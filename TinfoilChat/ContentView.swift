@@ -119,6 +119,28 @@ struct ContentView: View {
                 }
             )
         }
+        .alert(
+            PasskeySetupFailurePresentation(
+                chatViewModel.passkeySetupFailure ?? .registerFailed
+            ).title,
+            isPresented: Binding(
+                get: { chatViewModel.passkeySetupFailure != nil },
+                set: { if !$0 { chatViewModel.passkeySetupFailure = nil } }
+            )
+        ) {
+            Button("Set Up Manually") {
+                chatViewModel.passkeySetupFailure = nil
+                chatViewModel.cloudSyncOnboardingMode = .setup
+                chatViewModel.showCloudSyncOnboarding = true
+            }
+            Button("Not Now", role: .cancel) {
+                chatViewModel.passkeySetupFailure = nil
+            }
+        } message: {
+            Text(PasskeySetupFailurePresentation(
+                chatViewModel.passkeySetupFailure ?? .registerFailed
+            ).message)
+        }
         // Relay view model's request to show key import view
         .onChange(of: chatViewModel.shouldShowKeyImport) { _, shouldShow in
             if shouldShow {

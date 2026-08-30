@@ -19,7 +19,51 @@ enum PasskeyRecoveryResult {
     case manualSetupRequired
     case manualRecoveryRequired
     case temporarilyUnavailable
+    case setupFailed(PasskeyFlowFailure)
     case recoveryFailed
+}
+
+enum PasskeyBackupResult: Sendable {
+    case success
+    case failure(PasskeyFlowFailure)
+}
+
+struct PasskeySetupFailurePresentation: Equatable, Sendable {
+    let title: String
+    let message: String
+
+    static let authenticationFailed = PasskeySetupFailurePresentation(
+        title: "Passkey Authentication Failed",
+        message: "You can try again or enter your encryption key manually."
+    )
+
+    private init(title: String, message: String) {
+        self.title = title
+        self.message = message
+    }
+
+    init(_ failure: PasskeyFlowFailure) {
+        switch failure {
+        case .prfUnsupported:
+            title = "Passkey Provider Not Supported"
+            message = "Your passkey provider doesn't support the security features required by Tinfoil. Try another passkey provider and try again."
+        case .timedOut:
+            title = "Passkey Setup Timed Out"
+            message = "The passkey operation timed out. Please try again."
+        case .presentationUnavailable:
+            title = "Passkey Setup Unavailable"
+            message = "Tinfoil couldn't open the passkey prompt. Return to the app and try again."
+        case .enclaveUnavailable:
+            title = "Cloud Sync Temporarily Unavailable"
+            message = "Check your connection and try setting up your passkey again."
+        case .userCancelled:
+            title = "Passkey Setup Canceled"
+            message = "Passkey setup was canceled. Try again when you're ready."
+        case .noRemoteBundle, .noRemoteKey, .bundleDecryptFailed, .registerFailed, .remoteKeyExists, .keyIdMismatch:
+            title = "Couldn't Enable Cloud Sync"
+            message = "Passkey setup failed. Please try again."
+        }
+    }
 }
 
 // MARK: - KeyMismatchResolution
@@ -284,14 +328,19 @@ final class PasskeyManager: ObservableObject {
         let remoteState = await CloudKeyPreflightValidator.shared.inspectRemoteState()
         guard canMutateAccountKey else { return .recoveryFailed }
         if state.keyId == nil, !state.hasData, remoteState == .empty {
-            let created = await attemptNewUserPasskeySetup()
-            if !created {
+            let result = await attemptNewUserPasskeySetup()
+            if case .failure = result {
                 // No enclave key exists at all, so a leftover
                 // "passkey active" flag from a prior session is stale.
                 passkeyActive = false
                 passkeySetupAvailable = true
             }
-            return created ? .newUserSetupDone : .manualSetupRequired
+            switch result {
+            case .success:
+                return .newUserSetupDone
+            case .failure(let failure):
+                return .setupFailed(failure)
+            }
         }
 
         passkeySetupAvailable = true
@@ -418,8 +467,8 @@ final class PasskeyManager: ObservableObject {
     @discardableResult
     private func attemptNewUserPasskeySetup(
         authorizationMode: CloudKeyAuthorizationMode = .validated
-    ) async -> Bool {
-        guard let user = userInfo() else { return false }
+    ) async -> PasskeyBackupResult {
+        guard let user = userInfo() else { return .failure(.registerFailed) }
         let createdVia: SyncEnclaveCreatedVia = authorizationMode == .explicitStartFresh
             ? .startFresh
             : .passkey
@@ -428,7 +477,7 @@ final class PasskeyManager: ObservableObject {
             user: user,
             createdVia: createdVia
         )
-        guard canMutateAccountKey else { return false }
+        guard canMutateAccountKey else { return .failure(.userCancelled) }
         switch result {
         case .success(let cek, let keyIdHex, _, _):
             do {
@@ -440,18 +489,18 @@ final class PasskeyManager: ObservableObject {
                 }
                 persistEnclaveKeyId(keyIdHex)
                 activatePasskey()
-                return true
+                return .success
             } catch {
                 #if DEBUG
                 print("[PasskeyManager] applyFreshCek failed: \(error)")
                 #endif
-                return false
+                return .failure(.registerFailed)
             }
         case .failure(let reason, _):
             #if DEBUG
             print("[PasskeyManager] registerNewKeyWithPasskey failed: \(reason)")
             #endif
-            return false
+            return .failure(reason)
         }
     }
 
@@ -591,14 +640,14 @@ final class PasskeyManager: ObservableObject {
         }
     }
 
-    func startFreshWithNewKey() async -> Bool {
-        let success = await attemptNewUserPasskeySetup(authorizationMode: .explicitStartFresh)
-        if success {
+    func startFreshWithNewKey() async -> PasskeyBackupResult {
+        let result = await attemptNewUserPasskeySetup(authorizationMode: .explicitStartFresh)
+        if case .success = result {
             showPasskeyRecoveryChoice = false
             Self.clearRecoveryRetryContext(&pendingLegacyRecovery)
             Self.takeRecoveryCompletion(&onRecoveryComplete)?()
         }
-        return success
+        return result
     }
 
     // MARK: - Setup & Backup
@@ -613,8 +662,14 @@ final class PasskeyManager: ObservableObject {
                 passkeySetupAvailable = true
                 return .manualRecoveryRequired
             }
-            guard await createPasskeyBackup() else { return .recoveryFailed }
-            return .success
+            switch await createPasskeyBackup() {
+            case .success:
+                return .success
+            case .failure(.enclaveUnavailable):
+                return .temporarilyUnavailable
+            case .failure(let failure):
+                return .setupFailed(failure)
+            }
         }
         return await attemptPasskeyKeyRecovery()
     }
@@ -788,22 +843,22 @@ final class PasskeyManager: ObservableObject {
 
     /// Create a passkey bundle for the user's existing CEK. Used by
     /// "Add this device to passkey backup" in Settings.
-    func createPasskeyBackup() async -> Bool {
-        guard canMutateAccountKey else { return false }
-        guard let user = userInfo() else { return false }
-        guard await ensureCurrentPrimaryKeyAuthorized() else { return false }
-        guard canMutateAccountKey else { return false }
+    func createPasskeyBackup() async -> PasskeyBackupResult {
+        guard canMutateAccountKey else { return .failure(.userCancelled) }
+        guard let user = userInfo() else { return .failure(.registerFailed) }
+        guard await ensureCurrentPrimaryKeyAuthorized() else { return .failure(.registerFailed) }
+        guard canMutateAccountKey else { return .failure(.userCancelled) }
         let cek: Data
         do {
             cek = try EncryptionService.shared.getKeyBytesOrThrow()
         } catch {
-            return false
+            return .failure(.registerFailed)
         }
         let keyIdHex: String
         do {
             keyIdHex = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
         } catch {
-            return false
+            return .failure(.registerFailed)
         }
 
         // Determine whether to register-key or add-bundle by probing
@@ -814,20 +869,22 @@ final class PasskeyManager: ObservableObject {
         // existing key.
         do {
             let state = try await SyncEnclaveAPI.keyCurrent()
-            guard canMutateAccountKey else { return false }
+            guard canMutateAccountKey else { return .failure(.userCancelled) }
             if state.keyId == nil {
                 let result = await PasskeyKeyFlow.registerExistingKeyWithPasskey(
                     existingCek: cek,
                     user: user,
                     createdVia: .recovery
                 )
-                guard canMutateAccountKey else { return false }
-                if case .success = result {
+                guard canMutateAccountKey else { return .failure(.userCancelled) }
+                switch result {
+                case .success:
                     persistEnclaveKeyId(keyIdHex)
                     activatePasskey()
-                    return true
+                    return .success
+                case .failure(let failure, _):
+                    return .failure(failure)
                 }
-                return false
             }
 
             // Existing key — enroll a new passkey for it.
@@ -836,16 +893,21 @@ final class PasskeyManager: ObservableObject {
                 keyIdHex: keyIdHex,
                 user: user
             )
-            guard canMutateAccountKey else { return false }
-            if case .success = result {
+            guard canMutateAccountKey else { return .failure(.userCancelled) }
+            switch result {
+            case .success:
                 persistEnclaveKeyId(keyIdHex)
                 activatePasskey()
-                return true
+                return .success
+            case .failure(let failure, _):
+                return .failure(failure)
             }
+        } catch let error as SyncEnclaveError {
+            // Leave state unchanged while preserving the service failure category.
+            return .failure(PasskeyKeyFlow.failureFromEnclaveError(error))
         } catch {
-            // Non-fatal — leave state unchanged.
+            return .failure(.enclaveUnavailable)
         }
-        return false
     }
 
     /// No-op shim retained for compatibility with views that still

@@ -41,7 +41,9 @@ struct CloudSyncSettingsView: View {
     @State private var copiedToClipboard: Bool = false
     @State private var showBackupKeySheet: Bool = false
     @State private var isEnablingCloudSync = false
+    @State private var cloudSyncSetupErrorTitle = "Couldn't Enable Cloud Sync"
     @State private var cloudSyncSetupError: String?
+    @State private var cloudSyncSetupOffersManualSetup = false
     @State private var passkeyInventoryState = PasskeyBundleInventory(
         bundles: [],
         verification: .unverified,
@@ -257,10 +259,25 @@ struct CloudSyncSettingsView: View {
             UINavigationBar.appearance().compactAppearance = appearance
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
         }
-        .alert("Couldn't Enable Cloud Sync", isPresented: Binding(
+        .alert(cloudSyncSetupErrorTitle, isPresented: Binding(
             get: { cloudSyncSetupError != nil },
-            set: { if !$0 { cloudSyncSetupError = nil } }
+            set: {
+                if !$0 {
+                    cloudSyncSetupErrorTitle = "Couldn't Enable Cloud Sync"
+                    cloudSyncSetupError = nil
+                    cloudSyncSetupOffersManualSetup = false
+                }
+            }
         )) {
+            if cloudSyncSetupOffersManualSetup {
+                Button("Set Up Manually") {
+                    cloudSyncSetupOffersManualSetup = false
+                    cloudSyncSetupError = nil
+                    viewModel.cloudSyncOnboardingMode = .setup
+                    viewModel.showCloudSyncOnboarding = true
+                    onRequestCloseSettings()
+                }
+            }
             Button("OK", role: .cancel) {}
         } message: {
             Text(cloudSyncSetupError ?? "Please try again.")
@@ -274,7 +291,9 @@ struct CloudSyncSettingsView: View {
     private func enableCloudSync() async {
         guard !isEnablingCloudSync else { return }
         isEnablingCloudSync = true
+        cloudSyncSetupErrorTitle = "Couldn't Enable Cloud Sync"
         cloudSyncSetupError = nil
+        cloudSyncSetupOffersManualSetup = false
         defer { isEnablingCloudSync = false }
 
         await handlePasskeyRecoveryResult(await viewModel.retryPasskeySetup())
@@ -301,6 +320,8 @@ struct CloudSyncSettingsView: View {
             onRequestCloseSettings()
         case .some(.temporarilyUnavailable):
             cloudSyncSetupError = "Passkey recovery is temporarily unavailable. Check your connection and try again."
+        case .some(.setupFailed(let failure)):
+            showPasskeySetupFailure(failure, offersManualSetup: true)
         case .some(.recoveryFailed):
             if passkeyManager.showPasskeyRecoveryChoice {
                 onRequestCloseSettings()
@@ -447,20 +468,14 @@ struct CloudSyncSettingsView: View {
                         title: "Set Up Passkey on This Device",
                         subtitle: "Your other devices use a passkey already. Add one here for one-tap access."
                     ) {
-                        guard await viewModel.createPasskeyBackup() else {
-                            cloudSyncSetupError = "Passkey setup failed. Please try again."
-                            return
-                        }
+                        showPasskeySetupFailureIfNeeded(await viewModel.createPasskeyBackup())
                     }
                 } else if passkeyManager.passkeySetupAvailable && EncryptionService.shared.hasEncryptionKey() {
                     passkeyActionButton(
                         title: "Add Passkey for seamless sync",
                         subtitle: "Use Face ID or Touch ID to sync chats across devices"
                     ) {
-                        guard await viewModel.createPasskeyBackup() else {
-                            cloudSyncSetupError = "Passkey setup failed. Please try again."
-                            return
-                        }
+                        showPasskeySetupFailureIfNeeded(await viewModel.createPasskeyBackup())
                     }
                 } else if passkeyManager.passkeySetupAvailable && !EncryptionService.shared.hasEncryptionKey() {
                     passkeyActionButton(
@@ -475,6 +490,21 @@ struct CloudSyncSettingsView: View {
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
         }
+    }
+
+    private func showPasskeySetupFailureIfNeeded(_ result: PasskeyBackupResult) {
+        guard case .failure(let failure) = result else { return }
+        showPasskeySetupFailure(failure)
+    }
+
+    private func showPasskeySetupFailure(
+        _ failure: PasskeyFlowFailure,
+        offersManualSetup: Bool = false
+    ) {
+        let presentation = PasskeySetupFailurePresentation(failure)
+        cloudSyncSetupErrorTitle = presentation.title
+        cloudSyncSetupError = presentation.message
+        cloudSyncSetupOffersManualSetup = offersManualSetup
     }
 
     private func passkeyActionButton(

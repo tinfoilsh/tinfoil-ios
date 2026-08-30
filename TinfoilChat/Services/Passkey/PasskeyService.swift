@@ -12,6 +12,7 @@ enum PasskeyError: LocalizedError {
     case prfNotSupported
     case prfOutputMissing
     case userCancelled
+    case timedOut
     case authorizationFailed(Error)
     case randomGenerationFailed
     case invalidBase64url
@@ -25,6 +26,8 @@ enum PasskeyError: LocalizedError {
             return "PRF output missing from assertion"
         case .userCancelled:
             return "User cancelled passkey operation"
+        case .timedOut:
+            return "The passkey operation timed out"
         case .authorizationFailed(let error):
             return "Passkey authorization failed: \(error.localizedDescription)"
         case .randomGenerationFailed:
@@ -191,7 +194,9 @@ final class PasskeyService {
             return .prfNotSupported
         case .cancelled:
             return .userCancelled
-        case .timeout, .operationInProgress, .invalidInput, .operationFailed:
+        case .timeout:
+            return .timedOut
+        case .operationInProgress, .invalidInput, .operationFailed:
             return .authorizationFailed(passkeyError)
         }
     }

@@ -283,6 +283,7 @@ class ChatViewModel: ObservableObject {
     @Published var showSidebarSettings: Bool = false
     @Published var showCloudSyncOnboarding: Bool = false
     @Published var cloudSyncOnboardingMode: CloudSyncOnboardingMode = .setup
+    @Published var passkeySetupFailure: PasskeyFlowFailure?
     @Published var shouldOpenCloudSync: Bool = false
     @Published var shouldExpandProjectsInSidebar: Bool = false
     @Published private(set) var navigationRequest: ChatNavigationRequest?
@@ -6075,6 +6076,7 @@ class ChatViewModel: ObservableObject {
         loadedCloudRootSummaryIds = []
 
         // Reset passkey state
+        passkeySetupFailure = nil
         await passkeyManager.reset()
 
         // Clear cloud chats and create a new empty one with the free model.
@@ -6468,6 +6470,7 @@ class ChatViewModel: ObservableObject {
                     finishSignIn(token, userId: userId)
                     return
                 }
+                passkeySetupFailure = nil
                 let passkeyResult = await passkeyManager.attemptPasskeyKeyRecovery()
                 guard isCurrentSignIn(token, userId: userId) else { return }
                 switch passkeyResult {
@@ -6485,6 +6488,10 @@ class ChatViewModel: ObservableObject {
                     return
                 case .temporarilyUnavailable:
                     needsSignInWhenPresentationReady = true
+                    finishSignIn(token, userId: userId)
+                    return
+                case .setupFailed(let failure):
+                    passkeySetupFailure = failure
                     finishSignIn(token, userId: userId)
                     return
                 case .recoveryFailed:
@@ -7342,23 +7349,23 @@ class ChatViewModel: ObservableObject {
         return succeeded
     }
 
-    func startFreshWithNewKey() async -> Bool {
-        guard let operationUserId = currentUserId else { return false }
+    func startFreshWithNewKey() async -> PasskeyBackupResult {
+        guard let operationUserId = currentUserId else { return .failure(.registerFailed) }
         let operationTask = Task { [passkeyManager] in
-            guard !Task.isCancelled else { return false }
-            let succeeded = await passkeyManager.startFreshWithNewKey()
-            guard !Task.isCancelled else { return false }
-            return succeeded
+            guard !Task.isCancelled else { return PasskeyBackupResult.failure(.userCancelled) }
+            let result = await passkeyManager.startFreshWithNewKey()
+            guard !Task.isCancelled else { return .failure(.userCancelled) }
+            return result
         }
         guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
             operationTask.cancel()
-            return false
+            return .failure(.userCancelled)
         }
         defer { accountOperationTracker.end(operationToken) }
 
-        let succeeded = await operationTask.value
-        guard currentUserId == operationUserId else { return false }
-        return succeeded
+        let result = await operationTask.value
+        guard currentUserId == operationUserId else { return .failure(.userCancelled) }
+        return result
     }
 
     func retryPasskeySetup() async -> PasskeyRecoveryResult {
@@ -7388,26 +7395,26 @@ class ChatViewModel: ObservableObject {
     }
 
     @discardableResult
-    func createPasskeyBackup() async -> Bool {
-        guard let operationUserId = currentUserId else { return false }
+    func createPasskeyBackup() async -> PasskeyBackupResult {
+        guard let operationUserId = currentUserId else { return .failure(.registerFailed) }
         let operationTask = Task { [passkeyManager] in
-            guard !Task.isCancelled else { return false }
-            let succeeded = await passkeyManager.createPasskeyBackup()
-            guard !Task.isCancelled else { return false }
-            return succeeded
+            guard !Task.isCancelled else { return PasskeyBackupResult.failure(.userCancelled) }
+            let result = await passkeyManager.createPasskeyBackup()
+            guard !Task.isCancelled else { return .failure(.userCancelled) }
+            return result
         }
         guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
             operationTask.cancel()
-            return false
+            return .failure(.userCancelled)
         }
         defer { accountOperationTracker.end(operationToken) }
 
-        let succeeded = await operationTask.value
-        guard currentUserId == operationUserId else { return false }
-        guard succeeded else { return false }
+        let result = await operationTask.value
+        guard currentUserId == operationUserId else { return .failure(.userCancelled) }
+        guard case .success = result else { return result }
         let migrationToken = currentAccountOperationToken(userId: operationUserId)
         startLegacyMigration(token: migrationToken, userId: operationUserId)
-        return true
+        return .success
     }
 
     private func ensureCurrentAccount(_ userId: String) throws {
