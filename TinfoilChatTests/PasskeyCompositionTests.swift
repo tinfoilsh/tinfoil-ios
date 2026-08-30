@@ -1085,9 +1085,19 @@ struct PasskeyCompositionTests {
 
         #expect(PasskeyKeyFlow.failureFromPasskeyError(unsupported) == .prfUnsupported)
         #expect(PasskeyKeyFlow.failureFromPasskeyError(cancelled) == .userCancelled)
-        #expect(PasskeyKeyFlow.failureFromPasskeyError(timeout) == .userCancelled)
-        #expect(PasskeyKeyFlow.failureFromPasskeyError(invalid) == .userCancelled)
+        #expect(PasskeyKeyFlow.failureFromPasskeyError(timeout) == .timedOut)
+        #expect(PasskeyKeyFlow.failureFromPasskeyError(invalid) == .registerFailed)
         #expect(PasskeyKeyFlow.failureFromPasskeyError(missingAnchor) == .presentationUnavailable)
+    }
+
+    @Test func passkeySetupFailuresProvideActionableMessages() {
+        let unsupported = PasskeySetupFailurePresentation(.prfUnsupported)
+        let timeout = PasskeySetupFailurePresentation(.timedOut)
+
+        #expect(unsupported.title == "Passkey Provider Not Supported")
+        #expect(unsupported.message.contains("another passkey provider"))
+        #expect(timeout.title == "Passkey Setup Timed Out")
+        #expect(timeout.message.contains("try again"))
     }
 
     @Test func sharedHexParserRejectsMalformedInputAtBothBoundaries() {

@@ -34,6 +34,7 @@ import TinfoilPasskeyKit
 enum PasskeyFlowFailure: String, Sendable {
     case userCancelled
     case prfUnsupported
+    case timedOut
     case noRemoteBundle
     case noRemoteKey
     case bundleDecryptFailed
@@ -716,8 +717,10 @@ enum PasskeyKeyFlow {
                 return .prfUnsupported
             case .userCancelled:
                 return .userCancelled
+            case .timedOut:
+                return .timedOut
             case .authorizationFailed, .randomGenerationFailed, .invalidBase64url:
-                return .userCancelled
+                return .registerFailed
             case .presentationAnchorUnavailable:
                 return .presentationUnavailable
             }

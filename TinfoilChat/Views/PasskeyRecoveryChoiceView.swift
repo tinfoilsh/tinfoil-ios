@@ -14,7 +14,7 @@ struct PasskeyRecoveryChoiceView: View {
     /// Full auth retry (system UI including "Use a Device Nearby").
     var onTryAgain: () async -> Bool
     /// Generate a new key + create a new passkey (explicit split).
-    var onStartFresh: () async -> Bool
+    var onStartFresh: () async -> PasskeyBackupResult
     /// Cloud sync OFF, dismiss. User can retry from Settings later.
     var onSkip: () -> Void
     /// Enter encryption key manually without passkey.
@@ -23,7 +23,7 @@ struct PasskeyRecoveryChoiceView: View {
     @State private var isLoading = false
     @State private var loadingAction: LoadingAction?
     @State private var isStartFreshConfirmationPresented = false
-    @State private var recoveryFailed = false
+    @State private var failurePresentation: PasskeySetupFailurePresentation?
 
     private enum LoadingAction {
         case tryAgain
@@ -61,13 +61,18 @@ struct PasskeyRecoveryChoiceView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal)
 
-            if recoveryFailed {
-                Text("Passkey authentication failed. You can try again or enter your encryption key manually.")
-                    .font(.caption)
-                    .foregroundColor(.orange)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal)
+            if let failurePresentation {
+                VStack(spacing: 4) {
+                    Text(failurePresentation.title)
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    Text(failurePresentation.message)
+                        .font(.caption)
+                }
+                .foregroundColor(.orange)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal)
             }
 
             Spacer()
@@ -146,7 +151,7 @@ struct PasskeyRecoveryChoiceView: View {
             Spacer().frame(height: 24)
         }
         .presentationDetents([
-            .height(recoveryFailed ? Layout.failureSheetHeight : Layout.sheetHeight)
+            .height(failurePresentation == nil ? Layout.sheetHeight : Layout.failureSheetHeight)
         ])
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(isLoading)
@@ -168,13 +173,15 @@ struct PasskeyRecoveryChoiceView: View {
     private func handleTryAgain() {
         isLoading = true
         loadingAction = .tryAgain
-        recoveryFailed = false
+        failurePresentation = nil
         Task {
             let success = await onTryAgain()
             await MainActor.run {
                 isLoading = false
                 loadingAction = nil
-                recoveryFailed = !success
+                if !success {
+                    failurePresentation = PasskeySetupFailurePresentation(.registerFailed)
+                }
                 if success { dismiss() }
             }
         }
@@ -184,11 +191,16 @@ struct PasskeyRecoveryChoiceView: View {
         isLoading = true
         loadingAction = .startFresh
         Task {
-            let success = await onStartFresh()
+            let result = await onStartFresh()
             await MainActor.run {
                 isLoading = false
                 loadingAction = nil
-                if success { dismiss() }
+                switch result {
+                case .success:
+                    dismiss()
+                case .failure(let failure):
+                    failurePresentation = PasskeySetupFailurePresentation(failure)
+                }
             }
         }
     }
