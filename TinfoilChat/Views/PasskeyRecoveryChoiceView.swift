@@ -180,7 +180,7 @@ struct PasskeyRecoveryChoiceView: View {
                 isLoading = false
                 loadingAction = nil
                 if !success {
-                    failurePresentation = PasskeySetupFailurePresentation(.registerFailed)
+                    failurePresentation = .authenticationFailed
                 }
                 if success { dismiss() }
             }

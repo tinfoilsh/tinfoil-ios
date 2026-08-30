@@ -32,6 +32,16 @@ struct PasskeySetupFailurePresentation: Equatable, Sendable {
     let title: String
     let message: String
 
+    static let authenticationFailed = PasskeySetupFailurePresentation(
+        title: "Passkey Authentication Failed",
+        message: "You can try again or enter your encryption key manually."
+    )
+
+    private init(title: String, message: String) {
+        self.title = title
+        self.message = message
+    }
+
     init(_ failure: PasskeyFlowFailure) {
         switch failure {
         case .prfUnsupported:
