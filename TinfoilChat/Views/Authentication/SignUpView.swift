@@ -21,13 +21,13 @@ struct SignUpView: View {
     @Environment(Clerk.self) private var clerk
     @EnvironmentObject private var authManager: AuthManager
     @Environment(\.colorScheme) private var colorScheme
+    @Binding var email: String
     @Binding var errorMessage: String?
     @Binding var isLoading: Bool
     @Binding var isSignUp: Bool
     var onDismiss: () -> Void
     
     @State private var fullName = ""
-    @State private var email = ""
     @State private var password = ""
     @State private var verificationCode = ""
     @State private var attemptedSubmit = false

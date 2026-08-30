@@ -24,6 +24,7 @@ struct ModularAuthenticationView: View {
   @State private var isKeyboardVisible = false
   @State private var hasCompletedAuthentication = false
   @State private var notificationObservers: [NSObjectProtocol] = []
+  @State private var email = ""
   
   var body: some View {
     NavigationView {
@@ -139,6 +140,7 @@ struct ModularAuthenticationView: View {
     VStack(spacing: 4) {
       if isSignUp {
         SignUpView(
+          email: $email,
           errorMessage: $errorMessage,
           isLoading: $isLoading,
           isSignUp: $isSignUp,
@@ -150,6 +152,7 @@ struct ModularAuthenticationView: View {
         
         if !isInVerificationMode {
           Button("Already have an account? Sign In") {
+            errorMessage = nil
             isSignUp = false
           }
           .font(.subheadline)
@@ -158,8 +161,13 @@ struct ModularAuthenticationView: View {
         }
       } else {
         SignInView(
+          email: $email,
           errorMessage: $errorMessage,
           isLoading: $isLoading,
+          onRequestSignUp: {
+            errorMessage = nil
+            isSignUp = true
+          },
           onDismiss: { DispatchQueue.main.async { completeAuthentication() } }
         )
         .onPreferenceChange(VerificationModePreferenceKey.self) { inVerificationMode in
@@ -169,6 +177,7 @@ struct ModularAuthenticationView: View {
         
         if !isInVerificationMode {
           Button("Don't have an account? Sign Up") {
+            errorMessage = nil
             isSignUp = true
           }
           .font(.subheadline)
