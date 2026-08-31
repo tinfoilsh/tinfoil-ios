@@ -353,7 +353,7 @@ enum PasskeyKeyFlow {
         } catch let err {
             let failure = failureFromPasskeyError(err)
             PasskeyDiagnostics.failure(
-                "recovery: ceremony failed (\(failure.rawValue)): \(err.localizedDescription)"
+                "recovery: ceremony failed (\(failure.rawValue)): \(PasskeyDiagnostics.describe(err))"
             )
             return .failure(failure, message: err.localizedDescription)
         }
@@ -371,7 +371,7 @@ enum PasskeyKeyFlow {
                     )
                 } catch {
                     PasskeyDiagnostics.failure(
-                        "recovery: bundle unwrap failed: \(error.localizedDescription)"
+                        "recovery: bundle unwrap failed: \(PasskeyDiagnostics.describe(error))"
                     )
                     return nil
                 }
@@ -403,7 +403,7 @@ enum PasskeyKeyFlow {
                     )
                 } catch {
                     PasskeyDiagnostics.failure(
-                        "recovery: envelope unwrap failed: \(error.localizedDescription)"
+                        "recovery: envelope unwrap failed: \(PasskeyDiagnostics.describe(error))"
                     )
                     return nil
                 }

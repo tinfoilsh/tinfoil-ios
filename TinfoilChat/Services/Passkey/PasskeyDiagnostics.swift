@@ -58,6 +58,24 @@ enum PasskeyDiagnostics {
         return String(keyId.prefix(8))
     }
 
+    /// Render an error with its full underlying NSError chain
+    /// (domain/code), which localizedDescription flattens away.
+    /// ASAuthorizationError codes (e.g. 1004) are only diagnosable
+    /// with the domain and code intact.
+    static func describe(_ error: Error) -> String {
+        var parts: [String] = []
+        var current: Error? = error
+        var depth = 0
+        while let err = current, depth < 5 {
+            let nsError = err as NSError
+            parts.append("\(nsError.domain)#\(nsError.code): \(nsError.localizedDescription)")
+            current = nsError.userInfo[NSUnderlyingErrorKey] as? Error
+                ?? (err as? PasskeyError)?.underlying
+            depth += 1
+        }
+        return parts.joined(separator: " <- ")
+    }
+
     private static func addBreadcrumb(_ message: String, level: SentryLevel) {
         let crumb = Breadcrumb(level: level, category: "passkey")
         crumb.message = message

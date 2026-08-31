@@ -38,6 +38,16 @@ enum PasskeyError: LocalizedError {
             return "Passkey authorization requires an active app window"
         }
     }
+
+    /// The wrapped error, unwrapping the kit's error type so
+    /// diagnostics can reach the original framework NSError chain.
+    var underlying: Error? {
+        guard case .authorizationFailed(let error) = self else { return nil }
+        if let kitError = error as? PasskeyKeyError {
+            return kitError.underlyingError ?? kitError
+        }
+        return error
+    }
 }
 
 @MainActor
