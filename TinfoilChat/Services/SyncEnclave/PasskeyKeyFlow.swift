@@ -268,12 +268,18 @@ enum PasskeyKeyFlow {
         do {
             state = try await SyncEnclaveAPI.keyCurrent()
         } catch let err as SyncEnclaveError {
+            PasskeyDiagnostics.failure("unlock: keyCurrent failed: \(err.message)")
             return .failure(failureFromEnclaveError(err), message: err.message)
         } catch {
+            PasskeyDiagnostics.failure("unlock: keyCurrent failed: \(error.localizedDescription)")
             return .failure(.enclaveUnavailable, message: error.localizedDescription)
         }
 
         guard let serverKeyId = state.keyId, !state.bundles.isEmpty else {
+            PasskeyDiagnostics.failure(
+                "unlock: no remote key or bundles "
+                + "(keyId=\(PasskeyDiagnostics.keyIdPrefix(state.keyId)) bundles=\(state.bundles.count))"
+            )
             return .failure(.noRemoteKey)
         }
 
@@ -284,6 +290,11 @@ enum PasskeyKeyFlow {
             silent: silent
         )
         guard case .success(let cek, let derivedKeyIdHex, let credentialId, _) = result else {
+            if case .failure(let failure, let message) = result {
+                PasskeyDiagnostics.failure(
+                    "unlock: failed (\(failure.rawValue)): \(message ?? "-")"
+                )
+            }
             return result
         }
 
@@ -292,6 +303,10 @@ enum PasskeyKeyFlow {
         // reported key_id MUST match the derived id, or the bundle
         // is talking about a different key.
         guard derivedKeyIdHex == serverKeyId else {
+            PasskeyDiagnostics.failure(
+                "unlock: key id mismatch derived=\(PasskeyDiagnostics.keyIdPrefix(derivedKeyIdHex)) "
+                + "enclave=\(PasskeyDiagnostics.keyIdPrefix(serverKeyId))"
+            )
             return .failure(.keyIdMismatch, message: "keyId \(derivedKeyIdHex) != enclave \(serverKeyId)")
         }
         // Adopt the bundle's legacy alternatives only after the binding
@@ -317,7 +332,14 @@ enum PasskeyKeyFlow {
             legacy: legacyEntries,
             preferredCredentialId: prefer
         )
+        PasskeyDiagnostics.step(
+            "recovery: keyId=\(PasskeyDiagnostics.keyIdPrefix(state.keyId)) "
+            + "bundles=\(state.bundles.count) legacy=\(legacyEntries.count) "
+            + "candidates=\(candidates.credentialIds.count) "
+            + "preferKnown=\(prefer != nil) silent=\(immediatelyAvailable)"
+        )
         guard !candidates.credentialIds.isEmpty else {
+            PasskeyDiagnostics.failure("recovery: no candidate credentials")
             return .failure(.noRemoteBundle)
         }
 
@@ -329,18 +351,39 @@ enum PasskeyKeyFlow {
                 immediatelyAvailable: immediatelyAvailable
             )
         } catch let err {
-            return .failure(failureFromPasskeyError(err), message: err.localizedDescription)
+            let failure = failureFromPasskeyError(err)
+            PasskeyDiagnostics.failure(
+                "recovery: ceremony failed (\(failure.rawValue)): \(err.localizedDescription)"
+            )
+            return .failure(failure, message: err.localizedDescription)
         }
+        PasskeyDiagnostics.step("recovery: ceremony succeeded, resolving asserted credential")
 
         var externalLegacyFailure: PasskeyCandidateRecoveryResult?
         if let resolved: PasskeyCandidateRecoveryResult = candidates.resolveSelectedCredential(
             credentialId: evaluated.credentialId,
             current: { candidate in
-                guard let cek = try? PasskeyService.shared.unwrapKeyWithPRFResult(
-                    wrappedKey: candidate.wrappedKey,
-                    prfResult: evaluated.prfResult
-                ), let keyIdHex = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek),
-                keyIdHex == state.keyId else {
+                let cek: Data
+                do {
+                    cek = try PasskeyService.shared.unwrapKeyWithPRFResult(
+                        wrappedKey: candidate.wrappedKey,
+                        prfResult: evaluated.prfResult
+                    )
+                } catch {
+                    PasskeyDiagnostics.failure(
+                        "recovery: bundle unwrap failed: \(error.localizedDescription)"
+                    )
+                    return nil
+                }
+                guard let keyIdHex = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek) else {
+                    PasskeyDiagnostics.failure("recovery: key id derivation failed")
+                    return nil
+                }
+                guard keyIdHex == state.keyId else {
+                    PasskeyDiagnostics.failure(
+                        "recovery: key id mismatch derived=\(PasskeyDiagnostics.keyIdPrefix(keyIdHex)) "
+                        + "enclave=\(PasskeyDiagnostics.keyIdPrefix(state.keyId))"
+                    )
                     return nil
                 }
                 return .current(.success(
@@ -351,12 +394,28 @@ enum PasskeyKeyFlow {
                 ), legacyAlternatives: [])
             },
             currentEnvelope: { bundle in
-                guard let unwrapped = try? SyncEnclaveKeyBundle.unwrapLegacyJsonEnvelope(
-                    prfOutput: evaluated.prfResult.output,
-                    kekIvHex: bundle.kekIv,
-                    wrappedKeyHex: bundle.encryptedKeys
-                ), let keyIdHex = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: unwrapped.cek),
-                keyIdHex == state.keyId else {
+                let unwrapped: SyncEnclaveUnwrappedCek
+                do {
+                    unwrapped = try SyncEnclaveKeyBundle.unwrapLegacyJsonEnvelope(
+                        prfOutput: evaluated.prfResult.output,
+                        kekIvHex: bundle.kekIv,
+                        wrappedKeyHex: bundle.encryptedKeys
+                    )
+                } catch {
+                    PasskeyDiagnostics.failure(
+                        "recovery: envelope unwrap failed: \(error.localizedDescription)"
+                    )
+                    return nil
+                }
+                guard let keyIdHex = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: unwrapped.cek) else {
+                    PasskeyDiagnostics.failure("recovery: envelope key id derivation failed")
+                    return nil
+                }
+                guard keyIdHex == state.keyId else {
+                    PasskeyDiagnostics.failure(
+                        "recovery: envelope key id mismatch derived=\(PasskeyDiagnostics.keyIdPrefix(keyIdHex)) "
+                        + "enclave=\(PasskeyDiagnostics.keyIdPrefix(state.keyId))"
+                    )
                     return nil
                 }
                 return .current(.success(
@@ -373,6 +432,11 @@ enum PasskeyKeyFlow {
                     enclaveKeyId: state.keyId
                 )
                 if case .legacy = result { return result }
+                if case .failure(let failure, let message) = result {
+                    PasskeyDiagnostics.failure(
+                        "recovery: legacy entry failed (\(failure.rawValue)): \(message ?? "-")"
+                    )
+                }
                 externalLegacyFailure = preferredExternalLegacyFailure(
                     externalLegacyFailure,
                     over: result
@@ -383,6 +447,11 @@ enum PasskeyKeyFlow {
             return resolved
         }
 
+        if externalLegacyFailure == nil {
+            PasskeyDiagnostics.failure(
+                "recovery: asserted credential resolved no usable bundle"
+            )
+        }
         return externalLegacyFailure ?? .failure(.bundleDecryptFailed)
     }
 
@@ -725,6 +794,9 @@ enum PasskeyKeyFlow {
                 return .presentationUnavailable
             }
         }
+        PasskeyDiagnostics.warn(
+            "mapping unrecognized passkey error to userCancelled: \(err.localizedDescription)"
+        )
         return .userCancelled
     }
 
