@@ -326,6 +326,7 @@ struct CloudSyncSettingsView: View {
             if passkeyManager.showPasskeyRecoveryChoice {
                 onRequestCloseSettings()
             } else {
+                PasskeyDiagnostics.report("settings: surfaced 'Passkey authentication failed' alert")
                 cloudSyncSetupError = "Passkey authentication failed. Try again or restore your encryption key manually."
             }
         case nil:

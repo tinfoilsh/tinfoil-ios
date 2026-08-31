@@ -268,11 +268,15 @@ final class PasskeyManager: ObservableObject {
         do {
             state = try await SyncEnclaveAPI.keyCurrent()
         } catch {
+            PasskeyDiagnostics.failure(
+                "attemptRecovery: keyCurrent failed: \(PasskeyDiagnostics.describe(error))"
+            )
             return canMutateAccountKey ? .temporarilyUnavailable : .recoveryFailed
         }
         guard canMutateAccountKey else { return .recoveryFailed }
 
         guard let legacyEntries = await legacyRecoveryEntries() else {
+            PasskeyDiagnostics.failure("attemptRecovery: aborted (account changed during legacy lookup)")
             return .recoveryFailed
         }
         let candidates = PasskeyRecoveryCandidates(
@@ -283,6 +287,7 @@ final class PasskeyManager: ObservableObject {
 
         if !candidates.credentialIds.isEmpty {
             guard let recoveryAccount = legacyRecoveryAccountSnapshot() else {
+                PasskeyDiagnostics.failure("attemptRecovery: no account snapshot (signed out?)")
                 return .recoveryFailed
             }
             let result = await PasskeyKeyFlow.recoverFromCurrentAndLegacy(
@@ -299,8 +304,10 @@ final class PasskeyManager: ObservableObject {
                     legacyAlternatives: legacyAlternatives,
                     expectedAccount: recoveryAccount
                 ) {
+                    PasskeyDiagnostics.step("attemptRecovery: silent recovery succeeded")
                     return .success
                 }
+                PasskeyDiagnostics.failure("attemptRecovery: recovered key failed validation")
             case .legacy(let recovery):
                 let outcome = await applyValidatedLegacyRecovery(
                     recovery,
@@ -310,10 +317,16 @@ final class PasskeyManager: ObservableObject {
                         enclaveKeyId: state.keyId
                     )
                 )
-                if case .failed = outcome { break }
+                if case .failed = outcome {
+                    PasskeyDiagnostics.failure("attemptRecovery: legacy recovery failed validation/promotion")
+                    break
+                }
+                PasskeyDiagnostics.step("attemptRecovery: legacy recovery succeeded")
                 return .success
-            case .failure:
-                break
+            case .failure(let failure, let message):
+                PasskeyDiagnostics.failure(
+                    "attemptRecovery: silent ceremony failed (\(failure.rawValue)): \(message ?? "-")"
+                )
             }
             pendingLegacyRecovery = .enclave
             surfaceRecoveryChoice(forKeyId: state.keyId)
@@ -368,8 +381,13 @@ final class PasskeyManager: ObservableObject {
             return .noMismatch
         }
         guard canMutateAccountKey else { return .noMismatch }
+        PasskeyDiagnostics.step(
+            "launchMismatch: local=\(PasskeyDiagnostics.keyIdPrefix(localKeyId)) "
+            + "remote=\(PasskeyDiagnostics.keyIdPrefix(remoteKeyId)) bundles=\(state.bundles.count)"
+        )
 
         guard !state.bundles.isEmpty else {
+            PasskeyDiagnostics.failure("launchMismatch: remote key has no bundles, manual recovery required")
             return .manualRecoveryRequired
         }
 
@@ -442,11 +460,18 @@ final class PasskeyManager: ObservableObject {
                   currentUserId: Clerk.shared.user?.id,
                   currentGeneration: accountGeneration
               ) else {
+            PasskeyDiagnostics.failure(
+                "applyRecovery: post-unlock validation failed "
+                + "(key rotated mid-flight, credential removed, or account changed)"
+            )
             return false
         }
         do {
             try await applyRecoveredCek(cek: cek)
         } catch {
+            PasskeyDiagnostics.failure(
+                "applyRecovery: applying recovered key failed: \(PasskeyDiagnostics.describe(error))"
+            )
             return false
         }
         guard canMutateAccountKey,
@@ -455,6 +480,7 @@ final class PasskeyManager: ObservableObject {
                   currentUserId: Clerk.shared.user?.id,
                   currentGeneration: accountGeneration
               ) else {
+            PasskeyDiagnostics.failure("applyRecovery: account changed while applying key")
             return false
         }
         PasskeyKeyFlow.retainLegacyAlternatives(legacyAlternatives)
@@ -511,8 +537,14 @@ final class PasskeyManager: ObservableObject {
     /// Records the keyId so a later Skip can suppress re-prompting.
     private func surfaceRecoveryChoice(forKeyId keyId: String?) {
         if let keyId, keyId == dismissedRecoveryKeyId {
+            PasskeyDiagnostics.warn(
+                "recoveryChoice: suppressed, user previously skipped keyId=\(PasskeyDiagnostics.keyIdPrefix(keyId))"
+            )
             return
         }
+        PasskeyDiagnostics.step(
+            "recoveryChoice: presenting sheet for keyId=\(PasskeyDiagnostics.keyIdPrefix(keyId))"
+        )
         pendingRecoveryKeyId = keyId
         showPasskeyRecoveryChoice = true
     }
@@ -590,10 +622,16 @@ final class PasskeyManager: ObservableObject {
         do {
             state = try await SyncEnclaveAPI.keyCurrent()
         } catch {
+            PasskeyDiagnostics.failure(
+                "retryRecovery: keyCurrent failed: \(PasskeyDiagnostics.describe(error))"
+            )
             return false
         }
         guard canMutateAccountKey else { return false }
-        guard let legacyEntries = await legacyRecoveryEntries() else { return false }
+        guard let legacyEntries = await legacyRecoveryEntries() else {
+            PasskeyDiagnostics.failure("retryRecovery: aborted (account changed during legacy lookup)")
+            return false
+        }
         let candidates = PasskeyRecoveryCandidates(
             bundles: Array(state.bundles.values),
             legacy: legacyEntries,
@@ -601,6 +639,9 @@ final class PasskeyManager: ObservableObject {
         )
         guard !candidates.credentialIds.isEmpty,
               let recoveryAccount = legacyRecoveryAccountSnapshot() else {
+            PasskeyDiagnostics.failure(
+                "retryRecovery: no candidates (bundles=\(state.bundles.count) legacy=\(legacyEntries.count)) or no account"
+            )
             return false
         }
         let result = await PasskeyKeyFlow.recoverFromCurrentAndLegacy(
@@ -616,7 +657,11 @@ final class PasskeyManager: ObservableObject {
                 current,
                 legacyAlternatives: legacyAlternatives,
                 expectedAccount: recoveryAccount
-            ) else { return false }
+            ) else {
+                PasskeyDiagnostics.report("retryRecovery: recovered key failed validation")
+                return false
+            }
+            PasskeyDiagnostics.step("retryRecovery: interactive recovery succeeded")
             return Self.finishRecoveryRetry(
                 appliedResult: .success,
                 isCurrentAccount: canMutateAccountKey,
@@ -633,9 +678,22 @@ final class PasskeyManager: ObservableObject {
                 ),
                 completeRetry: true
             )
-            if case .failed = outcome { return false }
+            if case .failed = outcome {
+                PasskeyDiagnostics.report("retryRecovery: legacy recovery failed validation/promotion")
+                return false
+            }
+            PasskeyDiagnostics.step("retryRecovery: legacy recovery succeeded")
             return true
-        case .failure:
+        case .failure(let failure, let message):
+            // A user-cancelled prompt is a normal outcome, not an error
+            // worth a Sentry event; keep it as a breadcrumb only.
+            if failure == .userCancelled {
+                PasskeyDiagnostics.step("retryRecovery: interactive ceremony cancelled by user")
+            } else {
+                PasskeyDiagnostics.report(
+                    "retryRecovery: interactive ceremony failed (\(failure.rawValue)): \(message ?? "-")"
+                )
+            }
             return false
         }
     }
@@ -659,6 +717,7 @@ final class PasskeyManager: ObservableObject {
     func retryPasskeySetup() async -> PasskeyRecoveryResult {
         if EncryptionService.shared.hasEncryptionKey() {
             guard await ensureCurrentPrimaryKeyAuthorized() else {
+                PasskeyDiagnostics.failure("retrySetup: local key not authorized for cloud writes")
                 passkeySetupAvailable = true
                 return .manualRecoveryRequired
             }
@@ -666,11 +725,21 @@ final class PasskeyManager: ObservableObject {
             case .success:
                 return .success
             case .failure(.enclaveUnavailable):
+                PasskeyDiagnostics.failure("retrySetup: enclave unavailable")
                 return .temporarilyUnavailable
             case .failure(let failure):
+                PasskeyDiagnostics.failure("retrySetup: backup failed (\(failure.rawValue))")
                 return .setupFailed(failure)
             }
         }
+        PasskeyDiagnostics.step("retrySetup: no local key, falling through to recovery")
+        // An explicit user request to enable sync overrides a stale
+        // "Skip for Now": if the silent ceremony fails, the recovery
+        // choice sheet must be allowed to appear so the user can run
+        // an interactive unlock instead of dead-ending on a generic
+        // failure alert.
+        pendingRecoveryKeyId = nil
+        setDismissedRecoveryKeyId(nil)
         return await attemptPasskeyKeyRecovery()
     }
 

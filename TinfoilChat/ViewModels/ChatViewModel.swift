@@ -7331,7 +7331,10 @@ class ChatViewModel: ObservableObject {
     }
 
     func retryPasskeyRecovery() async -> Bool {
-        guard let operationUserId = currentUserId else { return false }
+        guard let operationUserId = currentUserId else {
+            PasskeyDiagnostics.failure("retryRecovery: no current user id (auth still settling?)")
+            return false
+        }
         let operationTask = Task { [passkeyManager] in
             guard !Task.isCancelled else { return false }
             let succeeded = await passkeyManager.retryPasskeyRecovery()
@@ -7339,13 +7342,19 @@ class ChatViewModel: ObservableObject {
             return succeeded
         }
         guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            PasskeyDiagnostics.failure(
+                "retryRecovery: rejected, account operation tracker is closed (account transition in progress)"
+            )
             operationTask.cancel()
             return false
         }
         defer { accountOperationTracker.end(operationToken) }
 
         let succeeded = await operationTask.value
-        guard currentUserId == operationUserId else { return false }
+        guard currentUserId == operationUserId else {
+            PasskeyDiagnostics.failure("retryRecovery: user changed mid-operation")
+            return false
+        }
         return succeeded
     }
 
