@@ -443,7 +443,7 @@ struct MessageInputView: View {
                 .foregroundColor(.orange)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .modifier(RateLimitNoticeBackground(color: Color.orange.opacity(0.5), isIntegrated: isIntegrated))
+                .modifier(RateLimitNoticeBackground(color: Color.orange.opacity(0.08), isIntegrated: isIntegrated))
                 .transition(.opacity)
         } else if let rl = viewModel.rateLimit, rl.remaining <= Constants.RateLimit.warningThreshold {
             let isOutOfRequests = rl.remaining <= 0
@@ -454,7 +454,7 @@ struct MessageInputView: View {
                 .padding(.vertical, 5)
                 .modifier(
                     RateLimitNoticeBackground(
-                        color: isOutOfRequests ? Color.orange.opacity(0.5) : Color.secondary.opacity(0.5),
+                        color: isOutOfRequests ? Color.orange.opacity(0.08) : Color.secondary.opacity(0.06),
                         isIntegrated: isIntegrated
                     )
                 )
