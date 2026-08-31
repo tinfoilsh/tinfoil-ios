@@ -154,6 +154,7 @@ struct UIKitTextField: UIViewRepresentable {
         textField.accessibilityLabel = placeholder
         textField.keyboardType = keyboardType
         textField.isSecureTextEntry = isSecure
+        textField.textColor = .label
         textField.backgroundColor = .systemBackground
         textField.layer.cornerRadius = 8
         textField.layer.borderWidth = 1
@@ -169,7 +170,9 @@ struct UIKitTextField: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: UITextField, context: Context) {
-        uiView.text = text
+        if uiView.text != text {
+            uiView.text = text
+        }
     }
     
     func makeCoordinator() -> Coordinator {
@@ -187,4 +190,4 @@ struct UIKitTextField: UIViewRepresentable {
             text = textField.text ?? ""
         }
     }
-} 
+}
