@@ -264,7 +264,6 @@ final class PasskeyManager: ObservableObject {
 
     /// Attempt to recover encryption keys via passkey, or auto-generate for new users.
     func attemptPasskeyKeyRecovery() async -> PasskeyRecoveryResult {
-        PasskeyDiagnostics.step("attemptRecovery: started")
         let state: EnclaveKeyCurrentResponse
         do {
             state = try await SyncEnclaveAPI.keyCurrent()
