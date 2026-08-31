@@ -264,6 +264,7 @@ final class PasskeyManager: ObservableObject {
 
     /// Attempt to recover encryption keys via passkey, or auto-generate for new users.
     func attemptPasskeyKeyRecovery() async -> PasskeyRecoveryResult {
+        PasskeyDiagnostics.step("attemptRecovery: started")
         let state: EnclaveKeyCurrentResponse
         do {
             state = try await SyncEnclaveAPI.keyCurrent()
@@ -537,8 +538,14 @@ final class PasskeyManager: ObservableObject {
     /// Records the keyId so a later Skip can suppress re-prompting.
     private func surfaceRecoveryChoice(forKeyId keyId: String?) {
         if let keyId, keyId == dismissedRecoveryKeyId {
+            PasskeyDiagnostics.warn(
+                "recoveryChoice: suppressed, user previously skipped keyId=\(PasskeyDiagnostics.keyIdPrefix(keyId))"
+            )
             return
         }
+        PasskeyDiagnostics.step(
+            "recoveryChoice: presenting sheet for keyId=\(PasskeyDiagnostics.keyIdPrefix(keyId))"
+        )
         pendingRecoveryKeyId = keyId
         showPasskeyRecoveryChoice = true
     }
@@ -705,6 +712,7 @@ final class PasskeyManager: ObservableObject {
     func retryPasskeySetup() async -> PasskeyRecoveryResult {
         if EncryptionService.shared.hasEncryptionKey() {
             guard await ensureCurrentPrimaryKeyAuthorized() else {
+                PasskeyDiagnostics.failure("retrySetup: local key not authorized for cloud writes")
                 passkeySetupAvailable = true
                 return .manualRecoveryRequired
             }
@@ -712,11 +720,21 @@ final class PasskeyManager: ObservableObject {
             case .success:
                 return .success
             case .failure(.enclaveUnavailable):
+                PasskeyDiagnostics.failure("retrySetup: enclave unavailable")
                 return .temporarilyUnavailable
             case .failure(let failure):
+                PasskeyDiagnostics.failure("retrySetup: backup failed (\(failure.rawValue))")
                 return .setupFailed(failure)
             }
         }
+        PasskeyDiagnostics.step("retrySetup: no local key, falling through to recovery")
+        // An explicit user request to enable sync overrides a stale
+        // "Skip for Now": if the silent ceremony fails, the recovery
+        // choice sheet must be allowed to appear so the user can run
+        // an interactive unlock instead of dead-ending on a generic
+        // failure alert.
+        pendingRecoveryKeyId = nil
+        setDismissedRecoveryKeyId(nil)
         return await attemptPasskeyKeyRecovery()
     }
 
