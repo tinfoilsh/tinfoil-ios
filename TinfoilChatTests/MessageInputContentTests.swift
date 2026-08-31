@@ -13,6 +13,15 @@ struct MessageInputContentTests {
         #expect(!hasNonWhitespaceContent(text))
     }
 
+    @Test("describes remaining free requests", arguments: [
+        (3, "3 free requests left today"),
+        (1, "1 free request left today"),
+        (0, "No free requests left today"),
+    ])
+    func remainingFreeRequests(remaining: Int, expectedText: String) {
+        #expect(freeRequestsRemainingText(remaining) == expectedText)
+    }
+
     @Test("hides audio input when Premium access is unavailable")
     func hidesUnavailableAudioInput() {
         #expect(!shouldShowAudioInput(

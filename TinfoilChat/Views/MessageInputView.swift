@@ -47,6 +47,35 @@ func shouldShowAudioInput(
     canUseAudioInput || isRecording || isTranscribing || isStartingRecording
 }
 
+func freeRequestsRemainingText(_ remaining: Int) -> String {
+    guard remaining > 0 else { return "No free requests left today" }
+    return "\(remaining) free request\(remaining == 1 ? "" : "s") left today"
+}
+
+private struct RateLimitNoticeBackground: ViewModifier {
+    let color: Color
+    let isIntegrated: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isIntegrated {
+            content
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .background(color)
+        } else {
+            content
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Dimensions.cornerRadiusSmall, style: .continuous)
+                        .fill(color)
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.top, 8)
+        }
+    }
+}
+
 /// Input area for typing messages, including attachments and send button
 struct MessageInputView: View {
     // MARK: - Constants
@@ -54,6 +83,7 @@ struct MessageInputView: View {
         static let defaultHeight: CGFloat = 72
         static let minimumHeight: CGFloat = 72
         static let maximumHeight: CGFloat = 180
+        static let inputCornerRadius: CGFloat = 26
         /// Drafts at or beyond these bounds cannot fit within `maximumHeight`
         /// at any supported text size, so the editor skips the full TextKit
         /// measurement pass that `sizeThatFits` would otherwise run over the
@@ -404,34 +434,29 @@ struct MessageInputView: View {
             }
     }
 
-    /// Small label shown above the input when remaining free requests are low
+    /// Small label shown with the input when remaining free requests are low
     @ViewBuilder
-    private var rateLimitLabel: some View {
+    private func rateLimitLabel(isIntegrated: Bool) -> some View {
         if let rl = viewModel.rateLimit, rl.kind == .hourly {
             Text("Hourly limit reached")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.orange)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(
-                    Capsule()
-                        .fill(Color.orange.opacity(0.15))
-                )
+                .modifier(RateLimitNoticeBackground(color: Color.orange.opacity(0.5), isIntegrated: isIntegrated))
                 .transition(.opacity)
         } else if let rl = viewModel.rateLimit, rl.remaining <= Constants.RateLimit.warningThreshold {
             let isOutOfRequests = rl.remaining <= 0
-            Text(isOutOfRequests
-                 ? "No requests left"
-                 : "\(rl.remaining) request\(rl.remaining == 1 ? "" : "s") left")
+            Text(freeRequestsRemainingText(rl.remaining))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(isOutOfRequests ? .orange : .secondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(
-                    Capsule()
-                        .fill(isOutOfRequests
-                              ? Color.orange.opacity(0.15)
-                              : Color.secondary.opacity(0.12))
+                .modifier(
+                    RateLimitNoticeBackground(
+                        color: isOutOfRequests ? Color.orange.opacity(0.5) : Color.secondary.opacity(0.5),
+                        isIntegrated: isIntegrated
+                    )
                 )
                 .transition(.opacity)
                 .animation(.easeInOut(duration: 0.25), value: rl.remaining)
@@ -509,7 +534,7 @@ struct MessageInputView: View {
     @ViewBuilder
     private func genUIInputContainer(pending: PendingInputToolCall) -> some View {
         VStack(spacing: 8) {
-            rateLimitLabel
+            rateLimitLabel(isIntegrated: false)
 
             GenUIInputAreaView(
                 pending: pending,
@@ -564,14 +589,14 @@ struct MessageInputView: View {
         if #available(iOS 26, *) {
             // iOS 26+ with liquid glass effect
             VStack(spacing: 4) {
-                rateLimitLabel
-
                 // Host both interactive glass effects (the input container and
                 // the send button) in one container so their gravity-well anchor
                 // views attach here instead of directly under the hosting
                 // controller's view, which UIKit warns against for hosted cells.
                 GlassEffectContainer {
                 VStack(spacing: 0) {
+                rateLimitLabel(isIntegrated: true)
+
                 // Attachment preview bar
                 if !viewModel.pendingAttachments.isEmpty {
                     AttachmentPreviewBar(
@@ -616,7 +641,8 @@ struct MessageInputView: View {
                 }
                 .padding(.vertical, 8)
             }
-            .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 26))
+            .clipShape(RoundedRectangle(cornerRadius: Layout.inputCornerRadius))
+            .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: Layout.inputCornerRadius))
             }
             }
             .padding(.horizontal, 12)
@@ -624,9 +650,9 @@ struct MessageInputView: View {
         } else {
             // Older iOS with material effect
             VStack(spacing: 4) {
-                rateLimitLabel
-
                 VStack(spacing: 0) {
+                rateLimitLabel(isIntegrated: true)
+
                 // Attachment preview bar
                 if !viewModel.pendingAttachments.isEmpty {
                     AttachmentPreviewBar(
@@ -672,9 +698,10 @@ struct MessageInputView: View {
                 .padding(.vertical, 8)
             }
             .background {
-                RoundedRectangle(cornerRadius: 26)
+                RoundedRectangle(cornerRadius: Layout.inputCornerRadius)
                     .fill(.thickMaterial)
             }
+            .clipShape(RoundedRectangle(cornerRadius: Layout.inputCornerRadius))
             }
             .padding(.horizontal, 12)
             .padding(.bottom, inputBottomPadding)
