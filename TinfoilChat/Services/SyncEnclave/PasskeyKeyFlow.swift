@@ -271,7 +271,7 @@ enum PasskeyKeyFlow {
             PasskeyDiagnostics.failure("unlock: keyCurrent failed: \(err.message)")
             return .failure(failureFromEnclaveError(err), message: err.message)
         } catch {
-            PasskeyDiagnostics.failure("unlock: keyCurrent failed: \(error.localizedDescription)")
+            PasskeyDiagnostics.failure("unlock: keyCurrent failed: \(PasskeyDiagnostics.describe(error))")
             return .failure(.enclaveUnavailable, message: error.localizedDescription)
         }
 
@@ -303,11 +303,10 @@ enum PasskeyKeyFlow {
         // reported key_id MUST match the derived id, or the bundle
         // is talking about a different key.
         guard derivedKeyIdHex == serverKeyId else {
-            PasskeyDiagnostics.failure(
-                "unlock: key id mismatch derived=\(PasskeyDiagnostics.keyIdPrefix(derivedKeyIdHex)) "
-                + "enclave=\(PasskeyDiagnostics.keyIdPrefix(serverKeyId))"
-            )
-            return .failure(.keyIdMismatch, message: "keyId \(derivedKeyIdHex) != enclave \(serverKeyId)")
+            let mismatch = "keyId \(PasskeyDiagnostics.keyIdPrefix(derivedKeyIdHex)) "
+                + "!= enclave \(PasskeyDiagnostics.keyIdPrefix(serverKeyId))"
+            PasskeyDiagnostics.failure("unlock: key id mismatch \(mismatch)")
+            return .failure(.keyIdMismatch, message: mismatch)
         }
         // Adopt the bundle's legacy alternatives only after the binding
         // check accepts it: a rejected bundle must not mutate the local
@@ -375,17 +374,9 @@ enum PasskeyKeyFlow {
                     )
                     return nil
                 }
-                guard let keyIdHex = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek) else {
-                    PasskeyDiagnostics.failure("recovery: key id derivation failed")
-                    return nil
-                }
-                guard keyIdHex == state.keyId else {
-                    PasskeyDiagnostics.failure(
-                        "recovery: key id mismatch derived=\(PasskeyDiagnostics.keyIdPrefix(keyIdHex)) "
-                        + "enclave=\(PasskeyDiagnostics.keyIdPrefix(state.keyId))"
-                    )
-                    return nil
-                }
+                guard let keyIdHex = validatedKeyId(
+                    cek: cek, enclaveKeyId: state.keyId, context: "bundle"
+                ) else { return nil }
                 return .current(.success(
                     cek: cek,
                     keyIdHex: keyIdHex,
@@ -407,17 +398,9 @@ enum PasskeyKeyFlow {
                     )
                     return nil
                 }
-                guard let keyIdHex = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: unwrapped.cek) else {
-                    PasskeyDiagnostics.failure("recovery: envelope key id derivation failed")
-                    return nil
-                }
-                guard keyIdHex == state.keyId else {
-                    PasskeyDiagnostics.failure(
-                        "recovery: envelope key id mismatch derived=\(PasskeyDiagnostics.keyIdPrefix(keyIdHex)) "
-                        + "enclave=\(PasskeyDiagnostics.keyIdPrefix(state.keyId))"
-                    )
-                    return nil
-                }
+                guard let keyIdHex = validatedKeyId(
+                    cek: unwrapped.cek, enclaveKeyId: state.keyId, context: "envelope"
+                ) else { return nil }
                 return .current(.success(
                     cek: unwrapped.cek,
                     keyIdHex: keyIdHex,
@@ -453,6 +436,28 @@ enum PasskeyKeyFlow {
             )
         }
         return externalLegacyFailure ?? .failure(.bundleDecryptFailed)
+    }
+
+    /// Derive the key id for an unwrapped CEK and enforce the §8.6
+    /// binding check against the enclave's registered key id, logging
+    /// any failure. Returns the derived key id hex when it matches.
+    private static func validatedKeyId(
+        cek: Data,
+        enclaveKeyId: String?,
+        context: String
+    ) -> String? {
+        guard let keyIdHex = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek) else {
+            PasskeyDiagnostics.failure("recovery: \(context) key id derivation failed")
+            return nil
+        }
+        guard keyIdHex == enclaveKeyId else {
+            PasskeyDiagnostics.failure(
+                "recovery: \(context) key id mismatch derived=\(PasskeyDiagnostics.keyIdPrefix(keyIdHex)) "
+                + "enclave=\(PasskeyDiagnostics.keyIdPrefix(enclaveKeyId))"
+            )
+            return nil
+        }
+        return keyIdHex
     }
 
     static func preferredExternalLegacyFailure(
@@ -681,7 +686,9 @@ enum PasskeyKeyFlow {
         // (when one exists) before we treat it as a recovery — adopting
         // a rotated-away key as primary would strand the live data.
         if let enclaveKeyId, keyIdHex != enclaveKeyId {
-            return .failure(.keyIdMismatch, message: "legacy keyId \(keyIdHex) != enclave \(enclaveKeyId)")
+            let mismatch = "legacy keyId \(PasskeyDiagnostics.keyIdPrefix(keyIdHex)) "
+                + "!= enclave \(PasskeyDiagnostics.keyIdPrefix(enclaveKeyId))"
+            return .failure(.keyIdMismatch, message: mismatch)
         }
 
         let bundle: SyncEnclaveBundleBody

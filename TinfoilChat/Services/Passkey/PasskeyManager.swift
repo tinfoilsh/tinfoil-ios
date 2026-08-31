@@ -269,7 +269,7 @@ final class PasskeyManager: ObservableObject {
             state = try await SyncEnclaveAPI.keyCurrent()
         } catch {
             PasskeyDiagnostics.failure(
-                "attemptRecovery: keyCurrent failed: \(error.localizedDescription)"
+                "attemptRecovery: keyCurrent failed: \(PasskeyDiagnostics.describe(error))"
             )
             return canMutateAccountKey ? .temporarilyUnavailable : .recoveryFailed
         }
@@ -470,7 +470,7 @@ final class PasskeyManager: ObservableObject {
             try await applyRecoveredCek(cek: cek)
         } catch {
             PasskeyDiagnostics.failure(
-                "applyRecovery: applying recovered key failed: \(error.localizedDescription)"
+                "applyRecovery: applying recovered key failed: \(PasskeyDiagnostics.describe(error))"
             )
             return false
         }
@@ -623,7 +623,7 @@ final class PasskeyManager: ObservableObject {
             state = try await SyncEnclaveAPI.keyCurrent()
         } catch {
             PasskeyDiagnostics.failure(
-                "retryRecovery: keyCurrent failed: \(error.localizedDescription)"
+                "retryRecovery: keyCurrent failed: \(PasskeyDiagnostics.describe(error))"
             )
             return false
         }
@@ -685,9 +685,15 @@ final class PasskeyManager: ObservableObject {
             PasskeyDiagnostics.step("retryRecovery: legacy recovery succeeded")
             return true
         case .failure(let failure, let message):
-            PasskeyDiagnostics.report(
-                "retryRecovery: interactive ceremony failed (\(failure.rawValue)): \(message ?? "-")"
-            )
+            // A user-cancelled prompt is a normal outcome, not an error
+            // worth a Sentry event; keep it as a breadcrumb only.
+            if failure == .userCancelled {
+                PasskeyDiagnostics.step("retryRecovery: interactive ceremony cancelled by user")
+            } else {
+                PasskeyDiagnostics.report(
+                    "retryRecovery: interactive ceremony failed (\(failure.rawValue)): \(message ?? "-")"
+                )
+            }
             return false
         }
     }

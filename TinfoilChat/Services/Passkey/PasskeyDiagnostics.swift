@@ -23,6 +23,11 @@ enum PasskeyDiagnostics {
         category: "Passkey"
     )
 
+    /// Bound on underlying-error traversal in `describe`. Real error
+    /// chains are 2-3 deep; the cap guards against pathological or
+    /// cyclic userInfo chains.
+    private static let maxErrorChainDepth = 5
+
     /// Log a flow milestone (which path was taken, candidate counts).
     static func step(_ message: String) {
         logger.info("\(message, privacy: .public)")
@@ -58,15 +63,15 @@ enum PasskeyDiagnostics {
         return String(keyId.prefix(8))
     }
 
-    /// Render an error with its full underlying NSError chain
-    /// (domain/code), which localizedDescription flattens away.
-    /// ASAuthorizationError codes (e.g. 1004) are only diagnosable
-    /// with the domain and code intact.
+    /// Render an error with its underlying NSError chain (domain/code),
+    /// which localizedDescription flattens away, bounded by
+    /// `maxErrorChainDepth`. ASAuthorizationError codes (e.g. 1004) are
+    /// only diagnosable with the domain and code intact.
     static func describe(_ error: Error) -> String {
         var parts: [String] = []
         var current: Error? = error
         var depth = 0
-        while let err = current, depth < 5 {
+        while let err = current, depth < maxErrorChainDepth {
             let nsError = err as NSError
             parts.append("\(nsError.domain)#\(nsError.code): \(nsError.localizedDescription)")
             current = nsError.userInfo[NSUnderlyingErrorKey] as? Error
