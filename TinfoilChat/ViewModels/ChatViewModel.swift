@@ -6822,18 +6822,16 @@ class ChatViewModel: ObservableObject {
                        continuationToken: nil
                    ) {
                     guard isCurrentSignIn(token, userId: userId) else { return }
-                    let pageState = ChatPaginationCoordinator.state(
-                        original: ChatPaginationPageState(token: paginationToken, hasMore: hasMoreChats),
-                        next: ChatPaginationPageState(token: result.nextToken, hasMore: result.hasMore),
+                    // On failure, fall back to a nil token with hasMore set:
+                    // the pagination token already points at page 2, so
+                    // reverting to it would skip the unpersisted first page.
+                    // The nil-token state makes Load More retry page 1.
+                    applyFetchedPageState(
+                        original: ChatPaginationPageState(token: nil, hasMore: true),
+                        result: result,
                         allRowsPersisted: allRowsPersisted,
-                        pageFailed: result.failed,
-                        pageCancelled: result.cancelled
+                        failureMessage: "Couldn't load your conversations. Try again."
                     )
-                    paginationToken = pageState.token
-                    hasMoreChats = pageState.hasMore
-                    if !allRowsPersisted {
-                        syncErrors.append("Couldn't load more conversations. Try again.")
-                    }
                 }
             }
 
@@ -7046,8 +7044,24 @@ class ChatViewModel: ObservableObject {
             continuationToken: paginationToken
         ) else { return }
 
-        let pageState = ChatPaginationCoordinator.state(
+        applyFetchedPageState(
             original: originalPageState,
+            result: result,
+            allRowsPersisted: allRowsPersisted,
+            failureMessage: "Couldn't load more conversations. Try again."
+        )
+    }
+
+    /// Advance pagination state after a page fetch, reverting to
+    /// `original` when the page wasn't fully persisted.
+    private func applyFetchedPageState(
+        original: ChatPaginationPageState,
+        result: PaginatedChatsResult,
+        allRowsPersisted: Bool,
+        failureMessage: String
+    ) {
+        let pageState = ChatPaginationCoordinator.state(
+            original: original,
             next: ChatPaginationPageState(token: result.nextToken, hasMore: result.hasMore),
             allRowsPersisted: allRowsPersisted,
             pageFailed: result.failed,
@@ -7056,7 +7070,7 @@ class ChatViewModel: ObservableObject {
         paginationToken = pageState.token
         hasMoreChats = pageState.hasMore
         if !allRowsPersisted {
-            syncErrors.append("Couldn't load more conversations. Try again.")
+            syncErrors.append(failureMessage)
         }
     }
 
