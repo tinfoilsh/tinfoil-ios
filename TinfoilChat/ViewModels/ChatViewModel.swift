@@ -6774,8 +6774,11 @@ class ChatViewModel: ObservableObject {
             guard isCurrentSignIn(token, userId: userId) else { return }
 
             // Perform sync
-            let _ = await cloudSync.syncAllChats()
+            let syncResult = await cloudSync.syncAllChats()
             guard isCurrentSignIn(token, userId: userId) else { return }
+            if !syncResult.errors.isEmpty {
+                syncErrors.append(contentsOf: syncResult.errors)
+            }
 
             // Load and display synced chats from file index (cloud chats only, paginated)
             let totalEntries = try await refreshCloudSummaryIndex(userId: userId)
@@ -6799,8 +6802,38 @@ class ChatViewModel: ObservableObject {
             guard isCurrentSignIn(token, userId: userId) else { return }
 
             // Setup pagination token
-            await setupPaginationForAppRestart(userId: userId, token: token)
+            let serverFirstPageIds = await setupPaginationForAppRestart(userId: userId, token: token)
             guard isCurrentSignIn(token, userId: userId) else { return }
+
+            // The sidebar's first page comes from the local index, which the
+            // sync above is supposed to populate. If the server's first page
+            // isn't reflected locally (failed or empty sync), pull it directly
+            // so the list never opens empty while the account has chats.
+            if let serverFirstPageIds {
+                let localSummaryIds = Set(
+                    cloudSidebarSummaries.filter { !$0.isBlankChat }.map(\.id)
+                )
+                let firstPageMissingLocally = serverFirstPageIds.contains {
+                    !localSummaryIds.contains($0)
+                }
+                if firstPageMissingLocally,
+                   let (result, allRowsPersisted) = await fetchAndPersistCloudChatPage(
+                       userId: userId,
+                       continuationToken: nil
+                   ) {
+                    guard isCurrentSignIn(token, userId: userId) else { return }
+                    // On failure, fall back to a nil token with hasMore set:
+                    // the pagination token already points at page 2, so
+                    // reverting to it would skip the unpersisted first page.
+                    // The nil-token state makes Load More retry page 1.
+                    applyFetchedPageState(
+                        original: ChatPaginationPageState(token: nil, hasMore: true),
+                        result: result,
+                        allRowsPersisted: allRowsPersisted,
+                        failureMessage: "Couldn't load your conversations. Try again."
+                    )
+                }
+            }
 
             await loadProjects()
             guard isCurrentSignIn(token, userId: userId) else { return }
@@ -6816,21 +6849,21 @@ class ChatViewModel: ObservableObject {
     private func setupPaginationForAppRestart(
         userId: String,
         token: AccountOperationFence.Token? = nil
-    ) async {
-        guard isCurrentPaginationOperation(userId: userId, token: token) else { return }
+    ) async -> [String]? {
+        guard isCurrentPaginationOperation(userId: userId, token: token) else { return nil }
         // Try to get pagination token from cloud to enable Load More
         let listResult = try? await CloudStorageService.shared.listChats(
             limit: Constants.Pagination.chatsPerPage,
             continuationToken: nil,
             includeContent: false
         )
-        guard isCurrentPaginationOperation(userId: userId, token: token) else { return }
-        if let listResult {
-            paginationToken = listResult.nextContinuationToken
-            hasMoreChats = listResult.hasMore
-            isPaginationActive = true
-            hasLoadedInitialPage = true
-        }
+        guard isCurrentPaginationOperation(userId: userId, token: token) else { return nil }
+        guard let listResult else { return nil }
+        paginationToken = listResult.nextContinuationToken
+        hasMoreChats = listResult.hasMore
+        isPaginationActive = true
+        hasLoadedInitialPage = true
+        return listResult.conversations.map(\.id)
     }
 
     private func isCurrentPaginationOperation(
@@ -6875,7 +6908,7 @@ class ChatViewModel: ObservableObject {
             }
             
             // Setup pagination after sync
-            await setupPaginationForAppRestart(userId: userId, token: token)
+            _ = await setupPaginationForAppRestart(userId: userId, token: token)
             guard isCurrentAccountOperation(token, userId: userId) else { return }
 
             // Load and display cloud chats after sync from file index
@@ -6994,33 +7027,66 @@ class ChatViewModel: ObservableObject {
         guard !Task.isCancelled, currentUserId == userId, !isLoadingMore else {
             return
         }
-        
-        // Must have a token to load more
-        guard let token = paginationToken else {
-            // No token but hasMoreChats might still be true after sync
-            // In this case, we should NOT set hasMoreChats to false automatically
-            // Only set it to false if we're certain there are no more
-            if !hasMoreChats {
-                // Already false, nothing to do
-                return
-            }
-            
-            // If hasMoreChats is true but no token, this is likely after a sync
-            // Don't change hasMoreChats - the sync logic should have set it correctly
+
+        // A missing token while hasMoreChats is set means the first page
+        // never loaded (e.g. the initial sync left the local index empty);
+        // fall through with a nil token to fetch the first page.
+        if paginationToken == nil && !hasMoreChats {
             return
         }
-        let originalPageState = ChatPaginationPageState(token: token, hasMore: hasMoreChats)
+        let originalPageState = ChatPaginationPageState(token: paginationToken, hasMore: hasMoreChats)
         isLoadingMore = true
         hasAttemptedLoadMore = true  // Track that user has loaded additional pages
         defer { isLoadingMore = false }
-        
-        // Load next page with the token
+
+        guard let (result, allRowsPersisted) = await fetchAndPersistCloudChatPage(
+            userId: userId,
+            continuationToken: paginationToken
+        ) else { return }
+
+        applyFetchedPageState(
+            original: originalPageState,
+            result: result,
+            allRowsPersisted: allRowsPersisted,
+            failureMessage: "Couldn't load more conversations. Try again."
+        )
+    }
+
+    /// Advance pagination state after a page fetch, reverting to
+    /// `original` when the page wasn't fully persisted.
+    private func applyFetchedPageState(
+        original: ChatPaginationPageState,
+        result: PaginatedChatsResult,
+        allRowsPersisted: Bool,
+        failureMessage: String
+    ) {
+        let pageState = ChatPaginationCoordinator.state(
+            original: original,
+            next: ChatPaginationPageState(token: result.nextToken, hasMore: result.hasMore),
+            allRowsPersisted: allRowsPersisted,
+            pageFailed: result.failed,
+            pageCancelled: result.cancelled
+        )
+        paginationToken = pageState.token
+        hasMoreChats = pageState.hasMore
+        if !allRowsPersisted {
+            syncErrors.append(failureMessage)
+        }
+    }
+
+    /// Fetch one page of chats from the server, persist it locally, and
+    /// upsert its summaries into the cloud sidebar. A nil continuation
+    /// token fetches the first page.
+    private func fetchAndPersistCloudChatPage(
+        userId: String,
+        continuationToken: String?
+    ) async -> (result: PaginatedChatsResult, allRowsPersisted: Bool)? {
         let result = await cloudSync.loadChatsWithPagination(
             limit: Constants.Pagination.chatsPerPage,
-            continuationToken: token,
+            continuationToken: continuationToken,
             loadLocal: false  // Don't fall back to local when paginating
         )
-        guard !Task.isCancelled, currentUserId == userId else { return }
+        guard !Task.isCancelled, currentUserId == userId else { return nil }
         let convertedChats = result.chats.compactMap { $0.toChat() }
         let conversionFailures = result.chats.count - convertedChats.count
         let persisted = await ChatPaginationPersistence.saveCloudChats(
@@ -7028,7 +7094,7 @@ class ChatViewModel: ObservableObject {
             userId: userId,
             loadingService: chatLoadingService
         )
-        guard !Task.isCancelled, currentUserId == userId else { return }
+        guard !Task.isCancelled, currentUserId == userId else { return nil }
         for summary in persisted.summaries {
             cloudSidebarSummaries = ChatSummaryState.upserting(
                 summary,
@@ -7043,18 +7109,7 @@ class ChatViewModel: ObservableObject {
             && conversionFailures == 0
             && persisted.failedIds.isEmpty
             && persisted.safelyPersistedCount == result.chats.count
-        let pageState = ChatPaginationCoordinator.state(
-            original: originalPageState,
-            next: ChatPaginationPageState(token: result.nextToken, hasMore: result.hasMore),
-            allRowsPersisted: allRowsPersisted,
-            pageFailed: result.failed,
-            pageCancelled: result.cancelled
-        )
-        paginationToken = pageState.token
-        hasMoreChats = pageState.hasMore
-        if !allRowsPersisted {
-            syncErrors.append("Couldn't load more conversations. Try again.")
-        }
+        return (result, allRowsPersisted)
     }
     
     /// Intelligently update chats after sync without resetting pagination
@@ -7157,7 +7212,7 @@ class ChatViewModel: ObservableObject {
         
         // Always refresh pagination token and hasMore state from the server after a sync
         // This guards against cold-start races where the token wasn't available yet
-        await setupPaginationForAppRestart(userId: userId, token: token)
+        _ = await setupPaginationForAppRestart(userId: userId, token: token)
         guard isCurrentSignIn(token, userId: userId) else { return }
         
         // Also sync profile settings
