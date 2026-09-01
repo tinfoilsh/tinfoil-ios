@@ -54,12 +54,12 @@ enum PasskeyError: LocalizedError {
 final class PasskeyService {
     static let shared = PasskeyService()
 
-    private let storage: TinfoilPasskeyKeyStorage
+    private let storage: KeychainPasskeyKeyStorage
     private let presentationAnchorProvider: TinfoilPasskeyPresentationAnchorProvider
     private let keyManagerResult: Result<PasskeyKeyManager, Error>
 
     private init() {
-        let storage = TinfoilPasskeyKeyStorage()
+        let storage = TinfoilPasskeyCacheMigration.makeStorage()
         let presentationAnchorProvider = TinfoilPasskeyPresentationAnchorProvider()
         self.storage = storage
         self.presentationAnchorProvider = presentationAnchorProvider

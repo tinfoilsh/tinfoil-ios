@@ -699,7 +699,7 @@ struct PasskeyCompositionTests {
             "isPlatformAuthenticator": true,
         ], options: [.sortedKeys])
 
-        let decoded = try TinfoilPasskeyKeyStorage.decodeCachedRecord(oldRecord)
+        let decoded = try TinfoilPasskeyCacheMigration.decodeCachedRecord(oldRecord)
 
         #expect(decoded.credentialId == "AQID")
         #expect(decoded.prfOutput == Data(repeating: 7, count: 32))
@@ -719,7 +719,7 @@ struct PasskeyCompositionTests {
             "prfOutput": Data(repeating: 9, count: 32).base64EncodedString(),
         ], options: [.sortedKeys])
 
-        let decoded = try TinfoilPasskeyKeyStorage.decodeCachedRecord(oldRecord)
+        let decoded = try TinfoilPasskeyCacheMigration.decodeCachedRecord(oldRecord)
 
         #expect(decoded.profile == TinfoilPasskeyProfile.current)
         #expect(decoded.credentialId == "AQID")
