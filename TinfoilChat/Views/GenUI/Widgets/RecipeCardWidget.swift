@@ -259,7 +259,6 @@ private struct RecipeCardView: View {
                             .monospacedDigit()
                             .foregroundColor(item.scaled ? scaledRecipeQuantityColor : GenUIStyle.primaryText(isDarkMode))
                             .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
                 .padding(.horizontal, 12)
@@ -550,20 +549,25 @@ private struct RecipeTagFlowLayout: Layout {
         var y: CGFloat = 0
         var rowHeight: CGFloat = 0
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            // Cap each item at the container width so an oversized item
+            // truncates its text instead of widening the whole layout.
+            let size = itemSize(for: subview, maxWidth: maxWidth)
             // Only wrap when the row already has content; an item wider
-            // than the container still goes on the current row (and gets
-            // clipped) instead of forcing an empty leading row.
+            // than the container still goes on the current row instead of
+            // forcing an empty leading row.
             if x > 0, x + size.width > maxWidth {
                 x = 0
                 y += rowHeight + spacing
                 rowHeight = 0
             }
-            x += size.width + spacing
+            x += size.width
             rowHeight = max(rowHeight, size.height)
             width = max(width, x)
+            x += spacing
         }
-        return CGSize(width: width, height: y + rowHeight)
+        // Never report a width beyond the proposal; otherwise the oversize
+        // propagates up and pushes the whole card wider than the screen.
+        return CGSize(width: min(width, maxWidth), height: y + rowHeight)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
@@ -571,7 +575,7 @@ private struct RecipeTagFlowLayout: Layout {
         var y: CGFloat = bounds.minY
         var rowHeight: CGFloat = 0
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = itemSize(for: subview, maxWidth: bounds.width)
             if x > bounds.minX, x + size.width > bounds.maxX {
                 x = bounds.minX
                 y += rowHeight + spacing
@@ -581,5 +585,14 @@ private struct RecipeTagFlowLayout: Layout {
             x += size.width + spacing
             rowHeight = max(rowHeight, size.height)
         }
+    }
+
+    private func itemSize(for subview: LayoutSubview, maxWidth: CGFloat) -> CGSize {
+        let ideal = subview.sizeThatFits(.unspecified)
+        guard ideal.width > maxWidth, maxWidth.isFinite else { return ideal }
+        let constrained = subview.sizeThatFits(
+            ProposedViewSize(width: maxWidth, height: nil)
+        )
+        return CGSize(width: min(constrained.width, maxWidth), height: constrained.height)
     }
 }
