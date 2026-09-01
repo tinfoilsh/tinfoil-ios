@@ -1,5 +1,4 @@
 import Foundation
-import Security
 import TinfoilPasskeyKit
 
 enum TinfoilPasskeyProfile {
@@ -131,8 +130,10 @@ enum TinfoilWrappedKeyAdapter {
     }
 }
 
-@MainActor
-final class TinfoilPasskeyKeyStorage: PasskeyKeyStorage {
+/// Decodes pre-kit PRF cache formats. Passed to the kit's Keychain
+/// storage adapter as its `decodeCachedRecord` fallback, which runs
+/// only when the stored payload is not a canonical `CachedPRFResult`.
+enum TinfoilPasskeyCacheMigration {
     private struct LegacyCacheEntry: Codable {
         let credentialId: String
         let prfOutput: Data
@@ -153,77 +154,7 @@ final class TinfoilPasskeyKeyStorage: PasskeyKeyStorage {
         let prfOutput: Data
     }
 
-    private let service: String
-    private let account: String
-    private let localCredentialIdKey: String
-    private let userDefaults: UserDefaults
-
-    init(
-        service: String = Constants.Passkey.rpId,
-        account: String = Constants.Passkey.prfCacheKeychainAccount,
-        localCredentialIdKey: String = Constants.StorageKeys.Secret.passkeyEnclaveCredentialId,
-        userDefaults: UserDefaults = .standard
-    ) {
-        self.service = service
-        self.account = account
-        self.localCredentialIdKey = localCredentialIdKey
-        self.userDefaults = userDefaults
-    }
-
-    func loadCachedPRFResult() throws -> CachedPRFResult? {
-        var query = baseQuery
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-
-        var value: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &value)
-        if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess, let data = value as? Data else {
-            throw storageError(status)
-        }
-        return try Self.decodeCachedRecord(data)
-    }
-
-    func saveCachedPRFResult(_ result: CachedPRFResult) throws {
-        let data = try JSONEncoder().encode(result)
-        let attributes: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        ]
-        let updateStatus = SecItemUpdate(baseQuery as CFDictionary, attributes as CFDictionary)
-        if updateStatus == errSecSuccess { return }
-        guard updateStatus == errSecItemNotFound else {
-            throw storageError(updateStatus)
-        }
-
-        var query = baseQuery
-        attributes.forEach { query[$0.key] = $0.value }
-        let addStatus = SecItemAdd(query as CFDictionary, nil)
-        guard addStatus == errSecSuccess else {
-            throw storageError(addStatus)
-        }
-    }
-
-    func loadLocalCredentialId() throws -> String? {
-        userDefaults.string(forKey: localCredentialIdKey)
-    }
-
-    func saveLocalCredentialId(_ credentialId: String) throws {
-        userDefaults.set(credentialId, forKey: localCredentialIdKey)
-    }
-
-    func clear() throws {
-        let status = SecItemDelete(baseQuery as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw storageError(status)
-        }
-        userDefaults.removeObject(forKey: localCredentialIdKey)
-    }
-
     static func decodeCachedRecord(_ data: Data) throws -> CachedPRFResult {
-        if let current = try? JSONDecoder().decode(CachedPRFResult.self, from: data) {
-            return current
-        }
         if let previous = try? JSONDecoder().decode(PreviousCacheEntry.self, from: data) {
             guard previous.profile.version == TinfoilPasskeyProfile.version,
                   previous.profile.relyingPartyId == Constants.Passkey.rpId,
@@ -248,22 +179,13 @@ final class TinfoilPasskeyKeyStorage: PasskeyKeyStorage {
         )
     }
 
-    private var baseQuery: [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-    }
-
-    private func storageError(_ status: OSStatus) -> NSError {
-        NSError(
-            domain: NSOSStatusErrorDomain,
-            code: Int(status),
-            userInfo: [
-                NSLocalizedDescriptionKey: SecCopyErrorMessageString(status, nil)
-                    ?? "Passkey storage failed" as CFString
-            ]
+    @MainActor
+    static func makeStorage() -> KeychainPasskeyKeyStorage {
+        KeychainPasskeyKeyStorage(
+            service: Constants.Passkey.rpId,
+            account: Constants.Passkey.prfCacheKeychainAccount,
+            localCredentialIdKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId,
+            decodeCachedRecord: decodeCachedRecord
         )
     }
 }
