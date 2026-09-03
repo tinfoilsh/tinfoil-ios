@@ -1350,7 +1350,14 @@ class CloudSyncService: ObservableObject {
                 return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, cancelled: true)
             }
 
-            let pulled = try await cloudStorage.pullChats(Array(remoteById.keys))
+            let pulled: [PulledChatResult]
+            if CEKEncoding.pullKeysIfAvailable() == nil {
+                pulled = remoteById.keys.map {
+                    .unavailable(id: $0, code: WireCodes.unknownKey)
+                }
+            } else {
+                pulled = try await cloudStorage.pullChats(Array(remoteById.keys))
+            }
             guard generation == accountGeneration else {
                 return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, cancelled: true)
             }
