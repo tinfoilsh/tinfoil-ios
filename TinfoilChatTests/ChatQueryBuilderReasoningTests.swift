@@ -325,22 +325,33 @@ struct ChatQueryBuilderReasoningTests {
     }
 
     @Test @MainActor
-    func emptyPromptDoesNotEmitSyntheticSystemWrapper() throws {
-        let query = ChatQueryBuilder.buildQuery(
-            modelId: "deepseek-v4-pro",
-            systemPrompt: "",
-            rules: "",
-            conversationMessages: [
-                Message(role: .user, content: "hello")
-            ],
-            stream: false,
-            genUIEnabled: false
-        )
+    func systemRoleIsUsedForDeepSeekAndAuto() throws {
+        let deepseek = model(id: "deepseek-v4-flash", reasoningConfig: nil)
+        let gptOss = model(id: "gpt-oss-120b", reasoningConfig: nil)
 
-        let messages = try encodedMessages(from: query)
-        #expect(messages.count == 1)
-        #expect(messages.first?["role"] as? String == "user")
-        #expect(messages.first?["content"] as? String == "hello")
+        for (modelId, candidates) in [
+            ("deepseek-v4-flash", nil),
+            ("gpt-oss-120b", [gptOss, deepseek]),
+        ] as [(String, [ModelType]?)] {
+            let query = ChatQueryBuilder.buildQuery(
+                modelId: modelId,
+                systemPrompt: "be helpful",
+                rules: "",
+                conversationMessages: [
+                    Message(role: .user, content: "hello")
+                ],
+                stream: false,
+                genUIEnabled: false,
+                autoCandidates: candidates
+            )
+
+            let messages = try encodedMessages(from: query)
+            #expect(messages.count == 2)
+            #expect(messages[0]["role"] as? String == "system")
+            #expect(messages[0]["content"] as? String == "be helpful")
+            #expect(messages[1]["role"] as? String == "user")
+            #expect(messages[1]["content"] as? String == "hello")
+        }
     }
 
     @Test @MainActor
