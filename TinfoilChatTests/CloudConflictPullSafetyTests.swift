@@ -54,3 +54,84 @@ struct CloudConflictPullSafetyTests {
         }
     }
 }
+
+struct CloudPullBatchSettlementTests {
+    private func okItem(_ id: String, etag: String = "2") throws -> EnclavePullItem {
+        let chat = StoredChat(from: Chat(id: id, title: id, modelType: pullBatchTestModel))
+        let plaintext = try CloudStorageService.encodeChatPlaintext(chat)
+        return EnclavePullItem(
+            id: id, ok: true, plaintext: plaintext.base64EncodedString(), keyId: nil, etag: etag,
+            needsRewrap: nil, projectIdSet: nil, projectId: nil, code: nil, reason: nil
+        )
+    }
+
+    private func failedItem(_ id: String, code: String) -> EnclavePullItem {
+        EnclavePullItem(
+            id: id, ok: false, plaintext: nil, keyId: nil, etag: nil,
+            needsRewrap: nil, projectIdSet: nil, projectId: nil, code: code, reason: nil
+        )
+    }
+
+    @Test func settlesEachRowInRequestOrderWithoutHidingPeers() throws {
+        let results = try CloudStorageService.settlePulledChats(
+            requested: ["gone", "present", "locked"],
+            items: [
+                try okItem("present"),
+                failedItem("locked", code: WireCodes.unknownKey),
+                failedItem("gone", code: WireCodes.notFound),
+            ]
+        )
+
+        #expect(results.map(\.id) == ["gone", "present", "locked"])
+        guard case .unavailable(_, let goneCode) = results[0],
+              case .ok(let present) = results[1],
+              case .unavailable(_, let lockedCode) = results[2]
+        else {
+            Issue.record("Unexpected settlement: \(results)")
+            return
+        }
+        #expect(goneCode == WireCodes.notFound)
+        #expect(present.id == "present")
+        #expect(present.syncVersion == 2)
+        #expect(lockedCode == WireCodes.unknownKey)
+    }
+
+    @Test func rejectsIncompleteAndUnexpectedBatches() throws {
+        #expect(throws: RevisionSyncError.self) {
+            try CloudStorageService.settlePulledChats(requested: ["chat-1"], items: [])
+        }
+        #expect(throws: RevisionSyncError.self) {
+            try CloudStorageService.settlePulledChats(
+                requested: ["chat-1"],
+                items: [try okItem("chat-1"), try okItem("chat-1")]
+            )
+        }
+        #expect(throws: RevisionSyncError.self) {
+            try CloudStorageService.settlePulledChats(
+                requested: ["chat-1"],
+                items: [try okItem("chat-1"), try okItem("chat-2")]
+            )
+        }
+    }
+}
+
+private let pullBatchTestModel = ModelType(
+    from: AppModelConfig(
+        modelName: "gpt-oss-120b",
+        image: "openai.png",
+        name: "GPT OSS 120B",
+        nameShort: "GPT OSS",
+        description: "",
+        details: "",
+        parameters: "",
+        contextWindow: "64k tokens",
+        contextWindowTokens: 64_000,
+        type: "chat",
+        chat: true,
+        paid: false,
+        multimodal: false,
+        toolCalling: nil,
+        attributes: nil,
+        reasoningConfig: nil
+    )
+)

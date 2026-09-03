@@ -6854,8 +6854,7 @@ class ChatViewModel: ObservableObject {
         // Try to get pagination token from cloud to enable Load More
         let listResult = try? await CloudStorageService.shared.listChats(
             limit: Constants.Pagination.chatsPerPage,
-            continuationToken: nil,
-            includeContent: false
+            continuationToken: nil
         )
         guard isCurrentPaginationOperation(userId: userId, token: token) else { return nil }
         guard let listResult else { return nil }
