@@ -431,6 +431,24 @@ struct PaginatedChatsResult {
 
 // MARK: - API Response Models
 
+/// Per-row outcome of a batched enclave pull. A row is `unavailable`
+/// when the enclave answered but could not hand back plaintext for it:
+/// deleted between list and pull (`NOT_FOUND`), sealed under a key this
+/// device does not hold (`UNKNOWN_KEY`), or a transient upstream
+/// failure (`NETWORK`). `code` is the enclave's structured item code so
+/// callers classify without matching on messages.
+enum PulledChatResult {
+    case ok(StoredChat)
+    case unavailable(id: String, code: String)
+
+    var id: String {
+        switch self {
+        case .ok(let chat): return chat.id
+        case .unavailable(let id, _): return id
+        }
+    }
+}
+
 /// Response from chat list API
 struct ChatListResponse: Codable {
     let conversations: [RemoteChat]

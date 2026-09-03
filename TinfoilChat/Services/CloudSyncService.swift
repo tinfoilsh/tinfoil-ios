@@ -1329,21 +1329,20 @@ class CloudSyncService: ObservableObject {
         }
         
         do {
-            // Fetch remote chats with pagination
-            // includeContent: true to get the encrypted data directly
-            let remoteList = try await cloudStorage.listChats(
+            let remoteList = try await listNextChatPage(
                 limit: pageLimit,
-                continuationToken: continuationToken,
-                includeContent: true
+                continuationToken: continuationToken
             )
             guard generation == accountGeneration else {
                 return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, cancelled: true)
             }
-            
-            // Process remote chats in parallel
-            var downloadedChats: [StoredChat] = []
-            let chatsToProcess = remoteList.conversations
-            
+            let remoteById = Dictionary(
+                remoteList.conversations
+                    .filter { !deletedChatsTracker.isDeleted($0.id) }
+                    .map { ($0.id, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+
             // Initialize encryption if available; continue even without a key so we can at least
             // fetch metadata and store encrypted placeholders. Decryption will be attempted per-chat.
             _ = try? await encryptionService.initialize()
@@ -1351,49 +1350,43 @@ class CloudSyncService: ObservableObject {
                 return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, cancelled: true)
             }
 
-            // Process chats sequentially to avoid connection exhaustion
-            for remoteChat in chatsToProcess {
-                guard generation == accountGeneration else {
-                    return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, cancelled: true)
+            let pulled: [PulledChatResult]
+            if CEKEncoding.pullKeysIfAvailable() == nil {
+                pulled = remoteById.keys.map {
+                    .unavailable(id: $0, code: WireCodes.unknownKey)
                 }
-                // Skip recently deleted chats
-                if deletedChatsTracker.isDeleted(remoteChat.id) {
-                    continue
-                }
+            } else {
+                pulled = try await cloudStorage.pullChats(Array(remoteById.keys))
+            }
+            guard generation == accountGeneration else {
+                return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, cancelled: true)
+            }
 
-                // Skip invalid chats (blank or without proper ID format)
-                if !(await shouldProcessRemoteChat(remoteChat)) {
-                    continue
-                }
-
-                guard let content = remoteChat.content else {
-                    continue
-                }
-
-                if let decrypted = await decryptRemoteChat(remoteChat, content: content) {
-                    guard generation == accountGeneration else {
-                        return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, cancelled: true)
-                    }
-                    downloadedChats.append(decrypted.chat)
-                } else {
-                    guard generation == accountGeneration else {
-                        return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, cancelled: true)
-                    }
-                    let placeholder = createEncryptedPlaceholder(remoteChat: remoteChat)
-                    downloadedChats.append(placeholder)
+            var downloadedChats: [StoredChat] = []
+            for result in pulled {
+                guard let remoteChat = remoteById[result.id] else { continue }
+                switch result {
+                case .ok(let chat):
+                    downloadedChats.append(applyRemoteMetadata(remoteChat, to: chat))
+                case .unavailable(_, let code):
+                    // The row vanished between list and pull; the next
+                    // revision sync carries the matching delete.
+                    if code == WireCodes.notFound { continue }
+                    reportUnavailableChat(id: result.id, code: code)
+                    downloadedChats.append(createEncryptedPlaceholder(remoteChat: remoteChat))
                 }
             }
 
             // Sort by latest activity (newest first), matching the server's
             // direction=desc list-status pagination.
             downloadedChats.sort { $0.updatedAt > $1.updatedAt }
-            
+
             return PaginatedChatsResult(
                 chats: downloadedChats,
                 hasMore: remoteList.hasMore,
                 nextToken: remoteList.nextContinuationToken
             )
-            
+
         } catch {
             // On error, fall back to local if enabled
             if loadLocal {
@@ -1409,7 +1402,50 @@ class CloudSyncService: ObservableObject {
             return PaginatedChatsResult(chats: [], hasMore: false, nextToken: nil, failed: true)
         }
     }
-    
+
+    /// Fetch the next metadata page that carries at least one chat. The
+    /// server pages chat updates and chat deletions under one cursor, so
+    /// a page may legitimately hold only deletions with a cursor that
+    /// still advances; those pages are skipped here so callers only ever
+    /// see a page with conversations or the end of history.
+    private func listNextChatPage(
+        limit: Int,
+        continuationToken: String?
+    ) async throws -> ChatListResponse {
+        var visitedTokens: Set<String> = []
+        var cursor = continuationToken
+        while true {
+            if let cursor {
+                guard visitedTokens.insert(cursor).inserted else {
+                    throw CloudStorageError.paginationCursorStalled
+                }
+            }
+            let page = try await cloudStorage.listChats(
+                limit: limit,
+                continuationToken: cursor
+            )
+            if !page.conversations.isEmpty || !page.hasMore {
+                return page
+            }
+            cursor = page.nextContinuationToken
+        }
+    }
+
+    /// Route an unreadable row into the sync health store the UI already
+    /// renders from. A row sealed under a key this device does not hold
+    /// needs the user to recover that key; anything else is a per-chat
+    /// download failure.
+    private func reportUnavailableChat(id: String, code: String) {
+        if code == WireCodes.unknownKey {
+            SyncHealthStore.shared.reportKeyActionRequired(.keyRecovery)
+        } else {
+            SyncHealthStore.shared.reportChatSyncFailed(
+                id,
+                message: "This chat couldn't be downloaded"
+            )
+        }
+    }
+
     /// Load local chats with pagination (fallback when offline or not authenticated)
     private func loadLocalChatsWithPagination(
         limit: Int,
@@ -1451,48 +1487,30 @@ class CloudSyncService: ObservableObject {
             nextToken: nextToken
         )
     }
-    
-    /// Apply server metadata dates and set a default model on a chat
-    /// the enclave already unsealed for us. `content` is the StoredChat
-    /// JSON returned by `/v1/sync/pull` (format-version 2).
-    /// Returns `nil` on a malformed body — callers create an encrypted
-    /// placeholder in that case.
-    struct DecryptedChatResult {
-        var chat: StoredChat
-    }
 
-    private func decryptRemoteChat(
-        _ remoteChat: RemoteChat,
-        content: String
-    ) async -> DecryptedChatResult? {
-        guard let plaintextData = content.data(using: .utf8) else { return nil }
+    /// Overlay list-status metadata onto a pulled chat. The server's
+    /// timestamps are authoritative for ordering, and the blob's
+    /// `createdAt` may be the decoder's `Date()` fallback.
+    private func applyRemoteMetadata(_ remoteChat: RemoteChat, to chat: StoredChat) -> StoredChat {
+        var merged = chat
+        merged.projectId = remoteChat.projectId
+        merged.projectLocallyModified = false
 
-        do {
-            var decryptedChat = try JSONDecoder().decode(StoredChat.self, from: plaintextData)
-            decryptedChat.formatVersion = 2
-            decryptedChat.projectId = remoteChat.projectId
-            decryptedChat.projectLocallyModified = false
-
-            // Prefer the blob's createdAt over the remote metadata.
-            // StoredChat falls back to `Date()` on parse failure — when
-            // the blob date is within the last few seconds it's almost
-            // certainly that fallback, so prefer the server timestamp.
-            let blobCreatedAt = decryptedChat.createdAt
-            let blobLooksLikeFallback = abs(blobCreatedAt.timeIntervalSinceNow) < Constants.Sync.createdAtFallbackThresholdSeconds
-            if blobLooksLikeFallback, let createdDate = parseISODate(remoteChat.createdAt) {
-                decryptedChat.createdAt = createdDate
-            }
-            if let updatedDate = parseISODate(remoteChat.updatedAt) {
-                decryptedChat.updatedAt = updatedDate
-            }
-            if decryptedChat.modelType == nil {
-                decryptedChat.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
-            }
-
-            return DecryptedChatResult(chat: decryptedChat)
-        } catch {
-            return nil
+        // Prefer the blob's createdAt over the remote metadata.
+        // StoredChat falls back to `Date()` on parse failure — when
+        // the blob date is within the last few seconds it's almost
+        // certainly that fallback, so prefer the server timestamp.
+        let blobLooksLikeFallback = abs(merged.createdAt.timeIntervalSinceNow) < Constants.Sync.createdAtFallbackThresholdSeconds
+        if blobLooksLikeFallback, let createdDate = parseISODate(remoteChat.createdAt) {
+            merged.createdAt = createdDate
         }
+        if let updatedDate = parseISODate(remoteChat.updatedAt) {
+            merged.updatedAt = updatedDate
+        }
+        if merged.modelType == nil {
+            merged.modelType = AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first
+        }
+        return merged
     }
 
     /// Create a placeholder for a chat the enclave declined to unseal
@@ -2555,21 +2573,6 @@ class CloudSyncService: ObservableObject {
     
     /// Determines if a remote chat should be processed/stored locally
     /// Returns false for clearly invalid chats that shouldn't be synced
-    private func shouldProcessRemoteChat(_ remoteChat: RemoteChat) async -> Bool {
-        // Check if it was recently deleted locally
-        if deletedChatsTracker.isDeleted(remoteChat.id) {
-            return false
-        }
-        // Do NOT filter out temporary IDs anymore. Some legacy/migrated chats
-        // may have UUID-based IDs and must still be downloaded to avoid data loss.
-
-        // Don't skip based on messageCount - for encrypted chats the server
-        // may not accurately know the message count inside the encrypted blob.
-        // Let decryption determine if the chat is valid.
-
-        return true
-    }
-    
     // MARK: - Retry Decryption Methods
 
     /// Drop locally-stored placeholders for chats that previously failed to

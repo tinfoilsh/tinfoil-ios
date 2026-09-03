@@ -64,3 +64,13 @@ enum WireCodes {
     static let network = EnclaveErrorCode.network.rawValue
     static let syncProtocolUpgradeRequired = EnclaveErrorCode.syncProtocolUpgradeRequired.rawValue
 }
+
+/// Client-assigned pull item codes. These never appear on the wire;
+/// they let a locally detected problem with an `ok=true` item flow
+/// through the same per-row classification as enclave-reported codes.
+enum LocalPullItemCodes {
+    /// The enclave returned plaintext that does not decode as a chat.
+    static let malformedPayload = "MALFORMED_PAYLOAD"
+    /// An `ok=false` item arrived without a code.
+    static let unspecified = "UNSPECIFIED"
+}

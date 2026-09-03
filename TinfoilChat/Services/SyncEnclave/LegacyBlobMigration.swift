@@ -309,19 +309,19 @@ enum LegacyBlobMigration {
             guard await Clerk.shared.user?.id == userId,
                   let page = try? await CloudStorageService.shared.listChats(
                       limit: Constants.SyncEnclave.listStatusPageLimit,
-                      continuationToken: cursor,
-                      includeContent: true
-                  )
+                      continuationToken: cursor
+                  ),
+                  let pulled = try? await CloudStorageService.shared.pullChats(
+                      page.conversations.map(\.id)
+                  ),
+                  await Clerk.shared.user?.id == userId
             else {
                 return false
             }
             guard !Task.isCancelled else { return false }
-            for remote in page.conversations {
+            for result in pulled {
                 guard !Task.isCancelled else { return false }
-                guard let content = remote.content,
-                      let data = content.data(using: .utf8),
-                      let chat = try? JSONDecoder().decode(StoredChat.self, from: data)
-                else {
+                guard case .ok(let chat) = result else {
                     return false
                 }
                 if chat.pendingRecoveries?.contains(where: {
