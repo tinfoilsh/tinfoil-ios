@@ -295,16 +295,50 @@ class CloudStorageService: ObservableObject {
     /// Pull plaintext for every requested chat. Requests are split into
     /// enclave-sized batches and results come back in request order, one
     /// per id. Transport failures and protocol violations (a response
-    /// missing or duplicating an id) throw; per-row enclave outcomes are
-    /// settled into the result so one unreadable chat cannot hide its
-    /// batch peers from the caller.
+    /// missing, duplicating, or inventing an id) throw; per-row outcomes,
+    /// including plaintext that fails to decode, are settled into the
+    /// result so one unreadable chat cannot hide its batch peers.
     func pullChats(_ ids: [String]) async throws -> [PulledChatResult] {
-        guard !ids.isEmpty else { return [] }
+        var results: [PulledChatResult] = []
+        results.reserveCapacity(ids.count)
+        try await pullChatBatches(ids) { results.append(contentsOf: $0) }
+        return results
+    }
+
+    /// Strict variant of `pullChats` for revision sync, which must mirror
+    /// the server exactly: any row that cannot be read is fatal unless it
+    /// was deleted between the event and the pull. Stops at the first
+    /// fatal row rather than pulling the remaining batches.
+    func downloadChats(_ ids: [String]) async throws -> [String: StoredChat] {
+        var chats: [String: StoredChat] = [:]
+        try await pullChatBatches(ids) { batch in
+            for result in batch {
+                switch result {
+                case .ok(let chat):
+                    chats[chat.id] = chat
+                case .unavailable(_, let code):
+                    if code == WireCodes.notFound { continue }
+                    if code == LocalPullItemCodes.malformedPayload {
+                        throw CloudStorageError.invalidChatPayload
+                    }
+                    throw SyncEnclaveError(
+                        message: "The cloud chat could not be opened",
+                        code: code
+                    )
+                }
+            }
+        }
+        return chats
+    }
+
+    private func pullChatBatches(
+        _ ids: [String],
+        consume: ([PulledChatResult]) throws -> Void
+    ) async throws {
+        guard !ids.isEmpty else { return }
         guard let keys = CEKEncoding.pullKeysIfAvailable() else {
             throw CloudStorageError.missingDecryptionKey
         }
-        var results: [PulledChatResult] = []
-        results.reserveCapacity(ids.count)
         for batchStart in stride(from: 0, to: ids.count, by: Constants.SyncEnclave.pullBatchSize) {
             let batch = Array(
                 ids[batchStart..<min(batchStart + Constants.SyncEnclave.pullBatchSize, ids.count)]
@@ -319,29 +353,8 @@ class CloudStorageService: ObservableObject {
                     keys: keys
                 )
             )
-            results.append(contentsOf: try Self.settlePulledChats(requested: batch, items: response.items))
+            try consume(try Self.settlePulledChats(requested: batch, items: response.items))
         }
-        return results
-    }
-
-    /// Strict variant of `pullChats` for revision sync, which must mirror
-    /// the server exactly: any row the enclave cannot return is fatal
-    /// unless it was deleted between the event and the pull.
-    func downloadChats(_ ids: [String]) async throws -> [String: StoredChat] {
-        var chats: [String: StoredChat] = [:]
-        for result in try await pullChats(ids) {
-            switch result {
-            case .ok(let chat):
-                chats[chat.id] = chat
-            case .unavailable(_, let code):
-                if code == WireCodes.notFound { continue }
-                throw SyncEnclaveError(
-                    message: "The cloud chat could not be opened",
-                    code: code
-                )
-            }
-        }
-        return chats
     }
 
     static func settlePulledChats(
@@ -352,21 +365,25 @@ class CloudStorageService: ObservableObject {
         var itemsById: [String: EnclavePullItem] = [:]
         for item in items {
             guard requestedIds.contains(item.id), itemsById[item.id] == nil else {
-                throw RevisionSyncError.incompletePull
+                throw CloudStorageError.invalidResponse
             }
             itemsById[item.id] = item
         }
         return try requested.map { id in
             guard let item = itemsById[id] else {
-                throw RevisionSyncError.incompletePull
+                throw CloudStorageError.invalidResponse
             }
             guard item.ok else {
-                return .unavailable(id: id, code: item.code ?? WireCodes.network)
+                return .unavailable(id: id, code: item.code ?? LocalPullItemCodes.unspecified)
             }
-            guard let chat = try decodeDownloadedChat(item, expectedChatId: id) else {
-                throw RevisionSyncError.incompletePull
+            do {
+                guard let chat = try decodeDownloadedChat(item, expectedChatId: id) else {
+                    throw CloudStorageError.invalidResponse
+                }
+                return .ok(chat)
+            } catch CloudStorageError.invalidChatPayload {
+                return .unavailable(id: id, code: LocalPullItemCodes.malformedPayload)
             }
-            return .ok(chat)
         }
     }
 

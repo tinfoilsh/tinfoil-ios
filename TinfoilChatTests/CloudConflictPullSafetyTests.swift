@@ -97,21 +97,42 @@ struct CloudPullBatchSettlementTests {
     }
 
     @Test func rejectsIncompleteAndUnexpectedBatches() throws {
-        #expect(throws: RevisionSyncError.self) {
+        #expect(throws: CloudStorageError.self) {
             try CloudStorageService.settlePulledChats(requested: ["chat-1"], items: [])
         }
-        #expect(throws: RevisionSyncError.self) {
+        #expect(throws: CloudStorageError.self) {
             try CloudStorageService.settlePulledChats(
                 requested: ["chat-1"],
                 items: [try okItem("chat-1"), try okItem("chat-1")]
             )
         }
-        #expect(throws: RevisionSyncError.self) {
+        #expect(throws: CloudStorageError.self) {
             try CloudStorageService.settlePulledChats(
                 requested: ["chat-1"],
                 items: [try okItem("chat-1"), try okItem("chat-2")]
             )
         }
+    }
+
+    @Test func settlesMalformedPlaintextAsUnavailableWithoutAbortingPeers() throws {
+        let malformed = EnclavePullItem(
+            id: "broken", ok: true, plaintext: "not-base64", keyId: nil, etag: "3",
+            needsRewrap: nil, projectIdSet: nil, projectId: nil, code: nil, reason: nil
+        )
+        let results = try CloudStorageService.settlePulledChats(
+            requested: ["broken", "fine"],
+            items: [malformed, try okItem("fine")]
+        )
+
+        guard case .unavailable(let id, let code) = results[0],
+              case .ok(let fine) = results[1]
+        else {
+            Issue.record("Unexpected settlement: \(results)")
+            return
+        }
+        #expect(id == "broken")
+        #expect(code == LocalPullItemCodes.malformedPayload)
+        #expect(fine.id == "fine")
     }
 }
 
