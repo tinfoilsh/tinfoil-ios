@@ -8,11 +8,8 @@
 import Foundation
 import OpenAI
 
-/// Helper for building ChatQuery with model-specific system prompt injection
-///
-/// **System Prompt Handling:**
-/// Most modern models support system role in messages array.
-/// For models that don't support it, we prepend to the first user message.
+/// Helper for building ChatQuery. The system prompt is always sent with the
+/// `system` role; every hosted chat model supports it.
 struct ChatQueryBuilder {
 
     /// Endpoint key for the chat completions API; matches the controlplane
@@ -80,28 +77,17 @@ struct ChatQueryBuilder {
 
         var messages: [ChatQuery.ChatCompletionMessageParam] = []
 
-        // Most models support system role; DeepSeek is the known exception.
-        // For Auto requests the representative `modelId` drives this, but if
-        // any candidate needs the synthetic `<system>` message we prepend for
-        // all so a DeepSeek resolution never loses its instructions.
-        let candidatesNeedPrepend = autoCandidates?.contains { $0.modelName.hasPrefix("deepseek") } ?? false
-        let useSystemRole = !modelId.hasPrefix("deepseek") && !candidatesNeedPrepend
-
         // Append the GenUI prompt hint so the model knows it can call
         // render_* tools instead of replying with markdown for structured
-        // content. The hint is appended to the system prompt regardless
-        // of which transport carries the system instructions (system role
-        // vs synthetic <system> user message).
+        // content.
         var effectiveSystemPrompt = systemPrompt
         if genUIEnabled, let hint = genUIRegistry.buildPromptHint() {
             effectiveSystemPrompt = systemPrompt.isEmpty ? hint : systemPrompt + "\n\n" + hint
         }
 
-        if useSystemRole {
-            let fullPrompt = rules.isEmpty ? effectiveSystemPrompt : effectiveSystemPrompt + "\n\n" + rules
-            if !fullPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                messages.append(.system(.init(content: .textContent(fullPrompt))))
-            }
+        let fullPrompt = rules.isEmpty ? effectiveSystemPrompt : effectiveSystemPrompt + "\n\n" + rules
+        if !fullPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            messages.append(.system(.init(content: .textContent(fullPrompt))))
         }
 
         let candidateReasoningHistoryPolicy = autoCandidates?.reduce(ReasoningHistoryPolicy.none) { policy, candidate in
@@ -116,7 +102,6 @@ struct ChatQueryBuilder {
             contextWindowTokens: contextWindowTokens,
             reasoningHistoryPolicy: reasoningHistoryPolicy
         )
-        var hasAddedSystemInstructions = useSystemRole
 
         for msg in recentMessages {
             let reasoningContent = reasoningHistoryPolicy.includesReasoning(for: msg)
@@ -124,16 +109,6 @@ struct ChatQueryBuilder {
                 : nil
             if msg.role == .user {
                 var userContent = msg.content
-
-                // For models that don't use system role (e.g. DeepSeek): inject system instructions as a separate user message
-                if !hasAddedSystemInstructions {
-                    let rawInstructions = rules.isEmpty ? effectiveSystemPrompt : effectiveSystemPrompt + "\n\n" + rules
-                    if !rawInstructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        let systemContent = "<system>\n\(rawInstructions)\n</system>"
-                        messages.append(.user(.init(content: .string(systemContent))))
-                    }
-                    hasAddedSystemInstructions = true
-                }
 
                 // Derive document content and image data from attachments
                 let documentAttachments = msg.attachments.filter { $0.type == .document }
