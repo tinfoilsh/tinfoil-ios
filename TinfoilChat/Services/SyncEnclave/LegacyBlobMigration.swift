@@ -313,7 +313,8 @@ enum LegacyBlobMigration {
                   ),
                   let pulled = try? await CloudStorageService.shared.pullChats(
                       page.conversations.map(\.id)
-                  )
+                  ),
+                  await Clerk.shared.user?.id == userId
             else {
                 return false
             }
