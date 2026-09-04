@@ -374,6 +374,7 @@ struct MessageTableView: UIViewRepresentable {
                             tableView.beginUpdates()
                             tableView.endUpdates()
                         }
+                        context.coordinator.clampPreservedOffsetToCollapsedContent()
                         context.coordinator.isCollapsingStreamingBuffer = false
                         context.coordinator.updateContentInset()
                         tableView.layoutIfNeeded()
@@ -715,8 +716,50 @@ struct MessageTableView: UIViewRepresentable {
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            releaseHeldOffsetIfUserScrolledUp(scrollView)
             updateContentInset()
             checkIfAtBottom()
+        }
+
+        /// The offset captured when streaming ended was measured against the
+        /// inflated buffer, so it can sit past the end of the collapsed content
+        /// when the last measured content height lagged behind the stream.
+        /// Holding such an offset would pad the bottom with blank space the
+        /// user never scrolled to, so clamp it to where the collapsed content
+        /// actually ends. The user-message pin is unaffected since it is
+        /// derived from the row position, not from this offset.
+        func clampPreservedOffsetToCollapsedContent() {
+            guard let tableView, let preserved = preservedOffsetAfterStreaming else { return }
+            let maxOffsetWithoutInset = preserved - customInsetRequired(forOffset: preserved, in: tableView)
+            preservedOffsetAfterStreaming = min(preserved, maxOffsetWithoutInset)
+        }
+
+        /// The custom bottom inset needed for `offset` to be reachable, beyond
+        /// what the system already contributes for the safe area and the
+        /// input bar. Positive when the content alone is too short.
+        private func customInsetRequired(forOffset offset: CGFloat, in scrollView: UIScrollView) -> CGFloat {
+            let systemBottomInset = scrollView.adjustedContentInset.bottom - scrollView.contentInset.bottom
+            return offset + scrollView.bounds.height - scrollView.contentSize.height - systemBottomInset
+        }
+
+        /// After streaming ends the bottom inset only exists to keep the view
+        /// from jumping at the moment the buffer collapses. Once the user
+        /// scrolls on their own, that hold has served its purpose: it follows
+        /// them upward so the blank space below shrinks as they go, and is
+        /// dropped entirely once the content no longer needs any extra inset.
+        /// Programmatic scrolls are ignored so the pending offset restore
+        /// after collapse cannot release the hold on its own.
+        private func releaseHeldOffsetIfUserScrolledUp(_ scrollView: UIScrollView) {
+            guard !parent.usesStreamingLayout, !isCollapsingStreamingBuffer else { return }
+            guard let heldOffset = preservedOffsetAfterStreaming else { return }
+            guard scrollView.isTracking || scrollView.isDecelerating else { return }
+
+            let currentOffset = scrollView.contentOffset.y
+            guard currentOffset < heldOffset else { return }
+
+            isUserMessageScrollMode = false
+            let requiredInset = customInsetRequired(forOffset: currentOffset, in: scrollView)
+            preservedOffsetAfterStreaming = requiredInset > 0 ? currentOffset : nil
         }
 
         func updateContentInset() {
@@ -770,12 +813,12 @@ struct MessageTableView: UIViewRepresentable {
             guard numberOfRows >= 2 else { return 0 }
             let userMessageIndexPath = IndexPath(row: numberOfRows - 2, section: 0)
             let userMessageY = tableView.rectForRow(at: userMessageIndexPath).origin.y
-            return userMessageY + tableView.bounds.height - tableView.contentSize.height
+            return customInsetRequired(forOffset: userMessageY, in: tableView)
         }
 
         private func insetForPreservedOffset(_ tableView: UITableView) -> CGFloat {
             guard let preservedOffsetAfterStreaming else { return 0 }
-            return preservedOffsetAfterStreaming + tableView.bounds.height - tableView.contentSize.height
+            return customInsetRequired(forOffset: preservedOffsetAfterStreaming, in: tableView)
         }
 
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
