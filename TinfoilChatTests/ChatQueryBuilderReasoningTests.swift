@@ -111,14 +111,17 @@ struct ChatQueryBuilderReasoningTests {
             description: "",
             details: "",
             parameters: "",
-            contextWindowTokens: contextWindowTokens,
             type: "chat",
             chat: true,
             paid: true,
             multimodal: false,
             toolCalling: true,
-            attributes: ["smart"],
-            reasoningConfig: reasoningConfig
+            chatConfig: ChatModelConfig(
+                contextWindowTokens: contextWindowTokens,
+                attributes: ["smart"],
+                descriptionShort: nil,
+                reasoningConfig: reasoningConfig
+            )
         ))
     }
 
@@ -129,7 +132,7 @@ struct ChatQueryBuilderReasoningTests {
         #expect(config.reasoningHistoryPolicy == .toolCallOnly)
     }
 
-    @Test func modelConfigWithoutContextWindowTokensFallsBackToDefault() throws {
+    @Test func modelConfigWithoutChatConfigFallsBackToDefaults() throws {
         let data = Data(
             #"""
             {
@@ -146,9 +149,41 @@ struct ChatQueryBuilderReasoningTests {
             }
             """#.utf8
         )
-        let config = try JSONDecoder().decode(AppModelConfig.self, from: data)
+        let model = ModelType(from: try JSONDecoder().decode(AppModelConfig.self, from: data))
 
-        #expect(ModelType(from: config).contextWindowTokens == Constants.Context.defaultContextWindowTokens)
+        #expect(model.contextWindowTokens == Constants.Context.defaultContextWindowTokens)
+        #expect(model.attributes.isEmpty)
+        #expect(!model.isReasoningModel)
+    }
+
+    @Test func chatSettingsDecodeFromChatConfig() throws {
+        let data = Data(
+            #"""
+            {
+              "modelName": "configured",
+              "image": "",
+              "name": "Configured",
+              "nameShort": "Configured",
+              "description": "",
+              "details": "",
+              "parameters": "",
+              "type": "chat",
+              "paid": true,
+              "multimodal": false,
+              "chatConfig": {
+                "contextWindowTokens": 32000,
+                "attributes": ["fast"],
+                "descriptionShort": "Quick answers",
+                "reasoningConfig": { "supportsEffort": true }
+              }
+            }
+            """#.utf8
+        )
+        let model = ModelType(from: try JSONDecoder().decode(AppModelConfig.self, from: data))
+
+        #expect(model.contextWindowTokens == 32_000)
+        #expect(model.attributes == ["fast"])
+        #expect(model.supportsReasoningEffort)
     }
 
     @Test func unknownReasoningHistoryPolicyFallsBackSafely() throws {

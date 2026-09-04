@@ -89,6 +89,18 @@ enum AutoModel {
     static let optionsField = "auto_model_options"
 }
 
+/// Settings the chat clients read for a model. The controlplane sends this
+/// block only on chat models and keeps everything a chat client needs inside it.
+struct ChatModelConfig: Codable {
+    /// Token budget the chat archives history against. May be lower than the
+    /// model's raw capability advertised to API consumers.
+    let contextWindowTokens: Int?
+    /// Capability tags advertised by the controlplane (e.g. `smart`, `fast`).
+    let attributes: [String]?
+    let descriptionShort: String?
+    let reasoningConfig: ReasoningConfig?
+}
+
 /// Model configuration from the new /api/app/models endpoint
 struct AppModelConfig: Codable {
     let modelName: String
@@ -98,14 +110,12 @@ struct AppModelConfig: Codable {
     let description: String
     let details: String
     let parameters: String
-    let contextWindowTokens: Int?
     let type: String
     let chat: Bool?
     let paid: Bool
     let multimodal: Bool
     let toolCalling: Bool?
-    let attributes: [String]?
-    let reasoningConfig: ReasoningConfig?
+    let chatConfig: ChatModelConfig?
 }
 
 // The /api/app/models endpoint returns an array directly, not wrapped in an object
@@ -172,7 +182,7 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
     var details: String { appConfig.details }
     var parameters: String { appConfig.parameters }
     var contextWindowTokens: Int {
-        appConfig.contextWindowTokens ?? Constants.Context.defaultContextWindowTokens
+        appConfig.chatConfig?.contextWindowTokens ?? Constants.Context.defaultContextWindowTokens
     }
     var type: String { appConfig.type }
     var isMultimodal: Bool { appConfig.multimodal }
@@ -182,30 +192,30 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
 
     /// Full reasoning config for this model, or nil if the model is not a
     /// reasoning model.
-    var reasoningConfig: ReasoningConfig? { appConfig.reasoningConfig }
+    var reasoningConfig: ReasoningConfig? { appConfig.chatConfig?.reasoningConfig }
 
     /// True iff the model exposes any reasoning controls. Used to gate the
     /// reasoning selector visibility.
-    var isReasoningModel: Bool { appConfig.reasoningConfig != nil }
+    var isReasoningModel: Bool { reasoningConfig != nil }
 
     /// True iff the model exposes a graded effort parameter.
     var supportsReasoningEffort: Bool {
-        appConfig.reasoningConfig?.supportsEffort == true
+        reasoningConfig?.supportsEffort == true
     }
 
     /// True iff the model exposes an on/off thinking toggle.
     var supportsThinkingToggle: Bool {
-        appConfig.reasoningConfig?.supportsToggle == true
+        reasoningConfig?.supportsToggle == true
     }
 
     var reasoningHistoryPolicy: ReasoningHistoryPolicy {
-        appConfig.reasoningConfig?.reasoningHistoryPolicy ?? .none
+        reasoningConfig?.reasoningHistoryPolicy ?? .none
     }
 
     // MARK: - Auto routing
 
     /// Capability tags advertised by the controlplane (e.g. `smart`, `fast`).
-    var attributes: [String] { appConfig.attributes ?? [] }
+    var attributes: [String] { appConfig.chatConfig?.attributes ?? [] }
 
     /// True iff the model can be picked as an auto candidate for tool use.
     var supportsToolCalling: Bool { appConfig.toolCalling ?? false }
@@ -240,14 +250,17 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
                 : "Routes to the fastest available model",
             details: "",
             parameters: "",
-            contextWindowTokens: minimumContextMember?.contextWindowTokens,
             type: "chat",
             chat: true,
             paid: true,
             multimodal: members.contains { $0.isMultimodal },
             toolCalling: members.contains { $0.supportsToolCalling },
-            attributes: [tier],
-            reasoningConfig: nil
+            chatConfig: ChatModelConfig(
+                contextWindowTokens: minimumContextMember?.contextWindowTokens,
+                attributes: [tier],
+                descriptionShort: nil,
+                reasoningConfig: nil
+            )
         )
         return ModelType(from: config)
     }
