@@ -730,9 +730,16 @@ struct MessageTableView: UIViewRepresentable {
         /// derived from the row position, not from this offset.
         func clampPreservedOffsetToCollapsedContent() {
             guard let tableView, let preserved = preservedOffsetAfterStreaming else { return }
-            let systemBottomInset = tableView.adjustedContentInset.bottom - tableView.contentInset.bottom
-            let maxOffsetWithoutInset = tableView.contentSize.height + systemBottomInset - tableView.bounds.height
+            let maxOffsetWithoutInset = preserved - customInsetRequired(forOffset: preserved, in: tableView)
             preservedOffsetAfterStreaming = min(preserved, maxOffsetWithoutInset)
+        }
+
+        /// The custom bottom inset needed for `offset` to be reachable, beyond
+        /// what the system already contributes for the safe area and the
+        /// input bar. Positive when the content alone is too short.
+        private func customInsetRequired(forOffset offset: CGFloat, in scrollView: UIScrollView) -> CGFloat {
+            let systemBottomInset = scrollView.adjustedContentInset.bottom - scrollView.contentInset.bottom
+            return offset + scrollView.bounds.height - scrollView.contentSize.height - systemBottomInset
         }
 
         /// After streaming ends the bottom inset only exists to keep the view
@@ -751,7 +758,7 @@ struct MessageTableView: UIViewRepresentable {
             guard currentOffset < heldOffset else { return }
 
             isUserMessageScrollMode = false
-            let requiredInset = currentOffset + scrollView.bounds.height - scrollView.contentSize.height
+            let requiredInset = customInsetRequired(forOffset: currentOffset, in: scrollView)
             preservedOffsetAfterStreaming = requiredInset > 0 ? currentOffset : nil
         }
 
@@ -806,12 +813,12 @@ struct MessageTableView: UIViewRepresentable {
             guard numberOfRows >= 2 else { return 0 }
             let userMessageIndexPath = IndexPath(row: numberOfRows - 2, section: 0)
             let userMessageY = tableView.rectForRow(at: userMessageIndexPath).origin.y
-            return userMessageY + tableView.bounds.height - tableView.contentSize.height
+            return customInsetRequired(forOffset: userMessageY, in: tableView)
         }
 
         private func insetForPreservedOffset(_ tableView: UITableView) -> CGFloat {
             guard let preservedOffsetAfterStreaming else { return 0 }
-            return preservedOffsetAfterStreaming + tableView.bounds.height - tableView.contentSize.height
+            return customInsetRequired(forOffset: preservedOffsetAfterStreaming, in: tableView)
         }
 
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
