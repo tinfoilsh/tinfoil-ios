@@ -221,7 +221,7 @@ struct PersonalizationView: View {
         Section {
             TextField("Nickname", text: $editor.nickname)
         } header: {
-            Text("What should Tin call you?")
+            Text("What should Al call you?")
         }
         .listRowBackground(Color.cardSurface(for: colorScheme))
     }
@@ -251,7 +251,7 @@ struct PersonalizationView: View {
 
     private var additionalContextSection: some View {
         Section {
-            TextField("Anything else Tin should know about you?", text: $editor.additionalContext, axis: .vertical)
+            TextField("Anything else Al should know about you?", text: $editor.additionalContext, axis: .vertical)
                 .lineLimit(3...6)
         } header: {
             Text("Additional context")

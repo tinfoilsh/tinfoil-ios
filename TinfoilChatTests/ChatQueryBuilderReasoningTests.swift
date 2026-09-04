@@ -245,7 +245,7 @@ struct ChatQueryBuilderReasoningTests {
     func extraBodyMakesItIntoEncodedChatQuery() throws {
         let query = ChatQueryBuilder.buildQuery(
             modelId: "deepseek-v4-pro",
-            systemPrompt: "you are tin",
+            systemPrompt: "you are al",
             rules: "",
             conversationMessages: [],
             stream: false,

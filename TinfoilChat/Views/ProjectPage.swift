@@ -286,7 +286,7 @@ struct ProjectDetailsView: View {
             .listRowBackground(Color.cardSurface(for: colorScheme))
 
             Section("Instructions") {
-                TextField("How should Tin behave in this project?", text: $editingInstructions, axis: .vertical)
+                TextField("How should Al behave in this project?", text: $editingInstructions, axis: .vertical)
                     .lineLimit(5...15)
                     .onChange(of: editingInstructions) { _, _ in hasPendingChanges = true }
                     .disabled(!viewModel.hasPremiumAccess)
