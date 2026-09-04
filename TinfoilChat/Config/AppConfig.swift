@@ -167,6 +167,9 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
     // Model description
     var description: String { appConfig.description }
 
+    /// Short blurb for the model picker, falling back to the full description.
+    var pickerDescription: String { appConfig.chatConfig?.descriptionShort ?? appConfig.description }
+
     // Full model name
     var fullName: String { appConfig.name }
 

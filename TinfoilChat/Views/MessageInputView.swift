@@ -1549,7 +1549,7 @@ struct ModelSelectorSheetView: View {
                             Text(model.displayName)
                                 .font(.system(size: 15, weight: .medium))
                                 .foregroundColor(.primary)
-                            Text(model.description)
+                            Text(model.pickerDescription)
                                 .font(.system(size: 12))
                                 .foregroundColor(.secondary)
                                 .lineLimit(2)
