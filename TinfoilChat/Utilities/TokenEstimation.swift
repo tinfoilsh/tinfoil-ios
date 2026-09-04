@@ -22,37 +22,6 @@ enum TokenEstimation {
         return Int(ceil(Double(text.count) / Constants.Context.charsPerToken))
     }
 
-    /// Parse a model's human-readable context window string (e.g. "64k tokens")
-    /// into a token count, falling back to the default when unknown.
-    static func parseContextWindowTokens(_ contextWindow: String?) -> Int {
-        guard let contextWindow, !contextWindow.isEmpty else {
-            return Constants.Context.defaultContextWindowTokens
-        }
-        guard let match = contextWindow.firstMatch(
-            of: /^\s*(\d+(?:\.\d+)?)\s*([kKmM])?(?:\s*tokens?)?\s*$/
-        ), let value = Double(match.1) else {
-            return Constants.Context.defaultContextWindowTokens
-        }
-
-        let multiplier: Double
-        switch match.2?.lowercased() {
-        case "k":
-            multiplier = 1_000
-        case "m":
-            multiplier = 1_000_000
-        default:
-            multiplier = 1
-        }
-
-        let tokens = value * multiplier
-        guard tokens.isFinite,
-              tokens >= Double(Constants.Context.minimumContextWindowTokens),
-              tokens < Double(Int.max) else {
-            return Constants.Context.defaultContextWindowTokens
-        }
-        return Int(tokens)
-    }
-
     /// Applies the usage ratio to the configured window size, keeping the
     /// remainder of the window reserved for the model's reply, the system
     /// prompt, and the slack in our character-based estimates.

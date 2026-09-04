@@ -98,7 +98,6 @@ struct ModelAvailabilityTests {
             description: "",
             details: "",
             parameters: "",
-            contextWindow: "128k tokens",
             contextWindowTokens: 128_000,
             type: type,
             chat: chat,

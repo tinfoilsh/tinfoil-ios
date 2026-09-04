@@ -100,8 +100,7 @@ struct ChatQueryBuilderReasoningTests {
 
     private func model(
         id: String,
-        contextWindow: String = "256k tokens",
-        contextWindowTokens: Int? = nil,
+        contextWindowTokens: Int? = 256_000,
         reasoningConfig: ReasoningConfig?
     ) -> ModelType {
         ModelType(from: AppModelConfig(
@@ -112,7 +111,6 @@ struct ChatQueryBuilderReasoningTests {
             description: "",
             details: "",
             parameters: "",
-            contextWindow: contextWindow,
             contextWindowTokens: contextWindowTokens,
             type: "chat",
             chat: true,
@@ -131,18 +129,17 @@ struct ChatQueryBuilderReasoningTests {
         #expect(config.reasoningHistoryPolicy == .toolCallOnly)
     }
 
-    @Test func legacyModelConfigFallsBackToDisplayContextWindow() throws {
+    @Test func modelConfigWithoutContextWindowTokensFallsBackToDefault() throws {
         let data = Data(
             #"""
             {
-              "modelName": "legacy",
+              "modelName": "minimal",
               "image": "",
-              "name": "Legacy",
-              "nameShort": "Legacy",
+              "name": "Minimal",
+              "nameShort": "Minimal",
               "description": "",
               "details": "",
               "parameters": "",
-              "contextWindow": "128k tokens",
               "type": "chat",
               "paid": true,
               "multimodal": false
@@ -151,7 +148,7 @@ struct ChatQueryBuilderReasoningTests {
         )
         let config = try JSONDecoder().decode(AppModelConfig.self, from: data)
 
-        #expect(ModelType(from: config).contextWindowTokens == 128_000)
+        #expect(ModelType(from: config).contextWindowTokens == Constants.Context.defaultContextWindowTokens)
     }
 
     @Test func unknownReasoningHistoryPolicyFallsBackSafely() throws {
@@ -464,52 +461,20 @@ struct ChatQueryBuilderReasoningTests {
 
     @Test func autoSelectionUsesTheSmallestCandidateContextWindow() {
         let selection = ModelSelection(
-            representative: model(id: "large", contextWindow: "256k tokens", reasoningConfig: nil),
+            representative: model(id: "large", contextWindowTokens: 256_000, reasoningConfig: nil),
             autoCandidates: [
-                model(id: "large", contextWindow: "256k tokens", reasoningConfig: nil),
-                model(id: "small", contextWindow: "128k tokens", reasoningConfig: nil),
+                model(id: "large", contextWindowTokens: 256_000, reasoningConfig: nil),
+                model(id: "small", contextWindowTokens: 128_000, reasoningConfig: nil),
             ]
         )
 
         #expect(selection.contextWindowTokens == 128_000)
     }
 
-    @Test func autoSelectionPrefersNumericContextWindow() {
-        let selection = ModelSelection(
-            representative: model(
-                id: "large",
-                contextWindow: "1k tokens",
-                contextWindowTokens: 256_000,
-                reasoningConfig: nil
-            ),
-            autoCandidates: [
-                model(
-                    id: "large",
-                    contextWindow: "1k tokens",
-                    contextWindowTokens: 256_000,
-                    reasoningConfig: nil
-                ),
-                model(
-                    id: "small",
-                    contextWindow: "999k tokens",
-                    contextWindowTokens: 128_000,
-                    reasoningConfig: nil
-                ),
-            ]
-        )
+    @Test func implausibleContextWindowTokensFallBackToDefault() {
+        let candidate = model(id: "broken", contextWindowTokens: 1, reasoningConfig: nil)
 
-        #expect(selection.contextWindowTokens == 128_000)
-    }
-
-    @Test func invalidNumericContextWindowFallsBackToDisplayValue() {
-        let candidate = model(
-            id: "legacy",
-            contextWindow: "128k tokens",
-            contextWindowTokens: 1,
-            reasoningConfig: nil
-        )
-
-        #expect(candidate.contextWindowTokens == 128_000)
+        #expect(candidate.contextWindowTokens == Constants.Context.defaultContextWindowTokens)
     }
 
     private func encodedMessages(from query: ChatQuery) throws -> [[String: Any]] {
