@@ -57,8 +57,10 @@ final class GenUIRegistry {
         widgetsByName[name] != nil
     }
 
+    /// Widgets exposed to the model. The controlplane allowlist is the kill
+    /// switch, so its absence fails closed.
     var effectiveWidgets: [AnyGenUIWidget] {
-        guard let config = configService.config else { return widgets }
+        guard let config = configService.config else { return [] }
         let allowedNames = Set(config.enabledWidgets)
         return widgets.filter { allowedNames.contains($0.name) }
     }
@@ -86,21 +88,11 @@ final class GenUIRegistry {
     /// Build the system-prompt hint block describing enabled registered
     /// widgets. Mirrors `buildGenUIPromptHint()` on the webapp side.
     func buildPromptHint() -> String? {
+        guard let config = configService.config else { return nil }
         let enabledWidgets = effectiveWidgets
         guard !enabledWidgets.isEmpty else { return nil }
 
-        let bundledHeader =
-            "You have optional render_* tools available. Default to a normal markdown " +
-            "response. Only call a render_* tool when the user explicitly asks for " +
-            "one of these UI elements, or when the content genuinely cannot be " +
-            "expressed well in markdown (e.g. an interactive HTML page, a chart that " +
-            "requires plotting, an embedded live preview). Do not use render_* tools " +
-            "for ordinary informational answers, lists, tables, or summaries — write " +
-            "those as regular prose and markdown. Prefer at most one render_* call " +
-            "per response, and always pair it with a written answer rather than " +
-            "replacing the answer with a widget."
-        let header = configService.config?.header ?? bundledHeader
         let lines = enabledWidgets.map { "- \($0.name): \($0.promptHint)" }
-        return header + "\n" + lines.joined(separator: "\n")
+        return config.header + "\n" + lines.joined(separator: "\n")
     }
 }

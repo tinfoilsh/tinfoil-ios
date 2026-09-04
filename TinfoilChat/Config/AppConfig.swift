@@ -387,21 +387,21 @@ class AppConfig: ObservableObject {
                 return
             }
 
-            // Fetch config and models in parallel
-            Task {
-                await GenUIConfigService.shared.refresh()
-            }
+            // Fetch config, models, and GenUI config in parallel
             async let configData = URLSession.shared.data(from: configURL)
             async let modelsData = URLSession.shared.data(from: allModelsURL)
+            async let genUIRefresh: Void = GenUIConfigService.shared.refresh()
 
             // Parse config - this is essential, so we need it to succeed
             let (configDataResult, _) = try await configData
             let remoteConfig = try JSONDecoder().decode(RemoteConfig.self, from: configDataResult)
 
-            // Parse models - both endpoints must succeed
+            // Parse models - all endpoints must succeed
             let (modelsDataResult, _) = try await modelsData
             // The API returns an array directly, not wrapped in an object
             let allModels = try JSONDecoder().decode([AppModelConfig].self, from: modelsDataResult)
+
+            try await genUIRefresh
 
             // Store ALL models (including title models for internal use)
             self.appModels = allModels
