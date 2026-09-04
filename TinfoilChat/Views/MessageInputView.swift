@@ -570,7 +570,7 @@ struct MessageInputView: View {
     private var messageTextEditor: some View {
         CustomTextEditor(text: $messageText,
                          textHeight: $textHeight,
-                         placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "What's on your mind?" : "Message",
+                         placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "How can I help you?" : "Reply to Al...",
                          shouldFocusInput: viewModel.shouldFocusInput,
                          handle: editorHandle,
                          allowsImagePaste: !isEditingMessage && viewModel.currentModel.isMultimodal,
