@@ -374,6 +374,7 @@ struct MessageTableView: UIViewRepresentable {
                             tableView.beginUpdates()
                             tableView.endUpdates()
                         }
+                        context.coordinator.clampPreservedOffsetToCollapsedContent()
                         context.coordinator.isCollapsingStreamingBuffer = false
                         context.coordinator.updateContentInset()
                         tableView.layoutIfNeeded()
@@ -715,8 +716,43 @@ struct MessageTableView: UIViewRepresentable {
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            releaseHeldOffsetIfUserScrolledUp(scrollView)
             updateContentInset()
             checkIfAtBottom()
+        }
+
+        /// The offset captured when streaming ended was measured against the
+        /// inflated buffer, so it can sit past the end of the collapsed content
+        /// when the last measured content height lagged behind the stream.
+        /// Holding such an offset would pad the bottom with blank space the
+        /// user never scrolled to, so clamp it to where the collapsed content
+        /// actually ends. The user-message pin is unaffected since it is
+        /// derived from the row position, not from this offset.
+        func clampPreservedOffsetToCollapsedContent() {
+            guard let tableView, let preserved = preservedOffsetAfterStreaming else { return }
+            let systemBottomInset = tableView.adjustedContentInset.bottom - tableView.contentInset.bottom
+            let maxOffsetWithoutInset = tableView.contentSize.height + systemBottomInset - tableView.bounds.height
+            preservedOffsetAfterStreaming = min(preserved, maxOffsetWithoutInset)
+        }
+
+        /// After streaming ends the bottom inset only exists to keep the view
+        /// from jumping at the moment the buffer collapses. Once the user
+        /// scrolls on their own, that hold has served its purpose: it follows
+        /// them upward so the blank space below shrinks as they go, and is
+        /// dropped entirely once the content no longer needs any extra inset.
+        /// Programmatic scrolls are ignored so the pending offset restore
+        /// after collapse cannot release the hold on its own.
+        private func releaseHeldOffsetIfUserScrolledUp(_ scrollView: UIScrollView) {
+            guard !parent.usesStreamingLayout, !isCollapsingStreamingBuffer else { return }
+            guard let heldOffset = preservedOffsetAfterStreaming else { return }
+            guard scrollView.isTracking || scrollView.isDecelerating else { return }
+
+            let currentOffset = scrollView.contentOffset.y
+            guard currentOffset < heldOffset else { return }
+
+            isUserMessageScrollMode = false
+            let requiredInset = currentOffset + scrollView.bounds.height - scrollView.contentSize.height
+            preservedOffsetAfterStreaming = requiredInset > 0 ? currentOffset : nil
         }
 
         func updateContentInset() {
