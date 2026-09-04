@@ -471,12 +471,6 @@ struct ChatQueryBuilderReasoningTests {
         #expect(selection.contextWindowTokens == 128_000)
     }
 
-    @Test func implausibleContextWindowTokensFallBackToDefault() {
-        let candidate = model(id: "broken", contextWindowTokens: 1, reasoningConfig: nil)
-
-        #expect(candidate.contextWindowTokens == Constants.Context.defaultContextWindowTokens)
-    }
-
     private func encodedMessages(from query: ChatQuery) throws -> [[String: Any]] {
         let data = try JSONEncoder().encode(query)
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]

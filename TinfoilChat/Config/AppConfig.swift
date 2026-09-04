@@ -172,11 +172,7 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
     var details: String { appConfig.details }
     var parameters: String { appConfig.parameters }
     var contextWindowTokens: Int {
-        if let contextWindowTokens = appConfig.contextWindowTokens,
-           contextWindowTokens >= Constants.Context.minimumContextWindowTokens {
-            return contextWindowTokens
-        }
-        return Constants.Context.defaultContextWindowTokens
+        appConfig.contextWindowTokens ?? Constants.Context.defaultContextWindowTokens
     }
     var type: String { appConfig.type }
     var isMultimodal: Bool { appConfig.multimodal }

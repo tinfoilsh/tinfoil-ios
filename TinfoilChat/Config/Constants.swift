@@ -320,8 +320,6 @@ enum Constants {
         static let contextWindowUsageRatio: Double = 0.8
         /// Fallback context window size when a model doesn't report one.
         static let defaultContextWindowTokens = 128_000
-        /// Smallest plausible model context window accepted from remote config.
-        static let minimumContextWindowTokens = 1_000
         /// Usage percentage at which the context indicator switches to the
         /// warning color.
         static let warningThresholdPercent = 80
