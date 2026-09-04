@@ -117,9 +117,8 @@ struct RemoteConfig: Codable {
     let minSupportedVersion: String
 
     struct ChatConfig: Codable {
-        let maxMessagesPerRequest: Int
-        let systemPrompt: String?
-        let rules: String?
+        let systemPrompt: String
+        let rules: String
     }
 }
 
@@ -388,21 +387,21 @@ class AppConfig: ObservableObject {
                 return
             }
 
-            // Fetch config and models in parallel
-            Task {
-                await GenUIConfigService.shared.refresh()
-            }
+            // Fetch config, models, and GenUI config in parallel
             async let configData = URLSession.shared.data(from: configURL)
             async let modelsData = URLSession.shared.data(from: allModelsURL)
+            async let genUIRefresh: Void = GenUIConfigService.shared.refresh()
 
             // Parse config - this is essential, so we need it to succeed
             let (configDataResult, _) = try await configData
             let remoteConfig = try JSONDecoder().decode(RemoteConfig.self, from: configDataResult)
 
-            // Parse models - both endpoints must succeed
+            // Parse models - all endpoints must succeed
             let (modelsDataResult, _) = try await modelsData
             // The API returns an array directly, not wrapped in an object
             let allModels = try JSONDecoder().decode([AppModelConfig].self, from: modelsDataResult)
+
+            try await genUIRefresh
 
             // Store ALL models (including title models for internal use)
             self.appModels = allModels
@@ -469,20 +468,25 @@ class AppConfig: ObservableObject {
         return await SessionTokenManager.shared.getSessionToken()
     }
     
-    var maxMessagesPerRequest: Int {
-        config!.chatConfig.maxMessagesPerRequest
+    /// Remote config is only read from views gated behind `isInitialized`,
+    /// so a nil config here is a programming error rather than a runtime state.
+    private var loadedConfig: RemoteConfig {
+        guard let config else {
+            preconditionFailure("remote config accessed before initialization")
+        }
+        return config
     }
     
     var systemPrompt: String {
-        config?.chatConfig.systemPrompt ?? "You are Tin, a helpful AI assistant created by Tinfoil."
+        loadedConfig.chatConfig.systemPrompt
     }
     
     var rules: String {
-        config?.chatConfig.rules ?? ""
+        loadedConfig.chatConfig.rules
     }
     
     var minSupportedVersion: String {
-        config?.minSupportedVersion ?? "1.0.0"
+        loadedConfig.minSupportedVersion
     }
     
     /// Current app version from bundle

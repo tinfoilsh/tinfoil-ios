@@ -10,53 +10,37 @@ struct GenUIRemoteConfig: Codable, Equatable {
     let enabledWidgets: [String]
 }
 
+enum GenUIConfigError: Error {
+    case httpStatus(Int)
+    case malformedPayload
+}
+
 @MainActor
 final class GenUIConfigService {
     typealias DataLoader = (URL) async throws -> (Data, Int)
 
     static let shared = GenUIConfigService()
 
-    private struct CacheEntry: Codable {
-        let cachedAt: Date
-        let value: GenUIRemoteConfig
-    }
-
-    private let defaults: UserDefaults
-    private let now: () -> Date
     private let dataLoader: DataLoader
 
     private(set) var config: GenUIRemoteConfig?
 
-    init(
-        defaults: UserDefaults = .standard,
-        now: @escaping () -> Date = Date.init,
-        dataLoader: @escaping DataLoader = GenUIConfigService.loadData
-    ) {
-        self.defaults = defaults
-        self.now = now
+    init(dataLoader: @escaping DataLoader = GenUIConfigService.loadData) {
         self.dataLoader = dataLoader
-        self.config = Self.readCachedConfig(defaults: defaults, now: now())
     }
 
-    func refresh() async {
-        do {
-            let (data, statusCode) = try await dataLoader(Constants.Config.systemPromptURL)
-            guard (200..<300).contains(statusCode) else { return }
-
-            guard let remoteConfig = Self.decodeConfig(from: data) else {
-                config = nil
-                defaults.removeObject(forKey: Constants.Config.genUIConfigCacheKey)
-                return
-            }
-
-            config = remoteConfig
-            let entry = CacheEntry(cachedAt: now(), value: remoteConfig)
-            if let encoded = try? JSONEncoder().encode(entry) {
-                defaults.set(encoded, forKey: Constants.Config.genUIConfigCacheKey)
-            }
-        } catch {
-            return
+    /// Fetches the GenUI block from the controlplane. Failures propagate so
+    /// the caller can treat GenUI config like any other required startup
+    /// config; a previously loaded value is retained on failure.
+    func refresh() async throws {
+        let (data, statusCode) = try await dataLoader(Constants.Config.systemPromptURL)
+        guard (200..<300).contains(statusCode) else {
+            throw GenUIConfigError.httpStatus(statusCode)
         }
+        guard let remoteConfig = Self.decodeConfig(from: data) else {
+            throw GenUIConfigError.malformedPayload
+        }
+        config = remoteConfig
     }
 
     static func loadData(from url: URL) async throws -> (Data, Int) {
@@ -78,18 +62,5 @@ final class GenUIConfigService {
             header: header,
             enabledWidgets: rawWidgets.compactMap { $0 as? String }
         )
-    }
-
-    private static func readCachedConfig(defaults: UserDefaults, now: Date) -> GenUIRemoteConfig? {
-        guard let data = defaults.data(forKey: Constants.Config.genUIConfigCacheKey),
-              let entry = try? JSONDecoder().decode(CacheEntry.self, from: data) else {
-            return nil
-        }
-
-        let age = now.timeIntervalSince(entry.cachedAt)
-        guard age >= 0, age <= Constants.Config.genUIConfigCacheMaxAge else {
-            return nil
-        }
-        return entry.value
     }
 }

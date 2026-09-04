@@ -26,13 +26,6 @@ struct GenUIConfigTests {
         }
     }
 
-    private func makeDefaults() -> UserDefaults {
-        let suiteName = "GenUIConfigTests-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-        return defaults
-    }
-
     private func response(header: String = "Remote guidance", widgets: String) -> Data {
         Data(
             """
@@ -41,28 +34,26 @@ struct GenUIConfigTests {
         )
     }
 
-    private func makeService(
-        defaults: UserDefaults,
-        now: @escaping () -> Date = Date.init,
-        state: LoaderState
-    ) -> GenUIConfigService {
-        GenUIConfigService(defaults: defaults, now: now, dataLoader: state.load)
+    private func makeService(state: LoaderState) -> GenUIConfigService {
+        GenUIConfigService(dataLoader: state.load)
     }
 
-    @Test func noConfigExposesEveryLocalWidget() {
+    @Test func noConfigExposesNoWidgetsOrHint() {
         let state = LoaderState(result: .failure(LoaderError.offline))
-        let service = makeService(defaults: makeDefaults(), state: state)
+        let service = makeService(state: state)
         let registry = GenUIRegistry(configService: service)
 
-        #expect(registry.effectiveWidgets.count == registry.widgets.count)
+        #expect(registry.effectiveWidgets.isEmpty)
+        #expect(registry.buildToolParams().isEmpty)
+        #expect(registry.buildPromptHint() == nil)
     }
 
     @Test func subsetFiltersToolsAndPromptHints() async throws {
         let state = LoaderState(result: .success((response(
             widgets: #"["render_stat_cards","render_chart"]"#
         ), 200)))
-        let service = makeService(defaults: makeDefaults(), state: state)
-        await service.refresh()
+        let service = makeService(state: state)
+        try await service.refresh()
         let registry = GenUIRegistry(configService: service)
 
         #expect(registry.effectiveWidgets.map(\.name) == ["render_stat_cards", "render_chart"])
@@ -84,10 +75,10 @@ struct GenUIConfigTests {
         #expect(query.parallelToolCalls == nil)
     }
 
-    @Test func emptyAllowlistRemovesAllRequestCapabilities() async {
+    @Test func emptyAllowlistRemovesAllRequestCapabilities() async throws {
         let state = LoaderState(result: .success((response(widgets: "[]"), 200)))
-        let service = makeService(defaults: makeDefaults(), state: state)
-        await service.refresh()
+        let service = makeService(state: state)
+        try await service.refresh()
         let registry = GenUIRegistry(configService: service)
         let query = ChatQueryBuilder.buildQuery(
             modelId: "gpt-oss-120b",
@@ -103,69 +94,55 @@ struct GenUIConfigTests {
         #expect(query.parallelToolCalls == nil)
     }
 
-    @Test func unknownWidgetNamesAreIgnored() async {
+    @Test func unknownWidgetNamesAreIgnored() async throws {
         let state = LoaderState(result: .success((response(
             widgets: #"["render_chart","render_future_widget"]"#
         ), 200)))
-        let service = makeService(defaults: makeDefaults(), state: state)
-        await service.refresh()
+        let service = makeService(state: state)
+        try await service.refresh()
         let registry = GenUIRegistry(configService: service)
 
         #expect(registry.effectiveWidgets.map(\.name) == ["render_chart"])
     }
 
-    @Test func malformedSuccessfulPayloadFallsBackToLocalWidgets() async {
-        let defaults = makeDefaults()
+    @Test func malformedPayloadThrowsAndRetainsPreviousConfig() async throws {
         let state = LoaderState(result: .success((response(widgets: #"["render_chart"]"#), 200)))
-        let service = makeService(defaults: defaults, state: state)
-        await service.refresh()
+        let service = makeService(state: state)
+        try await service.refresh()
         state.result = .success((Data(#"{"genUI":{"header":42,"enabledWidgets":"oops"}}"#.utf8), 200))
 
-        await service.refresh()
-
-        let registry = GenUIRegistry(configService: service)
-        #expect(service.config == nil)
-        #expect(registry.effectiveWidgets.count == registry.widgets.count)
-        #expect(defaults.data(forKey: Constants.Config.genUIConfigCacheKey) == nil)
-    }
-
-    @Test func validCacheLoadsForUpToSevenDays() async {
-        let cachedAt = Date(timeIntervalSince1970: 1_000_000)
-        let defaults = makeDefaults()
-        let state = LoaderState(result: .success((response(widgets: #"["render_chart"]"#), 200)))
-        let writer = makeService(defaults: defaults, now: { cachedAt }, state: state)
-        await writer.refresh()
-
-        let cached = makeService(
-            defaults: defaults,
-            now: { cachedAt.addingTimeInterval(Constants.Config.genUIConfigCacheMaxAge) },
-            state: LoaderState(result: .failure(LoaderError.offline))
-        )
-        let expired = makeService(
-            defaults: defaults,
-            now: { cachedAt.addingTimeInterval(Constants.Config.genUIConfigCacheMaxAge + 1) },
-            state: LoaderState(result: .failure(LoaderError.offline))
-        )
-
-        #expect(cached.config?.enabledWidgets == ["render_chart"])
-        #expect(expired.config == nil)
-    }
-
-    @Test func networkFailureRetainsInMemoryConfiguration() async {
-        let state = LoaderState(result: .success((response(widgets: #"["render_chart"]"#), 200)))
-        let service = makeService(defaults: makeDefaults(), state: state)
-        await service.refresh()
-        state.result = .failure(LoaderError.offline)
-
-        await service.refresh()
-
+        await #expect(throws: GenUIConfigError.self) {
+            try await service.refresh()
+        }
         #expect(service.config?.enabledWidgets == ["render_chart"])
     }
 
-    @Test func disabledWidgetsRemainAvailableForHistoricalRendering() async {
+    @Test func nonSuccessStatusThrows() async {
+        let state = LoaderState(result: .success((response(widgets: #"["render_chart"]"#), 503)))
+        let service = makeService(state: state)
+
+        await #expect(throws: GenUIConfigError.self) {
+            try await service.refresh()
+        }
+        #expect(service.config == nil)
+    }
+
+    @Test func networkFailurePropagatesAndRetainsInMemoryConfiguration() async throws {
+        let state = LoaderState(result: .success((response(widgets: #"["render_chart"]"#), 200)))
+        let service = makeService(state: state)
+        try await service.refresh()
+        state.result = .failure(LoaderError.offline)
+
+        await #expect(throws: LoaderError.self) {
+            try await service.refresh()
+        }
+        #expect(service.config?.enabledWidgets == ["render_chart"])
+    }
+
+    @Test func disabledWidgetsRemainAvailableForHistoricalRendering() async throws {
         let state = LoaderState(result: .success((response(widgets: "[]"), 200)))
-        let service = makeService(defaults: makeDefaults(), state: state)
-        await service.refresh()
+        let service = makeService(state: state)
+        try await service.refresh()
         let registry = GenUIRegistry(configService: service)
 
         #expect(registry.effectiveWidgets.isEmpty)
