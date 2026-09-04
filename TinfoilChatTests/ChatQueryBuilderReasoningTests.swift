@@ -153,6 +153,7 @@ struct ChatQueryBuilderReasoningTests {
 
         #expect(model.contextWindowTokens == Constants.Context.defaultContextWindowTokens)
         #expect(model.attributes.isEmpty)
+        #expect(model.pickerDescription == model.description)
         #expect(!model.isReasoningModel)
     }
 
@@ -183,6 +184,7 @@ struct ChatQueryBuilderReasoningTests {
 
         #expect(model.contextWindowTokens == 32_000)
         #expect(model.attributes == ["fast"])
+        #expect(model.pickerDescription == "Quick answers")
         #expect(model.supportsReasoningEffort)
     }
 
