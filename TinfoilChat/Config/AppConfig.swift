@@ -98,7 +98,6 @@ struct AppModelConfig: Codable {
     let description: String
     let details: String
     let parameters: String
-    let contextWindow: String
     let contextWindowTokens: Int?
     let type: String
     let chat: Bool?
@@ -172,13 +171,8 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
     // Additional properties from new config
     var details: String { appConfig.details }
     var parameters: String { appConfig.parameters }
-    var contextWindow: String { appConfig.contextWindow }
     var contextWindowTokens: Int {
-        if let contextWindowTokens = appConfig.contextWindowTokens,
-           contextWindowTokens >= Constants.Context.minimumContextWindowTokens {
-            return contextWindowTokens
-        }
-        return TokenEstimation.parseContextWindowTokens(appConfig.contextWindow)
+        appConfig.contextWindowTokens ?? Constants.Context.defaultContextWindowTokens
     }
     var type: String { appConfig.type }
     var isMultimodal: Bool { appConfig.multimodal }
@@ -246,7 +240,6 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
                 : "Routes to the fastest available model",
             details: "",
             parameters: "",
-            contextWindow: minimumContextMember?.contextWindow ?? "",
             contextWindowTokens: minimumContextMember?.contextWindowTokens,
             type: "chat",
             chat: true,

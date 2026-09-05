@@ -24,17 +24,6 @@ struct TokenEstimationTests {
         #expect(TokenEstimation.estimateTokenCount("abcde") == 2)
     }
 
-    @Test func parsesContextWindowStrings() {
-        #expect(TokenEstimation.parseContextWindowTokens("64k tokens") == 64_000)
-        #expect(TokenEstimation.parseContextWindowTokens("256K tokens") == 256_000)
-        #expect(TokenEstimation.parseContextWindowTokens("1M tokens") == 1_000_000)
-        #expect(TokenEstimation.parseContextWindowTokens("1.5m tokens") == 1_500_000)
-        #expect(TokenEstimation.parseContextWindowTokens("32000") == 32_000)
-        #expect(TokenEstimation.parseContextWindowTokens("1") == Constants.Context.defaultContextWindowTokens)
-        #expect(TokenEstimation.parseContextWindowTokens(nil) == Constants.Context.defaultContextWindowTokens)
-        #expect(TokenEstimation.parseContextWindowTokens("unknown") == Constants.Context.defaultContextWindowTokens)
-    }
-
     @Test func budgetIsUsageRatioOfWindow() {
         #expect(TokenEstimation.contextTokenBudget(100_000) == 80_000)
         #expect(TokenEstimation.contextTokenBudget(nil) ==
