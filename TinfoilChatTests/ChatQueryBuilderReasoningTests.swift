@@ -140,7 +140,7 @@ struct ChatQueryBuilderReasoningTests {
               "image": "",
               "name": "Minimal",
               "nameShort": "Minimal",
-              "description": "",
+              "description": "A model with no chat settings",
               "details": "",
               "parameters": "",
               "type": "chat",
@@ -153,7 +153,7 @@ struct ChatQueryBuilderReasoningTests {
 
         #expect(model.contextWindowTokens == Constants.Context.defaultContextWindowTokens)
         #expect(model.attributes.isEmpty)
-        #expect(model.pickerDescription == model.description)
+        #expect(model.pickerDescription == "A model with no chat settings")
         #expect(!model.isReasoningModel)
     }
 
