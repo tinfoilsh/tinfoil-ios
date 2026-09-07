@@ -74,6 +74,16 @@ actor ChatRecoveryClient {
 
     private var verifiedEndpoint: (enclaveURL: String, publicKey: Data)?
 
+    /// Session for the live completion stream. The shared session's 60s
+    /// idle timeout is shorter than the gaps a slow origin or long tool call
+    /// can produce, and tripping it surfaces as a spurious lost connection.
+    private static let streamingSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = Constants.ChatRecovery.streamIdleTimeoutSeconds
+        configuration.waitsForConnectivity = true
+        return URLSession(configuration: configuration)
+    }()
+
     func start(
         query: ChatQuery,
         sessionId: String,
@@ -84,7 +94,8 @@ actor ChatRecoveryClient {
         let endpoint = try await endpoint()
         let client = try EHBPClient(
             baseURL: Constants.API.baseURL,
-            publicKey: endpoint.publicKey
+            publicKey: endpoint.publicKey,
+            session: Self.streamingSession
         )
         var streamingQuery = query
         streamingQuery.stream = true

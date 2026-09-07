@@ -230,6 +230,12 @@ enum Constants {
         static let keyIdHexLength = 32
         static let tokenFieldHexLength = 64
         static let requestTimeoutSeconds: TimeInterval = 30
+        /// Idle timeout for the live chat completion stream. This is the time
+        /// URLSession waits between bytes, not the total request duration.
+        /// Set above Cloudflare's 100s origin read timeout so the client
+        /// never gives up on a slow origin before the edge would, and long
+        /// reasoning or tool-call gaps are not reported as a lost connection.
+        static let streamIdleTimeoutSeconds: TimeInterval = 120
         static let scanStallTimeoutSeconds: TimeInterval = 120
         static let hkdfInfo = "tinfoil-chat-recovery-envelope-v1"
         static let aadLabel = "tinfoil-chat-recovery-envelope-aad-v1"
