@@ -48,20 +48,6 @@ func shouldShowPendingResponseRecovery(
     )
 }
 
-func shouldHidePendingResponseAssistant(
-    message: Message,
-    pendingRecoveries: [PendingRecoveryEnvelope],
-    activeTurnId: String?,
-    hasRecoveryDraft: Bool = false
-) -> Bool {
-    !hasRecoveryDraft && messageHasPendingRecovery(
-        message: message,
-        role: .assistant,
-        pendingRecoveries: pendingRecoveries,
-        activeTurnId: activeTurnId
-    )
-}
-
 func pendingResponseRecoveryDetail(phase: ChatRecoveryPhase) -> String {
     switch phase {
     case .generating:
@@ -185,16 +171,6 @@ struct MessageView: View {
     private var showsPendingResponseRecovery: Bool {
         let context = recoveryContext
         return shouldShowPendingResponseRecovery(
-            message: message,
-            pendingRecoveries: context.pendingRecoveries,
-            activeTurnId: context.activeTurnId,
-            hasRecoveryDraft: hasRecoveryDraft
-        )
-    }
-
-    private var hidesPendingResponseAssistant: Bool {
-        let context = recoveryContext
-        return shouldHidePendingResponseAssistant(
             message: message,
             pendingRecoveries: context.pendingRecoveries,
             activeTurnId: context.activeTurnId,
@@ -969,13 +945,6 @@ struct MessageView: View {
             }
             return .systemAction
         })
-        .if(hidesPendingResponseAssistant) { view in
-            view
-                .hidden()
-                .frame(height: 0)
-                .clipped()
-                .accessibilityHidden(true)
-        }
     }
 
     private func copyMessagePart(_ text: String) {
