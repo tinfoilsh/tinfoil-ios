@@ -726,11 +726,19 @@ struct MessageTableView: UIViewRepresentable {
         /// when the last measured content height lagged behind the stream.
         /// Holding such an offset would pad the bottom with blank space the
         /// user never scrolled to, so clamp it to where the collapsed content
-        /// actually ends. The user-message pin is unaffected since it is
-        /// derived from the row position, not from this offset.
+        /// actually ends. While the user message is pinned to the top, the
+        /// blank space below a short response is intentional, so the clamp
+        /// never drops below the offset the pin inset already makes reachable
+        /// (see `insetForUserMessageAtTop`). Any offset the user could rest at
+        /// during the stream is therefore held as-is; otherwise restoring the
+        /// clamped offset would pull the user message down to the bottom of
+        /// the screen.
         func clampPreservedOffsetToCollapsedContent() {
             guard let tableView, let preserved = preservedOffsetAfterStreaming else { return }
-            let maxOffsetWithoutInset = preserved - customInsetRequired(forOffset: preserved, in: tableView)
+            var maxOffsetWithoutInset = preserved - customInsetRequired(forOffset: preserved, in: tableView)
+            if isUserMessageScrollMode, let userMessageRowTop = userMessageRowTop(tableView) {
+                maxOffsetWithoutInset = max(maxOffsetWithoutInset, userMessageRowTop)
+            }
             preservedOffsetAfterStreaming = min(preserved, maxOffsetWithoutInset)
         }
 
@@ -809,11 +817,17 @@ struct MessageTableView: UIViewRepresentable {
         /// Returns the minimum bottom inset that allows the user message row
         /// (second-to-last) to be scrolled to the top of the visible area.
         private func insetForUserMessageAtTop(_ tableView: UITableView) -> CGFloat {
-            let numberOfRows = tableView.numberOfRows(inSection: 0)
-            guard numberOfRows >= 2 else { return 0 }
-            let userMessageIndexPath = IndexPath(row: numberOfRows - 2, section: 0)
-            let userMessageY = tableView.rectForRow(at: userMessageIndexPath).origin.y
+            guard let userMessageY = userMessageRowTop(tableView) else { return 0 }
             return customInsetRequired(forOffset: userMessageY, in: tableView)
+        }
+
+        /// Content-space y origin of the user message row (second-to-last),
+        /// or nil when the table has no user/assistant pair yet.
+        private func userMessageRowTop(_ tableView: UITableView) -> CGFloat? {
+            let numberOfRows = tableView.numberOfRows(inSection: 0)
+            guard numberOfRows >= 2 else { return nil }
+            let userMessageIndexPath = IndexPath(row: numberOfRows - 2, section: 0)
+            return tableView.rectForRow(at: userMessageIndexPath).origin.y
         }
 
         private func insetForPreservedOffset(_ tableView: UITableView) -> CGFloat {
