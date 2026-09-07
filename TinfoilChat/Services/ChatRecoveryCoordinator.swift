@@ -460,6 +460,62 @@ actor ChatRecoveryCoordinator {
         )
     }
 
+    /// Drops every pending recovery on a chat so the user can retry the turn
+    /// right away instead of waiting for the server-side session to be
+    /// replayed. Only the local copy is mutated: the chat's next backup
+    /// publishes the removal, and the server sessions are deleted
+    /// best-effort in the background. Returns the metadata of the last
+    /// successful local mutation so the caller can stamp its in-memory chat.
+    func abandonPendingRecoveries(
+        chatId: String,
+        envelopes: [PendingRecoveryEnvelope],
+        userId: String,
+        storage: ChatRecoveryStorage
+    ) async -> ChatRecoveryLocalMutationResult? {
+        guard activeAccountId == userId else { return nil }
+        var metadata: ChatRecoveryLocalMutationResult?
+        for envelope in envelopes {
+            let key = turnKey(
+                chatId: chatId,
+                turnId: envelope.turnId,
+                storage: storage
+            )
+            cancelledTurns.insert(key)
+            let recoveryTask = activeRecoveryTasks[key]?.task
+            recoveryTask?.cancel()
+            await MainActor.run {
+                ChatRecoveryPhaseTracker.shared.clear(turnId: envelope.turnId)
+                ChatRecoveryDraftStore.shared.discard(
+                    chatId: chatId,
+                    turnId: envelope.turnId
+                )
+            }
+            await recoveryTask?.value
+            do {
+                metadata = try await ChatRecoverySync.shared.mutateLocally(
+                    chatId: chatId,
+                    userId: userId,
+                    storage: storage,
+                    mutation: .cancel(turnId: envelope.turnId, response: nil)
+                )
+            } catch {
+                continue
+            }
+            Task {
+                guard let opened = try? await self.openEnvelope(
+                    envelope,
+                    chatId: chatId,
+                    userId: userId,
+                    storage: storage
+                ) else { return }
+                try? await ChatRecoveryClient.shared.delete(
+                    sessionId: opened.payload.sessionId
+                )
+            }
+        }
+        return metadata
+    }
+
     func scan(
         userId: String,
         storages: [ChatRecoveryStorage],

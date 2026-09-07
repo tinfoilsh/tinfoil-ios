@@ -3277,11 +3277,23 @@ class ChatViewModel: ObservableObject {
         let hasAttachments = !pendingAttachments.isEmpty
         guard hasText || hasAttachments else { return false }
         guard attachmentsAreReadyToSend(pendingAttachments) else { return false }
-        guard !hasPendingResponseRecovery else { return false }
 
         if isLoading {
             guard !isMessageQueueFull else { return false }
             enqueueMessage(text: text)
+            return true
+        }
+
+        // Sending while the previous turn is still being recovered means the
+        // user has moved on. The message is queued so it stays visible, the
+        // pending recovery is abandoned, and the queue drain dispatches it.
+        if hasPendingResponseRecovery, let chatId = currentChat?.id {
+            guard !isMessageQueueFull else { return false }
+            enqueueMessage(text: text)
+            Task { @MainActor in
+                guard await abandonPendingRecoveriesForCurrentChat() else { return }
+                scheduleMessageQueueDrain(chatId: chatId)
+            }
             return true
         }
 
@@ -4957,6 +4969,41 @@ class ChatViewModel: ObservableObject {
         self.showVerifierSheet = false
     }
 
+    /// Gives up on recovering the current chat's interrupted turns so the
+    /// user can retry or move on immediately. Returns false when the
+    /// envelopes could not be cleared and the chat is still blocked.
+    private func abandonPendingRecoveriesForCurrentChat() async -> Bool {
+        guard let chat = currentChat,
+              let userId = currentUserId,
+              let envelopes = chat.pendingRecoveries,
+              !envelopes.isEmpty
+        else {
+            return true
+        }
+        let chatId = chat.id
+        let storage: ChatRecoveryStorage = chat.isLocalOnly ? .local : .cloud
+        let metadata = await ChatRecoveryCoordinator.shared.abandonPendingRecoveries(
+            chatId: chatId,
+            envelopes: envelopes,
+            userId: userId,
+            storage: storage
+        )
+        guard let metadata,
+              let location = findChatLocation(chatId)
+        else {
+            return false
+        }
+        var updated = self.chat(at: location)
+        updated.pendingRecoveries = nil
+        updated.clock = metadata.clock
+        updated.writer = metadata.writer
+        updated.clockVersion = metadata.clockVersion
+        updated.updatedAt = metadata.updatedAt
+        updated.locallyModified = metadata.locallyModified
+        updateChat(updated)
+        return currentChat?.id == chatId
+    }
+
     private func cancelRecoveredGeneration(chatId: String) {
         let chat: Chat?
         if currentChat?.id == chatId {
@@ -5339,11 +5386,22 @@ class ChatViewModel: ObservableObject {
     /// Regenerates the last assistant response by removing it and resending the last user message
     func regenerateLastResponse() {
         guard messageEditSession == nil,
-              !hasPendingResponseRecovery,
-              let chat = currentChat,
+              currentChat != nil,
               !isLoading else {
             return
         }
+
+        // An interrupted turn still waiting on recovery is abandoned first:
+        // the user has chosen to retry rather than wait for the replay.
+        if hasPendingResponseRecovery {
+            Task { @MainActor in
+                guard await abandonPendingRecoveriesForCurrentChat() else { return }
+                regenerateLastResponse()
+            }
+            return
+        }
+
+        guard let chat = currentChat else { return }
 
         // Find the last user message
         guard let lastUserMessageIndex = chat.messages.lastIndex(where: { $0.role == .user }) else {
