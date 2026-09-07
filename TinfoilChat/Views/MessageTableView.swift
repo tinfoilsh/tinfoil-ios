@@ -728,15 +728,16 @@ struct MessageTableView: UIViewRepresentable {
         /// user never scrolled to, so clamp it to where the collapsed content
         /// actually ends. While the user message is pinned to the top, the
         /// blank space below a short response is intentional, so the clamp
-        /// never drops below the offset that keeps that pin in place;
-        /// otherwise restoring the clamped offset would pull the user
-        /// message down to the bottom of the screen.
+        /// never drops below the offset the pin inset already makes reachable
+        /// (see `insetForUserMessageAtTop`). Any offset the user could rest at
+        /// during the stream is therefore held as-is; otherwise restoring the
+        /// clamped offset would pull the user message down to the bottom of
+        /// the screen.
         func clampPreservedOffsetToCollapsedContent() {
             guard let tableView, let preserved = preservedOffsetAfterStreaming else { return }
             var maxOffsetWithoutInset = preserved - customInsetRequired(forOffset: preserved, in: tableView)
             if isUserMessageScrollMode, let userMessageRowTop = userMessageRowTop(tableView) {
-                let pinnedOffset = userMessageRowTop - tableView.adjustedContentInset.top
-                maxOffsetWithoutInset = max(maxOffsetWithoutInset, pinnedOffset)
+                maxOffsetWithoutInset = max(maxOffsetWithoutInset, userMessageRowTop)
             }
             preservedOffsetAfterStreaming = min(preserved, maxOffsetWithoutInset)
         }
