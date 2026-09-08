@@ -30,8 +30,7 @@ func shouldShowMessageStopAction(
     hasSubmittableContent: Bool,
     isMessageQueueFull: Bool
 ) -> Bool {
-    hasActiveRecovery
-        || (isStreaming && (!hasSubmittableContent || isMessageQueueFull))
+    (isStreaming || hasActiveRecovery) && (!hasSubmittableContent || isMessageQueueFull)
 }
 
 func hasNonWhitespaceContent(_ text: String) -> Bool {
@@ -169,10 +168,10 @@ struct MessageInputView: View {
             || !viewModel.pendingAttachments.isEmpty
     }
 
-    /// While a response is streaming, the button stays a send button only
-    /// while a sendable draft can actually be queued; with nothing
-    /// submittable, or the queue already full, it reverts to a stop button
-    /// so the stream can always be cancelled. Mirrors the webapp.
+    /// While a response is streaming or being recovered, the button stays a
+    /// send button only while a sendable draft can actually be queued; with
+    /// nothing submittable, or the queue already full, it reverts to a stop
+    /// button so the stream can always be cancelled. Mirrors the webapp.
     private var showStopAction: Bool {
         shouldShowMessageStopAction(
             isStreaming: viewModel.isLoading,

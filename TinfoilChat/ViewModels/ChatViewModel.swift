@@ -3278,20 +3278,13 @@ class ChatViewModel: ObservableObject {
         guard hasText || hasAttachments else { return false }
         guard attachmentsAreReadyToSend(pendingAttachments) else { return false }
 
-        if isLoading {
-            guard !isMessageQueueFull else { return false }
+        // A message sent while the previous turn is still being recovered is
+        // queued like one sent mid-stream; the drain abandons the recovery
+        // before dispatching it, since sending means the user has moved on.
+        if isLoading || hasPendingResponseRecovery {
+            guard !isMessageQueueFull, let chatId = currentChat?.id else { return false }
             enqueueMessage(text: text)
-            return true
-        }
-
-        // Sending while the previous turn is still being recovered means the
-        // user has moved on. The message is queued so it stays visible, the
-        // pending recovery is abandoned, and the queue drain dispatches it.
-        if hasPendingResponseRecovery, let chatId = currentChat?.id {
-            guard !isMessageQueueFull else { return false }
-            enqueueMessage(text: text)
-            Task { @MainActor in
-                guard await abandonPendingRecoveriesForCurrentChat() else { return }
+            if !isLoading {
                 scheduleMessageQueueDrain(chatId: chatId)
             }
             return true
@@ -3392,13 +3385,23 @@ class ChatViewModel: ObservableObject {
     /// the chat on screen drains; a backgrounded chat keeps its queue and
     /// resumes when reopened. Dispatch keeps the keyboard up so a draft the
     /// user is typing is never interrupted.
-    private func drainMessageQueue(chatId: String) {
+    private func drainMessageQueue(chatId: String) async {
         guard currentChat?.id == chatId,
               canSendInCurrentContext,
               !streamState.isStreaming(chatId: chatId),
-              !hasPendingResponseRecovery,
-              var queue = messageQueues[chatId],
-              !queue.isEmpty else { return }
+              messageQueues[chatId]?.isEmpty == false else { return }
+
+        // A queued message supersedes any turn still waiting on recovery.
+        // If the recovery cannot be abandoned the message stays queued and
+        // is retried on the next drain trigger.
+        if hasPendingResponseRecovery {
+            guard await abandonPendingRecoveries(chatId: chatId) else { return }
+            guard currentChat?.id == chatId,
+                  canSendInCurrentContext,
+                  !streamState.isStreaming(chatId: chatId) else { return }
+        }
+
+        guard var queue = messageQueues[chatId], !queue.isEmpty else { return }
 
         // Same free-tier gate as a direct send: the message stays queued so
         // it can dispatch after an upgrade or on the next drain.
@@ -3418,7 +3421,7 @@ class ChatViewModel: ObservableObject {
     private func scheduleMessageQueueDrain(chatId: String) {
         guard messageQueues[chatId]?.isEmpty == false else { return }
         Task { @MainActor [weak self] in
-            self?.drainMessageQueue(chatId: chatId)
+            await self?.drainMessageQueue(chatId: chatId)
         }
     }
 
@@ -4969,18 +4972,21 @@ class ChatViewModel: ObservableObject {
         self.showVerifierSheet = false
     }
 
-    /// Gives up on recovering the current chat's interrupted turns so the
-    /// user can retry or move on immediately. Returns false when the
-    /// envelopes could not be cleared and the chat is still blocked.
-    private func abandonPendingRecoveriesForCurrentChat() async -> Bool {
-        guard let chat = currentChat,
-              let userId = currentUserId,
-              let envelopes = chat.pendingRecoveries,
-              !envelopes.isEmpty
+    /// Gives up on recovering a chat's interrupted turns so the user can
+    /// retry or move on immediately. Returns false when the envelopes could
+    /// not all be cleared and the chat is still blocked. Any envelope that
+    /// was cleared is already gone from local storage, so the in-memory
+    /// chat is refreshed from disk rather than edited optimistically.
+    private func abandonPendingRecoveries(chatId: String) async -> Bool {
+        guard let location = findChatLocation(chatId),
+              let userId = currentUserId
         else {
+            return false
+        }
+        let chat = self.chat(at: location)
+        guard let envelopes = chat.pendingRecoveries, !envelopes.isEmpty else {
             return true
         }
-        let chatId = chat.id
         let storage: ChatRecoveryStorage = chat.isLocalOnly ? .local : .cloud
         let metadata = await ChatRecoveryCoordinator.shared.abandonPendingRecoveries(
             chatId: chatId,
@@ -4988,20 +4994,21 @@ class ChatViewModel: ObservableObject {
             userId: userId,
             storage: storage
         )
-        guard let metadata,
-              let location = findChatLocation(chatId)
-        else {
-            return false
+        guard let refreshedLocation = findChatLocation(chatId) else { return false }
+        var updated = self.chat(at: refreshedLocation)
+        if let stored = try? await storage.fileStorage.loadChat(chatId: chatId, userId: userId) {
+            updated.pendingRecoveries = stored.pendingRecoveries
         }
-        var updated = self.chat(at: location)
-        updated.pendingRecoveries = nil
-        updated.clock = metadata.clock
-        updated.writer = metadata.writer
-        updated.clockVersion = metadata.clockVersion
-        updated.updatedAt = metadata.updatedAt
-        updated.locallyModified = metadata.locallyModified
-        updateChat(updated)
-        return currentChat?.id == chatId
+        if let metadata {
+            updated.pendingRecoveries = nil
+            updated.clock = metadata.clock
+            updated.writer = metadata.writer
+            updated.clockVersion = metadata.clockVersion
+            updated.updatedAt = metadata.updatedAt
+            updated.locallyModified = metadata.locallyModified
+        }
+        updateChat(updated, persist: metadata != nil)
+        return metadata != nil
     }
 
     private func cancelRecoveredGeneration(chatId: String) {
@@ -5386,22 +5393,23 @@ class ChatViewModel: ObservableObject {
     /// Regenerates the last assistant response by removing it and resending the last user message
     func regenerateLastResponse() {
         guard messageEditSession == nil,
-              currentChat != nil,
+              let chat = currentChat,
               !isLoading else {
             return
         }
 
         // An interrupted turn still waiting on recovery is abandoned first:
-        // the user has chosen to retry rather than wait for the replay.
+        // the user has chosen to retry rather than wait for the replay. The
+        // retry only proceeds if the same chat is still on screen afterwards.
         if hasPendingResponseRecovery {
+            let chatId = chat.id
             Task { @MainActor in
-                guard await abandonPendingRecoveriesForCurrentChat() else { return }
+                guard await abandonPendingRecoveries(chatId: chatId),
+                      currentChat?.id == chatId else { return }
                 regenerateLastResponse()
             }
             return
         }
-
-        guard let chat = currentChat else { return }
 
         // Find the last user message
         guard let lastUserMessageIndex = chat.messages.lastIndex(where: { $0.role == .user }) else {

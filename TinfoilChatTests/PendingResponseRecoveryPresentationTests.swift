@@ -95,4 +95,19 @@ struct PendingResponseRecoveryPresentationTests {
             isMessageQueueFull: false
         ))
     }
+
+    @Test func activeRecoveryYieldsToSendWhenDraftIsSubmittable() {
+        #expect(!shouldShowMessageStopAction(
+            isStreaming: false,
+            hasActiveRecovery: true,
+            hasSubmittableContent: true,
+            isMessageQueueFull: false
+        ))
+        #expect(shouldShowMessageStopAction(
+            isStreaming: false,
+            hasActiveRecovery: true,
+            hasSubmittableContent: true,
+            isMessageQueueFull: true
+        ))
+    }
 }
