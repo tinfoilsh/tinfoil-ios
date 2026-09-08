@@ -1651,6 +1651,12 @@ struct CustomTextEditor: UIViewRepresentable {
         textView.tintColor = UIColor.systemBlue
         textView.adjustsFontForContentSizeCategory = true
         textView.accessibilityLabel = "Message"
+        // On macOS the inline prediction panel re-enters itself through nested
+        // run loops while the text checker is still producing candidates,
+        // blocking the main thread for seconds at a time.
+        if ProcessInfo.processInfo.isiOSAppOnMac {
+            textView.inlinePredictionType = .no
+        }
 
         context.coordinator.textView = textView
         context.coordinator.currentTextSnapshot = text
