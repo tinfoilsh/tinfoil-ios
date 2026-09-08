@@ -3392,19 +3392,17 @@ class ChatViewModel: ObservableObject {
     /// resumes when reopened. Dispatch keeps the keyboard up so a draft the
     /// user is typing is never interrupted.
     private func drainMessageQueue(chatId: String) async {
-        guard currentChat?.id == chatId,
-              canSendInCurrentContext,
-              !streamState.isStreaming(chatId: chatId),
+        guard canDrainMessageQueue(chatId: chatId),
               messageQueues[chatId]?.isEmpty == false else { return }
 
         // A queued message supersedes any turn still waiting on recovery.
         // If the recovery cannot be abandoned the message stays queued and
-        // is retried on the next drain trigger.
+        // is retried on the next drain trigger. The preconditions are
+        // re-checked after the await since the account or selection may
+        // have changed underneath it.
         if hasPendingResponseRecovery {
-            guard await abandonPendingRecoveries(chatId: chatId) else { return }
-            guard currentChat?.id == chatId,
-                  canSendInCurrentContext,
-                  !streamState.isStreaming(chatId: chatId) else { return }
+            guard await abandonPendingRecoveries(chatId: chatId),
+                  canDrainMessageQueue(chatId: chatId) else { return }
         }
 
         guard var queue = messageQueues[chatId], !queue.isEmpty else { return }
@@ -3419,6 +3417,18 @@ class ChatViewModel: ObservableObject {
         let next = queue.removeFirst()
         messageQueues[chatId] = queue.isEmpty ? nil : queue
         dispatchMessage(text: next.text, attachments: next.attachments, dismissKeyboard: false)
+    }
+
+    /// A drain may only dispatch for the chat on screen, with a sendable
+    /// context, no stream in flight, and no account teardown underway. A
+    /// timer callback already in flight when sign-out begins must not
+    /// start a new turn against the account being torn down.
+    private func canDrainMessageQueue(chatId: String) -> Bool {
+        currentChat?.id == chatId
+            && canSendInCurrentContext
+            && !isAccountTeardownInProgress
+            && acceptsChatSaves
+            && !streamState.isStreaming(chatId: chatId)
     }
 
     /// Defers the drain one runloop turn so stream teardown (state resets,
