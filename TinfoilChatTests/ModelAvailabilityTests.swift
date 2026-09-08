@@ -98,14 +98,17 @@ struct ModelAvailabilityTests {
             description: "",
             details: "",
             parameters: "",
-            contextWindowTokens: 128_000,
             type: type,
             chat: chat,
             paid: paid,
             multimodal: false,
             toolCalling: false,
-            attributes: attributes,
-            reasoningConfig: nil
+            chatConfig: ChatModelConfig(
+                contextWindowTokens: 128_000,
+                attributes: attributes,
+                descriptionShort: nil,
+                reasoningConfig: nil
+            )
         )
     }
 }

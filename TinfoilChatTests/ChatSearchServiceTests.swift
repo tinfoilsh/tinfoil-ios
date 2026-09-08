@@ -95,14 +95,17 @@ struct ChatSearchServiceTests {
             description: "",
             details: "",
             parameters: "",
-            contextWindowTokens: 64_000,
             type: "chat",
             chat: true,
             paid: false,
             multimodal: false,
             toolCalling: nil,
-            attributes: nil,
-            reasoningConfig: nil
+            chatConfig: ChatModelConfig(
+                contextWindowTokens: 64_000,
+                attributes: nil,
+                descriptionShort: nil,
+                reasoningConfig: nil
+            )
         )
     )
 
