@@ -1331,7 +1331,13 @@ class ChatViewModel: ObservableObject {
             repeats: true
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.scanPendingRecoveries()
+                guard let self else { return }
+                self.scanPendingRecoveries()
+                // A queued message whose recovery abandonment failed has no
+                // trigger of its own, so the periodic scan retries the drain.
+                if let chatId = self.currentChat?.id {
+                    self.scheduleMessageQueueDrain(chatId: chatId)
+                }
             }
         }
         if let timer = recoveryScanTimer {
