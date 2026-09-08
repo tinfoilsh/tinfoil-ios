@@ -1651,6 +1651,12 @@ struct CustomTextEditor: UIViewRepresentable {
         textView.tintColor = UIColor.systemBlue
         textView.adjustsFontForContentSizeCategory = true
         textView.accessibilityLabel = "Message"
+        // On macOS the inline prediction panel re-enters itself through nested
+        // run loops while the text checker is still producing candidates,
+        // blocking the main thread for seconds at a time.
+        if ProcessInfo.processInfo.isiOSAppOnMac {
+            textView.inlinePredictionType = .no
+        }
 
         context.coordinator.textView = textView
         context.coordinator.currentTextSnapshot = text
@@ -1960,40 +1966,19 @@ final class PastingTextView: UITextView {
         UIPasteboard.general.urls?.filter { $0.isFileURL } ?? []
     }
 
-    /// UIKit probes `canPerformAction` many times while assembling the edit
-    /// menu, and each `hasImages`/`urls` read is a synchronous XPC round trip
-    /// to the pasteboard service. Cache the answers per pasteboard
-    /// generation so only the first probe pays that cost.
-    private var cachedPasteboardState: (changeCount: Int, hasImages: Bool, hasFileURLs: Bool)?
-
-    private func pasteboardState() -> (hasImages: Bool, hasFileURLs: Bool) {
-        let changeCount = UIPasteboard.general.changeCount
-        if let cached = cachedPasteboardState, cached.changeCount == changeCount {
-            return (cached.hasImages, cached.hasFileURLs)
-        }
-        let state = (
-            changeCount: changeCount,
-            hasImages: UIPasteboard.general.hasImages,
-            hasFileURLs: !pasteboardFileURLs.isEmpty
-        )
-        cachedPasteboardState = state
-        return (state.hasImages, state.hasFileURLs)
+    private var acceptsImagePaste: Bool {
+        allowsImagePaste && onPasteImage != nil
     }
 
+    /// UIKit probes `canPerformAction` repeatedly while assembling the edit
+    /// menu, on the main thread. Reading `hasImages`/`urls` there is a
+    /// synchronous XPC round trip to the pasteboard service that can stall
+    /// for seconds, so the pasteboard is never inspected here. Paste is
+    /// offered whenever attachments are accepted and the content is only
+    /// examined once the user actually pastes.
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(paste(_:)) {
-            if rejectsAttachmentPaste {
-                let state = pasteboardState()
-                if state.hasImages || state.hasFileURLs {
-                    return false
-                }
-            }
-            if allowsImagePaste && onPasteImage != nil && pasteboardState().hasImages {
-                return true
-            }
-            if onPasteFile != nil && pasteboardState().hasFileURLs {
-                return true
-            }
+        if action == #selector(paste(_:)), acceptsImagePaste || onPasteFile != nil {
+            return true
         }
         return super.canPerformAction(action, withSender: sender)
     }
@@ -2001,14 +1986,11 @@ final class PastingTextView: UITextView {
     override func paste(_ sender: Any?) {
         let pasteboard = UIPasteboard.general
 
-        if rejectsAttachmentPaste {
-            let state = pasteboardState()
-            if state.hasImages || state.hasFileURLs {
-                return
-            }
+        if rejectsAttachmentPaste, pasteboard.hasImages || !pasteboardFileURLs.isEmpty {
+            return
         }
 
-        if allowsImagePaste, pasteboard.hasImages,
+        if acceptsImagePaste, pasteboard.hasImages,
            let onPasteImage, let images = pasteboard.images, !images.isEmpty {
             for (index, image) in images.enumerated() {
                 guard let data = image.jpegData(
