@@ -29,7 +29,7 @@ final class ProjectStorageService: ObservableObject {
     // MARK: - Configuration
 
     func setTokenGetter(_ tokenGetter: @escaping SyncEnclaveClient.TokenGetter) async {
-        self.getToken = { await tokenGetter(false) }
+        self.getToken = { try? await tokenGetter(false) }
         await SyncEnclaveClient.shared.setTokenGetter(tokenGetter)
     }
 

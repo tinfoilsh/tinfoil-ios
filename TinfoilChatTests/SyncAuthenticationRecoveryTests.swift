@@ -93,6 +93,25 @@ struct SyncAuthenticationRecoveryTests {
         }
     }
 
+    @Test @MainActor
+    func transientRefreshFailureIsRetryableNotSignOut() async {
+        let client = SyncEnclaveClient(enclaveURL: "https://example.com", configRepo: "owner/repo")
+        await client.setTokenGetter { forceRefresh in
+            if forceRefresh { throw URLError(.notConnectedToInternet) }
+            return "stale-token"
+        }
+
+        do {
+            _ = try await client.requireToken(forceRefresh: true)
+            Issue.record("Expected forced refresh failure")
+        } catch let error as SyncEnclaveError {
+            #expect(error.code == WireCodes.network)
+            #expect(error != .authenticationActionRequired)
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
     @Test func resetCancelsTokenRefreshFromPreviousAccount() async {
         let probe = TokenProviderProbe()
         let client = SyncEnclaveClient(enclaveURL: "https://example.com", configRepo: "owner/repo")
