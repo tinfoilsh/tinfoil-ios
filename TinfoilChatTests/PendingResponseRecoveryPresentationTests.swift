@@ -48,43 +48,11 @@ struct PendingResponseRecoveryPresentationTests {
         ))
     }
 
-    @Test func hidesInterruptedAssistantWhileRecoveryIsPending() {
-        let interrupted = Message(
-            role: .assistant,
-            turnId: "turn-1",
-            content: "",
-            thoughts: "Partial reasoning",
-            isThinking: true
-        )
-
-        #expect(shouldHidePendingResponseAssistant(
-            message: interrupted,
-            pendingRecoveries: [recovery],
-            activeTurnId: nil
-        ))
-        #expect(!shouldHidePendingResponseAssistant(
-            message: interrupted,
-            pendingRecoveries: [recovery],
-            activeTurnId: "turn-1"
-        ))
-    }
-
-    @Test func draftSuppressesPlaceholderAndRevealsAssistant() {
+    @Test func draftSuppressesPlaceholder() {
         let user = Message(role: .user, turnId: "turn-1", content: "Question")
-        let assistant = Message(
-            role: .assistant,
-            turnId: "turn-1",
-            content: "Recovered partial"
-        )
 
         #expect(!shouldShowPendingResponseRecovery(
             message: user,
-            pendingRecoveries: [recovery],
-            activeTurnId: nil,
-            hasRecoveryDraft: true
-        ))
-        #expect(!shouldHidePendingResponseAssistant(
-            message: assistant,
             pendingRecoveries: [recovery],
             activeTurnId: nil,
             hasRecoveryDraft: true
@@ -125,6 +93,21 @@ struct PendingResponseRecoveryPresentationTests {
             hasActiveRecovery: false,
             hasSubmittableContent: false,
             isMessageQueueFull: false
+        ))
+    }
+
+    @Test func activeRecoveryYieldsToSendWhenDraftIsSubmittable() {
+        #expect(!shouldShowMessageStopAction(
+            isStreaming: false,
+            hasActiveRecovery: true,
+            hasSubmittableContent: true,
+            isMessageQueueFull: false
+        ))
+        #expect(shouldShowMessageStopAction(
+            isStreaming: false,
+            hasActiveRecovery: true,
+            hasSubmittableContent: true,
+            isMessageQueueFull: true
         ))
     }
 }

@@ -1331,7 +1331,13 @@ class ChatViewModel: ObservableObject {
             repeats: true
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.scanPendingRecoveries()
+                guard let self else { return }
+                self.scanPendingRecoveries()
+                // A queued message whose recovery abandonment failed has no
+                // trigger of its own, so the periodic scan retries the drain.
+                if let chatId = self.currentChat?.id {
+                    self.scheduleMessageQueueDrain(chatId: chatId)
+                }
             }
         }
         if let timer = recoveryScanTimer {
@@ -3277,11 +3283,16 @@ class ChatViewModel: ObservableObject {
         let hasAttachments = !pendingAttachments.isEmpty
         guard hasText || hasAttachments else { return false }
         guard attachmentsAreReadyToSend(pendingAttachments) else { return false }
-        guard !hasPendingResponseRecovery else { return false }
 
-        if isLoading {
-            guard !isMessageQueueFull else { return false }
+        // A message sent while the previous turn is still being recovered is
+        // queued like one sent mid-stream; the drain abandons the recovery
+        // before dispatching it, since sending means the user has moved on.
+        if isLoading || hasPendingResponseRecovery {
+            guard !isMessageQueueFull, let chatId = currentChat?.id else { return false }
             enqueueMessage(text: text)
+            if !isLoading {
+                scheduleMessageQueueDrain(chatId: chatId)
+            }
             return true
         }
 
@@ -3366,6 +3377,16 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Drops every chat's queue. Must run wherever the chat set is replaced
+    /// wholesale (sign-out, device wipe, cloud-chat removal): a queue that
+    /// outlived its chat would otherwise dispatch against whichever account
+    /// next selects a chat with the same id.
+    private func discardAllMessageQueues() {
+        for chatId in Array(messageQueues.keys) {
+            discardMessageQueue(chatId: chatId)
+        }
+    }
+
     /// Removes a queued message before it is dispatched.
     func removeQueuedMessage(id: String) {
         guard let chatId = currentChat?.id,
@@ -3380,13 +3401,21 @@ class ChatViewModel: ObservableObject {
     /// the chat on screen drains; a backgrounded chat keeps its queue and
     /// resumes when reopened. Dispatch keeps the keyboard up so a draft the
     /// user is typing is never interrupted.
-    private func drainMessageQueue(chatId: String) {
-        guard currentChat?.id == chatId,
-              canSendInCurrentContext,
-              !streamState.isStreaming(chatId: chatId),
-              !hasPendingResponseRecovery,
-              var queue = messageQueues[chatId],
-              !queue.isEmpty else { return }
+    private func drainMessageQueue(chatId: String) async {
+        guard canDrainMessageQueue(chatId: chatId),
+              messageQueues[chatId]?.isEmpty == false else { return }
+
+        // A queued message supersedes any turn still waiting on recovery.
+        // If the recovery cannot be abandoned the message stays queued and
+        // is retried on the next drain trigger. The preconditions are
+        // re-checked after the await since the account or selection may
+        // have changed underneath it.
+        if hasPendingResponseRecovery {
+            guard await abandonPendingRecoveries(chatId: chatId),
+                  canDrainMessageQueue(chatId: chatId) else { return }
+        }
+
+        guard var queue = messageQueues[chatId], !queue.isEmpty else { return }
 
         // Same free-tier gate as a direct send: the message stays queued so
         // it can dispatch after an upgrade or on the next drain.
@@ -3400,13 +3429,25 @@ class ChatViewModel: ObservableObject {
         dispatchMessage(text: next.text, attachments: next.attachments, dismissKeyboard: false)
     }
 
+    /// A drain may only dispatch for the chat on screen, with a sendable
+    /// context, no stream in flight, and no account teardown underway. A
+    /// timer callback already in flight when sign-out begins must not
+    /// start a new turn against the account being torn down.
+    private func canDrainMessageQueue(chatId: String) -> Bool {
+        currentChat?.id == chatId
+            && canSendInCurrentContext
+            && !isAccountTeardownInProgress
+            && acceptsChatSaves
+            && !streamState.isStreaming(chatId: chatId)
+    }
+
     /// Defers the drain one runloop turn so stream teardown (state resets,
     /// final chat updates) fully settles before the next dispatch mutates
     /// the conversation.
     private func scheduleMessageQueueDrain(chatId: String) {
         guard messageQueues[chatId]?.isEmpty == false else { return }
         Task { @MainActor [weak self] in
-            self?.drainMessageQueue(chatId: chatId)
+            await self?.drainMessageQueue(chatId: chatId)
         }
     }
 
@@ -4957,6 +4998,45 @@ class ChatViewModel: ObservableObject {
         self.showVerifierSheet = false
     }
 
+    /// Gives up on recovering a chat's interrupted turns so the user can
+    /// retry or move on immediately. Returns false when the envelopes could
+    /// not all be cleared and the chat is still blocked. Any envelope that
+    /// was cleared is already gone from local storage, so the in-memory
+    /// chat is refreshed from disk rather than edited optimistically.
+    private func abandonPendingRecoveries(chatId: String) async -> Bool {
+        guard let location = findChatLocation(chatId),
+              let userId = currentUserId
+        else {
+            return false
+        }
+        let chat = self.chat(at: location)
+        guard let envelopes = chat.pendingRecoveries, !envelopes.isEmpty else {
+            return true
+        }
+        let storage: ChatRecoveryStorage = chat.isLocalOnly ? .local : .cloud
+        let metadata = await ChatRecoveryCoordinator.shared.abandonPendingRecoveries(
+            chatId: chatId,
+            envelopes: envelopes,
+            userId: userId,
+            storage: storage
+        )
+        guard let refreshedLocation = findChatLocation(chatId) else { return false }
+        var updated = self.chat(at: refreshedLocation)
+        if let stored = try? await storage.fileStorage.loadChat(chatId: chatId, userId: userId) {
+            updated.pendingRecoveries = stored.pendingRecoveries
+        }
+        if let metadata {
+            updated.pendingRecoveries = nil
+            updated.clock = metadata.clock
+            updated.writer = metadata.writer
+            updated.clockVersion = metadata.clockVersion
+            updated.updatedAt = metadata.updatedAt
+            updated.locallyModified = metadata.locallyModified
+        }
+        updateChat(updated, persist: metadata != nil)
+        return metadata != nil
+    }
+
     private func cancelRecoveredGeneration(chatId: String) {
         let chat: Chat?
         if currentChat?.id == chatId {
@@ -5339,9 +5419,21 @@ class ChatViewModel: ObservableObject {
     /// Regenerates the last assistant response by removing it and resending the last user message
     func regenerateLastResponse() {
         guard messageEditSession == nil,
-              !hasPendingResponseRecovery,
               let chat = currentChat,
               !isLoading else {
+            return
+        }
+
+        // An interrupted turn still waiting on recovery is abandoned first:
+        // the user has chosen to retry rather than wait for the replay. The
+        // retry only proceeds if the same chat is still on screen afterwards.
+        if hasPendingResponseRecovery {
+            let chatId = chat.id
+            Task { @MainActor in
+                guard await abandonPendingRecoveries(chatId: chatId),
+                      currentChat?.id == chatId else { return }
+                regenerateLastResponse()
+            }
             return
         }
 
@@ -6082,6 +6174,7 @@ class ChatViewModel: ObservableObject {
         // Clear cloud chats and create a new empty one with the free model.
         // On-disk local chats are wiped immediately after this by clearAuthState's
         // full sign-out cleanup, so no content persists across accounts.
+        discardAllMessageQueues()
         chats = []
         localChats = []
         cloudSidebarSummaries = []
@@ -6123,6 +6216,7 @@ class ChatViewModel: ObservableObject {
 
         // Clear all chats from memory
         ChatRecoveryDraftStore.shared.clearAll()
+        discardAllMessageQueues()
         chats.removeAll()
         localChats.removeAll()
         cloudSidebarSummaries.removeAll()
@@ -6744,6 +6838,9 @@ class ChatViewModel: ObservableObject {
         if let userId = currentUserId {
             await cloudSync.handleLocalStoreWipe(forUser: userId)
             try? await EncryptedFileStorage.cloud.deleteAllChats(userId: userId)
+        }
+        for chatId in Array(messageQueues.keys) where !localChats.contains(where: { $0.id == chatId }) {
+            discardMessageQueue(chatId: chatId)
         }
         chats = []
         cloudSidebarSummaries = []
