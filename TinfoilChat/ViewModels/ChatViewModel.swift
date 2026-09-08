@@ -3377,6 +3377,16 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Drops every chat's queue. Must run wherever the chat set is replaced
+    /// wholesale (sign-out, device wipe, cloud-chat removal): a queue that
+    /// outlived its chat would otherwise dispatch against whichever account
+    /// next selects a chat with the same id.
+    private func discardAllMessageQueues() {
+        for chatId in Array(messageQueues.keys) {
+            discardMessageQueue(chatId: chatId)
+        }
+    }
+
     /// Removes a queued message before it is dispatched.
     func removeQueuedMessage(id: String) {
         guard let chatId = currentChat?.id,
@@ -6164,6 +6174,7 @@ class ChatViewModel: ObservableObject {
         // Clear cloud chats and create a new empty one with the free model.
         // On-disk local chats are wiped immediately after this by clearAuthState's
         // full sign-out cleanup, so no content persists across accounts.
+        discardAllMessageQueues()
         chats = []
         localChats = []
         cloudSidebarSummaries = []
@@ -6205,6 +6216,7 @@ class ChatViewModel: ObservableObject {
 
         // Clear all chats from memory
         ChatRecoveryDraftStore.shared.clearAll()
+        discardAllMessageQueues()
         chats.removeAll()
         localChats.removeAll()
         cloudSidebarSummaries.removeAll()
@@ -6826,6 +6838,9 @@ class ChatViewModel: ObservableObject {
         if let userId = currentUserId {
             await cloudSync.handleLocalStoreWipe(forUser: userId)
             try? await EncryptedFileStorage.cloud.deleteAllChats(userId: userId)
+        }
+        for chatId in Array(messageQueues.keys) where !localChats.contains(where: { $0.id == chatId }) {
+            discardMessageQueue(chatId: chatId)
         }
         chats = []
         cloudSidebarSummaries = []
