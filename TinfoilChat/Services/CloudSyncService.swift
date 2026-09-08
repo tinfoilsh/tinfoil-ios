@@ -683,34 +683,34 @@ class CloudSyncService: ObservableObject {
         
         // Set up custom token getter for R2 storage that ensures Clerk is loaded
         let tokenGetter: SyncEnclaveClient.TokenGetter = { forceRefresh in
-            do {
-                // Check if Clerk has a publishable key
-                guard await !Clerk.shared.publishableKey.isEmpty else {
-                    return nil
-                }
-                
-                // Ensure Clerk is loaded
-                if await !Clerk.shared.isLoaded {
-                    try await Clerk.shared.refreshClient()
-                }
-                
-                // Get fresh token from session
-                if let session = await Clerk.shared.session {
-                    // Try to get a fresh token first (refresh if needed)
-                    if let token = try? await session.getToken(.init(skipCache: forceRefresh)) {
-                        return token
-                    }
-                    if forceRefresh { return nil }
-                    // Fallback to last active token if refresh fails
-                    if let tokenResource = session.lastActiveToken {
-                        return tokenResource.jwt
-                    }
-                }
-                
-                return nil
-            } catch {
+            // Check if Clerk has a publishable key
+            guard await !Clerk.shared.publishableKey.isEmpty else {
                 return nil
             }
+
+            // Ensure Clerk is loaded. A failure here means Clerk could not
+            // be reached, not that the user is signed out, so it propagates.
+            if await !Clerk.shared.isLoaded {
+                try await Clerk.shared.refreshClient()
+            }
+
+            // No session is the only condition that means "signed out".
+            guard let session = await Clerk.shared.session else {
+                return nil
+            }
+
+            if forceRefresh {
+                // Failures here surface as thrown errors so a transient
+                // outage is retried rather than mistaken for a revoked session.
+                return try await session.getToken(.init(skipCache: true))
+            }
+
+            // Try to get a fresh token first (refresh if needed)
+            if let token = try? await session.getToken() {
+                return token
+            }
+            // Fallback to last active token if refresh fails
+            return session.lastActiveToken?.jwt
         }
         
         // Set token getter for both R2 storage and ProfileSync

@@ -83,10 +83,13 @@ actor SyncEnclaveClient {
     private let configRepo: String
     private var client: SecureClient?
     private var verificationTask: Task<SecureClient, Error>?
-    typealias TokenGetter = @Sendable (_ forceRefresh: Bool) async -> String?
+    /// Returns nil only when there is no session to mint a token for.
+    /// Transient failures (offline, Clerk unreachable) must throw so the
+    /// request is retried instead of being treated as a sign-out.
+    typealias TokenGetter = @Sendable (_ forceRefresh: Bool) async throws -> String?
 
     private var tokenGetter: TokenGetter?
-    private var tokenRefreshTask: (generation: Int, task: Task<String?, Never>)?
+    private var tokenRefreshTask: (generation: Int, task: Task<String?, Error>)?
     private var tokenGeneration = 0
     private var authenticationNotificationGeneration: Int?
 
@@ -333,10 +336,17 @@ actor SyncEnclaveClient {
     private func requireToken(forceRefresh: Bool, generation: Int) async throws -> String {
         guard generation == tokenGeneration else { throw CancellationError() }
         let token: String?
-        if forceRefresh {
-            token = await refreshedToken()
-        } else {
-            token = await tokenGetter?(false)
+        do {
+            if forceRefresh {
+                token = try await refreshedToken()
+            } else {
+                token = try await tokenGetter?(false)
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            guard generation == tokenGeneration else { throw CancellationError() }
+            throw Self.wrapTransportError(error)
         }
         guard generation == tokenGeneration else { throw CancellationError() }
         guard let token, !token.isEmpty else {
@@ -361,21 +371,22 @@ actor SyncEnclaveClient {
         return .authenticationActionRequired
     }
 
-    private func refreshedToken() async -> String? {
+    private func refreshedToken() async throws -> String? {
         let generation = tokenGeneration
         if let tokenRefreshTask {
-            let token = await tokenRefreshTask.task.value
-            return generation == tokenGeneration ? token : nil
+            let token = try await tokenRefreshTask.task.value
+            guard generation == tokenGeneration else { throw CancellationError() }
+            return token
         }
         guard let tokenGetter else { return nil }
-        let task = Task<String?, Never> { await tokenGetter(true) }
+        let task = Task<String?, Error> { try await tokenGetter(true) }
         tokenRefreshTask = (generation, task)
-        let token = await task.value
-        guard generation == tokenGeneration else { return nil }
+        let result = await task.result
+        guard generation == tokenGeneration else { throw CancellationError() }
         if tokenRefreshTask?.generation == generation {
             tokenRefreshTask = nil
         }
-        return token
+        return try result.get()
     }
 
     private static func decode<T: Decodable>(response: SecureResponse, path: String) throws -> T {

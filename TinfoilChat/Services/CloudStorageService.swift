@@ -31,7 +31,7 @@ class CloudStorageService: ObservableObject {
     /// race the first authenticated request against an empty token
     /// cache.
     func setTokenGetter(_ tokenGetter: @escaping SyncEnclaveClient.TokenGetter) async {
-        self.getToken = { await tokenGetter(false) }
+        self.getToken = { try? await tokenGetter(false) }
         await SyncEnclaveClient.shared.setTokenGetter(tokenGetter)
     }
 
