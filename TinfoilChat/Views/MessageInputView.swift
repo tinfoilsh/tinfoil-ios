@@ -800,14 +800,35 @@ struct MessageInputView: View {
             : viewModel.currentModel.displayName
     }
 
+    /// The picker label. For Auto, every level label is laid out invisibly
+    /// behind the visible one so the capsule keeps the widest label's width
+    /// and the input bar does not shift as the slider moves.
+    @ViewBuilder
+    private var modelSelectorLabel: some View {
+        let font = Font.system(size: 12, weight: .semibold)
+        if viewModel.currentModel.isAuto {
+            ZStack {
+                ForEach(AutoIntelligence.allCases, id: \.self) { level in
+                    Text(level.displayName)
+                        .font(font)
+                        .hidden()
+                }
+                Text(currentModelLabel)
+                    .font(font)
+            }
+        } else {
+            Text(currentModelLabel)
+                .font(font)
+        }
+    }
+
     @ViewBuilder
     private var modelSelectorButton: some View {
         Button {
             viewModel.showModelSelectorSheet = true
         } label: {
             HStack(spacing: 4) {
-                Text(currentModelLabel)
-                    .font(.system(size: 12, weight: .semibold))
+                modelSelectorLabel
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 10, weight: .semibold))
             }
