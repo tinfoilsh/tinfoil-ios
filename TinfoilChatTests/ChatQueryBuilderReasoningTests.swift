@@ -335,8 +335,37 @@ struct ChatQueryBuilderReasoningTests {
         let data = try JSONEncoder().encode(query)
         let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
 
-        #expect(object[AutoModel.optionsField] as? [[String: Any]] != nil)
+        #expect(object[AutoModel.optionsField] as? [String: Any] != nil)
         #expect(object["pii_check_options"] as? [String: Any] != nil)
+    }
+
+    /// Auto hands model and effort selection to the router: the request names
+    /// the "auto" sentinel, carries only the intelligence level, and must not
+    /// leak the representative model's reasoning params.
+    @Test @MainActor
+    func autoSendsIntelligenceLevelInsteadOfReasoningParams() throws {
+        let representative = model(id: "gpt-oss-120b", reasoningConfig: gptOssConfig())
+        let query = ChatQueryBuilder.buildQuery(
+            modelId: representative.modelName,
+            systemPrompt: "",
+            rules: "",
+            conversationMessages: [],
+            stream: false,
+            reasoningConfig: representative.reasoningConfig,
+            reasoningEffort: .high,
+            genUIEnabled: false,
+            autoCandidates: [representative],
+            autoIntelligence: .extra
+        )
+
+        let data = try JSONEncoder().encode(query)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        #expect(object["model"] as? String == AutoModel.id)
+        let options = try #require(object[AutoModel.optionsField] as? [String: Any])
+        #expect(options[AutoModel.intelligenceKey] as? Int == 75)
+        #expect(object["reasoning_effort"] == nil)
+        #expect(object["chat_template_kwargs"] == nil)
     }
 
     @Test @MainActor

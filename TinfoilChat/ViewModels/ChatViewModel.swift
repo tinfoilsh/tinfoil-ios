@@ -323,6 +323,16 @@ class ChatViewModel: ObservableObject {
             }
         }
     }
+    /// Auto intelligence slider position. Device-local, like the selected
+    /// model, so it is not part of the shared profile settings.
+    @Published var autoIntelligence: AutoIntelligence = .default {
+        didSet {
+            UserDefaults.standard.set(
+                autoIntelligence.rawValue,
+                forKey: Constants.StorageKeys.Settings.autoIntelligence
+            )
+        }
+    }
 
     // While true, persisted-setting didSet observers skip the shared-settings
     // sync callback. Loading stored values during init is not a user edit, and
@@ -994,6 +1004,11 @@ class ChatViewModel: ObservableObject {
             self.thinkingEnabled = UserDefaults.standard.bool(
                 forKey: Constants.StorageKeys.Settings.thinkingEnabled
             )
+        }
+        if let savedIntelligenceRaw = UserDefaults.standard.string(
+            forKey: Constants.StorageKeys.Settings.autoIntelligence
+        ), let savedIntelligence = AutoIntelligence(rawValue: savedIntelligenceRaw) {
+            self.autoIntelligence = savedIntelligence
         }
         isLoadingPersistedSettings = false
 
@@ -2717,8 +2732,19 @@ class ChatViewModel: ObservableObject {
         upsertSummary(for: chatToSelect)
         evictInactiveMaterializedChats()
 
-        // Update the current model to match the chat's model
-        if currentModel != chatToSelect.modelType {
+        // Update the current model to match the chat's model. Chats saved
+        // under a legacy Auto tier id are moved onto the single Auto entry so
+        // the legacy id is not written back on the next save.
+        if chatToSelect.modelType.isAuto,
+           let autoModel = AppConfig.shared.autoModel,
+           chatToSelect.modelType != autoModel {
+            var normalizedChat = chatToSelect
+            normalizedChat.modelType = autoModel
+            updateChat(normalizedChat)
+            if currentModel != autoModel {
+                changeModel(to: autoModel, shouldUpdateChat: false)
+            }
+        } else if currentModel != chatToSelect.modelType {
             changeModel(to: chatToSelect.modelType, shouldUpdateChat: false)
         }
 
@@ -3836,6 +3862,7 @@ class ChatViewModel: ObservableObject {
         let streamProjectDocuments = projectDocuments
         let streamReasoningEffort = reasoningEffort
         let streamThinkingEnabled = thinkingEnabled
+        let streamAutoIntelligence = autoIntelligence
         let streamWebSearchEnabled = isWebSearchEnabled
             && SettingsManager.shared.webSearchAvailable
         let summaryService = ThinkingSummaryService()
@@ -4003,6 +4030,7 @@ class ChatViewModel: ObservableObject {
                     thinkingEnabled: streamThinkingEnabled,
                     genUIEnabled: SettingsManager.shared.genUIEnabled,
                     autoCandidates: modelSelection.autoCandidates,
+                    autoIntelligence: streamAutoIntelligence,
                     includeTimeReminder: true
                 )
 
@@ -5298,6 +5326,7 @@ class ChatViewModel: ObservableObject {
                 thinkingEnabled: thinkingEnabled,
                 genUIEnabled: false,
                 autoCandidates: modelSelection.autoCandidates,
+                autoIntelligence: autoIntelligence,
                 includeTimeReminder: false,
                 responseFormat: responseFormat
             )

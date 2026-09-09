@@ -48,7 +48,7 @@ struct StreamingResponseProcessorTests {
         let processor = StreamingResponseProcessor(
             isWebSearchEnabled: false,
             hapticEnabled: false,
-            modelDisplayName: "Auto · Smart",
+            modelDisplayName: "Auto · High",
             modelDisplayNamesByName: ["gpt-oss-120b": "GPT-OSS 120B"]
         )
 
@@ -62,12 +62,12 @@ struct StreamingResponseProcessorTests {
         let processor = StreamingResponseProcessor(
             isWebSearchEnabled: false,
             hapticEnabled: false,
-            modelDisplayName: "Auto · Smart"
+            modelDisplayName: "Auto · High"
         )
 
         _ = processor.process(processor.parse(try chunk(content: "complete")))
 
-        #expect(processor.snapshot().modelDisplayName == "Auto · Smart")
+        #expect(processor.snapshot().modelDisplayName == "Auto · High")
     }
 
     private func chunk(

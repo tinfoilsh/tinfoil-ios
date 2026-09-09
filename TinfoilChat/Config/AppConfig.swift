@@ -77,16 +77,66 @@ struct ReasoningConfig: Codable, Equatable {
 }
 
 /// Synthetic "Auto" model selection that lets the router pick the best
-/// available model for a capability tier. The client never sends these ids
-/// as the request model; it sends `AutoModel.requestModel` plus an ordered
-/// candidate list under `AutoModel.optionsField`, mirroring the webapp.
+/// available model and reasoning effort for a requested intelligence level.
+/// The request sends `model: "auto"` plus `{ "intelligence": N }` under
+/// `AutoModel.optionsField`, mirroring the webapp.
 enum AutoModel {
-    static let smartId = "auto-smart"
-    static let fastId = "auto-fast"
-    static let smartTier = "smart"
-    static let fastTier = "fast"
-    static let requestModel = "auto"
+    static let id = "auto"
     static let optionsField = "auto_model_options"
+    static let intelligenceKey = "intelligence"
+
+    /// Picker ids from the previous two-tier Auto design. They survive in
+    /// UserDefaults and inside saved chats, and all resolve to the single
+    /// Auto entry.
+    static let legacyIds: Set<String> = ["auto-smart", "auto-fast"]
+
+    static func isAutoId(_ id: String) -> Bool {
+        id == Self.id || legacyIds.contains(id)
+    }
+}
+
+/// The five positions of the Auto intelligence slider. Each maps to a level on
+/// the router's normalized 0-100 scale, where 100 is the most capable model and
+/// effort currently in the catalog.
+enum AutoIntelligence: String, CaseIterable, Codable, Sendable {
+    case low
+    case medium
+    case high
+    case extra
+    case max
+
+    static let `default`: AutoIntelligence = .high
+
+    /// Short label used in the collapsed picker ("Auto · High") and slider.
+    var label: String {
+        switch self {
+        case .low: return "Low"
+        case .medium: return "Med"
+        case .high: return "High"
+        case .extra: return "Extra"
+        case .max: return "Max"
+        }
+    }
+
+    /// Value sent to the router.
+    var level: Int {
+        switch self {
+        case .low: return 0
+        case .medium: return 25
+        case .high: return 50
+        case .extra: return 75
+        case .max: return 100
+        }
+    }
+
+    var displayName: String { "Auto · \(label)" }
+
+    var index: Int { Self.allCases.firstIndex(of: self) ?? 0 }
+
+    static func at(index: Int) -> AutoIntelligence {
+        let clamped = min(max(index, 0), allCases.count - 1)
+        return allCases[clamped]
+    }
 }
 
 /// Settings the chat clients read for a model. The controlplane sends this
@@ -95,7 +145,7 @@ struct ChatModelConfig: Codable {
     /// Token budget the chat archives history against. May be lower than the
     /// model's raw capability advertised to API consumers.
     let contextWindowTokens: Int?
-    /// Capability tags advertised by the controlplane (e.g. `smart`, `fast`).
+    /// Open set of model tags advertised by the controlplane (e.g. `smart`, `fast`).
     let attributes: [String]?
     let descriptionShort: String?
     let reasoningConfig: ReasoningConfig?
@@ -217,40 +267,29 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
 
     // MARK: - Auto routing
 
-    /// Capability tags advertised by the controlplane (e.g. `smart`, `fast`).
+    /// Open set of model tags advertised by the controlplane (e.g. `smart`, `fast`).
     var attributes: [String] { appConfig.chatConfig?.attributes ?? [] }
 
     /// True iff the model can be picked as an auto candidate for tool use.
     var supportsToolCalling: Bool { appConfig.toolCalling ?? false }
 
-    /// True iff this is one of the synthetic Auto picker entries.
-    var isAuto: Bool { id == AutoModel.smartId || id == AutoModel.fastId }
+    /// True iff this is the synthetic Auto picker entry (or a legacy tier id
+    /// still carried by a saved chat).
+    var isAuto: Bool { AutoModel.isAutoId(id) }
 
-    /// The capability tier this Auto entry routes within, or nil for real models.
-    var autoTier: String? {
-        switch id {
-        case AutoModel.smartId: return AutoModel.smartTier
-        case AutoModel.fastId: return AutoModel.fastTier
-        default: return nil
-        }
-    }
-
-    /// Build a synthetic Auto model for a capability tier. Multimodal and
-    /// tool-calling flags are unions of the tier members so the UI and
-    /// message builder behave sensibly before resolution.
-    static func auto(tier: String, members: [ModelType]) -> ModelType {
-        let isSmart = tier == AutoModel.smartTier
+    /// Build the synthetic Auto model. Multimodal and tool-calling flags are
+    /// unions of the candidate members so the UI and message builder behave
+    /// sensibly before the router resolves the request.
+    static func auto(members: [ModelType]) -> ModelType {
         let minimumContextMember = members.min {
             $0.contextWindowTokens < $1.contextWindowTokens
         }
         let config = AppModelConfig(
-            modelName: isSmart ? AutoModel.smartId : AutoModel.fastId,
+            modelName: AutoModel.id,
             image: "",
-            name: isSmart ? "Auto" : "Auto",
-            nameShort: isSmart ? "Auto · Smart" : "Auto · Fast",
-            description: isSmart
-                ? "Routes to the best available high-capability model"
-                : "Routes to the fastest available model",
+            name: "Auto",
+            nameShort: "Auto",
+            description: "Routes to the best model for the chosen intelligence level",
             details: "",
             parameters: "",
             type: "chat",
@@ -260,7 +299,7 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
             toolCalling: members.contains { $0.supportsToolCalling },
             chatConfig: ChatModelConfig(
                 contextWindowTokens: minimumContextMember?.contextWindowTokens,
-                attributes: [tier],
+                attributes: nil,
                 descriptionShort: nil,
                 reasoningConfig: nil
             )
@@ -280,8 +319,10 @@ struct ModelType: Identifiable, Codable, Hashable, Equatable {
 }
 
 /// Result of resolving a (possibly Auto) selection into a concrete
-/// representative model plus, when Auto, the ordered candidate list the
-/// router should try in order.
+/// representative model plus, when Auto, the pool of models the router may
+/// choose from. The router makes the actual choice; the client uses the pool
+/// only for worst-case budgeting (smallest context window, strongest
+/// reasoning history policy).
 struct ModelSelection {
     let representative: ModelType
     let autoCandidates: [ModelType]?
@@ -301,34 +342,25 @@ enum ModelAvailability {
         }.map { ModelType(from: $0) }
     }
 
-    static func tierModels(_ tier: String, from models: [ModelType]) -> [ModelType] {
-        models.filter { $0.attributes.contains(tier) }
-    }
-
-    static func autoModels(from models: [ModelType]) -> [ModelType] {
-        var autoModels: [ModelType] = []
-        let smart = tierModels(AutoModel.smartTier, from: models)
-        if !smart.isEmpty {
-            autoModels.append(ModelType.auto(tier: AutoModel.smartTier, members: smart))
-        }
-        let fast = tierModels(AutoModel.fastTier, from: models)
-        if !fast.isEmpty {
-            autoModels.append(ModelType.auto(tier: AutoModel.fastTier, members: fast))
-        }
-        return autoModels
+    /// The synthetic Auto entry, present whenever at least one real chat model
+    /// exists for the router to choose from.
+    static func autoModel(from models: [ModelType]) -> ModelType? {
+        models.isEmpty ? nil : ModelType.auto(members: models)
     }
 
     static func selectableModels(from models: [ModelType]) -> [ModelType] {
-        autoModels(from: models) + models
+        guard let auto = autoModel(from: models) else { return models }
+        return [auto] + models
     }
 
     static func defaultModel(from models: [ModelType]) -> ModelType? {
-        autoModels(from: models).first { $0.id == AutoModel.fastId } ?? models.first
+        autoModel(from: models) ?? models.first
     }
 
     static func resolveSavedModel(id: String?, from models: [ModelType]) -> ModelType? {
         guard let id else { return defaultModel(from: models) }
-        return selectableModels(from: models).first { $0.id == id } ?? defaultModel(from: models)
+        if AutoModel.isAutoId(id) { return autoModel(from: models) ?? defaultModel(from: models) }
+        return models.first { $0.id == id } ?? defaultModel(from: models)
     }
 }
 
@@ -449,8 +481,8 @@ class AppConfig: ObservableObject {
         currentModel = ModelAvailability.resolveSavedModel(id: savedModelId, from: availableModels)
     }
 
-    // Default selection: prefer Auto Fast, fall back to the first available
-    // model if no fast-tier models exist in the config.
+    // Default selection: Auto, falling back to the first available model when
+    // the config carries no chat models to route between.
     var defaultModel: ModelType? {
         ModelAvailability.defaultModel(from: availableModels)
     }
@@ -546,51 +578,45 @@ class AppConfig: ObservableObject {
 
     // MARK: - Auto routing
 
-    /// Real chat models advertising the given capability tier.
-    func tierModels(_ tier: String) -> [ModelType] {
-        ModelAvailability.tierModels(tier, from: availableModels)
-    }
-
     func reasoningHistoryPolicy(for model: ModelType) -> ReasoningHistoryPolicy {
-        guard model.isAuto, let tier = model.autoTier else {
+        guard model.isAuto else {
             return model.reasoningHistoryPolicy
         }
-        return tierModels(tier).reduce(ReasoningHistoryPolicy.none) { policy, candidate in
+        return availableModels.reduce(ReasoningHistoryPolicy.none) { policy, candidate in
             ReasoningHistoryPolicy.strongest(policy, candidate.reasoningHistoryPolicy)
         }
     }
 
-    /// Synthetic Auto entries for tiers that currently have at least one member.
-    var autoModels: [ModelType] {
-        ModelAvailability.autoModels(from: availableModels)
+    /// The synthetic Auto entry, when any real chat model exists.
+    var autoModel: ModelType? {
+        ModelAvailability.autoModel(from: availableModels)
     }
 
-    /// Models shown in the picker: Auto entries first, then real models.
+    /// Models shown in the picker: Auto first, then real models.
     var selectableModels: [ModelType] {
         ModelAvailability.selectableModels(from: availableModels)
     }
 
-    /// Resolve a selectable id (Auto or real) back to a ModelType.
+    /// Resolve a selectable id (Auto, a legacy Auto tier id, or real) back to a ModelType.
     func findSelectableModel(id: String) -> ModelType? {
-        if id == AutoModel.smartId || id == AutoModel.fastId {
-            return autoModels.first { $0.id == id }
-        }
+        if AutoModel.isAutoId(id) { return autoModel }
         return availableModels.first { $0.id == id }
     }
 
-    /// Resolve a (possibly Auto) selection into a representative model plus an
-    /// ordered candidate list. Progressive narrowing keeps a preference only
-    /// when at least one candidate satisfies it, mirroring the webapp.
+    /// Resolve a (possibly Auto) selection into a representative model plus the
+    /// pool the router may choose from. Progressive narrowing keeps a
+    /// preference only when at least one candidate satisfies it, mirroring the
+    /// webapp.
     func resolveModelSelection(
         _ selected: ModelType,
         preferMultimodal: Bool,
         preferToolCalling: Bool
     ) -> ModelSelection {
-        guard selected.isAuto, let tier = selected.autoTier else {
+        guard selected.isAuto else {
             return ModelSelection(representative: selected, autoCandidates: nil)
         }
 
-        var candidates = tierModels(tier)
+        var candidates = availableModels
         if preferMultimodal {
             let capable = candidates.filter { $0.isMultimodal }
             if !capable.isEmpty { candidates = capable }

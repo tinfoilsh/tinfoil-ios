@@ -43,9 +43,10 @@ struct ChatQueryBuilder {
     ///   - thinkingEnabled: Whether thinking is on for models that support a
     ///     toggle. Ignored for models that do not.
     ///   - autoCandidates: When set, the request is sent as an Auto selection:
-    ///     `model` becomes `AutoModel.requestModel` and the ordered candidates
-    ///     (with per-candidate reasoning params) are attached under
-    ///     `AutoModel.optionsField` for the router to resolve.
+    ///     `model` becomes `AutoModel.id` and the requested intelligence level
+    ///     is attached under `AutoModel.optionsField`. The router picks the
+    ///     model and reasoning effort, so no per-model params are sent.
+    ///   - autoIntelligence: Slider position sent with Auto requests.
     ///   - includeTimeReminder: Append an ephemeral current-time reminder as
     ///     the final message. The reminder is built at request time and never
     ///     persisted, keeping the system prompt and history byte-stable so
@@ -71,6 +72,7 @@ struct ChatQueryBuilder {
         genUIEnabled: Bool = true,
         genUIRegistry: GenUIRegistry = .shared,
         autoCandidates: [ModelType]? = nil,
+        autoIntelligence: AutoIntelligence = .default,
         includeTimeReminder: Bool = false,
         responseFormat: ChatQuery.ResponseFormat? = nil
     ) -> ChatQuery {
@@ -209,22 +211,15 @@ struct ChatQueryBuilder {
         let requestModel: String
         var extraBody: [String: OpenAIJSON]
         if let autoCandidates, !autoCandidates.isEmpty {
-            // Send `model: "auto"` with an ordered candidate list. Each option
-            // carries its own pre-built reasoning params so the router can
-            // splice the resolved candidate's body without re-deriving them.
-            requestModel = AutoModel.requestModel
-            let options: [OpenAIJSON] = autoCandidates.map { candidate in
-                let params = makeReasoningExtraBody(
-                    reasoningConfig: candidate.reasoningConfig,
-                    reasoningEffort: reasoningEffort,
-                    thinkingEnabled: thinkingEnabled
-                ) ?? [:]
-                return .object([
-                    "model": .string(candidate.modelName),
-                    "params": .object(params)
+            // Hand model selection to the router: it picks a concrete model
+            // and reasoning effort for the requested intelligence level and
+            // applies that model's own reasoning params itself.
+            requestModel = AutoModel.id
+            extraBody = [
+                AutoModel.optionsField: .object([
+                    AutoModel.intelligenceKey: .int(autoIntelligence.level)
                 ])
-            }
-            extraBody = [AutoModel.optionsField: .array(options)]
+            ]
         } else {
             requestModel = modelId
             extraBody = makeReasoningExtraBody(
