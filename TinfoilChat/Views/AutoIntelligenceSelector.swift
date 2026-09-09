@@ -98,15 +98,12 @@ struct SteppedSlider: View {
                 Capsule()
                     .fill(Color.accentPrimary)
                     .frame(width: thumbCenterX + thumbDiameter / 2)
-                HStack(spacing: 0) {
-                    ForEach(0..<stepCount, id: \.self) { step in
-                        Circle()
-                            .fill(step <= index ? Color.white.opacity(0.6) : Color.secondary.opacity(0.7))
-                            .frame(width: dotDiameter, height: dotDiameter)
-                            .frame(maxWidth: .infinity)
-                    }
+                ForEach(0..<stepCount, id: \.self) { step in
+                    Circle()
+                        .fill(step <= index ? Color.white.opacity(0.6) : Color.secondary.opacity(0.7))
+                        .frame(width: dotDiameter, height: dotDiameter)
+                        .offset(x: thumbDiameter / 2 - dotDiameter / 2 + CGFloat(step) * stepWidth)
                 }
-                .padding(.horizontal, thumbDiameter / 2 - dotDiameter / 2)
                 Circle()
                     .fill(Color.white)
                     .shadow(color: .black.opacity(0.2), radius: 3, y: 1)

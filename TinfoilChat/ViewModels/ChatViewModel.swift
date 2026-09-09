@@ -2733,12 +2733,14 @@ class ChatViewModel: ObservableObject {
         evictInactiveMaterializedChats()
 
         // Update the current model to match the chat's model. Chats saved
-        // under a legacy Auto tier id map onto the single Auto entry.
-        let chatModel = chatToSelect.modelType.isAuto
-            ? (AppConfig.shared.autoModel ?? chatToSelect.modelType)
-            : chatToSelect.modelType
-        if currentModel != chatModel {
-            changeModel(to: chatModel, shouldUpdateChat: false)
+        // under a legacy Auto tier id are moved onto the single Auto entry so
+        // the legacy id is not written back on the next save.
+        if chatToSelect.modelType.isAuto,
+           let autoModel = AppConfig.shared.autoModel,
+           chatToSelect.modelType != autoModel {
+            changeModel(to: autoModel)
+        } else if currentModel != chatToSelect.modelType {
+            changeModel(to: chatToSelect.modelType, shouldUpdateChat: false)
         }
 
         // Lazy-load full-res images for v1 synced chats
@@ -4021,9 +4023,9 @@ class ChatViewModel: ObservableObject {
                     reasoningConfig: representativeModel.reasoningConfig,
                     reasoningEffort: streamReasoningEffort,
                     thinkingEnabled: streamThinkingEnabled,
-                    autoIntelligence: streamAutoIntelligence,
                     genUIEnabled: SettingsManager.shared.genUIEnabled,
                     autoCandidates: modelSelection.autoCandidates,
+                    autoIntelligence: streamAutoIntelligence,
                     includeTimeReminder: true
                 )
 

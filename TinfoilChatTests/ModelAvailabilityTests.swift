@@ -62,7 +62,7 @@ struct ModelAvailabilityTests {
     @Test func savedModelResolutionMapsLegacyAutoIdsOntoAuto() {
         let available = ModelAvailability.realModels(from: [config(id: "first")])
 
-        for legacyId in ["auto-smart", "auto-fast", AutoModel.id] {
+        for legacyId in AutoModel.legacyIds.union([AutoModel.id]) {
             #expect(ModelAvailability.resolveSavedModel(id: legacyId, from: available)?.id == AutoModel.id)
         }
         #expect(ModelAvailability.resolveSavedModel(id: "first", from: available)?.id == "first")
