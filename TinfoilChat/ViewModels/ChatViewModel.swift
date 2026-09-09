@@ -2738,7 +2738,13 @@ class ChatViewModel: ObservableObject {
         if chatToSelect.modelType.isAuto,
            let autoModel = AppConfig.shared.autoModel,
            chatToSelect.modelType != autoModel {
-            changeModel(to: autoModel)
+            if var normalizedChat = currentChat {
+                normalizedChat.modelType = autoModel
+                updateChat(normalizedChat)
+            }
+            if currentModel != autoModel {
+                changeModel(to: autoModel, shouldUpdateChat: false)
+            }
         } else if currentModel != chatToSelect.modelType {
             changeModel(to: chatToSelect.modelType, shouldUpdateChat: false)
         }
