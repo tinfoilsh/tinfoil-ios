@@ -95,10 +95,11 @@ enum AutoModel {
     }
 }
 
-/// The five positions of the Auto intelligence slider. Each maps to a level on
-/// the router's normalized 0-100 scale, where 100 is the most capable model and
+/// The positions of the Auto intelligence slider. Each maps to a level on the
+/// router's normalized 0-100 scale, where 100 is the most capable model and
 /// effort currently in the catalog.
 enum AutoIntelligence: String, CaseIterable, Codable, Sendable {
+    case instant
     case low
     case medium
     case high
@@ -110,6 +111,7 @@ enum AutoIntelligence: String, CaseIterable, Codable, Sendable {
     /// Short label used in the collapsed picker ("Auto · High") and slider.
     var label: String {
         switch self {
+        case .instant: return "Instant"
         case .low: return "Low"
         case .medium: return "Med"
         case .high: return "High"
@@ -121,10 +123,11 @@ enum AutoIntelligence: String, CaseIterable, Codable, Sendable {
     /// Value sent to the router.
     var level: Int {
         switch self {
-        case .low: return 0
-        case .medium: return 25
-        case .high: return 50
-        case .extra: return 75
+        case .instant: return 0
+        case .low: return 20
+        case .medium: return 40
+        case .high: return 60
+        case .extra: return 80
         case .max: return 100
         }
     }

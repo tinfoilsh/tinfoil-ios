@@ -363,7 +363,7 @@ struct ChatQueryBuilderReasoningTests {
 
         #expect(object["model"] as? String == AutoModel.id)
         let options = try #require(object[AutoModel.optionsField] as? [String: Any])
-        #expect(options[AutoModel.intelligenceKey] as? Int == 75)
+        #expect(options[AutoModel.intelligenceKey] as? Int == AutoIntelligence.extra.level)
         #expect(object["reasoning_effort"] == nil)
         #expect(object["chat_template_kwargs"] == nil)
     }
