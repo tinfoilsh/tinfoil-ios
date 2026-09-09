@@ -134,7 +134,7 @@ enum AutoIntelligence: String, CaseIterable, Codable, Sendable {
     var index: Int { Self.allCases.firstIndex(of: self) ?? 0 }
 
     static func at(index: Int) -> AutoIntelligence {
-        let clamped = min(max(index, 0), allCases.count - 1)
+        let clamped = Swift.min(Swift.max(index, 0), allCases.count - 1)
         return allCases[clamped]
     }
 }
