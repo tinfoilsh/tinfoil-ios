@@ -76,11 +76,11 @@ struct ModelAvailabilityTests {
         #expect(levels.last == 100)
         #expect(levels == levels.sorted())
         #expect(AutoIntelligence.allCases.map(\.displayName) == [
-            "Auto · Low", "Auto · Med", "Auto · High", "Auto · Extra", "Auto · Max",
+            "Auto · Instant", "Auto · Low", "Auto · Med", "Auto · High", "Auto · Extra", "Auto · Max",
         ])
-        #expect(AutoIntelligence.at(index: -1) == .low)
+        #expect(AutoIntelligence.at(index: -1) == .instant)
         #expect(AutoIntelligence.at(index: 99) == .max)
-        #expect(AutoIntelligence.default.index == 2)
+        #expect(AutoIntelligence.default == .high)
     }
 
     private static func config(
