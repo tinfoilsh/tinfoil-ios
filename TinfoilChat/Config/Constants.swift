@@ -69,6 +69,15 @@ enum Constants {
             static let opacity = 0.04
         }
 
+        enum AutoIntelligenceSlider {
+            static let popoverWidth: CGFloat = 280
+            static let popoverPadding: CGFloat = 16
+            static let popoverSpacing: CGFloat = 12
+            static let trackHeight: CGFloat = 32
+            static let thumbDiameter: CGFloat = 28
+            static let dotDiameter: CGFloat = 6
+        }
+
         enum VerificationCenter {
             static let drawerCornerRadius: CGFloat = 12
             static let drawerBorderWidth: CGFloat = 1
@@ -454,6 +463,7 @@ enum Constants {
             static let piiCheckEnabled = "tinfoil-settings-pii-check-enabled"
             static let genUIEnabled = "tinfoil-settings-genui-enabled"
             static let reasoningEffort = "tinfoil-settings-reasoning-effort"
+        static let autoIntelligence = "tinfoil-settings-auto-intelligence"
             static let thinkingEnabled = "tinfoil-settings-thinking-enabled"
             static let cloudSyncEnabled = "tinfoil-settings-cloud-sync-enabled"
             static let cloudSyncActiveTab = "tinfoil-settings-cloud-sync-active-tab"

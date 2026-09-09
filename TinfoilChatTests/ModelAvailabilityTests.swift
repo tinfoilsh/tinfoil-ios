@@ -20,67 +20,67 @@ struct ModelAvailabilityTests {
         #expect(available.map(\.id) == ["paid-chat", "paid-code"])
     }
 
-    @Test func derivesAutoTiersOnlyFromEligibleModelsInServerOrder() {
+    @Test func offersOneAutoEntryAheadOfRealModelsWhenAnyChatModelExists() {
         let models = [
-            config(id: "smart-first", attributes: [AutoModel.smartTier]),
-            config(id: "free-fast", paid: false, attributes: [AutoModel.fastTier]),
-            config(id: "fast-first", type: "code", attributes: [AutoModel.fastTier]),
-            config(id: "smart-second", attributes: [AutoModel.smartTier]),
+            config(id: "first"),
+            config(id: "free", paid: false),
+            config(id: "code", type: "code"),
+            config(id: "title", type: "title"),
         ]
         let available = ModelAvailability.realModels(from: models)
 
-        #expect(ModelAvailability.autoModels(from: available).map(\.id) == [
-            AutoModel.smartId,
-            AutoModel.fastId,
-        ])
-        #expect(ModelAvailability.tierModels(AutoModel.smartTier, from: available).map(\.id) == [
-            "smart-first",
-            "smart-second",
-        ])
-        #expect(ModelAvailability.tierModels(AutoModel.fastTier, from: available).map(\.id) == [
-            "fast-first",
-        ])
+        #expect(ModelAvailability.autoModel(from: available)?.id == AutoModel.id)
         #expect(ModelAvailability.selectableModels(from: available).map(\.id) == [
-            AutoModel.smartId,
-            AutoModel.fastId,
-            "smart-first",
-            "fast-first",
-            "smart-second",
+            AutoModel.id,
+            "first",
+            "code",
         ])
+        #expect(ModelAvailability.autoModel(from: []) == nil)
+        #expect(ModelAvailability.selectableModels(from: []).isEmpty)
     }
 
-    @Test func omitsAutoTierWithoutEligibleMembers() {
+    @Test func autoEntryUnionsCapabilitiesAndUsesSmallestContextWindow() throws {
         let available = ModelAvailability.realModels(from: [
-            config(id: "smart", attributes: [AutoModel.smartTier]),
-            config(id: "free-fast", paid: false, attributes: [AutoModel.fastTier]),
+            config(id: "big", contextWindowTokens: 256_000),
+            config(id: "small-vision", multimodal: true, contextWindowTokens: 32_000),
         ])
 
-        #expect(ModelAvailability.autoModels(from: available).map(\.id) == [AutoModel.smartId])
+        let auto = try #require(ModelAvailability.autoModel(from: available))
+        #expect(auto.isAuto)
+        #expect(auto.isMultimodal)
+        #expect(auto.contextWindowTokens == 32_000)
+        #expect(auto.reasoningConfig == nil)
     }
 
-    @Test func defaultsToAutoFastAndFallsBackToFirstRealModel() {
-        let withFast = ModelAvailability.realModels(from: [
-            config(id: "first"),
-            config(id: "fast", attributes: [AutoModel.fastTier]),
-        ])
-        let withoutFast = ModelAvailability.realModels(from: [
-            config(id: "first"),
-            config(id: "second"),
-        ])
+    @Test func defaultsToAutoAndFallsBackToNothingWithoutChatModels() {
+        let available = ModelAvailability.realModels(from: [config(id: "first"), config(id: "second")])
 
-        #expect(ModelAvailability.defaultModel(from: withFast)?.id == AutoModel.fastId)
-        #expect(ModelAvailability.defaultModel(from: withoutFast)?.id == "first")
+        #expect(ModelAvailability.defaultModel(from: available)?.id == AutoModel.id)
+        #expect(ModelAvailability.defaultModel(from: []) == nil)
     }
 
-    @Test func missingSavedModelUsesNormalDefaultResolver() {
-        let available = ModelAvailability.realModels(from: [
-            config(id: "first"),
-            config(id: "fast", attributes: [AutoModel.fastTier]),
-        ])
+    @Test func savedModelResolutionMapsLegacyAutoIdsOntoAuto() {
+        let available = ModelAvailability.realModels(from: [config(id: "first")])
 
-        #expect(ModelAvailability.resolveSavedModel(id: "removed", from: available)?.id == AutoModel.fastId)
+        for legacyId in ["auto-smart", "auto-fast", AutoModel.id] {
+            #expect(ModelAvailability.resolveSavedModel(id: legacyId, from: available)?.id == AutoModel.id)
+        }
         #expect(ModelAvailability.resolveSavedModel(id: "first", from: available)?.id == "first")
+        #expect(ModelAvailability.resolveSavedModel(id: "removed", from: available)?.id == AutoModel.id)
         #expect(ModelAvailability.resolveSavedModel(id: nil, from: []) == nil)
+    }
+
+    @Test func intelligenceLevelsSpanTheRouterScaleInOrder() {
+        let levels = AutoIntelligence.allCases.map(\.level)
+        #expect(levels.first == 0)
+        #expect(levels.last == 100)
+        #expect(levels == levels.sorted())
+        #expect(AutoIntelligence.allCases.map(\.displayName) == [
+            "Auto · Low", "Auto · Med", "Auto · High", "Auto · Extra", "Auto · Max",
+        ])
+        #expect(AutoIntelligence.at(index: -1) == .low)
+        #expect(AutoIntelligence.at(index: 99) == .max)
+        #expect(AutoIntelligence.default.index == 2)
     }
 
     private static func config(
@@ -88,7 +88,8 @@ struct ModelAvailabilityTests {
         type: String = "chat",
         chat: Bool? = true,
         paid: Bool = true,
-        attributes: [String] = []
+        multimodal: Bool = false,
+        contextWindowTokens: Int = 128_000
     ) -> AppModelConfig {
         AppModelConfig(
             modelName: id,
@@ -101,11 +102,11 @@ struct ModelAvailabilityTests {
             type: type,
             chat: chat,
             paid: paid,
-            multimodal: false,
+            multimodal: multimodal,
             toolCalling: false,
             chatConfig: ChatModelConfig(
-                contextWindowTokens: 128_000,
-                attributes: attributes,
+                contextWindowTokens: contextWindowTokens,
+                attributes: nil,
                 descriptionShort: nil,
                 reasoningConfig: nil
             )

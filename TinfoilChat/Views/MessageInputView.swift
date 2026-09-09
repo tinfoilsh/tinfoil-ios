@@ -622,7 +622,10 @@ struct MessageInputView: View {
 
                         modelSelectorButton
 
-                        if viewModel.currentModel.isReasoningModel {
+                        if viewModel.currentModel.isAuto {
+                            AutoIntelligenceSelector(intelligence: $viewModel.autoIntelligence)
+                                .padding(.leading, 4)
+                        } else if viewModel.currentModel.isReasoningModel {
                             ReasoningEffortSelector(
                                 supportsEffort: viewModel.currentModel.supportsReasoningEffort,
                                 supportsToggle: viewModel.currentModel.supportsThinkingToggle,
@@ -678,7 +681,10 @@ struct MessageInputView: View {
 
                         modelSelectorButton
 
-                        if viewModel.currentModel.isReasoningModel {
+                        if viewModel.currentModel.isAuto {
+                            AutoIntelligenceSelector(intelligence: $viewModel.autoIntelligence)
+                                .padding(.leading, 4)
+                        } else if viewModel.currentModel.isReasoningModel {
                             ReasoningEffortSelector(
                                 supportsEffort: viewModel.currentModel.supportsReasoningEffort,
                                 supportsToggle: viewModel.currentModel.supportsThinkingToggle,
@@ -791,13 +797,20 @@ struct MessageInputView: View {
         .padding(.leading, 8)
     }
 
+    /// Collapsed picker label: "Auto · <level>" for Auto, else the model name.
+    private var currentModelLabel: String {
+        viewModel.currentModel.isAuto
+            ? viewModel.autoIntelligence.displayName
+            : viewModel.currentModel.displayName
+    }
+
     @ViewBuilder
     private var modelSelectorButton: some View {
         Button {
             viewModel.showModelSelectorSheet = true
         } label: {
             HStack(spacing: 4) {
-                Text(viewModel.currentModel.displayName)
+                Text(currentModelLabel)
                     .font(.system(size: 12, weight: .semibold))
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 10, weight: .semibold))
@@ -810,7 +823,7 @@ struct MessageInputView: View {
         }
         .disabled(viewModel.isLoading)
         .accessibilityLabel("Model")
-        .accessibilityValue(viewModel.currentModel.displayName)
+        .accessibilityValue(currentModelLabel)
         .accessibilityHint("Changes the AI model")
         .padding(.leading, 4)
     }

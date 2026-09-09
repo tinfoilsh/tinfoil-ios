@@ -323,6 +323,16 @@ class ChatViewModel: ObservableObject {
             }
         }
     }
+    /// Auto intelligence slider position. Device-local, like the selected
+    /// model, so it is not part of the shared profile settings.
+    @Published var autoIntelligence: AutoIntelligence = .default {
+        didSet {
+            UserDefaults.standard.set(
+                autoIntelligence.rawValue,
+                forKey: Constants.StorageKeys.Settings.autoIntelligence
+            )
+        }
+    }
 
     // While true, persisted-setting didSet observers skip the shared-settings
     // sync callback. Loading stored values during init is not a user edit, and
@@ -994,6 +1004,11 @@ class ChatViewModel: ObservableObject {
             self.thinkingEnabled = UserDefaults.standard.bool(
                 forKey: Constants.StorageKeys.Settings.thinkingEnabled
             )
+        }
+        if let savedIntelligenceRaw = UserDefaults.standard.string(
+            forKey: Constants.StorageKeys.Settings.autoIntelligence
+        ), let savedIntelligence = AutoIntelligence(rawValue: savedIntelligenceRaw) {
+            self.autoIntelligence = savedIntelligence
         }
         isLoadingPersistedSettings = false
 
@@ -2717,9 +2732,13 @@ class ChatViewModel: ObservableObject {
         upsertSummary(for: chatToSelect)
         evictInactiveMaterializedChats()
 
-        // Update the current model to match the chat's model
-        if currentModel != chatToSelect.modelType {
-            changeModel(to: chatToSelect.modelType, shouldUpdateChat: false)
+        // Update the current model to match the chat's model. Chats saved
+        // under a legacy Auto tier id map onto the single Auto entry.
+        let chatModel = chatToSelect.modelType.isAuto
+            ? (AppConfig.shared.autoModel ?? chatToSelect.modelType)
+            : chatToSelect.modelType
+        if currentModel != chatModel {
+            changeModel(to: chatModel, shouldUpdateChat: false)
         }
 
         // Lazy-load full-res images for v1 synced chats
@@ -3836,6 +3855,7 @@ class ChatViewModel: ObservableObject {
         let streamProjectDocuments = projectDocuments
         let streamReasoningEffort = reasoningEffort
         let streamThinkingEnabled = thinkingEnabled
+        let streamAutoIntelligence = autoIntelligence
         let streamWebSearchEnabled = isWebSearchEnabled
             && SettingsManager.shared.webSearchAvailable
         let summaryService = ThinkingSummaryService()
@@ -4001,6 +4021,7 @@ class ChatViewModel: ObservableObject {
                     reasoningConfig: representativeModel.reasoningConfig,
                     reasoningEffort: streamReasoningEffort,
                     thinkingEnabled: streamThinkingEnabled,
+                    autoIntelligence: streamAutoIntelligence,
                     genUIEnabled: SettingsManager.shared.genUIEnabled,
                     autoCandidates: modelSelection.autoCandidates,
                     includeTimeReminder: true
@@ -5298,6 +5319,7 @@ class ChatViewModel: ObservableObject {
                 thinkingEnabled: thinkingEnabled,
                 genUIEnabled: false,
                 autoCandidates: modelSelection.autoCandidates,
+                autoIntelligence: autoIntelligence,
                 includeTimeReminder: false,
                 responseFormat: responseFormat
             )
