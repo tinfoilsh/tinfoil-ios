@@ -49,6 +49,7 @@ struct ChatSidebar: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @ObservedObject var authManager: AuthManager
     let onSubscribe: () -> Void
+    let onRequestSignIn: () -> Void
     @State private var editingChatId: String? = nil
     @State private var editingTitle: String = ""
     @State private var deletingChatId: String? = nil
@@ -304,6 +305,11 @@ struct ChatSidebar: View {
                 // swipe actions; the row chrome is stripped so the sidebar
                 // keeps its own look.
                 List {
+                    if let upsellVariant {
+                        upsellCard(upsellVariant)
+                            .sidebarRow(top: 8)
+                    }
+
                     if authManager.isAuthenticated && settings.isCloudSyncEnabled {
                         favoritesSection(projectColors: projectColors)
 
@@ -360,17 +366,11 @@ struct ChatSidebar: View {
             Divider()
                 .background(Color.gray.opacity(0.3))
 
-            VStack(spacing: 8) {
-                if !authManager.hasActiveSubscription {
-                    subscribeButton
-                }
-
-                settingsButton
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 8)
-            .safeAreaPadding(.bottom)
+            settingsButton
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 8)
+                .safeAreaPadding(.bottom)
         }
         .frame(maxHeight: .infinity, alignment: .top)
     }
@@ -787,25 +787,95 @@ struct ChatSidebar: View {
             }
     }
 
-    /// Upgrade entry point kept in the sidebar so users without Premium can
-    /// find it without digging through Settings.
-    private var subscribeButton: some View {
-        Button(action: onSubscribe) {
-            HStack(spacing: 8) {
-                Image(systemName: "sparkles")
-                    .font(.subheadline.weight(.semibold))
-                Text("Subscribe to Premium")
-                    .font(.body.weight(.semibold))
+    private enum UpsellVariant {
+        case account
+        case premium
+    }
+
+    /// Mirrors the webapp's sidebar upsell: hidden while auth is still
+    /// resolving or once the user has Premium; signed-out users are asked
+    /// to create an account, signed-in free users to subscribe.
+    private var upsellVariant: UpsellVariant? {
+        if authManager.isLoading || authManager.hasActiveSubscription { return nil }
+        return authManager.isAuthenticated ? .premium : .account
+    }
+
+    private struct UpsellFeature: Identifiable {
+        let systemImage: String
+        let text: String
+        var id: String { text }
+    }
+
+    private func upsellFeatures(for variant: UpsellVariant) -> [UpsellFeature] {
+        switch variant {
+        case .premium:
+            return [
+                UpsellFeature(systemImage: "mic", text: "Speech-to-text voice input"),
+                UpsellFeature(systemImage: "sparkles", text: "No daily request limits"),
+                UpsellFeature(systemImage: "folder", text: "Create projects to chat with files"),
+            ]
+        case .account:
+            return [
+                UpsellFeature(systemImage: "bubble.left.and.bubble.right", text: "Keep your chat history"),
+                UpsellFeature(systemImage: "icloud", text: "Encrypted sync across devices"),
+                UpsellFeature(systemImage: "pin", text: "Save your favorite chats"),
+            ]
+        }
+    }
+
+    private func upsellCard(_ variant: UpsellVariant) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Get more out of Tinfoil Chat")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(upsellFeatures(for: variant)) { feature in
+                    HStack(spacing: 12) {
+                        Image(systemName: feature.systemImage)
+                            .font(.caption)
+                            .foregroundColor(Color(UIColor.tertiaryLabel))
+                            .frame(width: 16)
+                        Text(feature.text)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
-            .foregroundColor(.white)
-            .padding(.vertical, 12)
-            .padding(.horizontal, 16)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .background(Color.tinfoilAccentDark)
-            .cornerRadius(8)
+
+            switch variant {
+            case .premium:
+                upsellCTAButton("Subscribe to Premium", action: onSubscribe)
+                    .accessibilityHint("Opens subscription options")
+            case .account:
+                upsellCTAButton("Create account", action: onRequestSignIn)
+                    .accessibilityHint("Opens sign in")
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(UIColor.secondarySystemBackground).opacity(0.3))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Color.gray.opacity(0.1), lineWidth: 1)
+        )
+    }
+
+    private func upsellCTAButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundColor(.white)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity)
+                .background(Color.tinfoilAccentDark)
+                .cornerRadius(8)
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Opens subscription options")
     }
 
     @ViewBuilder
