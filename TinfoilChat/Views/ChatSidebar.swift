@@ -48,6 +48,7 @@ struct ChatSidebar: View {
     @Binding var navigationRequest: ChatNavigationRequest?
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @ObservedObject var authManager: AuthManager
+    let onSubscribe: () -> Void
     @State private var editingChatId: String? = nil
     @State private var editingTitle: String = ""
     @State private var deletingChatId: String? = nil
@@ -365,11 +366,17 @@ struct ChatSidebar: View {
             Divider()
                 .background(Color.gray.opacity(0.3))
 
-            settingsButton
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 8)
-                .safeAreaPadding(.bottom)
+            VStack(spacing: 8) {
+                if !authManager.hasActiveSubscription {
+                    subscribeButton
+                }
+
+                settingsButton
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
+            .safeAreaPadding(.bottom)
         }
         .frame(maxHeight: .infinity, alignment: .top)
     }
@@ -707,6 +714,27 @@ struct ChatSidebar: View {
                         .accessibilityLabel("Cloud sync needs attention")
                 }
             }
+    }
+
+    /// Upgrade entry point kept in the sidebar so users without Premium can
+    /// find it without digging through Settings.
+    private var subscribeButton: some View {
+        Button(action: onSubscribe) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.subheadline.weight(.semibold))
+                Text("Subscribe to Premium")
+                    .font(.body.weight(.semibold))
+            }
+            .foregroundColor(.white)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .background(Color.tinfoilAccentDark)
+            .cornerRadius(8)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens subscription options")
     }
 
     @ViewBuilder
