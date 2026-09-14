@@ -214,8 +214,11 @@ struct MessageInputView: View {
     /// Voice input stays reachable with a single tap even after text has
     /// been typed or dictated, so a paused recording can always be resumed
     /// and appended to the draft. Mirrors the webapp's standalone mic.
+    /// Only offered once the draft has content: with an empty draft the
+    /// trailing button owns the voice role, and a hold here would flip it
+    /// to voice and tear this control down mid-recording.
     private var showsStandaloneVoiceButton: Bool {
-        showAudioButton && trailingAction != .voice
+        showAudioButton && hasDraftContent && trailingAction != .voice
     }
 
     private var voiceIconName: String {
@@ -242,7 +245,8 @@ struct MessageInputView: View {
         }
     }
 
-    /// Voice greys out while a recording is being transcribed.
+    /// Same chat-context gates as the trailing button, plus voice greys out
+    /// while a recording is being transcribed.
     private var isVoiceActionDisabled: Bool {
         guard viewModel.canUseCurrentChatActions,
               viewModel.canSendInCurrentContext else { return true }
