@@ -300,55 +300,49 @@ struct ChatSidebar: View {
         return VStack(spacing: 0) {
             recoveryBanner
             ScrollViewReader { scrollProxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        if authManager.isAuthenticated && settings.isCloudSyncEnabled {
-                            favoritesSection(projectColors: projectColors)
-                                .padding(.horizontal, 16)
-                                .padding(.top, 16)
-                                .id(ChatNavigationDestination.favorites)
+                // A List rather than a ScrollView so chat rows get the system
+                // swipe actions; the row chrome is stripped so the sidebar
+                // keeps its own look.
+                List {
+                    if authManager.isAuthenticated && settings.isCloudSyncEnabled {
+                        favoritesSection(projectColors: projectColors)
 
-                            if viewModel.hasPremiumAccess {
-                                projectsSection
-                                    .padding(.horizontal, 16)
-                                    .padding(.top, 8)
-                                    .id(ChatNavigationDestination.projects)
-                            }
-                        }
-
-                        chatsSectionHeader
-                            .padding(.horizontal, 16)
-                            .padding(.top, 8)
-
-                        if isTabSwitching {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle())
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 24)
-                        } else if isChatsExpanded {
-                            if authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled {
-                                cloudLocalTabSwitcher
-                                    .padding(.horizontal, 16)
-                                    .padding(.top, 8)
-                            }
-
-                            chatsDescription
-                                .padding(.horizontal, 16)
-                                .padding(.top, 8)
-
-                            if isChatSearchEnabled {
-                                chatSearchField
-                                    .padding(.horizontal, 16)
-                                    .padding(.top, 8)
-                            }
-
-                            chatList(projectColors: projectColors)
-                                .padding(.horizontal, 16)
-                                .padding(.top, 8)
-                                .padding(.bottom, 8)
+                        if viewModel.hasPremiumAccess {
+                            projectsSection
+                                .sidebarRow(top: 8)
+                                .id(ChatNavigationDestination.projects)
                         }
                     }
+
+                    chatsSectionHeader
+                        .sidebarRow(top: 8)
+
+                    if isTabSwitching {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle())
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 24)
+                            .sidebarRow()
+                    } else if isChatsExpanded {
+                        if authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled {
+                            cloudLocalTabSwitcher
+                                .sidebarRow(top: 8)
+                        }
+
+                        chatsDescription
+                            .sidebarRow(top: 8)
+
+                        if isChatSearchEnabled {
+                            chatSearchField
+                                .sidebarRow(top: 8)
+                        }
+
+                        chatList(projectColors: projectColors)
+                    }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .environment(\.defaultMinListRowHeight, 1)
                 .applyAlwaysBounceIfAvailable()
                 .refreshable {
                     await authManager.initializeAuthState()
@@ -446,144 +440,208 @@ struct ChatSidebar: View {
         }
     }
 
-    private func chatList(projectColors: [String: String]) -> some View {
-        VStack(spacing: 12) {
-            ForEach(Array(displayedChats.enumerated()), id: \.element.id) { _, chat in
-                ChatListItem(
-                    chat: chat,
-                    isSelected: viewModel.selectedChatId == chat.id,
-                    isEditing: editingChatId == chat.id,
-                    editingTitle: $editingTitle,
-                    createdTimeString: chat.isBlankChat ? "" : relativeTimeString(from: chat.createdAt),
-                    updatedTimeString: chat.isBlankChat ? "" : updatedTimeString(for: chat),
-                    isSyncing: !chat.isBlankChat && cloudSync.pendingUploadChatIds.contains(chat.id),
-                    syncFailed: !chat.isBlankChat && syncHealth.failedChats[chat.id] != nil,
-                    isGenerating: viewModel.isChatStreaming(chat.id),
-                    isPinned: profileManager.isChatPinned(chat.id),
-                    projectColor: chat.projectId.flatMap { projectColors[$0] },
-                    onSelect: {
-                        if isChatSearchActive {
-                            if !chatSearch.available {
-                                viewModel.openSummaryChat(
-                                    id: chat.id,
-                                    projectId: chat.projectId,
-                                    isLocalOnly: chat.isLocalOnly
-                                )
-                                return
-                            }
-                            guard let fullChat = resolveSidebarSearchChat(
-                                id: chat.id,
-                                remoteResults: chatSearch.results,
-                                loadedChats: viewModel.chats
-                            ) else { return }
-                            viewModel.openSearchResult(fullChat)
-                        } else {
-                            viewModel.selectChat(id: chat.id, isLocalOnly: chat.isLocalOnly)
-                        }
-                    },
-                    onEdit: {
-                        if editingChatId == chat.id {
-                            let editedChatId = chat.id
-                            let editedTitle = editingTitle
-                            Task {
-                                await viewModel.updateChatTitle(editedChatId, newTitle: editedTitle)
-                                if editingChatId == editedChatId {
-                                    editingChatId = nil
-                                }
-                            }
-                        } else {
-                            startEditing(chat)
-                        }
-                    },
-                    onDelete: { confirmDelete(chat) },
-                    showEditDelete: authManager.isAuthenticated
-                )
-                .contextMenu {
-                    if viewModel.canPinChat(chat) || profileManager.isChatPinned(chat.id) {
-                        Button {
-                            viewModel.toggleChatPin(chat)
-                        } label: {
-                            Label(
-                                profileManager.isChatPinned(chat.id) ? "Unpin" : "Pin",
-                                systemImage: profileManager.isChatPinned(chat.id) ? "pin.slash" : "pin"
-                            )
-                        }
+    /// Whether a row may be renamed or deleted, matching the inline
+    /// edit/trash controls and the accessibility actions on the row.
+    private func canManageChat(_ chat: ChatListSummary) -> Bool {
+        authManager.isAuthenticated && !chat.isBlankChat && !chat.decryptionFailed
+    }
+
+    /// Swipe right to pin, swipe left to delete or rename, mirroring the
+    /// project page's chat rows.
+    private func chatRowSwipeActions<Content: View>(
+        _ chat: ChatListSummary,
+        content: Content
+    ) -> some View {
+        content
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                if viewModel.canPinChat(chat) || profileManager.isChatPinned(chat.id) {
+                    Button {
+                        viewModel.toggleChatPin(chat)
+                    } label: {
+                        Label(
+                            profileManager.isChatPinned(chat.id) ? "Unpin" : "Pin",
+                            systemImage: profileManager.isChatPinned(chat.id) ? "pin.slash" : "pin"
+                        )
                     }
-                    if viewModel.hasPremiumAccess && !chat.isBlankChat && !chat.decryptionFailed {
-                        ForEach(viewModel.projects.filter { $0.decryptionFailed != true }) { project in
-                            Button {
-                                Task {
-                                    await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
-                                }
-                            } label: {
-                                Label {
-                                    Text("Add to \(project.name)")
-                                } icon: {
-                                    ProjectFolderIcon(color: project.color, size: 22)
-                                }
-                            }
-                        }
-                    }
+                    .tint(.blue)
                 }
             }
-
-            if isChatSearchActive {
-                chatSearchStatusRow
-            } else if viewModel.hasMoreChats && activeTab != .local {
-                if viewModel.isLoadingMore {
-                    HStack {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle())
-                            .scaleEffect(0.8)
-                        Text("Loading...")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                if canManageChat(chat) {
+                    Button(role: .destructive) {
+                        confirmDelete(chat)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                } else {
-                    loadMoreButton
+                    Button {
+                        startEditing(chat)
+                    } label: {
+                        Label("Rename", systemImage: "square.and.pencil")
+                    }
+                    .tint(.gray)
                 }
+            }
+    }
+
+    @ViewBuilder
+    private func chatList(projectColors: [String: String]) -> some View {
+        ForEach(displayedChats) { chat in
+            chatRowSwipeActions(chat, content: ChatListItem(
+                chat: chat,
+                isSelected: viewModel.selectedChatId == chat.id,
+                isEditing: editingChatId == chat.id,
+                editingTitle: $editingTitle,
+                createdTimeString: chat.isBlankChat ? "" : relativeTimeString(from: chat.createdAt),
+                updatedTimeString: chat.isBlankChat ? "" : updatedTimeString(for: chat),
+                isSyncing: !chat.isBlankChat && cloudSync.pendingUploadChatIds.contains(chat.id),
+                syncFailed: !chat.isBlankChat && syncHealth.failedChats[chat.id] != nil,
+                isGenerating: viewModel.isChatStreaming(chat.id),
+                isPinned: profileManager.isChatPinned(chat.id),
+                projectColor: chat.projectId.flatMap { projectColors[$0] },
+                onSelect: {
+                    if isChatSearchActive {
+                        if !chatSearch.available {
+                            viewModel.openSummaryChat(
+                                id: chat.id,
+                                projectId: chat.projectId,
+                                isLocalOnly: chat.isLocalOnly
+                            )
+                            return
+                        }
+                        guard let fullChat = resolveSidebarSearchChat(
+                            id: chat.id,
+                            remoteResults: chatSearch.results,
+                            loadedChats: viewModel.chats
+                        ) else { return }
+                        viewModel.openSearchResult(fullChat)
+                    } else {
+                        viewModel.selectChat(id: chat.id, isLocalOnly: chat.isLocalOnly)
+                    }
+                },
+                onEdit: {
+                    if editingChatId == chat.id {
+                        let editedChatId = chat.id
+                        let editedTitle = editingTitle
+                        Task {
+                            await viewModel.updateChatTitle(editedChatId, newTitle: editedTitle)
+                            if editingChatId == editedChatId {
+                                editingChatId = nil
+                            }
+                        }
+                    } else {
+                        startEditing(chat)
+                    }
+                },
+                onDelete: { confirmDelete(chat) },
+                showEditDelete: authManager.isAuthenticated
+            )
+            .contextMenu {
+                if viewModel.canPinChat(chat) || profileManager.isChatPinned(chat.id) {
+                    Button {
+                        viewModel.toggleChatPin(chat)
+                    } label: {
+                        Label(
+                            profileManager.isChatPinned(chat.id) ? "Unpin" : "Pin",
+                            systemImage: profileManager.isChatPinned(chat.id) ? "pin.slash" : "pin"
+                        )
+                    }
+                }
+                if viewModel.hasPremiumAccess && !chat.isBlankChat && !chat.decryptionFailed {
+                    ForEach(viewModel.projects.filter { $0.decryptionFailed != true }) { project in
+                        Button {
+                            Task {
+                                await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
+                            }
+                        } label: {
+                            Label {
+                                Text("Add to \(project.name)")
+                            } icon: {
+                                ProjectFolderIcon(color: project.color, size: 22)
+                            }
+                        }
+                    }
+                }
+                if canManageChat(chat) {
+                    Divider()
+                    Button {
+                        startEditing(chat)
+                    } label: {
+                        Label("Rename", systemImage: "square.and.pencil")
+                    }
+                    Button(role: .destructive) {
+                        confirmDelete(chat)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+            })
+            .sidebarRow(top: 6, bottom: 6)
+        }
+
+        if isChatSearchActive {
+            chatSearchStatusRow
+                .sidebarRow(top: 6, bottom: 8)
+        } else if viewModel.hasMoreChats && activeTab != .local {
+            if viewModel.isLoadingMore {
+                HStack {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle())
+                        .scaleEffect(0.8)
+                    Text("Loading...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .sidebarRow(top: 6, bottom: 8)
+            } else {
+                loadMoreButton
+                    .sidebarRow(top: 6, bottom: 8)
             }
         }
     }
 
+    /// Emits the header and each favorite as separate list rows so the
+    /// rows pick up swipe actions.
+    @ViewBuilder
     private func favoritesSection(projectColors: [String: String]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isFavoritesExpanded.toggle()
-                }
-            } label: {
-                HStack {
-                    Label("Favorites", systemImage: "pin")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    Spacer()
-                    Image(systemName: "chevron.down")
-                        .font(.caption)
-                        .rotationEffect(.degrees(isFavoritesExpanded ? 0 : -90))
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 12)
-                .contentShape(Rectangle())
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isFavoritesExpanded.toggle()
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Favorites")
-            .accessibilityAddTraits(.isHeader)
-            .accessibilityValue(isFavoritesExpanded ? "Expanded" : "Collapsed")
+        } label: {
+            HStack {
+                Label("Favorites", systemImage: "pin")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.caption)
+                    .rotationEffect(.degrees(isFavoritesExpanded ? 0 : -90))
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Favorites")
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityValue(isFavoritesExpanded ? "Expanded" : "Collapsed")
+        .sidebarRow(top: 16)
+        .id(ChatNavigationDestination.favorites)
 
-            if isFavoritesExpanded {
-                if visibleFavoriteChats.isEmpty {
-                    Text("Pin cloud chats for quick access.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 14)
-                } else {
-                    ForEach(visibleFavoriteChats) { chat in
-                        favoriteChatRow(chat, projectColors: projectColors)
-                    }
+        if isFavoritesExpanded {
+            if visibleFavoriteChats.isEmpty {
+                Text("Pin cloud chats for quick access.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 14)
+                    .sidebarRow(top: 10)
+            } else {
+                ForEach(visibleFavoriteChats) { chat in
+                    favoriteChatRow(chat, projectColors: projectColors)
+                        .sidebarRow(top: 10)
                 }
             }
         }
@@ -600,7 +658,7 @@ struct ChatSidebar: View {
 
     private func favoriteChatRow(_ chat: Chat, projectColors: [String: String]) -> some View {
         let summary = ChatListSummary(from: chat)
-        return ChatListItem(
+        return chatRowSwipeActions(summary, content: ChatListItem(
             chat: summary,
             isSelected: viewModel.currentChat?.id == chat.id,
             isEditing: editingChatId == chat.id,
@@ -665,7 +723,19 @@ struct ChatSidebar: View {
                     }
                 }
             }
-        }
+
+            Divider()
+            Button {
+                startEditing(summary)
+            } label: {
+                Label("Rename", systemImage: "square.and.pencil")
+            }
+            Button(role: .destructive) {
+                confirmDelete(summary)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        })
     }
 
     @ViewBuilder
@@ -989,6 +1059,15 @@ private extension View {
         } else {
             self
         }
+    }
+
+    /// Strips the system list row chrome so sidebar content lays out as it
+    /// would in a plain stack, with the sidebar's own horizontal margin.
+    func sidebarRow(top: CGFloat = 0, bottom: CGFloat = 0) -> some View {
+        self
+            .listRowInsets(EdgeInsets(top: top, leading: 16, bottom: bottom, trailing: 16))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
     }
 }
 
