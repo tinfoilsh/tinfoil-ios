@@ -488,7 +488,9 @@ struct ChatContainer: View {
             isOpen: $isSidebarOpen,
             navigationRequest: $sidebarNavigationRequest,
             viewModel: viewModel,
-            authManager: authManager
+            authManager: authManager,
+            onSubscribe: { showPremiumModal = true },
+            onRequestSignIn: showAuthenticationView
         )
     }
 
