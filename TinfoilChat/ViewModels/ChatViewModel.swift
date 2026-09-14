@@ -5527,6 +5527,9 @@ class ChatViewModel: ObservableObject {
             return false
         }
         let trimmedContent = newContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Editing only rewrites the text; the images and documents the user
+        // originally sent stay with the message so the model keeps its context.
+        let originalAttachments = chat.messages[messageIndex].attachments
 
         // Truncate to remove the edited message and all messages after it
         var updatedChat = chat
@@ -5543,7 +5546,11 @@ class ChatViewModel: ObservableObject {
         // Dismiss keyboard
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
 
-        let userMessage = Message(role: .user, content: trimmedContent)
+        let userMessage = Message(
+            role: .user,
+            content: trimmedContent,
+            attachments: originalAttachments
+        )
         addMessage(userMessage)
 
         messageEditSession = nil
