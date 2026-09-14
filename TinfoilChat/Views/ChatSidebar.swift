@@ -473,6 +473,7 @@ struct ChatSidebar: View {
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
+                    .tint(.red)
                     Button {
                         startEditing(chat)
                     } label: {
