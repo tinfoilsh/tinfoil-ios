@@ -384,11 +384,13 @@ struct WebSearchSource: Codable, Equatable, Identifiable {
     let id: String
     let title: String
     let url: String
+    let snippet: String?
 
-    init(id: String = UUID().uuidString.lowercased(), title: String, url: String) {
+    init(id: String = UUID().uuidString.lowercased(), title: String, url: String, snippet: String? = nil) {
         self.id = id
         self.title = title
         self.url = url
+        self.snippet = snippet
     }
     
     init(from decoder: Decoder) throws {
@@ -397,6 +399,19 @@ struct WebSearchSource: Codable, Equatable, Identifiable {
         id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString.lowercased()
         title = try container.decode(String.self, forKey: .title)
         url = try container.decode(String.self, forKey: .url)
+        snippet = try container.decodeIfPresent(String.self, forKey: .snippet)
+    }
+
+    var timelineValue: JSONValue {
+        var fields: [String: JSONValue] = ["title": .string(title), "url": .string(url)]
+        if let snippet { fields["snippet"] = .string(snippet) }
+        return .object(fields)
+    }
+
+    static func fromTimeline(_ value: JSONValue) -> WebSearchSource? {
+        guard let fields = value.objectValue,
+              let url = fields["url"]?.stringValue else { return nil }
+        return WebSearchSource(title: fields["title"]?.stringValue ?? url, url: url, snippet: fields["snippet"]?.stringValue)
     }
 }
 
@@ -443,11 +458,13 @@ struct URLFetchState: Codable, Equatable, Identifiable {
     let id: String
     let url: String
     var status: URLFetchStatus
+    var sources: [WebSearchSource]?
 
-    init(id: String = UUID().uuidString.lowercased(), url: String, status: URLFetchStatus = .fetching) {
+    init(id: String = UUID().uuidString.lowercased(), url: String, status: URLFetchStatus = .fetching, sources: [WebSearchSource]? = nil) {
         self.id = id
         self.url = url
         self.status = status
+        self.sources = sources
     }
 }
 
@@ -1026,7 +1043,7 @@ struct Message: Identifiable, Codable, Equatable {
                         guard let item = value.objectValue,
                               let url = item["url"]?.stringValue else { return nil }
                         let title = item["title"]?.stringValue ?? url
-                        return WebSearchSource(title: title, url: url)
+                        return WebSearchSource(title: title, url: url, snippet: item["snippet"]?.stringValue)
                     }
                 }
                 let instance = WebSearchInstance(
@@ -1047,7 +1064,7 @@ struct Message: Identifiable, Codable, Equatable {
                           let url = item["url"]?.stringValue else { continue }
                     let statusRaw = item["status"]?.stringValue ?? "completed"
                     let status = URLFetchStatus(rawValue: statusRaw) ?? .completed
-                    let fetch = URLFetchState(id: id, url: url, status: status)
+                    let fetch = URLFetchState(id: id, url: url, status: status, sources: item["sources"]?.arrayValue?.compactMap(WebSearchSource.fromTimeline))
                     fetches.append(fetch)
                     segments.append(.urlFetch(fetchId: id))
                 }
@@ -1203,11 +1220,15 @@ struct Message: Identifiable, Codable, Equatable {
         for segment in segments {
             if case .urlFetch(let fetchId) = segment {
                 guard let fetch = fetchById[fetchId] else { continue }
-                pendingFetches.append(.object([
+                var fetchFields: [String: JSONValue] = [
                     "id": .string(fetch.id),
                     "url": .string(fetch.url),
                     "status": .string(fetch.status.rawValue),
-                ]))
+                ]
+                if let sources = fetch.sources {
+                    fetchFields["sources"] = .array(sources.map(\.timelineValue))
+                }
+                pendingFetches.append(.object(fetchFields))
                 continue
             }
 
@@ -1235,9 +1256,7 @@ struct Message: Identifiable, Codable, Equatable {
                     if let query = search.query { state["query"] = .string(query) }
                     state["status"] = .string(search.status.rawValue)
                     if let sources = search.sources {
-                        state["sources"] = .array(sources.map {
-                            .object(["title": .string($0.title), "url": .string($0.url)])
-                        })
+                        state["sources"] = .array(sources.map(\.timelineValue))
                     }
                     if let reason = search.reason { state["reason"] = .string(reason) }
                 } else {

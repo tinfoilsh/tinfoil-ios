@@ -42,6 +42,10 @@ enum TokenEstimation {
         reasoningHistoryPolicy: ReasoningHistoryPolicy = .none
     ) -> Int {
         var tokens = estimateTokenCount(message.content)
+        let evidence = WebSearchHistory.messages(for: message, messageIndex: 0)
+        if !evidence.isEmpty {
+            tokens += Int(ceil(Double(WebSearchHistory.serializedLength(evidence)) / Constants.Context.charsPerToken))
+        }
         if reasoningHistoryPolicy.includesReasoning(for: message) {
             tokens += estimateTokenCount(message.reasoningContentForHistory)
         }

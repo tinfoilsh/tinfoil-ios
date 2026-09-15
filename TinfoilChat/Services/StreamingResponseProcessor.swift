@@ -185,9 +185,8 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     }
 
     func findSearchInstance(matching eventId: String?) -> WebSearchInstance? {
-        if let eventId = eventId,
-           let hit = webSearches.first(where: { $0.id == eventId }) {
-            return hit
+        if let eventId = eventId {
+            return webSearches.first(where: { $0.id == eventId })
         }
         return webSearches.last
     }
@@ -313,7 +312,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
                     id: lastSearch.id,
                     query: lastSearch.query,
                     status: promotedStatus,
-                    sources: collectedSources,
+                    sources: lastSearch.sources?.contains(where: { $0.snippet?.isEmpty == false }) == true ? lastSearch.sources : collectedSources,
                     reason: lastSearch.reason
                 )
             }
@@ -491,7 +490,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
                 id: lastSearch.id,
                 query: lastSearch.query,
                 status: finalStatus,
-                sources: collectedSources,
+                sources: lastSearch.sources?.contains(where: { $0.snippet?.isEmpty == false }) == true ? lastSearch.sources : collectedSources,
                 reason: lastSearch.reason
             )
         }

@@ -1797,12 +1797,18 @@ private struct RecoveredEventState {
                 urlFetches.append(URLFetchState(id: fetchId, url: url, status: status))
                 processor.appendURLFetchSegment(fetchId)
             }
+            if status == .completed, let index = urlFetches.firstIndex(where: { $0.id == fetchId }) {
+                urlFetches[index].sources = event.sources?.compactMap { source in
+                    guard source.url == url else { return nil }
+                    return WebSearchSource(title: source.title ?? url, url: url, snippet: source.snippet)
+                }
+            }
             return
         }
 
         let sources = event.sources?.compactMap { source -> WebSearchSource? in
             guard let url = source.url, !url.isEmpty else { return nil }
-            return WebSearchSource(title: source.title ?? url, url: url)
+            return WebSearchSource(title: source.title ?? url, url: url, snippet: source.snippet)
         }
         let existing = processor.findSearchInstance(matching: event.itemId)
         let id = existing?.id ?? event.itemId ?? processor.allocateSearchId()
@@ -1818,7 +1824,7 @@ private struct RecoveredEventState {
         case .blocked:
             status = .blocked
         }
-        let mergedSources = (sources?.isEmpty == false) ? sources : existing?.sources
+        let mergedSources = sources ?? existing?.sources
         processor.upsertWebSearch(
             WebSearchInstance(
                 id: id,

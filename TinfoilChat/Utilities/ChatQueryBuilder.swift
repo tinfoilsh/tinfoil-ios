@@ -105,7 +105,8 @@ struct ChatQueryBuilder {
             reasoningHistoryPolicy: reasoningHistoryPolicy
         )
 
-        for msg in recentMessages {
+        for (index, msg) in recentMessages.enumerated() {
+            messages.append(contentsOf: WebSearchHistory.messages(for: msg, messageIndex: index))
             let reasoningContent = reasoningHistoryPolicy.includesReasoning(for: msg)
                 ? msg.reasoningContentForHistory
                 : nil

@@ -31,6 +31,7 @@ struct TinfoilWebSearchCallEvent: Decodable, Sendable {
     struct Source: Decodable, Sendable {
         let title: String?
         let url: String?
+        let snippet: String?
     }
 
     let type: String
