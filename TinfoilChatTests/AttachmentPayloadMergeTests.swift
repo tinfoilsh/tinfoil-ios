@@ -26,8 +26,18 @@ struct AttachmentPayloadMergeTests {
         )
     }
 
-    private func userMessage(id: String = "msg-1", _ attachments: [Attachment]) -> Message {
-        Message(id: id, role: .user, content: "What is in this image?", attachments: attachments)
+    private func userMessage(
+        id: String = "msg-1",
+        turnId: String? = nil,
+        _ attachments: [Attachment]
+    ) -> Message {
+        Message(
+            id: id,
+            role: .user,
+            turnId: turnId,
+            content: "What is in this image?",
+            attachments: attachments
+        )
     }
 
     @Test func copiesLocalBytesIntoWireCopyMatchedById() {
@@ -47,6 +57,19 @@ struct AttachmentPayloadMergeTests {
         let merged = AttachmentPayloadMerge.inheritingImageBytes(into: remote, from: local)
 
         #expect(merged[0].attachments[0].id == "server-id")
+        #expect(merged[0].attachments[0].base64 == fullBase64)
+    }
+
+    @Test func matchesByTurnIdWhenMessageIdsDiffer() {
+        // Messages written by the web app carry no id, so each decode
+        // synthesizes a new one; the turn id is what both copies share.
+        let local = [
+            userMessage(id: "decoded-a", turnId: "turn-1", [image(id: "client-id", base64: fullBase64, encryptionKey: nil)])
+        ]
+        let remote = [userMessage(id: "decoded-b", turnId: "turn-1", [image(id: "server-id")])]
+
+        let merged = AttachmentPayloadMerge.inheritingImageBytes(into: remote, from: local)
+
         #expect(merged[0].attachments[0].base64 == fullBase64)
     }
 

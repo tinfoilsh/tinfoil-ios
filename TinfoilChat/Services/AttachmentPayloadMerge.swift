@@ -24,6 +24,14 @@ enum AttachmentPayloadMerge {
         }
     }
 
+    /// True when any image attachment lacks full-resolution bytes,
+    /// regardless of whether it can be fetched from the bucket.
+    static func containsBytelessImages(_ messages: [Message]) -> Bool {
+        messages.contains { message in
+            message.attachments.contains { $0.type == .image && $0.base64 == nil }
+        }
+    }
+
     /// Returns `messages` with the given attachment-id → base64 map merged
     /// into matching attachments.
     static func applyingImageBytes(
@@ -88,14 +96,17 @@ enum AttachmentPayloadMerge {
     }
 
     private struct MetadataKey: Hashable {
-        let messageId: String
+        let messageKey: String
         let type: AttachmentType
         let fileName: String
         let mimeType: String?
         let fileSize: Int64
 
         init(message: Message, attachment: Attachment) {
-            messageId = message.id
+            // Messages written by the web app carry no id and get a fresh
+            // one on every decode, so the turn id is the stable
+            // correspondence across copies when it is present.
+            messageKey = message.turnId.map { "\(message.role.rawValue):\($0)" } ?? message.id
             type = attachment.type
             fileName = attachment.fileName
             mimeType = attachment.mimeType
