@@ -421,11 +421,13 @@ actor EncryptedFileStorage {
         }
         EditClockStore.observe(chat.clock)
         var chatToSave = chat
+        // Best effort: an unreadable local file must not block the remote
+        // copy from replacing it.
         if existing != nil,
            chatToSave.messages.contains(where: { message in
                message.attachments.contains { $0.type == .image && $0.base64 == nil }
            }),
-           let current = try await loadChatUnlocked(chatId: chat.id, userId: userId) {
+           let current = try? await loadChatUnlocked(chatId: chat.id, userId: userId) {
             chatToSave.messages = AttachmentPayloadMerge.inheritingImageBytes(
                 into: chatToSave.messages,
                 from: current.messages
