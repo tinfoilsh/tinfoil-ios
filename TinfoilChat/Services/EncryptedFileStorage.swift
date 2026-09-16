@@ -421,17 +421,24 @@ actor EncryptedFileStorage {
         }
         EditClockStore.observe(chat.clock)
         var chatToSave = chat
-        // Best effort: an unreadable local file must not block the remote
-        // copy from replacing it.
-        if existing != nil,
-           chatToSave.messages.contains(where: { message in
-               message.attachments.contains { $0.type == .image && $0.base64 == nil }
-           }),
-           let current = try? await loadChatUnlocked(chatId: chat.id, userId: userId) {
-            chatToSave.messages = AttachmentPayloadMerge.inheritingImageBytes(
-                into: chatToSave.messages,
-                from: current.messages
-            )
+        if existing != nil, AttachmentPayloadMerge.containsBytelessImages(chatToSave.messages) {
+            // Best effort: an unreadable local file must not block the
+            // remote copy from replacing it, but cancellation still aborts
+            // the apply.
+            let current: Chat?
+            do {
+                current = try await loadChatUnlocked(chatId: chat.id, userId: userId)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                current = nil
+            }
+            if let current {
+                chatToSave.messages = AttachmentPayloadMerge.inheritingImageBytes(
+                    into: chatToSave.messages,
+                    from: current.messages
+                )
+            }
         }
         try await performSaveChat(
             chatToSave,

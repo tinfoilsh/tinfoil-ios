@@ -138,7 +138,7 @@ actor ChatRecoverySync {
                     $0.decryptionFailed || $0.dataCorrupted ? nil : $0
                 }
                 var candidate = preferredBase(local: local, remote: remoteChat)
-                if let local, AttachmentPayloadMerge.containsUnfetchedSyncedImages(candidate.messages) {
+                if let local, AttachmentPayloadMerge.containsBytelessImages(candidate.messages) {
                     candidate.messages = AttachmentPayloadMerge.inheritingImageBytes(
                         into: candidate.messages,
                         from: local.messages
