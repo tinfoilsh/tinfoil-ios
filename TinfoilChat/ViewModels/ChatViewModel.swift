@@ -2798,6 +2798,35 @@ class ChatViewModel: ObservableObject {
         saveChat(chat)
     }
     
+    /// Returns `messages` with full-resolution bytes fetched for any synced
+    /// image that still lacks them. Fetch failures leave the affected
+    /// attachments unchanged.
+    private func hydratingSyncedImages(in messages: [Message]) async -> [Message] {
+        let needsFetch = messages.contains { message in
+            message.attachments.contains {
+                $0.type == .image && $0.base64 == nil && $0.encryptionKey != nil
+            }
+        }
+        guard needsFetch else { return messages }
+        let loadedImages: [String: String]
+        do {
+            loadedImages = try await CloudStorageService.shared.loadImages(in: messages)
+        } catch {
+            return messages
+        }
+        guard !loadedImages.isEmpty else { return messages }
+        var hydrated = messages
+        for messageIndex in hydrated.indices {
+            for attachmentIndex in hydrated[messageIndex].attachments.indices {
+                let attachmentId = hydrated[messageIndex].attachments[attachmentIndex].id
+                if let base64 = loadedImages[attachmentId] {
+                    hydrated[messageIndex].attachments[attachmentIndex].base64 = base64
+                }
+            }
+        }
+        return hydrated
+    }
+
     /// Merge fetched image base64 data into the current messages of a chat by attachment ID.
     /// This avoids replacing the entire messages array, preventing a stale snapshot from
     /// overwriting messages that may have been updated by sync while images were loading.
@@ -3844,7 +3873,6 @@ class ChatViewModel: ObservableObject {
         let streamChat = updatedStreamChat
         streamState.start(chatId: streamChatId)
 
-        let conversationMessages = streamChat.messages
         let recoveryUserId = currentUserId
         let recoveryStorage: ChatRecoveryStorage?
         if recoveryUserId == nil || streamChat.isTemporary {
@@ -3934,6 +3962,13 @@ class ChatViewModel: ObservableObject {
                 // forces a fresh mint to bypass a stale cached token.
                 try await SessionTokenManager.shared.acquireTokenForSend(
                     forceRefresh: hasRetriedWithFreshKey
+                )
+
+                // Synced images may be present only as thumbnails until the
+                // bucket copy is fetched; a request built without their bytes
+                // would reach a vision model as a text-only prompt.
+                let conversationMessages = await self.hydratingSyncedImages(
+                    in: streamChat.messages
                 )
 
                 // Resolve the (possibly Auto) selection into a representative
