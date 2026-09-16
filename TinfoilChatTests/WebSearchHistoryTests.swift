@@ -18,6 +18,29 @@ struct WebSearchHistoryTests {
         try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(messages)) as? [[String: Any]])
     }
 
+    @Test func eventSourceHelpersFilterAndPreserveOrder() throws {
+        let other = "https://example.com/other"
+        let payload = """
+        {"type":"tinfoil.web_search_call","status":"completed","action":{"type":"open_page","url":"\(url)"},
+         "sources":[{"title":"B","url":"\(other)","snippet":"b"},{"title":"","url":"","snippet":"x"},
+                    {"title":"A","url":"\(url)","snippet":"\(excerpt)"},{"title":null,"url":null}]}
+        """
+        let event = try JSONDecoder().decode(TinfoilWebSearchCallEvent.self, from: Data(payload.utf8))
+        let search = try #require(event.searchSources)
+        #expect(search.map(\.url) == [other, url])
+        #expect(search[1].snippet == excerpt)
+        let fetch = try #require(event.fetchSources(for: url))
+        #expect(fetch.map(\.url) == [url])
+        #expect(fetch[0].snippet == excerpt)
+        #expect(event.fetchSources(for: "") == [])
+        #expect(event.fetchSources(for: "https://example.com/missing") == [])
+
+        let bare = try JSONDecoder().decode(TinfoilWebSearchCallEvent.self,
+            from: Data(#"{"type":"tinfoil.web_search_call","status":"completed"}"#.utf8))
+        #expect(bare.searchSources == nil)
+        #expect(bare.fetchSources(for: url) == nil)
+    }
+
     @Test func replaysPairedEvidenceAfterSixStoredTurns() throws {
         for index in 0..<6 {
             let restored = try JSONDecoder().decode(Message.self, from: JSONEncoder().encode(message()))

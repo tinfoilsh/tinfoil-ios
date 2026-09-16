@@ -60,7 +60,8 @@ struct TinfoilWebSearchCallEvent: Decodable, Sendable {
 
     /// Sources reported by a page-fetch event, restricted to the fetched URL.
     func fetchSources(for url: String) -> [WebSearchSource]? {
-        sources?.compactMap { source in
+        guard !url.isEmpty else { return sources.map { _ in [] } }
+        return sources?.compactMap { source in
             guard source.url == url else { return nil }
             return WebSearchSource(title: source.title ?? url, url: url, snippet: source.snippet)
         }

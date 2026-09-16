@@ -191,15 +191,12 @@ final class StreamingResponseProcessor: @unchecked Sendable {
         return webSearches.last
     }
 
-    /// Router-provided sources carry snippets and are authoritative; citation
-    /// annotations only add URLs that the router did not already report.
+    /// Router-provided sources carry snippets and are authoritative for the
+    /// search they belong to. Citation annotations are a turn-wide accumulator
+    /// and only stand in when the router reported nothing for this search.
     private func mergedSources(for search: WebSearchInstance) -> [WebSearchSource] {
         let retained = search.sources ?? []
-        guard retained.contains(where: { $0.snippet?.isEmpty == false }) else {
-            return collectedSources
-        }
-        let known = Set(retained.map(\.url))
-        return retained + collectedSources.filter { !known.contains($0.url) }
+        return retained.contains(where: { $0.snippet?.isEmpty == false }) ? retained : collectedSources
     }
 
     // MARK: - Chunk processing (stream task)
