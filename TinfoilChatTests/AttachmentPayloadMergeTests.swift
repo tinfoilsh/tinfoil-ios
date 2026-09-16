@@ -26,8 +26,8 @@ struct AttachmentPayloadMergeTests {
         )
     }
 
-    private func userMessage(_ attachments: [Attachment]) -> Message {
-        Message(role: .user, content: "What is in this image?", attachments: attachments)
+    private func userMessage(id: String = "msg-1", _ attachments: [Attachment]) -> Message {
+        Message(id: id, role: .user, content: "What is in this image?", attachments: attachments)
     }
 
     @Test func copiesLocalBytesIntoWireCopyMatchedById() {
@@ -40,7 +40,7 @@ struct AttachmentPayloadMergeTests {
         #expect(merged[0].attachments[0].thumbnailBase64 == "thumb")
     }
 
-    @Test func matchesByMetadataWhenUploadMintedANewId() {
+    @Test func matchesByMetadataWithinTheSameMessageWhenUploadMintedANewId() {
         let local = [userMessage([image(id: "client-id", base64: fullBase64, encryptionKey: nil)])]
         let remote = [userMessage([image(id: "server-id")])]
 
@@ -48,6 +48,15 @@ struct AttachmentPayloadMergeTests {
 
         #expect(merged[0].attachments[0].id == "server-id")
         #expect(merged[0].attachments[0].base64 == fullBase64)
+    }
+
+    @Test func doesNotMatchByMetadataAcrossMessages() {
+        let local = [userMessage(id: "msg-1", [image(id: "client-id", base64: fullBase64, encryptionKey: nil)])]
+        let remote = [userMessage(id: "msg-2", [image(id: "server-id")])]
+
+        let merged = AttachmentPayloadMerge.inheritingImageBytes(into: remote, from: local)
+
+        #expect(merged[0].attachments[0].base64 == nil)
     }
 
     @Test func doesNotLendBytesToADifferentImage() {
@@ -80,5 +89,24 @@ struct AttachmentPayloadMergeTests {
         let merged = AttachmentPayloadMerge.inheritingImageBytes(into: remote, from: local)
 
         #expect(merged[0].attachments[0].base64 == "NEW")
+    }
+
+    @Test func detectsOnlySyncedImagesThatStillLackBytes() {
+        #expect(AttachmentPayloadMerge.containsUnfetchedSyncedImages([userMessage([image(id: "a")])]))
+        #expect(!AttachmentPayloadMerge.containsUnfetchedSyncedImages(
+            [userMessage([image(id: "a", base64: fullBase64)])]
+        ))
+        #expect(!AttachmentPayloadMerge.containsUnfetchedSyncedImages(
+            [userMessage([image(id: "a", encryptionKey: nil)])]
+        ))
+    }
+
+    @Test func appliesFetchedBytesByAttachmentId() {
+        let messages = [userMessage([image(id: "a"), image(id: "b")])]
+
+        let merged = AttachmentPayloadMerge.applyingImageBytes(["b": "BBBB"], to: messages)
+
+        #expect(merged[0].attachments[0].base64 == nil)
+        #expect(merged[0].attachments[1].base64 == "BBBB")
     }
 }
