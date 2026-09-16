@@ -138,6 +138,12 @@ actor ChatRecoverySync {
                     $0.decryptionFailed || $0.dataCorrupted ? nil : $0
                 }
                 var candidate = preferredBase(local: local, remote: remoteChat)
+                if let local {
+                    candidate.messages = AttachmentPayloadMerge.inheritingImageBytes(
+                        into: candidate.messages,
+                        from: local.messages
+                    )
+                }
                 try apply(mutation, to: &candidate, authoritativeRemote: remoteChat)
                 candidate.syncVersion = remote.syncVersion
                 try stampEdit(&candidate, observedRemote: remoteChat)
@@ -401,7 +407,6 @@ actor ChatRecoverySync {
                 chat.messages[messageIndex].attachments[attachmentIndex].id = rewrite.serverId
                 chat.messages[messageIndex].attachments[attachmentIndex].encryptionKey =
                     rewrite.encryptionKey
-                chat.messages[messageIndex].attachments[attachmentIndex].base64 = nil
             }
         }
     }
