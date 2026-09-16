@@ -191,6 +191,17 @@ final class StreamingResponseProcessor: @unchecked Sendable {
         return webSearches.last
     }
 
+    /// Router-provided sources carry snippets and are authoritative; citation
+    /// annotations only add URLs that the router did not already report.
+    private func mergedSources(for search: WebSearchInstance) -> [WebSearchSource] {
+        let retained = search.sources ?? []
+        guard retained.contains(where: { $0.snippet?.isEmpty == false }) else {
+            return collectedSources
+        }
+        let known = Set(retained.map(\.url))
+        return retained + collectedSources.filter { !known.contains($0.url) }
+    }
+
     // MARK: - Chunk processing (stream task)
 
     /// Strip router-emitted `<tinfoil-event>` markers from the delta before
@@ -312,7 +323,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
                     id: lastSearch.id,
                     query: lastSearch.query,
                     status: promotedStatus,
-                    sources: lastSearch.sources?.contains(where: { $0.snippet?.isEmpty == false }) == true ? lastSearch.sources : collectedSources,
+                    sources: mergedSources(for: lastSearch),
                     reason: lastSearch.reason
                 )
             }
@@ -490,7 +501,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
                 id: lastSearch.id,
                 query: lastSearch.query,
                 status: finalStatus,
-                sources: lastSearch.sources?.contains(where: { $0.snippet?.isEmpty == false }) == true ? lastSearch.sources : collectedSources,
+                sources: mergedSources(for: lastSearch),
                 reason: lastSearch.reason
             )
         }

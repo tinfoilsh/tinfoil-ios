@@ -49,6 +49,22 @@ struct TinfoilWebSearchCallEvent: Decodable, Sendable {
         case error
         case sources
     }
+
+    /// Sources reported by a search event, dropping entries without a URL.
+    var searchSources: [WebSearchSource]? {
+        sources?.compactMap { source in
+            guard let url = source.url, !url.isEmpty else { return nil }
+            return WebSearchSource(title: source.title ?? url, url: url, snippet: source.snippet)
+        }
+    }
+
+    /// Sources reported by a page-fetch event, restricted to the fetched URL.
+    func fetchSources(for url: String) -> [WebSearchSource]? {
+        sources?.compactMap { source in
+            guard source.url == url else { return nil }
+            return WebSearchSource(title: source.title ?? url, url: url, snippet: source.snippet)
+        }
+    }
 }
 
 /// Streaming parser that extracts `<tinfoil-event>...</tinfoil-event>`

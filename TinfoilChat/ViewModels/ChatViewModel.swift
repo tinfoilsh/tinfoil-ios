@@ -4174,10 +4174,7 @@ class ChatViewModel: ObservableObject {
                         case .completed:
                             if let idx = chat.messages[lastIndex].urlFetches.firstIndex(where: { $0.id == fetchId }) {
                                 chat.messages[lastIndex].urlFetches[idx].status = .completed
-                                chat.messages[lastIndex].urlFetches[idx].sources = event.sources?.compactMap { source in
-                                    guard source.url == url else { return nil }
-                                    return WebSearchSource(title: source.title ?? url, url: url, snippet: source.snippet)
-                                }
+                                chat.messages[lastIndex].urlFetches[idx].sources = event.fetchSources(for: url)
                             }
                         case .failed:
                             if let idx = chat.messages[lastIndex].urlFetches.firstIndex(where: { $0.id == fetchId }) {
@@ -4218,16 +4215,13 @@ class ChatViewModel: ObservableObject {
                             chatId: sid
                         )
                     case .completed:
-                        let eventSources = event.sources?.compactMap { source -> WebSearchSource? in
-                            guard let url = source.url, !url.isEmpty else { return nil }
-                            return WebSearchSource(title: source.title ?? url, url: url, snippet: source.snippet)
-                        }
+                        let eventSources = event.searchSources
                         if let existing = processor.findSearchInstance(matching: event.itemId) {
                             // Preserve any sources already collected for this
                             // instance when the completion payload doesn't
                             // carry a non-empty sources list of its own.
                             let mergedSources: [WebSearchSource]?
-                            if let eventSources {
+                            if let eventSources, !eventSources.isEmpty {
                                 mergedSources = eventSources
                             } else {
                                 mergedSources = existing.sources
@@ -4253,10 +4247,7 @@ class ChatViewModel: ObservableObject {
                         chat.messages[lastIndex].webSearchState?.status = .completed
                         self.streamState.setWebSearchSummary(nil, chatId: sid)
                     case .failed:
-                        let eventSources = event.sources?.compactMap { source -> WebSearchSource? in
-                            guard let url = source.url, !url.isEmpty else { return nil }
-                            return WebSearchSource(title: source.title ?? url, url: url, snippet: source.snippet)
-                        } ?? []
+                        let eventSources = event.searchSources ?? []
                         if let existing = processor.findSearchInstance(matching: event.itemId) {
                             processor.upsertWebSearch(
                                 WebSearchInstance(

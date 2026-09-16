@@ -1037,15 +1037,7 @@ struct Message: Identifiable, Codable, Equatable {
                 let statusRaw = stateObject["status"]?.stringValue ?? "completed"
                 let status = WebSearchStatus(rawValue: statusRaw) ?? .completed
                 let reason = stateObject["reason"]?.stringValue
-                var sources: [WebSearchSource]? = nil
-                if let array = stateObject["sources"]?.arrayValue {
-                    sources = array.compactMap { value in
-                        guard let item = value.objectValue,
-                              let url = item["url"]?.stringValue else { return nil }
-                        let title = item["title"]?.stringValue ?? url
-                        return WebSearchSource(title: title, url: url, snippet: item["snippet"]?.stringValue)
-                    }
-                }
+                let sources = stateObject["sources"]?.arrayValue?.compactMap(WebSearchSource.fromTimeline)
                 let instance = WebSearchInstance(
                     id: id,
                     query: query,

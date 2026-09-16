@@ -67,7 +67,7 @@ enum WebSearchHistory {
             guard !sources.isEmpty,
                   let output = json(["note": Constants.WebSearchHistory.evidenceNote, "sources": sources]) else { return [] }
             return [
-                .assistant(.init(content: nil, reasoningContent: "", toolCalls: [
+                .assistant(.init(content: nil, reasoningContent: nil, toolCalls: [
                     .init(id: id, function: .init(arguments: action.arguments, name: action.name))
                 ])),
                 .tool(.init(content: .textContent(output), toolCallId: id))
