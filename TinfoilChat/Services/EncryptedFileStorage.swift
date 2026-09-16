@@ -420,8 +420,19 @@ actor EncryptedFileStorage {
             return decision
         }
         EditClockStore.observe(chat.clock)
+        var chatToSave = chat
+        if existing != nil,
+           chatToSave.messages.contains(where: { message in
+               message.attachments.contains { $0.type == .image && $0.base64 == nil }
+           }),
+           let current = try await loadChatUnlocked(chatId: chat.id, userId: userId) {
+            chatToSave.messages = AttachmentPayloadMerge.inheritingImageBytes(
+                into: chatToSave.messages,
+                from: current.messages
+            )
+        }
         try await performSaveChat(
-            chat,
+            chatToSave,
             userId: userId,
             allowRemoteDeleteReplacement: allowRemoteDeleteReplacement
         )
@@ -1328,6 +1339,20 @@ actor EncryptedFileStorage {
     }
 
     // MARK: - Private Helpers
+
+    /// Reads the on-disk chat without touching the index or the write
+    /// lock, for callers that already hold the lock.
+    private func loadChatUnlocked(chatId: String, userId: String) async throws -> Chat? {
+        let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
+        if fileManager.fileExists(atPath: encPath.path) {
+            return try await loadChatFromFile(encPath, isRaw: false)
+        }
+        let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
+        if fileManager.fileExists(atPath: rawPath.path) {
+            return try await loadChatFromFile(rawPath, isRaw: true)
+        }
+        return nil
+    }
 
     private func loadChatFromFile(_ fileURL: URL, isRaw: Bool) async throws -> Chat? {
         let performanceToken = PerformanceInstrumentation.shared.begin(.fullChatLoad)
