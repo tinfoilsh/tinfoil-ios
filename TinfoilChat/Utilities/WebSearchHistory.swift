@@ -57,37 +57,22 @@ enum WebSearchHistory {
     }
 
     static func messages(for message: Message, messageIndex: Int) -> [ChatQuery.ChatCompletionMessageParam] {
-        var remaining = Constants.WebSearchHistory.maxSerializedCharacters
-        var pairs: [[ChatQuery.ChatCompletionMessageParam]] = []
-        for (index, action) in actions(for: message).enumerated().reversed() {
+        actions(for: message).enumerated().flatMap { (index, action) -> [ChatQuery.ChatCompletionMessageParam] in
             let id = "\(Constants.WebSearchHistory.callIDPrefix)\(messageIndex)_\(index)"
-            var sources: [[String: String]] = []
-            var pair: [ChatQuery.ChatCompletionMessageParam] = []
-            var seen = Set<String>()
-            for source in action.sources {
-                if sources.count >= Constants.WebSearchHistory.maxSourcesPerCall { break }
+            let sources = action.sources.compactMap { source -> [String: String]? in
                 guard let snippet = source.snippet, !snippet.isEmpty,
-                      source.url.lowercased().hasPrefix("https://") || source.url.lowercased().hasPrefix("http://"),
-                      !seen.contains(source.url) else { continue }
-                let candidate = ["url": source.url, "title": source.title, "snippet": boundedSnippet(snippet)]
-                guard let output = json(["note": Constants.WebSearchHistory.evidenceNote, "sources": sources + [candidate]]) else { continue }
-                let nextPair: [ChatQuery.ChatCompletionMessageParam] = [
-                    .assistant(.init(content: nil, reasoningContent: "", toolCalls: [
-                        .init(id: id, function: .init(arguments: action.arguments, name: action.name))
-                    ])),
-                    .tool(.init(content: .textContent(output), toolCallId: id))
-                ]
-                guard serializedLength(nextPair) <= remaining else { continue }
-                sources.append(candidate)
-                seen.insert(source.url)
-                pair = nextPair
+                      source.url.lowercased().hasPrefix("https://") || source.url.lowercased().hasPrefix("http://") else { return nil }
+                return ["url": source.url, "title": source.title, "snippet": snippet]
             }
-            if !pair.isEmpty {
-                remaining -= serializedLength(pair)
-                pairs.append(pair)
-            }
+            guard !sources.isEmpty,
+                  let output = json(["note": Constants.WebSearchHistory.evidenceNote, "sources": sources]) else { return [] }
+            return [
+                .assistant(.init(content: nil, reasoningContent: "", toolCalls: [
+                    .init(id: id, function: .init(arguments: action.arguments, name: action.name))
+                ])),
+                .tool(.init(content: .textContent(output), toolCallId: id))
+            ]
         }
-        return pairs.reversed().flatMap { $0 }
     }
 
     static func serializedLength(_ messages: [ChatQuery.ChatCompletionMessageParam]) -> Int {
@@ -100,19 +85,5 @@ enum WebSearchHistory {
     private static func json(_ value: [String: Any]) -> String? {
         guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes]) else { return nil }
         return String(data: data, encoding: .utf8)
-    }
-
-    private static func boundedSnippet(_ text: String) -> String {
-        guard text.utf16.count > Constants.WebSearchHistory.maxSnippetCharacters else { return text }
-        let limit = Constants.WebSearchHistory.maxSnippetCharacters - Constants.WebSearchHistory.truncationNotice.utf16.count
-        var prefix = ""
-        var count = 0
-        for scalar in text.unicodeScalars {
-            let part = String(scalar)
-            if count + part.utf16.count > limit { break }
-            prefix += part
-            count += part.utf16.count
-        }
-        return prefix + Constants.WebSearchHistory.truncationNotice
     }
 }

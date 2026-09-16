@@ -50,7 +50,7 @@ struct WebSearchHistoryTests {
         #expect(fetchOutput.contains(excerpt))
     }
 
-    @Test func excludesUnsupportedEvidenceAndBoundsHistory() throws {
+    @Test func excludesUnsupportedEvidenceAndPreservesFullHistory() throws {
         var original = message()
         for status in [WebSearchStatus.searching, .failed, .blocked] {
             original.webSearchState?.status = status
@@ -59,18 +59,31 @@ struct WebSearchHistoryTests {
         original.webSearchState?.status = .completed
         original.webSearchState?.sources = [WebSearchSource(title: "Legacy", url: url)]
         #expect(WebSearchHistory.messages(for: original, messageIndex: 0).isEmpty)
-        let largeSnippet = String(repeating: "🔎", count: 2000)
-        original.webSearches = (0..<20).map { index in
+        let actionCount = 20
+        let sourceCount = 10
+        let repetitions = 2000
+        let fullText = "  Start of source.\n" + String(repeating: "🔎", count: repetitions) + "\nImportant conclusion at the end.  "
+        original.webSearches = (0..<actionCount).map { index in
             WebSearchInstance(id: "search-\(index)", query: "query-\(index)", status: .completed,
-                              sources: (0..<8).map { WebSearchSource(title: "Paper", url: "\(url)-\($0)", snippet: largeSnippet) }, reason: nil)
+                              sources: (0..<sourceCount).map { WebSearchSource(title: "Paper", url: "\(url)-\($0)", snippet: fullText) }, reason: nil)
         }
         let replay = WebSearchHistory.messages(for: original, messageIndex: 0)
-        #expect(!replay.isEmpty)
-        #expect(WebSearchHistory.serializedLength(replay) <= Constants.WebSearchHistory.maxSerializedCharacters)
+        try #require(replay.count == actionCount * 2)
         #expect(TokenEstimation.estimateMessageTokens(original) > TokenEstimation.estimateTokenCount(original.content))
-        let encoded = try #require(String(data: JSONEncoder().encode(replay), encoding: .utf8))
-        #expect(encoded.contains("query-19"))
-        #expect(encoded.contains("[Excerpt truncated]"))
+        let encoded = try objects(replay)
+        for index in 0..<actionCount {
+            let calls = try #require(encoded[index * 2]["tool_calls"] as? [[String: Any]])
+            let function = try #require(calls[0]["function"] as? [String: String])
+            #expect(function["arguments"] == "{\"query\":\"query-\(index)\"}")
+            let text = try #require(encoded[index * 2 + 1]["content"] as? String)
+            let output = try #require(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+            let sources = try #require(output["sources"] as? [[String: String]])
+            #expect(sources.count == sourceCount)
+            #expect(sources.compactMap { $0["snippet"] } == Array(repeating: fullText, count: sourceCount))
+            #expect(sources.compactMap { $0["url"] } == (0..<sourceCount).map { "\(url)-\($0)" })
+        }
+        let latest = Message(role: .user, content: "Continue.")
+        #expect(TokenEstimation.selectMessagesWithinBudget([original, latest], contextWindowTokens: 100).map(\.id) == [latest.id])
     }
 
     @Test func sourceMetadataSurvivesCitationUpdates() throws {
