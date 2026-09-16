@@ -2749,10 +2749,7 @@ class ChatViewModel: ObservableObject {
         }
 
         // Lazy-load full-res images for v1 synced chats
-        let hasUnfetchedImages = chatToSelect.messages.contains { msg in
-            msg.attachments.contains { $0.type == .image && $0.base64 == nil && $0.encryptionKey != nil }
-        }
-        if hasUnfetchedImages {
+        if AttachmentPayloadMerge.containsUnfetchedSyncedImages(chatToSelect.messages) {
             let chatId = chatToSelect.id
             selectedChatImageTask = Task { [weak self] in
                 let performanceToken = PerformanceInstrumentation.shared.begin(
@@ -2799,56 +2796,41 @@ class ChatViewModel: ObservableObject {
     }
     
     /// Returns `messages` with full-resolution bytes fetched for any synced
-    /// image that still lacks them. Fetch failures leave the affected
-    /// attachments unchanged.
-    private func hydratingSyncedImages(in messages: [Message]) async -> [Message] {
-        let needsFetch = messages.contains { message in
-            message.attachments.contains {
-                $0.type == .image && $0.base64 == nil && $0.encryptionKey != nil
-            }
+    /// image that still lacks them, and merges the fetched bytes into the
+    /// chat's state so later sends do not download them again. Download
+    /// failures leave the affected attachments unchanged; cancellation
+    /// propagates so the caller's cleanup runs.
+    private func hydratingSyncedImages(
+        in messages: [Message],
+        chatId: String
+    ) async throws -> [Message] {
+        guard AttachmentPayloadMerge.containsUnfetchedSyncedImages(messages) else {
+            return messages
         }
-        guard needsFetch else { return messages }
         let loadedImages: [String: String]
         do {
             loadedImages = try await CloudStorageService.shared.loadImages(in: messages)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             return messages
         }
         guard !loadedImages.isEmpty else { return messages }
-        var hydrated = messages
-        for messageIndex in hydrated.indices {
-            for attachmentIndex in hydrated[messageIndex].attachments.indices {
-                let attachmentId = hydrated[messageIndex].attachments[attachmentIndex].id
-                if let base64 = loadedImages[attachmentId] {
-                    hydrated[messageIndex].attachments[attachmentIndex].base64 = base64
-                }
-            }
-        }
-        return hydrated
+        applyLoadedImages(loadedImages, toChatId: chatId)
+        return AttachmentPayloadMerge.applyingImageBytes(loadedImages, to: messages)
     }
 
     /// Merge fetched image base64 data into the current messages of a chat by attachment ID.
     /// This avoids replacing the entire messages array, preventing a stale snapshot from
     /// overwriting messages that may have been updated by sync while images were loading.
     private func applyLoadedImages(_ images: [String: String], toChatId chatId: String) {
-        func mergeIntoMessages(_ messages: inout [Message]) {
-            for msgIdx in messages.indices {
-                for attIdx in messages[msgIdx].attachments.indices {
-                    let attId = messages[msgIdx].attachments[attIdx].id
-                    if let b64 = images[attId] {
-                        messages[msgIdx].attachments[attIdx].base64 = b64
-                    }
-                }
-            }
-        }
-
         if currentChat?.id == chatId {
             var updated = currentChat!
-            mergeIntoMessages(&updated.messages)
+            updated.messages = AttachmentPayloadMerge.applyingImageBytes(images, to: updated.messages)
             currentChat = updated
         }
         if let idx = chats.firstIndex(where: { $0.id == chatId }) {
-            mergeIntoMessages(&chats[idx].messages)
+            chats[idx].messages = AttachmentPayloadMerge.applyingImageBytes(images, to: chats[idx].messages)
         }
     }
 
@@ -3967,8 +3949,9 @@ class ChatViewModel: ObservableObject {
                 // Synced images may be present only as thumbnails until the
                 // bucket copy is fetched; a request built without their bytes
                 // would reach a vision model as a text-only prompt.
-                let conversationMessages = await self.hydratingSyncedImages(
-                    in: streamChat.messages
+                let conversationMessages = try await self.hydratingSyncedImages(
+                    in: streamChat.messages,
+                    chatId: streamChatId
                 )
 
                 // Resolve the (possibly Auto) selection into a representative
