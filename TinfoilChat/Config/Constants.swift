@@ -415,6 +415,8 @@ enum Constants {
 
     enum CloudSync {
         static let clipboardExpirationSeconds: TimeInterval = 300
+        static let attentionBadgeSize: CGFloat = 8
+        static let attentionAccessibilityLabel = "Cloud sync needs attention"
     }
 
     enum Sync {

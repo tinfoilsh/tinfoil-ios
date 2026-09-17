@@ -244,6 +244,7 @@ struct SettingsView: View {
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var profileManager = ProfileManager.shared
     @ObservedObject private var passkeyManager = PasskeyManager.shared
+    @ObservedObject private var syncHealth = SyncHealthStore.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAuthView = false
     @State private var showDeleteConfirmation = false
@@ -591,6 +592,15 @@ struct SettingsView: View {
                 } label: {
                     HStack {
                         Text("Cloud Sync")
+                        if syncHealth.needsAttention() {
+                            Circle()
+                                .fill(Color.orange)
+                                .frame(
+                                    width: Constants.CloudSync.attentionBadgeSize,
+                                    height: Constants.CloudSync.attentionBadgeSize
+                                )
+                                .accessibilityLabel(Constants.CloudSync.attentionAccessibilityLabel)
+                        }
                         Spacer()
                         Text(settings.isCloudSyncEnabled ? "On" : "Off")
                             .foregroundColor(.secondary)

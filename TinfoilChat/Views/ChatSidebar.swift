@@ -783,9 +783,12 @@ struct ChatSidebar: View {
                 if syncHealth.needsAttention() {
                     Circle()
                         .fill(Color.orange)
-                        .frame(width: 8, height: 8)
+                        .frame(
+                            width: Constants.CloudSync.attentionBadgeSize,
+                            height: Constants.CloudSync.attentionBadgeSize
+                        )
                         .offset(x: 4, y: -4)
-                        .accessibilityLabel("Cloud sync needs attention")
+                        .accessibilityLabel(Constants.CloudSync.attentionAccessibilityLabel)
                 }
             }
     }
