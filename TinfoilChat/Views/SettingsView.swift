@@ -609,7 +609,10 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
                     Spacer()
-                    Text(profileManager.defaultPromptPreset?.name ?? "Tinfoil default")
+                    Text(
+                        profileManager.defaultPromptPreset?.name
+                            ?? (profileManager.defaultPromptPresetId.isEmpty ? "Tinfoil default" : "Unavailable")
+                    )
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
@@ -1173,15 +1176,44 @@ struct DefaultPromptPresetView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var customPresets: [PromptPreset] {
-        profileManager.customPromptPresets.map { PromptPreset(from: $0) }
+        profileManager.allPromptPresets.filter { !$0.isBuiltIn }
+    }
+
+    private var builtInPresets: [PromptPreset] {
+        profileManager.allPromptPresets.filter { $0.isBuiltIn }
+    }
+
+    /// A stored default that does not resolve locally (deleted elsewhere or
+    /// not yet synced). New chats fall back to the Tinfoil default meanwhile.
+    private var isDefaultUnavailable: Bool {
+        !profileManager.defaultPromptPresetId.isEmpty && profileManager.defaultPromptPreset == nil
     }
 
     var body: some View {
         Form {
             Section {
                 presetRow(id: nil, name: "Tinfoil default", iconName: "text.quote")
+                if isDefaultUnavailable {
+                    HStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 16))
+                            .foregroundColor(.secondary)
+                            .frame(width: 24)
+                        Text("Unavailable")
+                            .font(.body)
+                        Spacer()
+                        Image(systemName: "checkmark")
+                            .font(.body.weight(.semibold))
+                            .foregroundColor(.green)
+                            .accessibilityLabel("Selected")
+                    }
+                }
             } footer: {
-                Text("New chats start with this prompt. You can still switch prompts in any chat.")
+                Text(
+                    isDefaultUnavailable
+                        ? "Your default prompt is unavailable. It may have been deleted or not finished syncing; new chats use the Tinfoil default until it is."
+                        : "New chats start with this prompt. You can still switch prompts in any chat."
+                )
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
 
@@ -1197,7 +1229,7 @@ struct DefaultPromptPresetView: View {
             }
 
             Section {
-                ForEach(PromptPreset.builtIns) { preset in
+                ForEach(builtInPresets) { preset in
                     presetRow(id: preset.id, name: preset.name, iconName: preset.iconName)
                 }
             } header: {
@@ -1231,7 +1263,9 @@ struct DefaultPromptPresetView: View {
 
     @ViewBuilder
     private func presetRow(id: String?, name: String, iconName: String) -> some View {
-        let isSelected = profileManager.defaultPromptPreset?.id == id
+        let isSelected = id == nil
+            ? profileManager.defaultPromptPresetId.isEmpty
+            : profileManager.defaultPromptPresetId == id
         Button {
             profileManager.setDefaultPromptPreset(id)
         } label: {
