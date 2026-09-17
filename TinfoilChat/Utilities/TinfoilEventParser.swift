@@ -31,6 +31,7 @@ struct TinfoilWebSearchCallEvent: Decodable, Sendable {
     struct Source: Decodable, Sendable {
         let title: String?
         let url: String?
+        let snippet: String?
     }
 
     let type: String
@@ -47,6 +48,23 @@ struct TinfoilWebSearchCallEvent: Decodable, Sendable {
         case action
         case error
         case sources
+    }
+
+    /// Sources reported by a search event, dropping entries without a URL.
+    var searchSources: [WebSearchSource]? {
+        sources?.compactMap { source in
+            guard let url = source.url, !url.isEmpty else { return nil }
+            return WebSearchSource(title: source.title ?? url, url: url, snippet: source.snippet)
+        }
+    }
+
+    /// Sources reported by a page-fetch event, restricted to the fetched URL.
+    func fetchSources(for url: String) -> [WebSearchSource]? {
+        guard !url.isEmpty else { return sources.map { _ in [] } }
+        return sources?.compactMap { source in
+            guard source.url == url else { return nil }
+            return WebSearchSource(title: source.title ?? url, url: url, snippet: source.snippet)
+        }
     }
 }
 

@@ -19,7 +19,12 @@ enum TokenEstimation {
     /// archiving only needs both platforms to agree, not exact counts.
     static func estimateTokenCount(_ text: String?) -> Int {
         guard let text, !text.isEmpty else { return 0 }
-        return Int(ceil(Double(text.count) / Constants.Context.charsPerToken))
+        return tokensForCharacterCount(text.count)
+    }
+
+    static func tokensForCharacterCount(_ count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        return Int(ceil(Double(count) / Constants.Context.charsPerToken))
     }
 
     /// Applies the usage ratio to the configured window size, keeping the
@@ -31,7 +36,8 @@ enum TokenEstimation {
     }
 
     /// Estimate the prompt tokens contributed by a single message, including
-    /// tool calls and attachment text. Reasoning is counted when the selected
+    /// tool calls, attachment text, and the replayed web-search evidence that
+    /// the query builder appends after the message. Reasoning is counted when the selected
     /// model requires it to be returned in subsequent requests. Search
     /// reasoning is counted even though this app's query builder doesn't resend
     /// it yet: the webapp sends it for multi-turn context and counts it, and
@@ -42,6 +48,10 @@ enum TokenEstimation {
         reasoningHistoryPolicy: ReasoningHistoryPolicy = .none
     ) -> Int {
         var tokens = estimateTokenCount(message.content)
+        let evidence = WebSearchHistory.messages(for: message, messageIndex: 0)
+        if !evidence.isEmpty {
+            tokens += tokensForCharacterCount(WebSearchHistory.serializedLength(evidence))
+        }
         if reasoningHistoryPolicy.includesReasoning(for: message) {
             tokens += estimateTokenCount(message.reasoningContentForHistory)
         }

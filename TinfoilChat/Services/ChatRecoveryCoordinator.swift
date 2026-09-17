@@ -1791,19 +1791,22 @@ private struct RecoveredEventState {
             case .blocked:
                 status = .blocked
             }
-            if let index = urlFetches.firstIndex(where: { $0.id == fetchId }) {
+            let index: Int
+            if let existing = urlFetches.firstIndex(where: { $0.id == fetchId }) {
+                index = existing
                 urlFetches[index].status = status
             } else {
                 urlFetches.append(URLFetchState(id: fetchId, url: url, status: status))
                 processor.appendURLFetchSegment(fetchId)
+                index = urlFetches.count - 1
+            }
+            if status == .completed {
+                urlFetches[index].sources = event.fetchSources(for: url)
             }
             return
         }
 
-        let sources = event.sources?.compactMap { source -> WebSearchSource? in
-            guard let url = source.url, !url.isEmpty else { return nil }
-            return WebSearchSource(title: source.title ?? url, url: url)
-        }
+        let sources = event.searchSources
         let existing = processor.findSearchInstance(matching: event.itemId)
         let id = existing?.id ?? event.itemId ?? processor.allocateSearchId()
         let status: WebSearchStatus
