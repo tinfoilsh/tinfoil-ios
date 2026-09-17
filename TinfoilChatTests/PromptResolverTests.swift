@@ -12,19 +12,14 @@ struct PromptResolverTests {
     )
 
     @Test
-    func presetTakesPrecedenceOverCustomAndDefaultPrompts() throws {
+    func presetTakesPrecedenceOverDefaultPrompt() throws {
         let resolved = try PromptResolver.resolve(
             presetId: preset.id,
             availablePresets: [preset],
-            profileCustomPrompt: "profile prompt",
-            settingsCustomPrompt: "settings prompt",
             defaultPrompt: "default prompt"
         )
 
-        #expect(resolved == ResolvedSystemPrompt(
-            systemPrompt: "preset prompt",
-            suppressDefaultRules: false
-        ))
+        #expect(resolved == "preset prompt")
     }
 
     @Test
@@ -33,31 +28,19 @@ struct PromptResolverTests {
             try PromptResolver.resolve(
                 presetId: "user:missing",
                 availablePresets: [preset],
-                profileCustomPrompt: "profile prompt",
-                settingsCustomPrompt: "settings prompt",
                 defaultPrompt: "default prompt"
             )
         }
     }
 
     @Test
-    func customAndDefaultPrecedenceIsPreserved() throws {
-        let profile = try PromptResolver.resolve(
+    func fallsBackToDefaultWithoutPreset() throws {
+        let resolved = try PromptResolver.resolve(
             presetId: nil,
-            availablePresets: [],
-            profileCustomPrompt: "profile prompt",
-            settingsCustomPrompt: "settings prompt",
-            defaultPrompt: "default prompt"
-        )
-        let fallback = try PromptResolver.resolve(
-            presetId: nil,
-            availablePresets: [],
-            profileCustomPrompt: nil,
-            settingsCustomPrompt: nil,
+            availablePresets: [preset],
             defaultPrompt: "default prompt"
         )
 
-        #expect(profile.systemPrompt == "profile prompt")
-        #expect(fallback.systemPrompt == "default prompt")
+        #expect(resolved == "default prompt")
     }
 }

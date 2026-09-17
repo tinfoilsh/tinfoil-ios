@@ -39,15 +39,14 @@ class ProfileManager: ObservableObject {
     @Published var additionalContext: String = ProfileDefaults.additionalContext
     @Published var isUsingPersonalization: Bool = ProfileDefaults.isUsingPersonalization
     
-    // Custom system prompt
-    @Published var isUsingCustomPrompt: Bool = ProfileDefaults.isUsingCustomPrompt
-    @Published var customSystemPrompt: String = ProfileDefaults.customSystemPrompt
-
     // User-created prompt presets (synced through the shared profile row)
     @Published var customPromptPresets: [SyncedPromptPreset] = ProfileDefaults.customPromptPresets
 
     // Preset ids pinned as homescreen favorites (built-in or custom)
     @Published var favoritePromptPresetIds: [String] = ProfileDefaults.favoritePromptPresetIds
+
+    // Preset stamped onto new chats; empty means the Tinfoil default
+    @Published var defaultPromptPresetId: String = ProfileDefaults.defaultPromptPresetId
 
     @Published private(set) var pinnedChatIds: [String]? = nil
     
@@ -90,6 +89,7 @@ class ProfileManager: ObservableObject {
     
     private init() {
         loadFromKeychain()
+        migrateLegacyCustomPrompt()
         setupChangeObservers()
         setupAutoSync()
         // Trigger an initial sync shortly after initialization
@@ -249,10 +249,9 @@ class ProfileManager: ObservableObject {
             traits: traits,
             additionalContext: additionalContext,
             isUsingPersonalization: isUsingPersonalization,
-            isUsingCustomPrompt: isUsingCustomPrompt,
-            customSystemPrompt: customSystemPrompt,
             customPromptPresets: customPromptPresets,
             favoritePromptPresetIds: favoritePromptPresetIds,
+            defaultPromptPresetId: defaultPromptPresetId,
             reasoningEffort: reasoningEffort,
             thinkingEnabled: thinkingEnabled,
             webSearchAvailable: SettingsManager.shared.webSearchAvailable,
@@ -344,17 +343,14 @@ class ProfileManager: ObservableObject {
             self.additionalContext = additionalContext
         }
         self.isUsingPersonalization = profile.usesPersonalization
-        if let isUsingCustomPrompt = profile.isUsingCustomPrompt {
-            self.isUsingCustomPrompt = isUsingCustomPrompt
-        }
-        if let customSystemPrompt = profile.customSystemPrompt {
-            self.customSystemPrompt = customSystemPrompt
-        }
         if let customPromptPresets = profile.customPromptPresets {
             self.customPromptPresets = customPromptPresets
         }
         if let favoritePromptPresetIds = profile.favoritePromptPresetIds {
             self.favoritePromptPresetIds = favoritePromptPresetIds
+        }
+        if let defaultPromptPresetId = profile.defaultPromptPresetId {
+            self.defaultPromptPresetId = defaultPromptPresetId
         }
         if let reasoningEffort = profile.reasoningEffort,
            ReasoningEffort(rawValue: reasoningEffort) != nil {
@@ -475,27 +471,6 @@ class ProfileManager: ObservableObject {
             }
             .store(in: &cancellables)
         
-        $isUsingCustomPrompt
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard !(self?.isApplyingProfile ?? false) else { return }
-                self?.saveToKeychain()
-            }
-            .store(in: &cancellables)
-        
-        $customSystemPrompt
-            .dropFirst()
-            .filter { [weak self] _ in !(self?.isApplyingProfile ?? false) }
-            .compactMap { [weak self] _ in self?.accountGeneration }
-            .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
-            .sink { [weak self] generation in
-                guard let self,
-                      generation == self.accountGeneration,
-                      !self.isApplyingProfile else { return }
-                self.saveToKeychain()
-            }
-            .store(in: &cancellables)
-
         $customPromptPresets
             .dropFirst()
             .sink { [weak self] _ in
@@ -511,6 +486,71 @@ class ProfileManager: ObservableObject {
                 self?.saveToKeychain()
             }
             .store(in: &cancellables)
+
+        $defaultPromptPresetId
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard !(self?.isApplyingProfile ?? false) else { return }
+                self?.saveToKeychain()
+            }
+            .store(in: &cancellables)
+    }
+
+    // MARK: - Legacy Custom Prompt Migration
+
+    /// Fields of the stored profile that ProfileData no longer models.
+    private struct LegacyCustomPromptFields: Decodable {
+        var isUsingCustomPrompt: Bool?
+        var customSystemPrompt: String?
+    }
+
+    /// The settings screen used to hold a single free-text custom prompt
+    /// behind a toggle, stored in the synced profile and mirrored to
+    /// UserDefaults. That prompt now lives in the library as a user preset
+    /// marked as the default, so an enabled legacy prompt is converted once
+    /// and the legacy storage is cleared either way. The migrated preset uses
+    /// a fixed id so devices that migrate independently before syncing
+    /// converge on the same preset instead of conflicting.
+    private func migrateLegacyCustomPrompt() {
+        let defaults = UserDefaults.standard
+        let enabledKey = Constants.StorageKeys.UserPrefs.customPromptEnabled
+        let promptKey = Constants.StorageKeys.UserPrefs.customSystemPrompt
+
+        var legacy: LegacyCustomPromptFields?
+        if let data = keychainHelper.load(for: keychainKey, service: keychainService) {
+            legacy = try? JSONDecoder().decode(LegacyCustomPromptFields.self, from: data)
+        }
+        let hasDefaultsValues = defaults.object(forKey: enabledKey) != nil
+            || defaults.object(forKey: promptKey) != nil
+        guard legacy?.isUsingCustomPrompt != nil || legacy?.customSystemPrompt != nil || hasDefaultsValues else {
+            return
+        }
+
+        let enabled = legacy?.isUsingCustomPrompt ?? defaults.bool(forKey: enabledKey)
+        let prompt = legacy?.customSystemPrompt ?? defaults.string(forKey: promptKey) ?? ""
+        if enabled, Self.systemPromptHasContent(prompt), defaultPromptPresetId.isEmpty {
+            let migratedId = PromptPreset.migratedCustomPromptId
+            if !customPromptPresets.contains(where: { $0.id == migratedId }) {
+                let now = Date().timeIntervalSince1970 * 1000
+                customPromptPresets.append(
+                    SyncedPromptPreset(
+                        id: migratedId,
+                        name: Constants.PromptLibrary.migratedCustomPromptName,
+                        description: Constants.PromptLibrary.migratedCustomPromptDescription,
+                        systemPrompt: prompt,
+                        createdAt: now,
+                        updatedAt: now
+                    )
+                )
+            }
+            defaultPromptPresetId = migratedId
+        }
+
+        defaults.removeObject(forKey: enabledKey)
+        defaults.removeObject(forKey: promptKey)
+        // Rewrite the stored profile so the legacy fields are dropped and the
+        // migrated preset is persisted even when nothing else changes.
+        saveToKeychain()
     }
 
     // MARK: - Prompt Presets
@@ -562,6 +602,33 @@ class ProfileManager: ObservableObject {
     func deletePromptPreset(id: String) {
         customPromptPresets.removeAll { $0.id == id }
         favoritePromptPresetIds.removeAll { $0 == id }
+        if defaultPromptPresetId == id {
+            defaultPromptPresetId = ProfileDefaults.defaultPromptPresetId
+        }
+    }
+
+    // MARK: - Default Preset
+
+    /// The preset new chats start with, or nil for the Tinfoil default. A
+    /// stale id (preset deleted elsewhere or not yet synced here) resolves to
+    /// nil so new chats fall back to the default instead of a missing preset.
+    var defaultPromptPreset: PromptPreset? {
+        promptPreset(for: defaultPromptPresetId.isEmpty ? nil : defaultPromptPresetId)
+    }
+
+    /// The preset id to stamp onto a newly created chat.
+    var defaultPromptPresetIdForNewChat: String? {
+        defaultPromptPreset?.id
+    }
+
+    func isDefaultPreset(_ id: String) -> Bool {
+        defaultPromptPresetId == id
+    }
+
+    /// Make a preset the default for new chats, or clear the default when
+    /// nil is passed.
+    func setDefaultPromptPreset(_ id: String?) {
+        defaultPromptPresetId = id ?? ProfileDefaults.defaultPromptPresetId
     }
 
     // MARK: - Favorites
@@ -951,10 +1018,9 @@ class ProfileManager: ObservableObject {
                p1.traits != p2.traits ||
                p1.additionalContext != p2.additionalContext ||
                p1.isUsingPersonalization != p2.isUsingPersonalization ||
-               p1.isUsingCustomPrompt != p2.isUsingCustomPrompt ||
-               p1.customSystemPrompt != p2.customSystemPrompt ||
                p1.customPromptPresets != p2.customPromptPresets ||
                p1.favoritePromptPresetIds != p2.favoritePromptPresetIds ||
+               (p1.defaultPromptPresetId ?? "") != (p2.defaultPromptPresetId ?? "") ||
                p1.reasoningEffort != p2.reasoningEffort ||
                p1.thinkingEnabled != p2.thinkingEnabled ||
                p1.webSearchAvailable != p2.webSearchAvailable ||
@@ -990,16 +1056,6 @@ class ProfileManager: ObservableObject {
         )
     }
     
-    /// Get custom system prompt if enabled
-    func getCustomSystemPrompt() -> String? {
-        guard isUsingCustomPrompt else { return nil }
-        return Self.normalizeSystemPromptForSending(customSystemPrompt)
-    }
-
-    nonisolated static func normalizeSystemPromptForSending(_ prompt: String) -> String {
-        systemPromptHasContent(prompt) ? prompt : ""
-    }
-
     nonisolated static func systemPromptHasContent(_ prompt: String) -> Bool {
         var result = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         if result.hasPrefix("<system>") {
@@ -1021,10 +1077,9 @@ class ProfileManager: ObservableObject {
         traits = ProfileDefaults.traits
         additionalContext = ProfileDefaults.additionalContext
         isUsingPersonalization = ProfileDefaults.isUsingPersonalization
-        isUsingCustomPrompt = ProfileDefaults.isUsingCustomPrompt
-        customSystemPrompt = ProfileDefaults.customSystemPrompt
         customPromptPresets = ProfileDefaults.customPromptPresets
         favoritePromptPresetIds = ProfileDefaults.favoritePromptPresetIds
+        defaultPromptPresetId = ProfileDefaults.defaultPromptPresetId
         SettingsManager.shared.piiCheckEnabled = ProfileDefaults.piiCheckEnabled
         self.pinnedChatIds = pinnedChatIds
         isApplyingProfile = false

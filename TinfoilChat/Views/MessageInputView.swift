@@ -1545,9 +1545,6 @@ struct AddToSheetView: View {
         if viewModel.currentChat?.promptPresetId != nil {
             return ("Unavailable", "exclamationmark.triangle")
         }
-        if profileManager.isUsingCustomPrompt || settings.isUsingCustomPrompt {
-            return ("Custom Prompt", "square.and.pencil")
-        }
         return ("Default", "text.quote")
     }
 

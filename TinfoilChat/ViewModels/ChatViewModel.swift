@@ -551,6 +551,7 @@ class ChatViewModel: ObservableObject {
     private var chatRecoveryObserver: NSObjectProtocol?
     private var cloudRemoteDeleteObserver: NSObjectProtocol?
     private var networkStatusCancellable: AnyCancellable?
+    private var defaultPromptPresetCancellable: AnyCancellable?
     private var streamUpdateTimers: [String: Timer] = [:]
     private var pendingStreamUpdates: [String: Chat] = [:]
     private var pendingSaveTask: Task<Void, Never>?
@@ -1031,7 +1032,10 @@ class ChatViewModel: ObservableObject {
         // authManager is nil at init time (set later via onAppear), so this always takes
         // the unauthenticated branch. The didSet on authManager moves the chat to the
         // correct array once auth state is known.
-        let newChat = Chat.create(modelType: currentModel)
+        let newChat = Chat.create(
+            modelType: currentModel,
+            promptPresetId: ProfileManager.shared.defaultPromptPresetIdForNewChat
+        )
         currentChat = newChat
         chats = [newChat]
         selectedChatId = newChat.id
@@ -1050,6 +1054,7 @@ class ChatViewModel: ObservableObject {
 
         // Setup network status observer for automatic retry on reconnection
         setupNetworkStatusObserver()
+        setupDefaultPromptPresetObserver()
 
         // Mirror the passkey recovery-skipped state so views observe it through the
         // view model rather than reaching into the passkey service directly.
@@ -1097,6 +1102,8 @@ class ChatViewModel: ObservableObject {
         // Cancel network status observer
         networkStatusCancellable?.cancel()
         networkStatusCancellable = nil
+        defaultPromptPresetCancellable?.cancel()
+        defaultPromptPresetCancellable = nil
 
         // Remove app lifecycle observers
         if let observer = didBecomeActiveObserver {
@@ -1461,6 +1468,38 @@ class ChatViewModel: ObservableObject {
             }
     }
 
+    /// Blank chats are stamped with the default preset when created, so when
+    /// the default changes (locally or via sync) while a blank is already
+    /// open it would otherwise start its first conversation with the old
+    /// preset. Only blanks still carrying the previous default are updated,
+    /// so a preset the user picked for a blank by hand is left alone.
+    private func setupDefaultPromptPresetObserver() {
+        var previousDefault = ProfileManager.shared.defaultPromptPresetIdForNewChat
+        defaultPromptPresetCancellable = ProfileManager.shared.$defaultPromptPresetId
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let newDefault = ProfileManager.shared.defaultPromptPresetIdForNewChat
+                let oldDefault = previousDefault
+                previousDefault = newDefault
+                guard oldDefault != newDefault else { return }
+                let restamp: (inout Chat) -> Void = { chat in
+                    if chat.isBlankChat && chat.promptPresetId == oldDefault {
+                        chat.promptPresetId = newDefault
+                    }
+                }
+                for index in self.chats.indices { restamp(&self.chats[index]) }
+                for index in self.localChats.indices { restamp(&self.localChats[index]) }
+                if var current = self.currentChat {
+                    restamp(&current)
+                    if current.promptPresetId != self.currentChat?.promptPresetId {
+                        self.currentChat = current
+                    }
+                }
+            }
+    }
+
     private func scanPendingRecoveries() {
         guard let userId = currentUserId else { return }
         guard !recoveryScansSuspended else { return }
@@ -1708,11 +1747,13 @@ class ChatViewModel: ObservableObject {
             shouldBeLocal = activeStorageTab == .local
         }
 
-        // A reused blank represents a fresh chat, so reset its preference to
-        // the current global default before selecting it.
+        // A reused blank represents a fresh chat, so reset its preferences to
+        // the current global defaults before selecting it.
+        let defaultPresetId = ProfileManager.shared.defaultPromptPresetIdForNewChat
         if shouldBeLocal {
             if let index = localChats.firstIndex(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
                 localChats[index].webSearchEnabled = SettingsManager.shared.webSearchAvailable
+                localChats[index].promptPresetId = defaultPresetId
                 selectChat(localChats[index])
                 shouldFocusInput = focusInput
                 return
@@ -1720,6 +1761,7 @@ class ChatViewModel: ObservableObject {
         } else {
             if let index = chats.firstIndex(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
                 chats[index].webSearchEnabled = SettingsManager.shared.webSearchAvailable
+                chats[index].promptPresetId = defaultPresetId
                 selectChat(chats[index])
                 shouldFocusInput = focusInput
                 return
@@ -1732,7 +1774,8 @@ class ChatViewModel: ObservableObject {
             language: nil,
             userId: currentUserId,
             isLocalOnly: shouldBeLocal,
-            projectId: targetProjectId
+            projectId: targetProjectId,
+            promptPresetId: defaultPresetId
         )
 
         if shouldBeLocal {
@@ -3973,25 +4016,18 @@ class ChatViewModel: ObservableObject {
                 let modelId = representativeModel.modelName
                 
                 // Add system message first with language preference
-                let settingsManager = SettingsManager.shared
                 let profileManager = ProfileManager.shared
-                // Precedence: per-chat prompt preset > custom prompt toggle > default
+                // Precedence: per-chat prompt preset > default
                 if let presetId = streamChat.promptPresetId,
                    profileManager.promptPreset(for: presetId) == nil {
                     await profileManager.performFullSync()
                 }
 
-                let resolvedPrompt = try PromptResolver.resolve(
+                var systemPrompt = try PromptResolver.resolve(
                     presetId: streamChat.promptPresetId,
                     availablePresets: profileManager.allPromptPresets,
-                    profileCustomPrompt: profileManager.getCustomSystemPrompt(),
-                    settingsCustomPrompt: settingsManager.isUsingCustomPrompt
-                        ? ProfileManager.normalizeSystemPromptForSending(settingsManager.customSystemPrompt)
-                        : nil,
                     defaultPrompt: AppConfig.shared.systemPrompt
                 )
-                var systemPrompt = resolvedPrompt.systemPrompt
-                let suppressDefaultRules = resolvedPrompt.suppressDefaultRules
 
                 // Replace MODEL_NAME placeholder with current model name
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{MODEL_NAME}", with: representativeModel.fullName)
@@ -4019,7 +4055,7 @@ class ChatViewModel: ObservableObject {
                 )
                 
                 // Process rules with same replacements
-                var processedRules = suppressDefaultRules ? "" : AppConfig.shared.rules
+                var processedRules = AppConfig.shared.rules
                 if !processedRules.isEmpty {
                     processedRules = processedRules.replacingOccurrences(of: "{MODEL_NAME}", with: representativeModel.fullName)
                     processedRules = processedRules.replacingOccurrences(of: "{LANGUAGE}", with: languageToUse)
@@ -5738,11 +5774,18 @@ class ChatViewModel: ObservableObject {
             let webSearchEnabled = wasCurrentChatBlank
                 ? currentChat?.webSearchEnabled
                 : nil
+            // Carry the blank's preset over when it is the current chat so a
+            // per-chat selection survives the list refresh; otherwise start
+            // from the user's default preset.
+            let promptPresetId = wasCurrentChatBlank
+                ? currentChat?.promptPresetId
+                : ProfileManager.shared.defaultPromptPresetIdForNewChat
             let blankChat = Chat.create(
                 modelType: currentModel,
                 language: nil,
                 userId: currentUserId,
                 isLocalOnly: isLocal,
+                promptPresetId: promptPresetId,
                 webSearchEnabled: webSearchEnabled
             )
             result.insert(blankChat, at: 0)

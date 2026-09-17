@@ -22,20 +22,20 @@ struct ProfileMergeTests {
     @Test("keeps each side's field with the higher clock")
     func keepsHigherClockPerField() {
         var local = ProfileData(
-            nickname: "local-name", customSystemPrompt: "old-prompt"
+            nickname: "local-name", additionalContext: "old-prompt"
         )
         local.fieldClocks = [
             "nickname": EditClock(v: 5, w: "A"),
-            "customSystemPrompt": EditClock(v: 1, w: "A"),
+            "additionalContext": EditClock(v: 1, w: "A"),
         ]
         local.updatedAt = "2024-01-01T00:00:00.000Z"
 
         var remote = ProfileData(
-            nickname: "remote-name", customSystemPrompt: "new-prompt"
+            nickname: "remote-name", additionalContext: "new-prompt"
         )
         remote.fieldClocks = [
             "nickname": EditClock(v: 2, w: "B"),
-            "customSystemPrompt": EditClock(v: 9, w: "B"),
+            "additionalContext": EditClock(v: 9, w: "B"),
         ]
         remote.updatedAt = "2024-01-02T00:00:00.000Z"
 
@@ -44,7 +44,7 @@ struct ProfileMergeTests {
         )
 
         #expect(result.merged.nickname == "local-name")
-        #expect(result.merged.customSystemPrompt == "new-prompt")
+        #expect(result.merged.additionalContext == "new-prompt")
         #expect(result.adoptedRemote == true)
     }
 
@@ -77,16 +77,16 @@ struct ProfileMergeTests {
     @Test("refuses to let an empty remote wipe a populated local on fallback")
     func emptyRemoteGuard() {
         var local = ProfileData(
-            nickname: "real-user", traits: ["curious"], customSystemPrompt: "my prompt"
+            nickname: "real-user", traits: ["curious"], additionalContext: "my prompt"
         )
         local.updatedAt = "2024-01-01T00:00:00.000Z"
-        var remote = ProfileData(nickname: "", traits: [], customSystemPrompt: "")
+        var remote = ProfileData(nickname: "", traits: [], additionalContext: "")
         remote.updatedAt = "2024-01-02T00:00:00.000Z"
 
         let result = ProfileMerge.mergeProfiles(local: local, remote: remote)
 
         #expect(result.merged.nickname == "real-user")
-        #expect(result.merged.customSystemPrompt == "my prompt")
+        #expect(result.merged.additionalContext == "my prompt")
         #expect(result.adoptedRemote == false)
     }
 
@@ -106,14 +106,14 @@ struct ProfileMergeTests {
 
     @Test("preset favorites-only remote cannot bypass the fallback guard")
     func presetFavoritesOnlyRemoteGuard() {
-        var local = ProfileData(customSystemPrompt: "Keep this")
+        var local = ProfileData(additionalContext: "Keep this")
         local.updatedAt = "2024-01-01T00:00:00.000Z"
         var remote = ProfileData(favoritePromptPresetIds: ["preset-a"])
         remote.updatedAt = "2024-01-02T00:00:00.000Z"
 
         let result = ProfileMerge.mergeProfiles(local: local, remote: remote)
 
-        #expect(result.merged.customSystemPrompt == "Keep this")
+        #expect(result.merged.additionalContext == "Keep this")
         #expect(result.adoptedRemote == false)
     }
 
@@ -390,9 +390,9 @@ struct ProfileMergeTests {
 
     @Test("adopts populated remote fields when local stayed empty")
     func staleEmptyAdoptsRemote() {
-        let baseline = ProfileData(nickname: "", customSystemPrompt: "")
+        let baseline = ProfileData(nickname: "", additionalContext: "")
         let local = baseline
-        var remote = ProfileData(nickname: "Ada", customSystemPrompt: "Be concise")
+        var remote = ProfileData(nickname: "Ada", additionalContext: "Be concise")
         remote.version = 2
 
         let result = ProfileMerge.mergeProfiles(
@@ -402,7 +402,7 @@ struct ProfileMergeTests {
         )
 
         #expect(result.merged.nickname == "Ada")
-        #expect(result.merged.customSystemPrompt == "Be concise")
+        #expect(result.merged.additionalContext == "Be concise")
         #expect(result.conflicts.isEmpty)
     }
 
@@ -426,8 +426,8 @@ struct ProfileMergeTests {
 
     @Test("preserves an intentional local reset")
     func preservesIntentionalReset() {
-        let baseline = ProfileData(customSystemPrompt: "Use headings")
-        let local = ProfileData(customSystemPrompt: "")
+        let baseline = ProfileData(additionalContext: "Use headings")
+        let local = ProfileData(additionalContext: "")
         var remote = baseline
         remote.version = 2
 
@@ -437,7 +437,7 @@ struct ProfileMergeTests {
             remote: remote
         )
 
-        #expect(result.merged.customSystemPrompt == "")
+        #expect(result.merged.additionalContext == "")
         #expect(result.conflicts.isEmpty)
     }
 
@@ -459,6 +459,63 @@ struct ProfileMergeTests {
         #expect(result.merged.chatFont == "serif")
         #expect(result.conflicts.isEmpty)
         #expect(result.merged.fieldClocks?["chatFont"] == EditClock(v: 3, w: "A"))
+    }
+
+    @Test("adopts a cleared default prompt preset from the remote")
+    func adoptsClearedDefaultPromptPreset() {
+        let baseline = ProfileData(defaultPromptPresetId: "user:abc")
+        let local = ProfileData(defaultPromptPresetId: "user:abc")
+        // A clear is sent as an empty string, never as a missing key, so it
+        // is distinguishable from an older client that lacks the field.
+        var remote = ProfileData(defaultPromptPresetId: "")
+        remote.version = 2
+
+        let result = ProfileMerge.mergeProfiles(
+            baseline: baseline,
+            local: local,
+            remote: remote
+        )
+
+        #expect(result.merged.defaultPromptPresetId == "")
+        #expect(result.conflicts.isEmpty)
+    }
+
+    @Test("treats an unset default prompt preset the same as an omitted one")
+    func unsetDefaultPromptPresetMatchesOmission() {
+        // The baseline came from an older client that never wrote the field,
+        // while this client serializes the unset default as "". Both mean
+        // "no default" so the remote's new choice must win without conflict.
+        let baseline = ProfileData(nickname: "Ada")
+        let local = ProfileData(nickname: "Ada", defaultPromptPresetId: "")
+        var remote = ProfileData(nickname: "Ada", defaultPromptPresetId: "user:abc")
+        remote.version = 2
+
+        let result = ProfileMerge.mergeProfiles(
+            baseline: baseline,
+            local: local,
+            remote: remote
+        )
+
+        #expect(result.merged.defaultPromptPresetId == "user:abc")
+        #expect(result.conflicts.isEmpty)
+        #expect(ProfileMerge.changedProfileFields(local: local, baseline: baseline).isEmpty)
+    }
+
+    @Test("keeps the local default prompt preset when the remote omits it")
+    func preservesDefaultPromptPresetOnRemoteOmission() {
+        let baseline = ProfileData(nickname: "Ada", defaultPromptPresetId: "user:abc")
+        let local = ProfileData(nickname: "Ada", defaultPromptPresetId: "user:abc")
+        var remote = ProfileData(nickname: "Ada")
+        remote.version = 2
+
+        let result = ProfileMerge.mergeProfiles(
+            baseline: baseline,
+            local: local,
+            remote: remote
+        )
+
+        #expect(result.merged.defaultPromptPresetId == "user:abc")
+        #expect(result.conflicts.isEmpty)
     }
 
     @Test("keeps the higher clock when both sides wrote the same value")

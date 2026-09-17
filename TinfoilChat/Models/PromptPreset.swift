@@ -25,6 +25,10 @@ struct PromptPreset: Identifiable, Equatable {
 
     static let userIdPrefix = "user:"
 
+    /// Fixed id for the preset created from the legacy custom system prompt
+    /// setting, shared with the webapp so both platforms migrate to one preset.
+    static let migratedCustomPromptId = "user:migrated-custom-prompt"
+
     /// Default SF Symbol used for user-created presets.
     static let defaultUserIcon = "square.and.pencil"
 
@@ -54,11 +58,6 @@ struct PromptPreset: Identifiable, Equatable {
     }
 }
 
-struct ResolvedSystemPrompt: Equatable {
-    let systemPrompt: String
-    let suppressDefaultRules: Bool
-}
-
 enum PromptResolutionError: LocalizedError, Equatable {
     case presetUnavailable(String)
 
@@ -74,35 +73,15 @@ enum PromptResolver {
     static func resolve(
         presetId: String?,
         availablePresets: [PromptPreset],
-        profileCustomPrompt: String?,
-        settingsCustomPrompt: String?,
         defaultPrompt: String
-    ) throws -> ResolvedSystemPrompt {
+    ) throws -> String {
         if let presetId {
             guard let preset = availablePresets.first(where: { $0.id == presetId }) else {
                 throw PromptResolutionError.presetUnavailable(presetId)
             }
-            return ResolvedSystemPrompt(
-                systemPrompt: preset.systemPrompt,
-                suppressDefaultRules: false
-            )
+            return preset.systemPrompt
         }
-
-        if let profileCustomPrompt {
-            return ResolvedSystemPrompt(
-                systemPrompt: profileCustomPrompt,
-                suppressDefaultRules: !ProfileManager.systemPromptHasContent(profileCustomPrompt)
-            )
-        }
-
-        if let settingsCustomPrompt {
-            return ResolvedSystemPrompt(
-                systemPrompt: settingsCustomPrompt,
-                suppressDefaultRules: !ProfileManager.systemPromptHasContent(settingsCustomPrompt)
-            )
-        }
-
-        return ResolvedSystemPrompt(systemPrompt: defaultPrompt, suppressDefaultRules: false)
+        return defaultPrompt
     }
 }
 

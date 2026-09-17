@@ -314,6 +314,10 @@ enum Constants {
         static let maxFavorites = 3
         /// Number of prompt suggestions shown on the welcome screen.
         static let homeSuggestionCount = 3
+        /// Name and description given to a legacy custom system prompt when
+        /// it is converted into a library preset.
+        static let migratedCustomPromptName = "My default prompt"
+        static let migratedCustomPromptDescription = "Migrated from the custom system prompt setting"
     }
 
     enum ChatFavorites {
