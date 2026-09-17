@@ -50,8 +50,8 @@ class ProfileSyncService: ObservableObject {
     private static let knownProfileKeys: Set<String> = [
         "isDarkMode", "themeMode", "language", "nickname", "profession",
         "traits", "additionalContext", "isUsingPersonalization",
-        "isUsingCustomPrompt", "customSystemPrompt", "customPromptPresets",
-        "favoritePromptPresetIds", "reasoningEffort",
+        "customPromptPresets", "favoritePromptPresetIds",
+        "defaultPromptPresetId", "reasoningEffort",
         "thinkingEnabled", "webSearchAvailable", "codeExecutionEnabled",
         "piiCheckEnabled", "genUIEnabled", "chatFont", "projectUploadPreference",
         "pinnedChatIds",

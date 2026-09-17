@@ -24,8 +24,8 @@ enum ProfileMerge {
     static let mergeFields: [String] = [
         "isDarkMode", "themeMode", "language", "nickname", "profession",
         "traits", "additionalContext", "isUsingPersonalization",
-        "isUsingCustomPrompt", "customSystemPrompt", "customPromptPresets",
-        "favoritePromptPresetIds", "reasoningEffort",
+        "customPromptPresets", "favoritePromptPresetIds",
+        "defaultPromptPresetId", "reasoningEffort",
         "thinkingEnabled", "webSearchAvailable",
         "codeExecutionEnabled",
         "piiCheckEnabled", "genUIEnabled", "chatFont",
@@ -71,7 +71,7 @@ enum ProfileMerge {
             return !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
         if nonEmpty(p.nickname) || nonEmpty(p.profession)
-            || nonEmpty(p.additionalContext) || nonEmpty(p.customSystemPrompt) {
+            || nonEmpty(p.additionalContext) || nonEmpty(p.defaultPromptPresetId) {
             return true
         }
         if let traits = p.traits, !traits.isEmpty { return true }

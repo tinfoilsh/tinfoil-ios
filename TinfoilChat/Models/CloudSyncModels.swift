@@ -528,13 +528,15 @@ struct ProfileData: Codable {
     var additionalContext: String?
     var isUsingPersonalization: Bool?
     
-    // Custom system prompt settings
-    var isUsingCustomPrompt: Bool?
-    var customSystemPrompt: String?
+    // Prompt library
     var customPromptPresets: [SyncedPromptPreset]?
     /// Ordered preset ids the user pinned as homescreen favorites.
     /// Mixes `builtin:*` and `user:*` ids, shared with the webapp.
     var favoritePromptPresetIds: [String]?
+    /// Preset stamped onto every new chat. An empty string means the Tinfoil
+    /// default and is always written (never omitted) so a clear on one device
+    /// propagates to the others.
+    var defaultPromptPresetId: String?
 
     // Shared chat defaults
     var reasoningEffort: String?
@@ -575,10 +577,9 @@ enum ProfileDefaults {
     static let traits: [String] = []
     static let additionalContext = ""
     static let isUsingPersonalization = true
-    static let isUsingCustomPrompt = false
-    static let customSystemPrompt = ""
     static let customPromptPresets: [SyncedPromptPreset] = []
     static let favoritePromptPresetIds: [String] = []
+    static let defaultPromptPresetId = ""
     static let reasoningEffort = ReasoningEffort.medium.rawValue
     static let thinkingEnabled = true
     static let webSearchAvailable = true
@@ -593,10 +594,9 @@ enum ProfileDefaults {
         traits: traits,
         additionalContext: additionalContext,
         isUsingPersonalization: isUsingPersonalization,
-        isUsingCustomPrompt: isUsingCustomPrompt,
-        customSystemPrompt: customSystemPrompt,
         customPromptPresets: customPromptPresets,
         favoritePromptPresetIds: favoritePromptPresetIds,
+        defaultPromptPresetId: defaultPromptPresetId,
         reasoningEffort: reasoningEffort,
         thinkingEnabled: thinkingEnabled,
         webSearchAvailable: webSearchAvailable,
