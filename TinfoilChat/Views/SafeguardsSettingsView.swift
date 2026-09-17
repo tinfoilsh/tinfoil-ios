@@ -75,13 +75,18 @@ struct SafeguardsSettingsView: View {
 
     private var privacySection: some View {
         Section {
-            VStack(alignment: .leading, spacing: Constants.Safeguards.contentSpacing) {
-                Label("Your conversations stay private.", systemImage: "lock.shield")
-                    .font(.headline)
-                Text("Automated safeguards check model responses in the context of the conversation—not user prompts for wrongdoing. These checks run entirely inside secure enclaves at inference time, applying our narrow hard-no policy on child endangerment, mass violence and terrorism, and encouraging self-harm.")
-                Text("Only a flag linked to your account and the chat ID leaves the enclaves. Tinfoil cannot see the conversation or the flagged category, and there is no human review of your private chats. Your stored backups remain end-to-end encrypted. Safeguards do not scan stored chat data; checks happen only at inference time inside the enclaves.")
-            }
-            .font(.subheadline)
+            explanation(
+                title: "Your conversations stay private",
+                text: "Safeguards run entirely inside secure enclaves. Tinfoil cannot read your conversations, and there is no human review of your private chats."
+            )
+            explanation(
+                title: "Safeguards assess model responses",
+                text: "Automated checks assess model responses in conversational context—not user prompts for wrongdoing—against our narrow hard-no policy on child endangerment, mass violence and terrorism, and encouraging self-harm."
+            )
+            explanation(
+                title: "Only a flag leaves the enclave",
+                text: "Only a flag linked to your account and chat ID leaves the enclaves—not the conversation or flagged category. Encrypted stored backups are not scanned; checks happen only at inference time."
+            )
             Link(destination: Constants.Safeguards.infoURL) {
                 Label("Learn how safeguards work", systemImage: "arrow.up.right.square")
             }
@@ -89,9 +94,20 @@ struct SafeguardsSettingsView: View {
         .listRowBackground(Color.cardSurface(for: colorScheme))
     }
 
+    private func explanation(title: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: Constants.Safeguards.contentSpacing) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     @ViewBuilder
     private var flagsSection: some View {
         Section {
+            suspensionProgress(store.report)
             if let error = store.errorMessage {
                 VStack(alignment: .leading, spacing: Constants.Safeguards.contentSpacing) {
                     Text(error)
@@ -112,42 +128,49 @@ struct SafeguardsSettingsView: View {
                     Text("No flagged chats in the last \(report.windowDescription).")
                         .foregroundStyle(.secondary)
                 }
-                if !report.flags.isEmpty || report.inWindow > 0 {
-                    suspensionProgress(report)
-                    ForEach(report.flags) { flag in
-                        flagRow(flag, report: report)
-                    }
+                ForEach(report.flags) { flag in
+                    flagRow(flag, report: report)
                 }
                 if store.isLoading {
                     ProgressView("Refreshing flagged chats…")
                 }
-            } else if store.errorMessage == nil {
-                ProgressView("Loading flagged chats…")
             }
         } header: {
             Text(store.usesExamples ? "Example Flagged Chats" : "Flagged Chats")
         } footer: {
-            if let report = store.report, !report.flags.isEmpty || report.inWindow > 0 {
+            if let report = store.report {
                 Text("These flags identify chats containing model responses flagged by safeguards. Repeated flags within the counting window can lead to automatic account suspension. Flags count for \(report.windowDescription); older flags no longer count toward suspension.")
             }
         }
         .listRowBackground(Color.cardSurface(for: colorScheme))
     }
 
-    private func suspensionProgress(_ report: SafeguardFlagsReport) -> some View {
+    private func suspensionProgress(_ report: SafeguardFlagsReport?) -> some View {
         VStack(alignment: .leading, spacing: Constants.Safeguards.contentSpacing) {
-            Text("\(report.inWindow) of \(report.banThreshold) flags in the last \(report.windowDescription)")
-                .font(.subheadline.weight(.medium))
-            ProgressView(value: report.progress)
-                .progressViewStyle(.linear)
-                .tint(Color(hex: Constants.Safeguards.suspensionColorHex))
-                .accessibilityLabel("Flags toward account suspension")
-                .accessibilityValue("\(report.inWindow) of \(report.banThreshold)")
-            Text(report.remaining == 0
-                 ? "Suspension limit reached"
-                 : "\(report.remaining) more before account suspension")
-                .font(.caption)
-                .foregroundStyle(report.inWindow >= report.warnThreshold ? Color.red : Color.secondary)
+            if let report {
+                Text("\(report.inWindow) of \(report.banThreshold) flags in the last \(report.windowDescription)")
+                    .font(.subheadline.weight(.medium))
+                ProgressView(value: report.progress)
+                    .progressViewStyle(.linear)
+                    .tint(Color(hex: Constants.Safeguards.suspensionColorHex))
+                    .accessibilityLabel("Flags toward account suspension")
+                    .accessibilityValue("\(report.inWindow) of \(report.banThreshold)")
+                Text(report.remaining == 0
+                     ? "Suspension limit reached"
+                     : "\(report.remaining) more before account suspension")
+                    .font(.caption)
+                    .foregroundStyle(report.inWindow >= report.warnThreshold ? Color.red : Color.secondary)
+            } else {
+                Text(store.errorMessage == nil ? "Loading flag count…" : "Flag count unavailable")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Capsule()
+                    .fill(Color(hex: Constants.Safeguards.suspensionColorHex).opacity(Constants.Safeguards.progressTrackOpacity))
+                    .frame(height: Constants.Safeguards.progressTrackHeight)
+                    .accessibilityElement()
+                    .accessibilityLabel("Flags toward account suspension")
+                    .accessibilityValue(store.errorMessage == nil ? "Loading" : "Unavailable")
+            }
         }
     }
 

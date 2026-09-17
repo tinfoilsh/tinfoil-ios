@@ -30,6 +30,25 @@ struct SafeguardsStoreTests {
     }
 
     @Test
+    func emptyResultsRetainThePolicyForZeroProgress() async throws {
+        let store = SafeguardsStore(usesExamples: false) { _ in
+            SafeguardFlagsReport(flags: [], inWindow: 0, windowHours: 48, warnThreshold: 3, banThreshold: 4)
+        }
+        store.setUserId("user-a")
+        #expect(store.report == nil)
+
+        await store.refresh()
+
+        let report = try #require(store.report)
+        #expect(report.flags.isEmpty)
+        #expect(report.progress == 0)
+        #expect(report.remaining == 4)
+        #expect(report.windowDescription == "2 days")
+        #expect(store.errorMessage == nil)
+        #expect(!store.isLoading)
+    }
+
+    @Test
     func retainsSameAccountDataOnRefreshFailureButNotOnAccountChange() async {
         var shouldFail = false
         let store = SafeguardsStore(usesExamples: false) { _ in
