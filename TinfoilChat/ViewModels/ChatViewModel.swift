@@ -551,6 +551,7 @@ class ChatViewModel: ObservableObject {
     private var chatRecoveryObserver: NSObjectProtocol?
     private var cloudRemoteDeleteObserver: NSObjectProtocol?
     private var networkStatusCancellable: AnyCancellable?
+    private var defaultPromptPresetCancellable: AnyCancellable?
     private var streamUpdateTimers: [String: Timer] = [:]
     private var pendingStreamUpdates: [String: Chat] = [:]
     private var pendingSaveTask: Task<Void, Never>?
@@ -1053,6 +1054,7 @@ class ChatViewModel: ObservableObject {
 
         // Setup network status observer for automatic retry on reconnection
         setupNetworkStatusObserver()
+        setupDefaultPromptPresetObserver()
 
         // Mirror the passkey recovery-skipped state so views observe it through the
         // view model rather than reaching into the passkey service directly.
@@ -1100,6 +1102,8 @@ class ChatViewModel: ObservableObject {
         // Cancel network status observer
         networkStatusCancellable?.cancel()
         networkStatusCancellable = nil
+        defaultPromptPresetCancellable?.cancel()
+        defaultPromptPresetCancellable = nil
 
         // Remove app lifecycle observers
         if let observer = didBecomeActiveObserver {
@@ -1460,6 +1464,38 @@ class ChatViewModel: ObservableObject {
                 // Retry after a short delay to let the network stabilize
                 DispatchQueue.main.asyncAfter(deadline: .now() + Constants.Verification.networkRetryDelaySeconds) { [weak self] in
                     self?.retryClientSetup()
+                }
+            }
+    }
+
+    /// Blank chats are stamped with the default preset when created, so when
+    /// the default changes (locally or via sync) while a blank is already
+    /// open it would otherwise start its first conversation with the old
+    /// preset. Only blanks still carrying the previous default are updated,
+    /// so a preset the user picked for a blank by hand is left alone.
+    private func setupDefaultPromptPresetObserver() {
+        var previousDefault = ProfileManager.shared.defaultPromptPresetIdForNewChat
+        defaultPromptPresetCancellable = ProfileManager.shared.$defaultPromptPresetId
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let newDefault = ProfileManager.shared.defaultPromptPresetIdForNewChat
+                let oldDefault = previousDefault
+                previousDefault = newDefault
+                guard oldDefault != newDefault else { return }
+                let restamp: (inout Chat) -> Void = { chat in
+                    if chat.isBlankChat && chat.promptPresetId == oldDefault {
+                        chat.promptPresetId = newDefault
+                    }
+                }
+                for index in self.chats.indices { restamp(&self.chats[index]) }
+                for index in self.localChats.indices { restamp(&self.localChats[index]) }
+                if var current = self.currentChat {
+                    restamp(&current)
+                    if current.promptPresetId != self.currentChat?.promptPresetId {
+                        self.currentChat = current
+                    }
                 }
             }
     }
