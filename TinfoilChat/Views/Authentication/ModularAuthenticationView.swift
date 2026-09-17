@@ -128,6 +128,12 @@ struct ModularAuthenticationView: View {
   private var authenticationContent: some View {
     VStack(spacing: 16) {
       authenticationForms
+      Text("By continuing, you agree to our [Terms](\(Constants.Legal.termsOfServiceURL.absoluteString)) and acknowledge our [Privacy Policy](\(Constants.Legal.privacyPolicyURL.absoluteString)).")
+        .font(.footnote)
+        .foregroundColor(.secondary)
+        .tint(Color.adaptiveAccent)
+        .multilineTextAlignment(.center)
+        .fixedSize(horizontal: false, vertical: true)
     }
     .onChange(of: clerk.user != nil) { _, isSignedIn in
       if isSignedIn && onAuthenticated == nil {
