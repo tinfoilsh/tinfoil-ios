@@ -59,9 +59,15 @@ struct SubscriptionRefreshContext: Equatable {
 class AuthManager: ObservableObject {
     private static let userIdKey = "id"
 
-    @Published var isAuthenticated = false
+    let safeguards = SafeguardsStore()
+
+    @Published var isAuthenticated = false {
+        didSet { synchronizeSafeguardsAccount() }
+    }
     @Published var isLoading = true
-    @Published var localUserData: [String: Any]? = nil
+    @Published var localUserData: [String: Any]? = nil {
+        didSet { synchronizeSafeguardsAccount() }
+    }
     @Published var hasActiveSubscription = false
 
     var localUserId: String? {
@@ -143,6 +149,10 @@ class AuthManager: ObservableObject {
 
     private func invalidateAccountLifecycle() {
         accountLifecycleGeneration &+= 1
+    }
+
+    private func synchronizeSafeguardsAccount() {
+        safeguards.setUserId(isAuthenticated ? localUserId : nil)
     }
 
     private func isCurrentSubscriptionRefresh(
@@ -361,6 +371,7 @@ class AuthManager: ObservableObject {
     
     private func clearAuthState() async {
         invalidateAccountLifecycle()
+        safeguards.setUserId(nil)
         if let accountTeardownTask {
             await accountTeardownTask.value
             return
@@ -423,6 +434,7 @@ class AuthManager: ObservableObject {
     
     func signOut() async {
         invalidateAccountLifecycle()
+        safeguards.setUserId(nil)
         do {
             // If we have a Clerk instance, use it, otherwise fall back to Clerk.shared
             let clerk = self.clerk ?? Clerk.shared

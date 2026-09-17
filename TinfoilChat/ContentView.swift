@@ -22,6 +22,20 @@ struct ContentView: View {
     @Environment(\.requestReview) private var requestReview
     @State private var showKeyInputModal = false
     @State private var lastSyncTime: Date?
+
+    private struct SafeguardsRefreshID: Equatable {
+        let userId: String?
+        let sessionId: String?
+        let isActive: Bool
+    }
+
+    private var safeguardsRefreshID: SafeguardsRefreshID {
+        SafeguardsRefreshID(
+            userId: authManager.isAuthenticated ? authManager.localUserId : nil,
+            sessionId: clerk.session?.id,
+            isActive: scenePhase == .active
+        )
+    }
     
     var body: some View {
         Group {
@@ -41,6 +55,12 @@ struct ContentView: View {
                 ChatContainer()
                     .environmentObject(chatViewModel)
             }
+        }
+        .task(id: safeguardsRefreshID) {
+            guard !Task.isCancelled else { return }
+            authManager.safeguards.setSessionId(clerk.session?.id)
+            guard scenePhase == .active else { return }
+            await authManager.safeguards.refresh()
         }
         .onAppear {
             chatViewModel.authManager = authManager

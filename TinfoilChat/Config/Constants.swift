@@ -309,6 +309,32 @@ enum Constants {
         static let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
     }
 
+    enum Safeguards {
+        static let flagsURL = URL(string: "\(API.baseURL)/api/users/me/safeguard-flags")!
+        static let infoURL = URL(string: "https://tinfoil.sh/safety-and-safeguards")!
+        static let chatBaseURL = URL(string: "\(Share.shareBaseURL)/chat")!
+        static let secondsPerHour: TimeInterval = 60 * 60
+        static let hoursPerDay = 24
+        static let requestTimeoutSeconds: TimeInterval = 30
+        static let suspensionColorHex = "991B1B"
+        static let progressTrackHeight: CGFloat = 4
+        static let progressTrackOpacity: Double = 0.15
+        static let contentSpacing: CGFloat = 12
+        static let flagLabel = "Model response flagged by safeguards"
+        static let loadError = "Could not load flagged chats. Please try again."
+
+        #if DEBUG
+        static let useExamples = true
+        static let exampleWindowHours = 7 * hoursPerDay
+        static let exampleWarnThreshold = 8
+        static let exampleBanThreshold = 10
+        static let exampleAgesInHours = [2, 3 * hoursPerDay, 12 * hoursPerDay]
+        static let exampleIDPrefix = "example-safeguard-flag-"
+        #else
+        static let useExamples = false
+        #endif
+    }
+
     enum PromptLibrary {
         /// Maximum number of prompt presets a user can pin as favorites.
         static let maxFavorites = 3

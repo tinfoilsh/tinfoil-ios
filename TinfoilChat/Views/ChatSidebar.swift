@@ -352,6 +352,7 @@ struct ChatSidebar: View {
                 .applyAlwaysBounceIfAvailable()
                 .refreshable {
                     await authManager.initializeAuthState()
+                    await authManager.safeguards.refresh()
                     await viewModel.performFullSync()
                 }
                 .frame(maxHeight: .infinity)
@@ -489,6 +490,7 @@ struct ChatSidebar: View {
         ForEach(displayedChats) { chat in
             chatRowSwipeActions(chat, content: ChatListItem(
                 chat: chat,
+                safeguards: authManager.safeguards,
                 isSelected: viewModel.selectedChatId == chat.id,
                 isEditing: editingChatId == chat.id,
                 editingTitle: $editingTitle,
@@ -661,6 +663,7 @@ struct ChatSidebar: View {
         let summary = ChatListSummary(from: chat)
         return chatRowSwipeActions(summary, content: ChatListItem(
             chat: summary,
+            safeguards: authManager.safeguards,
             isSelected: viewModel.currentChat?.id == chat.id,
             isEditing: editingChatId == chat.id,
             editingTitle: $editingTitle,
@@ -1144,6 +1147,7 @@ private extension View {
 
 struct ChatListItem: View {
     let chat: ChatListSummary
+    @ObservedObject var safeguards: SafeguardsStore
     let isSelected: Bool
     let isEditing: Bool
     @Binding var editingTitle: String
@@ -1201,6 +1205,13 @@ struct ChatListItem: View {
                             Text(chat.title)
                                 .foregroundColor(.primary)
                                 .lineLimit(1)
+
+                            if safeguards.isFlagged(chat.id) {
+                                Image(systemName: "flag.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.red)
+                                    .accessibilityHidden(true)
+                            }
                             
                             if chat.isBlankChat {
                                 // Blue dot indicator for new chats
@@ -1298,6 +1309,9 @@ struct ChatListItem: View {
         }
         if isPinned {
             components.append("Favorite")
+        }
+        if safeguards.isFlagged(chat.id) {
+            components.append(Constants.Safeguards.flagLabel)
         }
         if chat.isBlankChat {
             components.append("New chat")
