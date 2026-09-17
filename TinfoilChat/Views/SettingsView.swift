@@ -60,19 +60,6 @@ class SettingsManager: ObservableObject {
         }
     }
     
-    // Custom system prompt settings
-    @Published var isUsingCustomPrompt: Bool {
-        didSet {
-            UserDefaults.standard.set(isUsingCustomPrompt, forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled)
-        }
-    }
-    
-    @Published var customSystemPrompt: String {
-        didSet {
-            UserDefaults.standard.set(customSystemPrompt, forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt)
-        }
-    }
-
     // While true, setting-change observers skip notifying ProfileManager. This
     // is set while a synced profile is being applied, both to avoid redundant
     // sync callbacks and to prevent re-entering ProfileManager.shared while its
@@ -145,10 +132,6 @@ class SettingsManager: ObservableObject {
             self.selectedTraits = ProfileDefaults.traits
         }
         
-        // Initialize custom system prompt settings
-        self.isUsingCustomPrompt = UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.customPromptEnabled) as? Bool ?? ProfileDefaults.isUsingCustomPrompt
-        self.customSystemPrompt = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.customSystemPrompt) ?? ProfileDefaults.customSystemPrompt
-
         if let storedValue = UserDefaults.standard.object(
             forKey: Constants.StorageKeys.Settings.webSearchAvailable
         ) as? Bool {
@@ -231,8 +214,6 @@ class SettingsManager: ObservableObject {
         profession = ProfileDefaults.profession
         selectedTraits = ProfileDefaults.traits
         additionalContext = ProfileDefaults.additionalContext
-        isUsingCustomPrompt = ProfileDefaults.isUsingCustomPrompt
-        customSystemPrompt = ProfileDefaults.customSystemPrompt
         webSearchAvailable = ProfileDefaults.webSearchAvailable
         piiCheckEnabled = ProfileDefaults.piiCheckEnabled
         genUIEnabled = ProfileDefaults.genUIEnabled
@@ -618,25 +599,20 @@ struct SettingsView: View {
 
             }
 
-            NavigationLink(destination: CustomSystemPromptView(
-                isUsingCustomPrompt: $settings.isUsingCustomPrompt,
-                customSystemPrompt: $settings.customSystemPrompt
-            )) {
+            NavigationLink(destination: DefaultPromptPresetView()) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Custom System Prompt")
+                        Text("Default Prompt")
                             .font(.body)
-                        Text("Override the default system prompt")
+                        Text("Prompt new chats start with")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                     Spacer()
-                    if profileManager.isUsingCustomPrompt {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.caption)
-                            .foregroundColor(.green)
-                            .accessibilityLabel("Enabled")
-                    }
+                    Text(profileManager.defaultPromptPreset?.name ?? "Tinfoil default")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
                 }
             }
 
@@ -990,10 +966,6 @@ struct SettingsView: View {
                     
                     // Mirror the profile language for legacy settings consumers.
                     settings.selectedLanguage = profileManager.language
-                    
-                    // Update custom prompt settings from single source of truth (ProfileManager)
-                    settings.isUsingCustomPrompt = profileManager.isUsingCustomPrompt
-                    settings.customSystemPrompt = profileManager.customSystemPrompt
                 }
             }
         }
@@ -1012,16 +984,6 @@ struct SettingsView: View {
         .onReceive(ProfileManager.shared.$language) { newValue in
             if !newValue.isEmpty && settings.selectedLanguage != newValue {
                 settings.selectedLanguage = newValue
-            }
-        }
-        .onReceive(ProfileManager.shared.$isUsingCustomPrompt) { newValue in
-            if settings.isUsingCustomPrompt != newValue {
-                settings.isUsingCustomPrompt = newValue
-            }
-        }
-        .onReceive(ProfileManager.shared.$customSystemPrompt) { newValue in
-            if settings.customSystemPrompt != newValue {
-                settings.customSystemPrompt = newValue
             }
         }
         .sheet(isPresented: $showAuthView) {
@@ -1205,178 +1167,91 @@ struct ProfileEditorView: View {
     }
 }
 
-// Custom System Prompt View
-struct CustomSystemPromptView: View {
-    @Binding var isUsingCustomPrompt: Bool
-    @Binding var customSystemPrompt: String
+// Default Prompt Preset View
+struct DefaultPromptPresetView: View {
     @ObservedObject private var profileManager = ProfileManager.shared
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
-    @State private var editingPrompt: String = ""
-    @State private var showRestoreConfirmation = false
-    
-    private var defaultSystemPrompt: String {
-        AppConfig.shared.systemPrompt
+
+    private var customPresets: [PromptPreset] {
+        profileManager.customPromptPresets.map { PromptPreset(from: $0) }
     }
-    
-    private func stripSystemTags(_ prompt: String) -> String {
-        var result = prompt
-        if result.hasPrefix("<system>") {
-            result = String(result.dropFirst(8)).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        if result.hasSuffix("</system>") {
-            result = String(result.dropLast(9)).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return result
-    }
-    
+
     var body: some View {
         Form {
             Section {
-                Toggle("Enable Custom System Prompt", isOn: $isUsingCustomPrompt)
-                    .tint(Color.green)
-                    .onChange(of: isUsingCustomPrompt) { _, newValue in
-                        profileManager.isUsingCustomPrompt = newValue
-                        if newValue {
-                            var currentEditor = editingPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if currentEditor.isEmpty {
-                                currentEditor = stripSystemTags(defaultSystemPrompt)
-                                editingPrompt = currentEditor
-                            }
-                            if profileManager.customSystemPrompt.isEmpty {
-                                var promptToSave = currentEditor
-                                if !promptToSave.hasPrefix("<system>") { promptToSave = "<system>\n\(promptToSave)" }
-                                if !promptToSave.hasSuffix("</system>") { promptToSave += "\n</system>" }
-                                profileManager.customSystemPrompt = promptToSave
-                            }
-                        }
-                    }
-            } header: {
-                Text("Status")
+                presetRow(id: nil, name: "Tinfoil default", iconName: "text.quote")
             } footer: {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("When enabled, your custom prompt will override the default system prompt")
-                        .font(.caption)
-                    
-                    if isUsingCustomPrompt {
-                        Text("Tip: Use placeholders like {USER_PREFERENCES}, {LANGUAGE}, and {TIMEZONE} to tell the model about your preferences and timezone. The current time and date are always provided to the model automatically.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 4)
-                    }
-                }
+                Text("New chats start with this prompt. You can still switch prompts in any chat.")
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
-            
-            if isUsingCustomPrompt {
+
+            if !customPresets.isEmpty {
                 Section {
-                    TextEditor(text: $editingPrompt)
-                        .font(.system(.body, design: .monospaced))
-                        .frame(minHeight: 200)
-                        .accessibilityLabel("Custom prompt")
-                } header: {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Custom Prompt")
-                        HStack {
-                            Button(action: {
-                                showRestoreConfirmation = true
-                            }) {
-                                Text("Restore default prompt")
-                                    .font(.caption)
-                                    .foregroundColor(.red)
-                            }
-                            Spacer()
-                            Button(action: {
-                                editingPrompt = ""
-                            }) {
-                                Text("Clear")
-                                    .font(.caption)
-                                    .foregroundColor(.blue)
-                            }
-                        }
+                    ForEach(customPresets) { preset in
+                        presetRow(id: preset.id, name: preset.name, iconName: preset.iconName)
                     }
+                } header: {
+                    Text("Your Prompts")
                 }
                 .listRowBackground(Color.cardSurface(for: colorScheme))
             }
+
+            Section {
+                ForEach(PromptPreset.builtIns) { preset in
+                    presetRow(id: preset.id, name: preset.name, iconName: preset.iconName)
+                }
+            } header: {
+                Text("Built-in")
+            }
+            .listRowBackground(Color.cardSurface(for: colorScheme))
         }
         .scrollContentBackground(.hidden)
         .background(Color.settingsBackground(for: colorScheme))
-        .navigationTitle("Custom System Prompt")
+        .navigationTitle("Default Prompt")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Save") {
-                    var promptToSave = editingPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !promptToSave.isEmpty {
-                        if !promptToSave.hasPrefix("<system>") {
-                            promptToSave = "<system>\n\(promptToSave)"
-                        }
-                        if !promptToSave.hasSuffix("</system>") {
-                            promptToSave = "\(promptToSave)\n</system>"
-                        }
-                    }
-                    
-                    profileManager.customSystemPrompt = promptToSave
-                    profileManager.isUsingCustomPrompt = isUsingCustomPrompt
-                    customSystemPrompt = promptToSave
-                    dismiss()
-                }
-                .fontWeight(.semibold)
-            }
-        }
         .onAppear {
             let appearance = UINavigationBarAppearance()
             appearance.configureWithDefaultBackground()
-            
+
             UINavigationBar.appearance().standardAppearance = appearance
             UINavigationBar.appearance().compactAppearance = appearance
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
-            
-            if !profileManager.customSystemPrompt.isEmpty {
-                editingPrompt = stripSystemTags(profileManager.customSystemPrompt)
-                isUsingCustomPrompt = profileManager.isUsingCustomPrompt
-            } else if !customSystemPrompt.isEmpty {
-                editingPrompt = stripSystemTags(customSystemPrompt)
-            } else {
-                editingPrompt = stripSystemTags(defaultSystemPrompt)
-            }
-            
-            Task {
-                await profileManager.syncFromCloud()
-                await MainActor.run {
-                    if !profileManager.customSystemPrompt.isEmpty {
-                        editingPrompt = stripSystemTags(profileManager.customSystemPrompt)
-                        isUsingCustomPrompt = profileManager.isUsingCustomPrompt
-                    }
-                }
-            }
         }
         .onDisappear {
             let appearance = UINavigationBarAppearance()
             appearance.configureWithOpaqueBackground()
             appearance.backgroundColor = UIColor(Color.backgroundPrimary)
             appearance.shadowColor = .clear
-            
+
             UINavigationBar.appearance().standardAppearance = appearance
             UINavigationBar.appearance().compactAppearance = appearance
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
         }
-        .alert("Restore Default", isPresented: $showRestoreConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Restore", role: .destructive) {
-                var strippedDefault = defaultSystemPrompt
-                if strippedDefault.hasPrefix("<system>") {
-                    strippedDefault = String(strippedDefault.dropFirst(8))
-                    strippedDefault = strippedDefault.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    @ViewBuilder
+    private func presetRow(id: String?, name: String, iconName: String) -> some View {
+        let isSelected = profileManager.defaultPromptPreset?.id == id
+        Button {
+            profileManager.setDefaultPromptPreset(id)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: iconName)
+                    .font(.system(size: 16))
+                    .foregroundColor(.secondary)
+                    .frame(width: 24)
+                Text(name)
+                    .font(.body)
+                    .foregroundColor(.primary)
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundColor(.green)
+                        .accessibilityLabel("Selected")
                 }
-                if strippedDefault.hasSuffix("</system>") {
-                    strippedDefault = String(strippedDefault.dropLast(9))
-                    strippedDefault = strippedDefault.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                editingPrompt = strippedDefault
             }
-        } message: {
-            Text("Are you sure you want to restore the default system prompt? Your custom prompt will be replaced.")
         }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
