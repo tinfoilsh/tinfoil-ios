@@ -86,6 +86,7 @@ actor ChatRecoveryClient {
 
     func start(
         query: ChatQuery,
+        conversationId: String,
         sessionId: String,
         bearerToken: String,
         userId: String
@@ -116,6 +117,7 @@ actor ChatRecoveryClient {
                 Constants.ChatRecovery.sessionHeader: sessionId,
                 Constants.ChatRecovery.eventsHeader: Constants.ChatRecovery.webSearchEvent,
                 Constants.ChatRecovery.enclaveHeader: endpoint.enclaveURL,
+                Constants.API.conversationIdHeader: conversationId,
             ],
             body: body
         )

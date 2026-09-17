@@ -4124,6 +4124,7 @@ class ChatViewModel: ObservableObject {
                     recoverySessionMayHaveStarted = true
                     let recoverable = try await ChatRecoveryClient.shared.start(
                         query: chatQuery,
+                        conversationId: streamChatId,
                         sessionId: attempt.sessionId,
                         bearerToken: bearerToken,
                         userId: userId
@@ -4158,7 +4159,10 @@ class ChatViewModel: ObservableObject {
                     }
                     stream = recoverable.stream
                 } else {
-                    stream = client.chatsStream(query: chatQuery)
+                    stream = client.chatsStream(
+                        query: chatQuery,
+                        headers: [Constants.API.conversationIdHeader: streamChatId]
+                    )
                 }
 
                 // Applies one decoded marker event to the current chat.
