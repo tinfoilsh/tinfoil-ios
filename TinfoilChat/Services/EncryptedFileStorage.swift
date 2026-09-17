@@ -420,8 +420,28 @@ actor EncryptedFileStorage {
             return decision
         }
         EditClockStore.observe(chat.clock)
+        var chatToSave = chat
+        if existing != nil, AttachmentPayloadMerge.containsBytelessImages(chatToSave.messages) {
+            // Best effort: an unreadable local file must not block the
+            // remote copy from replacing it, but cancellation still aborts
+            // the apply.
+            let current: Chat?
+            do {
+                current = try await loadChatUnlocked(chatId: chat.id, userId: userId)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                current = nil
+            }
+            if let current {
+                chatToSave.messages = AttachmentPayloadMerge.inheritingImageBytes(
+                    into: chatToSave.messages,
+                    from: current.messages
+                )
+            }
+        }
         try await performSaveChat(
-            chat,
+            chatToSave,
             userId: userId,
             allowRemoteDeleteReplacement: allowRemoteDeleteReplacement
         )
@@ -1328,6 +1348,20 @@ actor EncryptedFileStorage {
     }
 
     // MARK: - Private Helpers
+
+    /// Reads the on-disk chat without touching the index or the write
+    /// lock, for callers that already hold the lock.
+    private func loadChatUnlocked(chatId: String, userId: String) async throws -> Chat? {
+        let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
+        if fileManager.fileExists(atPath: encPath.path) {
+            return try await loadChatFromFile(encPath, isRaw: false)
+        }
+        let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
+        if fileManager.fileExists(atPath: rawPath.path) {
+            return try await loadChatFromFile(rawPath, isRaw: true)
+        }
+        return nil
+    }
 
     private func loadChatFromFile(_ fileURL: URL, isRaw: Bool) async throws -> Chat? {
         let performanceToken = PerformanceInstrumentation.shared.begin(.fullChatLoad)
