@@ -224,6 +224,12 @@ struct PromptLibraryView: View {
                     }
                 }
                 Spacer()
+                if profileManager.isDefaultPreset(preset.id) {
+                    Image(systemName: "bookmark.fill")
+                        .font(.caption)
+                        .foregroundColor(.accentColor)
+                        .accessibilityLabel("Default for new chats")
+                }
                 if profileManager.isFavoritePreset(preset.id) {
                     Image(systemName: "star.fill")
                         .font(.caption)
@@ -354,6 +360,16 @@ struct PromptDetailView: View {
                     }
                 }
                 .disabled(!profileManager.canToggleFavorite(preset.id))
+
+                let isDefault = profileManager.isDefaultPreset(preset.id)
+                Button {
+                    profileManager.setDefaultPromptPreset(isDefault ? nil : preset.id)
+                } label: {
+                    HStack {
+                        Image(systemName: isDefault ? "bookmark.slash" : "bookmark")
+                        Text(isDefault ? "Stop using for new chats" : "Use for new chats")
+                    }
+                }
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
 
