@@ -946,6 +946,17 @@ struct SettingsView: View {
                 accountSection
                 if authManager.isAuthenticated {
                     subscriptionSection
+                    Section {
+                        NavigationLink {
+                            SafeguardsSettingsView(
+                                store: authManager.safeguards,
+                                onOpenChat: { dismiss() }
+                            )
+                        } label: {
+                            Label("Safeguards", systemImage: "shield.lefthalf.filled")
+                        }
+                    }
+                    .listRowBackground(Color.cardSurface(for: colorScheme))
                 }
                 chatSettingsSection
                 preferencesSection

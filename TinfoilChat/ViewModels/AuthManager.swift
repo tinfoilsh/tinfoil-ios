@@ -59,9 +59,15 @@ struct SubscriptionRefreshContext: Equatable {
 class AuthManager: ObservableObject {
     private static let userIdKey = "id"
 
-    @Published var isAuthenticated = false
+    let safeguards = SafeguardsStore()
+
+    @Published var isAuthenticated = false {
+        didSet { synchronizeSafeguardsAccount() }
+    }
     @Published var isLoading = true
-    @Published var localUserData: [String: Any]? = nil
+    @Published var localUserData: [String: Any]? = nil {
+        didSet { synchronizeSafeguardsAccount() }
+    }
     @Published var hasActiveSubscription = false
 
     var localUserId: String? {
@@ -143,6 +149,11 @@ class AuthManager: ObservableObject {
 
     private func invalidateAccountLifecycle() {
         accountLifecycleGeneration &+= 1
+        safeguards.setUserId(nil)
+    }
+
+    private func synchronizeSafeguardsAccount() {
+        safeguards.setUserId(isAuthenticated ? localUserId : nil)
     }
 
     private func isCurrentSubscriptionRefresh(
