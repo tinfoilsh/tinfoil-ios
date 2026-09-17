@@ -21,6 +21,7 @@ struct SafeguardsSettingsView: View {
         Group {
             if canShowFlags {
                 List {
+                    flagsSection
                     privacySection
                     #if DEBUG
                     Section {
@@ -35,7 +36,6 @@ struct SafeguardsSettingsView: View {
                     }
                     .listRowBackground(Color.cardSurface(for: colorScheme))
                     #endif
-                    flagsSection
                 }
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
@@ -90,6 +90,8 @@ struct SafeguardsSettingsView: View {
             Link(destination: Constants.Safeguards.infoURL) {
                 Label("Learn how safeguards work", systemImage: "arrow.up.right.square")
             }
+        } header: {
+            Text("How it works")
         }
         .listRowBackground(Color.cardSurface(for: colorScheme))
     }
