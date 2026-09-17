@@ -198,6 +198,12 @@ enum Constants {
     enum API {
         static let chatCompletionsEndpoint = "/v1/chat/completions"
         static let baseURL = "https://api.tinfoil.sh"
+        /// Carries the chat id on completion requests so the router's
+        /// safeguards submission can identify the conversation: a continued
+        /// conversation is then counted at most once toward an acceptable
+        /// use policy violation, and a flag can be linked back to the chat.
+        /// The router strips it before the request reaches the model.
+        static let conversationIdHeader = "X-Tinfoil-Conversation-Id"
         static let dailyRateLimitMessage = "You've reached your daily rate limit."
         /// Read-only recovery endpoint for passkeys registered on the
         /// pre-enclave (v1) webapp. Consulted only when the enclave key
