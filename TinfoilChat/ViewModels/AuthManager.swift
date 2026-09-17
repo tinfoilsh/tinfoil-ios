@@ -149,7 +149,6 @@ class AuthManager: ObservableObject {
 
     private func invalidateAccountLifecycle() {
         accountLifecycleGeneration &+= 1
-        safeguards.setUserId(nil)
     }
 
     private func synchronizeSafeguardsAccount() {
@@ -372,6 +371,7 @@ class AuthManager: ObservableObject {
     
     private func clearAuthState() async {
         invalidateAccountLifecycle()
+        safeguards.setUserId(nil)
         if let accountTeardownTask {
             await accountTeardownTask.value
             return
@@ -434,6 +434,7 @@ class AuthManager: ObservableObject {
     
     func signOut() async {
         invalidateAccountLifecycle()
+        safeguards.setUserId(nil)
         do {
             // If we have a Clerk instance, use it, otherwise fall back to Clerk.shared
             let clerk = self.clerk ?? Clerk.shared

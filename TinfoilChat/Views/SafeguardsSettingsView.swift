@@ -79,7 +79,7 @@ struct SafeguardsSettingsView: View {
                 Label("Your conversations stay private.", systemImage: "lock.shield")
                     .font(.headline)
                 Text("Automated safeguards check model responses in the context of the conversation—not user prompts for wrongdoing. These checks run entirely inside secure enclaves at inference time, applying our narrow hard-no policy on child endangerment, mass violence and terrorism, and encouraging self-harm.")
-                Text("Only a flag linked to your account and the chat ID leaves the enclaves. Tinfoil cannot see the conversation or the flagged category, and there is no human review of your private chats. Backed-up and synced chats remain end-to-end encrypted and are not scanned by safeguards.")
+                Text("Only a flag linked to your account and the chat ID leaves the enclaves. Tinfoil cannot see the conversation or the flagged category, and there is no human review of your private chats. Your stored backups remain end-to-end encrypted. Safeguards do not scan stored chat data; checks happen only at inference time inside the enclaves.")
             }
             .font(.subheadline)
             Link(destination: Constants.Safeguards.infoURL) {

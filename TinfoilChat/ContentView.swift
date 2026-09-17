@@ -57,6 +57,8 @@ struct ContentView: View {
             }
         }
         .task(id: safeguardsRefreshID) {
+            guard !Task.isCancelled else { return }
+            authManager.safeguards.setSessionId(clerk.session?.id)
             guard scenePhase == .active else { return }
             await authManager.safeguards.refresh()
         }

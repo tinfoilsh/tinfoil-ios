@@ -10,6 +10,7 @@ final class SafeguardsStore: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var usesExamples: Bool
     private(set) var userId: String?
+    private var sessionId: String?
     private let fetchFlags: FetchFlags
     private var flaggedChatIds: Set<String> = []
     private var generation = UUID()
@@ -26,6 +27,12 @@ final class SafeguardsStore: ObservableObject {
     func setUserId(_ userId: String?) {
         guard self.userId != userId else { return }
         self.userId = userId
+        clear()
+    }
+
+    func setSessionId(_ sessionId: String?) {
+        guard self.sessionId != sessionId else { return }
+        self.sessionId = sessionId
         clear()
     }
 
