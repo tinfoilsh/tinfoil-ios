@@ -480,6 +480,27 @@ struct ProfileMergeTests {
         #expect(result.conflicts.isEmpty)
     }
 
+    @Test("treats an unset default prompt preset the same as an omitted one")
+    func unsetDefaultPromptPresetMatchesOmission() {
+        // The baseline came from an older client that never wrote the field,
+        // while this client serializes the unset default as "". Both mean
+        // "no default" so the remote's new choice must win without conflict.
+        let baseline = ProfileData(nickname: "Ada")
+        let local = ProfileData(nickname: "Ada", defaultPromptPresetId: "")
+        var remote = ProfileData(nickname: "Ada", defaultPromptPresetId: "user:abc")
+        remote.version = 2
+
+        let result = ProfileMerge.mergeProfiles(
+            baseline: baseline,
+            local: local,
+            remote: remote
+        )
+
+        #expect(result.merged.defaultPromptPresetId == "user:abc")
+        #expect(result.conflicts.isEmpty)
+        #expect(ProfileMerge.changedProfileFields(local: local, baseline: baseline).isEmpty)
+    }
+
     @Test("keeps the local default prompt preset when the remote omits it")
     func preservesDefaultPromptPresetOnRemoteOmission() {
         let baseline = ProfileData(nickname: "Ada", defaultPromptPresetId: "user:abc")

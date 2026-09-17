@@ -91,7 +91,7 @@ enum ProfileMerge {
         for field in mergeFields {
             let a = localDict[field]
             let b = baselineDict[field]
-            if !valuesEqual(a, b) {
+            if !valuesEqual(a, b, field: field) {
                 changed.append(field)
             }
         }
@@ -129,10 +129,10 @@ enum ProfileMerge {
             }
 
             if let remoteValue = mergedDict[field] {
-                if valuesEqual(localValue, remoteValue) { continue }
+                if valuesEqual(localValue, remoteValue, field: field) { continue }
             }
             guard let defaultValue = defaultDict[field],
-                  valuesEqual(localValue, defaultValue) else { return nil }
+                  valuesEqual(localValue, defaultValue, field: field) else { return nil }
         }
 
         // Local defaults carry no unsynced user intent, so remote values or
@@ -186,11 +186,11 @@ enum ProfileMerge {
             let remoteValue = remoteDict[field]
             let remoteClock = remoteTrusted ? remote.fieldClocks?[field] : nil
 
-            if valuesEqual(localValue, baselineValue) {
+            if valuesEqual(localValue, baselineValue, field: field) {
                 assign(remoteValue, field: field)
                 if let remoteClock { mergedClocks[field] = remoteClock }
-                adoptedRemote = adoptedRemote || !valuesEqual(localValue, remoteValue)
-            } else if valuesEqual(localValue, remoteValue) {
+                adoptedRemote = adoptedRemote || !valuesEqual(localValue, remoteValue, field: field)
+            } else if valuesEqual(localValue, remoteValue, field: field) {
                 // Both sides converged on the same value. Keep the
                 // higher trusted clock so the CRDT ordering survives
                 // for future merges instead of silently rewinding to
@@ -206,7 +206,7 @@ enum ProfileMerge {
                 } else if let clock = localClock ?? remoteClock {
                     mergedClocks[field] = clock
                 }
-            } else if valuesEqual(remoteValue, baselineValue) {
+            } else if valuesEqual(remoteValue, baselineValue, field: field) {
                 if let localClock { mergedClocks[field] = localClock }
             } else if let localClock, let remoteClock {
                 if SyncConflictResolver.remoteWins(
@@ -325,6 +325,22 @@ enum ProfileMerge {
     private static func profile(from dict: [String: Any]) throws -> ProfileData {
         let data = try JSONSerialization.data(withJSONObject: dict)
         return try JSONDecoder().decode(ProfileData.self, from: data)
+    }
+
+    /// The unset default preset is serialized as "" so clears propagate,
+    /// but profiles from older clients omit the field entirely; both mean
+    /// "Tinfoil default" and must not register as a change or a conflict.
+    private static let emptyStringMeansUnset: Set<String> = ["defaultPromptPresetId"]
+
+    private static func normalizedValue(_ value: Any?, field: String) -> Any? {
+        if emptyStringMeansUnset.contains(field), let string = value as? String, string.isEmpty {
+            return nil
+        }
+        return value
+    }
+
+    private static func valuesEqual(_ a: Any?, _ b: Any?, field: String) -> Bool {
+        valuesEqual(normalizedValue(a, field: field), normalizedValue(b, field: field))
     }
 
     private static func valuesEqual(_ a: Any?, _ b: Any?) -> Bool {
