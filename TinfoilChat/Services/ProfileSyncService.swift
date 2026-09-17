@@ -58,6 +58,13 @@ class ProfileSyncService: ObservableObject {
         "version", "updatedAt", "fieldClocks", "clockVersion",
     ]
 
+    /// Keys older clients still write that this client has migrated away
+    /// from. They are dropped on push rather than carried forward as
+    /// unknown fields, so the migration converges instead of resurrecting.
+    private static let retiredProfileKeys: Set<String> = [
+        "isUsingCustomPrompt", "customSystemPrompt",
+    ]
+
     private static let iso8601Formatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -165,7 +172,9 @@ class ProfileSyncService: ObservableObject {
             // Capture fields we do not model so a later push carries
             // them forward instead of wiping them.
             if let raw = try? JSONSerialization.jsonObject(with: plaintext) as? [String: Any] {
-                self.unknownRemoteFields = raw.filter { !Self.knownProfileKeys.contains($0.key) }
+                self.unknownRemoteFields = raw.filter {
+                    !Self.knownProfileKeys.contains($0.key) && !Self.retiredProfileKeys.contains($0.key)
+                }
                 self.persistUnknownRemoteFields()
             } else {
                 self.unknownRemoteFields = [:]
