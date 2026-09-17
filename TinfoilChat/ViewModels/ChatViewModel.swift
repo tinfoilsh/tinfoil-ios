@@ -1031,7 +1031,10 @@ class ChatViewModel: ObservableObject {
         // authManager is nil at init time (set later via onAppear), so this always takes
         // the unauthenticated branch. The didSet on authManager moves the chat to the
         // correct array once auth state is known.
-        let newChat = Chat.create(modelType: currentModel)
+        let newChat = Chat.create(
+            modelType: currentModel,
+            promptPresetId: ProfileManager.shared.defaultPromptPresetIdForNewChat
+        )
         currentChat = newChat
         chats = [newChat]
         selectedChatId = newChat.id
@@ -1708,11 +1711,13 @@ class ChatViewModel: ObservableObject {
             shouldBeLocal = activeStorageTab == .local
         }
 
-        // A reused blank represents a fresh chat, so reset its preference to
-        // the current global default before selecting it.
+        // A reused blank represents a fresh chat, so reset its preferences to
+        // the current global defaults before selecting it.
+        let defaultPresetId = ProfileManager.shared.defaultPromptPresetIdForNewChat
         if shouldBeLocal {
             if let index = localChats.firstIndex(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
                 localChats[index].webSearchEnabled = SettingsManager.shared.webSearchAvailable
+                localChats[index].promptPresetId = defaultPresetId
                 selectChat(localChats[index])
                 shouldFocusInput = focusInput
                 return
@@ -1720,6 +1725,7 @@ class ChatViewModel: ObservableObject {
         } else {
             if let index = chats.firstIndex(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
                 chats[index].webSearchEnabled = SettingsManager.shared.webSearchAvailable
+                chats[index].promptPresetId = defaultPresetId
                 selectChat(chats[index])
                 shouldFocusInput = focusInput
                 return
@@ -1732,7 +1738,8 @@ class ChatViewModel: ObservableObject {
             language: nil,
             userId: currentUserId,
             isLocalOnly: shouldBeLocal,
-            projectId: targetProjectId
+            projectId: targetProjectId,
+            promptPresetId: defaultPresetId
         )
 
         if shouldBeLocal {
@@ -3955,25 +3962,18 @@ class ChatViewModel: ObservableObject {
                 let modelId = representativeModel.modelName
                 
                 // Add system message first with language preference
-                let settingsManager = SettingsManager.shared
                 let profileManager = ProfileManager.shared
-                // Precedence: per-chat prompt preset > custom prompt toggle > default
+                // Precedence: per-chat prompt preset > default
                 if let presetId = streamChat.promptPresetId,
                    profileManager.promptPreset(for: presetId) == nil {
                     await profileManager.performFullSync()
                 }
 
-                let resolvedPrompt = try PromptResolver.resolve(
+                var systemPrompt = try PromptResolver.resolve(
                     presetId: streamChat.promptPresetId,
                     availablePresets: profileManager.allPromptPresets,
-                    profileCustomPrompt: profileManager.getCustomSystemPrompt(),
-                    settingsCustomPrompt: settingsManager.isUsingCustomPrompt
-                        ? ProfileManager.normalizeSystemPromptForSending(settingsManager.customSystemPrompt)
-                        : nil,
                     defaultPrompt: AppConfig.shared.systemPrompt
                 )
-                var systemPrompt = resolvedPrompt.systemPrompt
-                let suppressDefaultRules = resolvedPrompt.suppressDefaultRules
 
                 // Replace MODEL_NAME placeholder with current model name
                 systemPrompt = systemPrompt.replacingOccurrences(of: "{MODEL_NAME}", with: representativeModel.fullName)
@@ -4001,7 +4001,7 @@ class ChatViewModel: ObservableObject {
                 )
                 
                 // Process rules with same replacements
-                var processedRules = suppressDefaultRules ? "" : AppConfig.shared.rules
+                var processedRules = AppConfig.shared.rules
                 if !processedRules.isEmpty {
                     processedRules = processedRules.replacingOccurrences(of: "{MODEL_NAME}", with: representativeModel.fullName)
                     processedRules = processedRules.replacingOccurrences(of: "{LANGUAGE}", with: languageToUse)
@@ -5718,11 +5718,18 @@ class ChatViewModel: ObservableObject {
             let webSearchEnabled = wasCurrentChatBlank
                 ? currentChat?.webSearchEnabled
                 : nil
+            // Carry the blank's preset over when it is the current chat so a
+            // per-chat selection survives the list refresh; otherwise start
+            // from the user's default preset.
+            let promptPresetId = wasCurrentChatBlank
+                ? currentChat?.promptPresetId
+                : ProfileManager.shared.defaultPromptPresetIdForNewChat
             let blankChat = Chat.create(
                 modelType: currentModel,
                 language: nil,
                 userId: currentUserId,
                 isLocalOnly: isLocal,
+                promptPresetId: promptPresetId,
                 webSearchEnabled: webSearchEnabled
             )
             result.insert(blankChat, at: 0)
