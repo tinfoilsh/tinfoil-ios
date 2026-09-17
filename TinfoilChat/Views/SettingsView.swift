@@ -623,7 +623,6 @@ struct SettingsView: View {
                         profileManager.defaultPromptPreset?.name
                             ?? (profileManager.defaultPromptPresetId.isEmpty ? "Tinfoil default" : "Unavailable")
                     )
-                        .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                 }
