@@ -592,7 +592,7 @@ struct SettingsView: View {
                 } label: {
                     HStack {
                         Text("Cloud Sync")
-                        if syncHealth.needsAttention() {
+                        if settings.isCloudSyncEnabled && syncHealth.needsAttention() {
                             Circle()
                                 .fill(Color.orange)
                                 .frame(

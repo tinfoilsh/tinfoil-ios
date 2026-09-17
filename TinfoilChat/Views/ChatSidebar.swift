@@ -780,7 +780,7 @@ struct ChatSidebar: View {
     private var settingsGearIcon: some View {
         Image(systemName: "gear")
             .overlay(alignment: .topTrailing) {
-                if syncHealth.needsAttention() {
+                if authManager.isAuthenticated && settings.isCloudSyncEnabled && syncHealth.needsAttention() {
                     Circle()
                         .fill(Color.orange)
                         .frame(
