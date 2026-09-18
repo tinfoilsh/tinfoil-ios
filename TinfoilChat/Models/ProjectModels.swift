@@ -62,6 +62,9 @@ struct ProjectDocument: Codable, Identifiable, Equatable {
     var updatedAt: String
     var content: String?
     var decryptionFailed: Bool?
+    /// Small JPEG preview stored alongside image documents so lists can show
+    /// a real thumbnail; the full image is never persisted.
+    var thumbnailBase64: String? = nil
 }
 
 struct ProjectDocumentPayload: Codable, Equatable {
@@ -69,6 +72,7 @@ struct ProjectDocumentPayload: Codable, Equatable {
     var filename: String
     var contentType: String
     var sizeBytes: Int? = nil
+    var thumbnailBase64: String? = nil
 
     var resolvedSizeBytes: Int {
         sizeBytes ?? content.utf8.count
