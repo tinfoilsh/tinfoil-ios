@@ -199,8 +199,8 @@ struct ChatListView: View {
                 }
             }
         }
-        .task(id: isLoading) {
-            guard !isLoading, authManager.isAuthenticated, !Task.isCancelled else { return }
+        .task(id: viewModel.hasActiveStreams) {
+            guard !viewModel.hasActiveStreams, authManager.isAuthenticated, !Task.isCancelled else { return }
             await authManager.safeguards.refresh()
         }
         .onAppear {
