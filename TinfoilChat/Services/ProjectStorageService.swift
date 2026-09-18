@@ -327,7 +327,6 @@ final class ProjectStorageService: ObservableObject {
         let wireId = projectDocumentId(projectId: projectId, documentId: idResponse.documentId)
         let (payload, syncVersion) = try await enclaveStore.uploadDocument(
             id: wireId,
-            projectId: projectId,
             filename: filename,
             contentType: contentType,
             content: content,
