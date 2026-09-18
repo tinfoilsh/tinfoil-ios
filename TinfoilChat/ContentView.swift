@@ -227,7 +227,8 @@ struct ContentView: View {
                 performPendingIntentActionsIfReady()
             }
         }
-        .onChange(of: chatViewModel.readyForAccountActionsUserId) { _, _ in
+        .onChange(of: canProcessPendingActions) { _, isReady in
+            guard isReady else { return }
             importSharedAttachmentsIfReady()
             performPendingIntentActionsIfReady()
         }
@@ -283,6 +284,7 @@ struct ContentView: View {
             && !authManager.isLoading
             && !authManager.needsOnboarding
             && AccountActionReadiness.canPerform(
+                isTearingDown: chatViewModel.isAccountTeardownInProgress,
                 isAuthenticated: authManager.isAuthenticated,
                 userId: authManager.localUserId,
                 readyUserId: chatViewModel.readyForAccountActionsUserId

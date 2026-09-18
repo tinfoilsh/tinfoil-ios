@@ -392,7 +392,7 @@ class ChatViewModel: ObservableObject {
     private var accountOperationFence = AccountOperationFence()
     private let accountOperationTracker = AccountOperationTracker()
     private var activeSignInToken: AccountOperationFence.Token?
-    private var isAccountTeardownInProgress = false
+    @Published private(set) var isAccountTeardownInProgress = false
     private var acceptsChatSaves = true
     private var hasPerformedInitialSync: Bool = false  // Track if initial sync has been done
     private var hasAnonymousChatsToSync: Bool = false  // Track if we have anonymous chats to sync
