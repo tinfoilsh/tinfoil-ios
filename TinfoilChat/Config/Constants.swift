@@ -511,6 +511,20 @@ enum Constants {
         static let recordingButtonReturnDamping: CGFloat = 0.72
         static let sampleRate: Double = 44100.0
         static let numberOfChannels: Int = 1  // Mono
+
+        enum Waveform {
+            static let sampleInterval: TimeInterval = 0.05
+            static let frameInterval: TimeInterval = 1.0 / 60.0
+            static let meteringChannel = 0
+            static let minimumDecibels: Float = -60
+            static let maximumDecibels: Float = 0
+            static let maximumSamples = 256
+            static let height: CGFloat = 32
+            static let barWidth: CGFloat = 3
+            static let barSpacing: CGFloat = 2
+            static let minimumBarHeight: CGFloat = 3
+            static let contentSpacing: CGFloat = 12
+        }
     }
 
     enum WebApp {

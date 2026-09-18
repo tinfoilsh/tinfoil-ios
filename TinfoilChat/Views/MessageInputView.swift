@@ -323,6 +323,10 @@ struct MessageInputView: View {
             .onChange(of: messageText) { _, newValue in
                 messageTextHasNonWhitespace = hasNonWhitespaceContent(newValue)
             }
+            .onReceive(AudioRecordingService.shared.$isRecording) { isRecording in
+                guard !isRecording, viewModel.isRecording else { return }
+                Task { await stopRecordingAndInsertTranscription() }
+            }
             .onChange(of: viewModel.messageEditSession) { _, newSession in
                 handleMessageEditSessionChange(newSession)
             }
@@ -586,6 +590,17 @@ struct MessageInputView: View {
         }
     }
 
+    @ViewBuilder
+    private var messageComposerContent: some View {
+        if viewModel.isRecording {
+            AudioRecordingWaveformView(recordingService: .shared)
+                .frame(height: Layout.minimumHeight)
+                .padding(.horizontal)
+        } else {
+            messageTextEditor
+        }
+    }
+
     /// Shared between the iOS 26 and pre-26 input layouts so the editor's
     /// growing list of paste/send hooks stays defined in one place.
     private var messageTextEditor: some View {
@@ -634,7 +649,7 @@ struct MessageInputView: View {
                 }
 
                 // Text input area
-                messageTextEditor
+                messageComposerContent
 
                 // Bottom row with action buttons
                 HStack {
@@ -682,7 +697,7 @@ struct MessageInputView: View {
                 }
 
                 // Text input area
-                messageTextEditor
+                messageComposerContent
 
                 // Bottom row with action buttons
                 HStack {
