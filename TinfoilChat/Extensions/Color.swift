@@ -17,6 +17,7 @@ extension Color {
     static let tinfoilLight = Color(hex: "EEF3F3")
     static let tinfoilAccentDark = Color(hex: "004444")
     static let tinfoilAccentLight = Color(hex: "68C7AC")
+    static let tinfoilAccentBlue = Color(hex: "10347D")
     
     // App surface colors
     static let backgroundPrimary = Color(hex: "121212")

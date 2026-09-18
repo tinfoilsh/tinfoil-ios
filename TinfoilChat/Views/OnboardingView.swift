@@ -129,6 +129,7 @@ private struct OnboardingLetterPage: View {
                 .clipShape(RoundedRectangle(cornerRadius: Constants.Onboarding.bannerCornerRadius))
 
             Text("Tinfoil Chat was built as a sanctuary for thought.")
+                .bold()
             Text("At Tinfoil, we believe that AI is the most intimate technology yet created. We see AI as a space to explore, to make mistakes, to think out loud, to reflect with a beautiful and deep intelligence on the other end.")
             Text("This is *your* space to explore ideas in private.")
         }
@@ -211,6 +212,7 @@ private struct OnboardingSafeguardsPage: View {
         VStack(spacing: Constants.Onboarding.contentSpacing) {
             Image(systemName: "checkmark.shield")
                 .font(.system(size: Constants.Onboarding.iconSize))
+                .foregroundStyle(Color.tinfoilAccentBlue)
                 .frame(height: Constants.Onboarding.iconAreaHeight)
                 .accessibilityHidden(true)
 
@@ -222,8 +224,17 @@ private struct OnboardingSafeguardsPage: View {
                         .accessibilityAddTraits(.isHeader)
                 }
                 BalancedTextLayout {
-                    Text("Privacy-preserving safeguards review AI responses for safety. Safeguards run inside secure enclaves at inference time, keeping your conversations private and notifying you in case of a flag. \(Text("Tinfoil never sees conversation content or nature of the flag raised.").fontWeight(.semibold).foregroundStyle(.primary))")
+                    Text("Privacy-preserving safeguards review AI responses for safety.")
                         .foregroundStyle(.secondary)
+                }
+                BalancedTextLayout {
+                    Text("Safeguards run inside secure enclaves at inference time, keeping your conversations private and notifying you in case of a flag.")
+                        .foregroundStyle(.secondary)
+                }
+                BalancedTextLayout {
+                    Text("Tinfoil never sees conversation content or nature of the flag raised.")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.primary)
                 }
 
                 Link(destination: Constants.Safeguards.infoURL) {
