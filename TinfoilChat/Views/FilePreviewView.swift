@@ -31,10 +31,15 @@ enum FilePreviewClassifier {
     /// Trims a document down to the first few lines so the tile has something
     /// to lay out without holding the entire body in the view hierarchy.
     static func excerpt(_ content: String) -> String {
-        let lines = content
+        // Only the head of the document is ever shown, so bound the work to a
+        // prefix instead of scanning a possibly multi-megabyte body.
+        let head = content.prefix(
+            Constants.FilePreview.textMaxCharacters * Constants.FilePreview.textMaxLines
+        )
+        let lines = head
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
-            .split(separator: "\n", omittingEmptySubsequences: false)
+            .split(separator: "\n", maxSplits: Constants.FilePreview.textMaxLines, omittingEmptySubsequences: false)
             .prefix(Constants.FilePreview.textMaxLines)
         let joined = lines.joined(separator: "\n")
         return String(joined.prefix(Constants.FilePreview.textMaxCharacters))
