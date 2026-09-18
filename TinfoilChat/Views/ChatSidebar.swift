@@ -350,6 +350,11 @@ struct ChatSidebar: View {
                 .applyAlwaysBounceIfAvailable()
                 .refreshable {
                     await authManager.initializeAuthState()
+                    // The premium entitlement comes from the Tinfoil API, not
+                    // from the auth session, and it gates the project list. A
+                    // refresh must re-fetch it or a subscription started on
+                    // another device never shows up here.
+                    await authManager.fetchSubscriptionStatus()
                     await authManager.safeguards.refresh()
                     await viewModel.performFullSync()
                 }
