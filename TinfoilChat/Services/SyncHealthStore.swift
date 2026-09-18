@@ -103,6 +103,13 @@ final class SyncHealthStore: ObservableObject {
         }
     }
 
+    /// Drops every per-chat failure entry while keeping the account-wide
+    /// gate. Used when the local cloud chat store is wiped: the chats
+    /// those entries describe no longer exist, but a key problem does.
+    func clearFailedChats() {
+        if !failedChats.isEmpty { failedChats = [:] }
+    }
+
     /// Full reset (sign-out).
     func reset() {
         if gate != .ok { gate = .ok }
