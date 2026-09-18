@@ -128,14 +128,7 @@ private struct AttachmentPreviewChip: View {
     }
 
     private var iconName: String {
-        let ext = (attachment.fileName as NSString).pathExtension.lowercased()
-        switch ext {
-        case "pdf": return "doc.richtext"
-        case "html": return "globe"
-        case "csv": return "tablecells"
-        case "md": return "text.document"
-        default: return "doc.text"
-        }
+        FilePreviewClassifier.iconName(for: attachment.fileName)
     }
 
     private var formattedFileSize: String {

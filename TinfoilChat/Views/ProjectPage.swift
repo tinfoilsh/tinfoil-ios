@@ -419,8 +419,12 @@ struct ProjectDocumentsView: View {
 
     private func documentRow(_ document: ProjectDocument) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: "doc")
-                .foregroundColor(.secondary)
+            FilePreviewView(
+                filename: document.filename,
+                thumbnailBase64: document.thumbnailBase64,
+                textContent: document.content,
+                cacheKey: "project-document-\(document.id)-\(document.syncVersion)"
+            )
             VStack(alignment: .leading, spacing: 2) {
                 Text(document.filename.isEmpty ? "Encrypted" : document.filename)
                     .font(.subheadline)

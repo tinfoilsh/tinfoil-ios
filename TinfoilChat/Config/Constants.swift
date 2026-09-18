@@ -717,6 +717,26 @@ enum Constants {
         static let supportedImageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic"]
         static let defaultImageMimeType = "image/jpeg"
     }
+
+    /// Tiles that stand in for a file: an image thumbnail, a miniature
+    /// rendering of a text document, or a file-type glyph.
+    enum FilePreview {
+        static let projectRowSize: CGFloat = 36
+        static let cornerRadius: CGFloat = 6
+        /// Files with these extensions are rendered as a miniature page of text.
+        static let textExtensions: Set<String> = [
+            "txt", "md", "csv", "json", "xml", "html", "yaml", "yml", "log",
+            "swift", "py", "js", "ts", "go", "rs", "java", "kt", "c", "h", "cpp", "sh", "sql",
+        ]
+        /// Enough text to fill the tile at the smallest font without laying
+        /// out the whole document.
+        static let textMaxLines = 24
+        static let textMaxCharacters = 600
+        /// The text is intentionally too small to read; only the shape of
+        /// the page shows through, as in a Finder document icon.
+        static let textFontSize: CGFloat = 2.5
+        static let textPadding: CGFloat = 3
+    }
 }
 
 // MARK: - Storage Keys Migration
