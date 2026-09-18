@@ -80,7 +80,6 @@ struct SyncEnclaveProjectStore {
 
     func uploadDocument(
         id: String,
-        projectId: String,
         filename: String,
         contentType: String,
         content: String,
@@ -94,17 +93,12 @@ struct SyncEnclaveProjectStore {
             sizeBytes: sizeBytes,
             thumbnailBase64: thumbnailBase64
         )
-        let metadata: [String: AnyCodable] = [
-            "filename": AnyCodable(filename),
-            "contentType": AnyCodable(contentType),
-            "projectId": AnyCodable(projectId)
-        ]
         let response = try await push(
             scope: .projectDocument,
             id: id,
             payload: payload,
             ifMatch: nil,
-            metadata: metadata
+            metadata: nil
         )
         return (payload, etagToSyncVersion(response.etag))
     }
