@@ -170,18 +170,19 @@ private struct OnboardingPrivacyPage: View {
                                 if privacyEnabled {
                                     Image(systemName: "checkmark")
                                         .font(.system(size: Constants.Onboarding.checkmarkSize, weight: .bold))
-                                        .foregroundStyle(Color.adaptiveAccent)
+                                        .foregroundStyle(Color.tinfoilAccentDark)
                                 }
                             }
                         if !privacyEnabled { Spacer(minLength: .zero) }
                     }
                     .padding(Constants.Onboarding.togglePadding)
                     .frame(width: Constants.Onboarding.toggleWidth, height: Constants.Onboarding.toggleHeight)
-                    .background(privacyEnabled ? Color.adaptiveAccent : .red, in: Capsule())
+                    .background(privacyEnabled ? Color.accentPrimary : .red, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Toggle privacy")
                 .accessibilityValue(privacyEnabled ? "Private" : "Enable Privacy")
+                .accessibilityAddTraits(.isToggle)
                 .animation(reduceMotion ? nil : .easeInOut(duration: Constants.Onboarding.animationDuration), value: privacyEnabled)
 
                 Text(privacyEnabled ? "Private" : "Enable Privacy")
