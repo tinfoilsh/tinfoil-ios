@@ -386,6 +386,7 @@ class ChatViewModel: ObservableObject {
     private var isAppPresentationReady = false
     private var needsSignInWhenPresentationReady = false
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
+    @Published private(set) var readyForAccountActionsUserId: String?
     private var signInTask: Task<Void, Never>?
     private var legacyMigrationTask: Task<Void, Never>?
     private var accountOperationFence = AccountOperationFence()
@@ -6072,6 +6073,7 @@ class ChatViewModel: ObservableObject {
 
     @discardableResult
     private func cancelSignInOperation() -> Task<Void, Never>? {
+        readyForAccountActionsUserId = nil
         let canceledTask = signInTask
         canceledTask?.cancel()
         signInTask = nil
@@ -6569,6 +6571,7 @@ class ChatViewModel: ObservableObject {
         let token = accountOperationFence.begin(userId: userId)
         activeSignInToken = token
         isSignInInProgress = true
+        readyForAccountActionsUserId = nil
         recoveryScansSuspended = false
         signInTask = Task { [weak self] in
             guard let self,
@@ -6789,6 +6792,7 @@ class ChatViewModel: ObservableObject {
                 ensureBlankChatAtTop()
             }
             finishSignIn(token, userId: userId)
+            readyForAccountActionsUserId = userId
         } catch {
             // If key initialization fails, fall back to showing setup modal
             guard isCurrentSignIn(token, userId: userId) else { return }

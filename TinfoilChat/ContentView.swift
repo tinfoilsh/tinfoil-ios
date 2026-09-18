@@ -68,7 +68,7 @@ struct ContentView: View {
         .onAppear {
             chatViewModel.authManager = authManager
             refreshHomeScreenQuickActions()
-            chatViewModel.setAppPresentationReady(scenePhase == .active && !authManager.needsOnboarding)
+            updateAppPresentationReadiness()
             authManager.setChatViewModel(chatViewModel)
             requestAppReviewIfEligible()
             importSharedAttachmentsIfReady()
@@ -177,10 +177,11 @@ struct ContentView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
-            chatViewModel.setAppPresentationReady(newPhase == .active && !authManager.needsOnboarding)
+            updateAppPresentationReadiness()
 
             if newPhase == .active {
                 importSharedAttachmentsIfReady()
+                performPendingIntentActionsIfReady()
             }
 
             if newPhase == .active && authManager.isAuthenticated {
@@ -200,7 +201,7 @@ struct ContentView: View {
             }
         }
         .onChange(of: authManager.needsOnboarding) { _, needsOnboarding in
-            chatViewModel.setAppPresentationReady(scenePhase == .active && !needsOnboarding)
+            updateAppPresentationReadiness()
             if !needsOnboarding {
                 importSharedAttachmentsIfReady()
                 performPendingIntentActionsIfReady()
@@ -225,6 +226,10 @@ struct ContentView: View {
                 }
                 performPendingIntentActionsIfReady()
             }
+        }
+        .onChange(of: chatViewModel.readyForAccountActionsUserId) { _, _ in
+            importSharedAttachmentsIfReady()
+            performPendingIntentActionsIfReady()
         }
         .onChange(of: intentCoordinator.pendingActions) { _, actions in
             guard !actions.isEmpty else { return }
@@ -269,13 +274,28 @@ struct ContentView: View {
         requestReview()
     }
 
+    private func updateAppPresentationReadiness() {
+        chatViewModel.setAppPresentationReady(scenePhase == .active && !authManager.needsOnboarding)
+    }
+
+    private var canProcessPendingActions: Bool {
+        scenePhase == .active
+            && !authManager.isLoading
+            && !authManager.needsOnboarding
+            && AccountActionReadiness.canPerform(
+                isAuthenticated: authManager.isAuthenticated,
+                userId: authManager.localUserId,
+                readyUserId: chatViewModel.readyForAccountActionsUserId
+            )
+    }
+
     private func importSharedAttachmentsIfReady() {
-        guard !authManager.isLoading, !authManager.needsOnboarding else { return }
+        guard canProcessPendingActions else { return }
         SharedImportCoordinator.shared.importPendingAttachments(into: chatViewModel)
     }
 
     private func performPendingIntentActionsIfReady() {
-        guard !authManager.isLoading, !authManager.needsOnboarding else { return }
+        guard canProcessPendingActions else { return }
         while let action = intentCoordinator.peekNextAction() {
             // Stop draining at the first action that cannot run yet so queued
             // actions stay in order; the isLoading observer resumes the drain.
