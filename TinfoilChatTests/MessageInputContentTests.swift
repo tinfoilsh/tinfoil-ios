@@ -73,4 +73,41 @@ struct MessageInputContentTests {
             currentAccountId: "account-b"
         ) == .accountChanged)
     }
+
+    @Test("uses one voice or send action based on draft content", arguments: ["", " ", "hello", "  hello  "])
+    func trailingActionFollowsDraftContent(text: String) {
+        let hasContent = hasNonWhitespaceContent(text)
+        #expect(MessageInputTrailingAction.resolve(
+            showAudioButton: true,
+            showsRecordingState: false,
+            hasDraftContent: hasContent,
+            showStopAction: false
+        ) == (hasContent ? .send : .voice))
+    }
+
+    @Test("keeps the recording stop action available when the draft changes", arguments: [false, true])
+    func recordingRetainsTheVoiceAction(hasDraftContent: Bool) {
+        #expect(MessageInputTrailingAction.resolve(
+            showAudioButton: true,
+            showsRecordingState: true,
+            hasDraftContent: hasDraftContent,
+            showStopAction: false
+        ) == .voice)
+    }
+
+    @Test("retains stop for generation and send when audio is unavailable", arguments: [false, true])
+    func trailingActionPreservesStopAndUnavailableAudio(hasDraftContent: Bool) {
+        #expect(MessageInputTrailingAction.resolve(
+            showAudioButton: true,
+            showsRecordingState: false,
+            hasDraftContent: hasDraftContent,
+            showStopAction: true
+        ) == .stop)
+        #expect(MessageInputTrailingAction.resolve(
+            showAudioButton: false,
+            showsRecordingState: false,
+            hasDraftContent: hasDraftContent,
+            showStopAction: false
+        ) == .send)
+    }
 }
