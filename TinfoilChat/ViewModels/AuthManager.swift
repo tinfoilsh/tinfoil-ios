@@ -8,6 +8,7 @@
 import SwiftUI
 import ClerkKit
 import Combine
+import Sentry
 
 enum SubscriptionAccessPolicy {
     static func requiresCredentialRefresh(previous: Bool, current: Bool) -> Bool {
@@ -69,6 +70,44 @@ class AuthManager: ObservableObject {
         didSet { synchronizeSafeguardsAccount() }
     }
     @Published var hasActiveSubscription = false
+    @Published private(set) var hasCompletedOnboarding = UserDefaults.standard.bool(
+        forKey: Constants.StorageKeys.Settings.hasCompletedOnboarding
+    )
+
+    var needsOnboarding: Bool {
+        OnboardingEligibility.shouldShow(
+            isAuthLoaded: clerk?.isLoaded == true && !isLoading,
+            isAuthenticated: isAuthenticated,
+            userId: clerk?.user?.id,
+            localUserId: localUserId,
+            hasCompletedLocally: hasCompletedOnboarding,
+            hasCompletedOnAccount: clerk?.user?.unsafeMetadata?[Constants.Onboarding.completionMetadataKey]?.boolValue == true
+        )
+    }
+
+    func completeOnboarding() {
+        guard isAuthenticated,
+              let clerk,
+              let user = clerk.user,
+              user.id == localUserId else { return }
+
+        UserDefaults.standard.set(true, forKey: Constants.StorageKeys.Settings.hasCompletedOnboarding)
+        hasCompletedOnboarding = true
+        let generation = accountLifecycleGeneration
+        Task { @MainActor [weak self] in
+            guard let self,
+                  self.accountLifecycleGeneration == generation,
+                  self.localUserId == user.id,
+                  clerk.user?.id == user.id else { return }
+            do {
+                try await user.updateMetadata(unsafeMetadata: .object([
+                    Constants.Onboarding.completionMetadataKey: .bool(true)
+                ]))
+            } catch {
+                SentrySDK.capture(error: error)
+            }
+        }
+    }
 
     var localUserId: String? {
         localUserData?[Self.userIdKey] as? String

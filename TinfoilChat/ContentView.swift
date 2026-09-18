@@ -39,7 +39,10 @@ struct ContentView: View {
     
     var body: some View {
         Group {
-            if authManager.isLoading {
+            if authManager.needsOnboarding {
+                OnboardingView(onComplete: authManager.completeOnboarding)
+                    .id(clerk.user?.id)
+            } else if authManager.isLoading {
                 ZStack {
                     splashBackground
                     VStack(spacing: 24) {
@@ -65,7 +68,7 @@ struct ContentView: View {
         .onAppear {
             chatViewModel.authManager = authManager
             refreshHomeScreenQuickActions()
-            chatViewModel.setAppPresentationReady(scenePhase == .active)
+            chatViewModel.setAppPresentationReady(scenePhase == .active && !authManager.needsOnboarding)
             authManager.setChatViewModel(chatViewModel)
             requestAppReviewIfEligible()
             importSharedAttachmentsIfReady()
@@ -174,7 +177,7 @@ struct ContentView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
-            chatViewModel.setAppPresentationReady(newPhase == .active)
+            chatViewModel.setAppPresentationReady(newPhase == .active && !authManager.needsOnboarding)
 
             if newPhase == .active {
                 importSharedAttachmentsIfReady()
@@ -194,6 +197,13 @@ struct ContentView: View {
                         }
                     }
                 }
+            }
+        }
+        .onChange(of: authManager.needsOnboarding) { _, needsOnboarding in
+            chatViewModel.setAppPresentationReady(scenePhase == .active && !needsOnboarding)
+            if !needsOnboarding {
+                importSharedAttachmentsIfReady()
+                performPendingIntentActionsIfReady()
             }
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuthenticated in
@@ -247,6 +257,7 @@ struct ContentView: View {
     }
 
     private func requestAppReviewIfEligible() {
+        guard !authManager.needsOnboarding else { return }
         let defaults = UserDefaults.standard
         let launchCount = defaults.integer(forKey: Constants.StorageKeys.Settings.appLaunchCount) + 1
         defaults.set(launchCount, forKey: Constants.StorageKeys.Settings.appLaunchCount)
@@ -259,12 +270,12 @@ struct ContentView: View {
     }
 
     private func importSharedAttachmentsIfReady() {
-        guard !authManager.isLoading else { return }
+        guard !authManager.isLoading, !authManager.needsOnboarding else { return }
         SharedImportCoordinator.shared.importPendingAttachments(into: chatViewModel)
     }
 
     private func performPendingIntentActionsIfReady() {
-        guard !authManager.isLoading else { return }
+        guard !authManager.isLoading, !authManager.needsOnboarding else { return }
         while let action = intentCoordinator.peekNextAction() {
             // Stop draining at the first action that cannot run yet so queued
             // actions stay in order; the isLoading observer resumes the drain.

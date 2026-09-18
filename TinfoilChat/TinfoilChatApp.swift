@@ -19,7 +19,7 @@ struct TinfoilChatApp: App {
     @State private var clerk: Clerk
     @StateObject private var appConfig = AppConfig.shared
     @StateObject private var authManager = AuthManager()
-    @AppStorage(Constants.StorageKeys.Settings.hasCompletedOnboarding) private var hasCompletedOnboarding = false
+    @State private var isReplayingOnboarding = Constants.Onboarding.isReplayRequested
 
     init() {
         StorageKeysMigration.migrateIfNeeded()
@@ -42,11 +42,9 @@ struct TinfoilChatApp: App {
                 if appConfig.isInitialized {
                     if !appConfig.isAppVersionSupported {
                         UpdateRequiredView()
-                    } else if !hasCompletedOnboarding {
+                    } else if isReplayingOnboarding {
                         OnboardingView {
-                            withAnimation(.easeInOut(duration: 0.4)) {
-                                hasCompletedOnboarding = true
-                            }
+                            isReplayingOnboarding = false
                         }
                     } else {
                         AdaptiveTintContainer {

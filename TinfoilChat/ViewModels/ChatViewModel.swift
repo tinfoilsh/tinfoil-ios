@@ -6530,7 +6530,9 @@ class ChatViewModel: ObservableObject {
             }
             return
         }
-        guard isAppPresentationReady else {
+        guard isAppPresentationReady,
+              authManager?.isLoading == false,
+              authManager?.needsOnboarding == false else {
             needsSignInWhenPresentationReady = true
             return
         }
