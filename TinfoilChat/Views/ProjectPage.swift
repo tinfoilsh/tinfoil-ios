@@ -105,6 +105,10 @@ struct ProjectPage: View {
             }
         .scrollContentBackground(.hidden)
         .background(Color.settingsBackground(for: colorScheme))
+        // The app-level adaptive tint does not survive a UIKit-backed
+        // navigation round-trip inside this Form, so it is restated here to
+        // keep row icons monochrome instead of falling back to system blue.
+        .tint(colorScheme == .dark ? .white : .black)
         .onAppear { syncEditingName() }
         .onChange(of: project?.id) { _, _ in syncEditingName() }
         .onChange(of: project?.name) { _, _ in
