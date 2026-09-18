@@ -395,7 +395,7 @@ struct ProjectDocumentsView: View {
         }
         .sheet(isPresented: $showDocumentPicker) {
             DocumentPickerView(
-                allowedKinds: [.documents],
+                allowedKinds: [.documents, .images],
                 allowsMultipleSelection: true,
                 onDocumentsPicked: { batch in
                     Task {

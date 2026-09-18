@@ -148,6 +148,23 @@ private enum GenUIRetryRequestError: Error {
     case clientUnavailable
 }
 
+private enum ProjectImageDescriptionError: LocalizedError {
+    case clientUnavailable
+    case noMultimodalModel
+    case emptyDescription
+
+    var errorDescription: String? {
+        switch self {
+        case .clientUnavailable:
+            return "The secure connection is still starting. Try again in a moment."
+        case .noMultimodalModel:
+            return "No available model can read images right now."
+        case .emptyDescription:
+            return "The model did not return a description for this image."
+        }
+    }
+}
+
 func shouldBlockMessageSendForRecovery(
     pendingRecoveries: [PendingRecoveryEnvelope],
     isStreaming: Bool
@@ -2302,10 +2319,21 @@ class ChatViewModel: ObservableObject {
             guard let sizeBytes = resourceValues.fileSize else {
                 throw CocoaError(.fileReadUnknown)
             }
-            let markdown = try await DocumentConversionService.shared.convertToMarkdown(
-                url: handle.url,
-                filename: handle.fileName
-            )
+            // Project documents must carry reusable text, so images are turned
+            // into a model-written description and keep only a small thumbnail
+            // for display; the full image is never stored.
+            let content: String
+            var thumbnailBase64: String? = nil
+            if DocumentPickerBatchAdmission.classify(handle) == .image {
+                let processed = try await ImageProcessingService.shared.processImage(at: handle.url)
+                content = try await self.describeImageForProject(base64: processed.base64)
+                thumbnailBase64 = processed.thumbnailBase64
+            } else {
+                content = try await DocumentConversionService.shared.convertToMarkdown(
+                    url: handle.url,
+                    filename: handle.fileName
+                )
+            }
             guard self.isCurrentProjectAccount(accountGeneration),
                   self.hasPremiumAccess else { throw CancellationError() }
             let contentType = DocumentConversionService.mimeType(for: handle.fileName)
@@ -2313,8 +2341,9 @@ class ChatViewModel: ObservableObject {
                 projectId: project.id,
                 filename: handle.fileName,
                 contentType: contentType,
-                content: markdown,
-                sizeBytes: sizeBytes
+                content: content,
+                sizeBytes: sizeBytes,
+                thumbnailBase64: thumbnailBase64
             )
             guard self.isCurrentProjectAccount(accountGeneration),
                   self.hasPremiumAccess else { throw CancellationError() }
@@ -2329,6 +2358,49 @@ class ChatViewModel: ObservableObject {
             successCount: result.successes.count,
             failures: pickerFailures + result.failures
         )
+    }
+
+    /// Asks a multimodal model for a text description of an image so it can be
+    /// stored as project context alongside regular documents.
+    private func describeImageForProject(base64: String) async throws -> String {
+        guard let client, !isClientInitializing else {
+            throw ProjectImageDescriptionError.clientUnavailable
+        }
+        guard let model = AppConfig.shared.imageDescriptionModel else {
+            throw ProjectImageDescriptionError.noMultimodalModel
+        }
+
+        try await SessionTokenManager.shared.acquireTokenForSend(forceRefresh: false)
+
+        let imageUrl = ChatQuery.ChatCompletionMessageParam.ContentPartImageParam.ImageURL(
+            url: "data:\(Constants.Attachments.defaultImageMimeType);base64,\(base64)",
+            detail: .auto
+        )
+        let query = ChatQuery(
+            messages: [
+                .user(.init(content: .contentParts([
+                    .text(.init(text: Constants.ImageDescription.prompt)),
+                    .image(.init(imageUrl: imageUrl))
+                ])))
+            ],
+            model: model.modelName,
+            stream: false
+        )
+
+        SessionTokenManager.shared.snapshotAndDecrementRemaining()
+        defer { SessionTokenManager.shared.refreshRateLimit() }
+        let result = try await GenUIRetryRequestExecutor.execute(
+            request: { try await client.chats(query: query) },
+            recoverAuthentication: {
+                try await SessionTokenManager.shared.acquireTokenForSend(forceRefresh: true)
+            },
+            isAuthenticationError: { Self.isAuthenticationError($0) }
+        )
+        guard let description = result.choices.first?.message.content,
+              !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ProjectImageDescriptionError.emptyDescription
+        }
+        return description
     }
 
     func deleteProjectDocument(_ documentId: String) async {

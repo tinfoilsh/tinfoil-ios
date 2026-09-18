@@ -495,6 +495,21 @@ enum Constants {
         static let tailWordCount = 200
     }
 
+    enum ImageDescription {
+        /// Prompt used to turn an image into reusable text for project context,
+        /// matching the webapp so descriptions read the same across clients.
+        static let prompt = """
+        Describe this image in detail. Include:
+        - What is happening in the image
+        - Colors (provide hex codes where relevant)
+        - Any text visible in the image
+        - Layout and composition
+        - Other notable details
+        """
+        /// Attribute tag advertised by the controlplane for low-latency models.
+        static let preferredModelAttribute = "fast"
+    }
+
     enum TitleGeneration {
         static let wordThreshold = 100
         static let systemPrompt = "Generate a concise, descriptive title of minimum 2 words, maximum 5 words for the following text. NEVER output markdown."
