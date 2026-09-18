@@ -235,7 +235,7 @@ private struct OnboardingSafeguardsPage: View {
                         .foregroundStyle(.secondary)
                 }
                 BalancedTextLayout {
-                    Text("Tinfoil never sees conversation content or nature of the flag raised.")
+                    Text("Tinfoil never sees conversation content or the nature of the flag raised.")
                         .fontWeight(.semibold)
                         .foregroundStyle(.primary)
                 }
