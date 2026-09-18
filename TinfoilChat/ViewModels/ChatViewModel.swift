@@ -7049,6 +7049,11 @@ class ChatViewModel: ObservableObject {
             try await cloudSync.initialize()
             guard isCurrentSignIn(token, userId: userId) else { return }
 
+            // Project metadata does not depend on chat revisions, so fetch it
+            // alongside the chat sync instead of after it; otherwise the
+            // Projects section sits empty until every chat page has landed.
+            let projectsLoad = Task { await self.loadProjects() }
+
             // Perform sync
             let syncResult = await cloudSync.syncAllChats()
             guard isCurrentSignIn(token, userId: userId) else { return }
@@ -7111,7 +7116,7 @@ class ChatViewModel: ObservableObject {
                 }
             }
 
-            await loadProjects()
+            await projectsLoad.value
             guard isCurrentSignIn(token, userId: userId) else { return }
             scanPendingRecoveries()
         } catch {
@@ -7444,6 +7449,14 @@ class ChatViewModel: ObservableObject {
     
     /// Perform a full sync with the cloud
     func performFullSync() async {
+        // A pull-to-refresh that lands while sign-in is still syncing should
+        // hold the spinner until that pass finishes rather than return at
+        // once with nothing visibly changed. Sign-in already performs a full
+        // sync, so there is nothing left to do once it completes.
+        if isSignInInProgress, let signInTask {
+            await signInTask.value
+            return
+        }
         guard !isSignInInProgress, !needsSignInWhenPresentationReady else { return }
 
         // Gate sync when cloud sync is disabled
