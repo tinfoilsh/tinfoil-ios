@@ -1826,6 +1826,19 @@ class ChatViewModel: ObservableObject {
                 isLoadingProjects = false
             }
         }
+
+        // Show the last known list right away so the sidebar is not empty
+        // while the cloud fetch is in flight; the fetch result replaces it.
+        if projects.isEmpty, latestAppliedProjectListLoadGeneration == 0 {
+            let cached = await ProjectListCache.shared.load(userId: userId)
+            guard accountGeneration == projectListAccountGeneration,
+                  generation == projectListLoadGeneration,
+                  currentUserId == userId else { return }
+            if !cached.isEmpty, projects.isEmpty {
+                projects = cached
+            }
+        }
+
         do {
             let loadedProjects = try await projectStorage.loadProjects()
             guard accountGeneration == projectListAccountGeneration,
@@ -1836,6 +1849,7 @@ class ChatViewModel: ObservableObject {
                   hasPremiumAccess else { return }
             latestAppliedProjectListLoadGeneration = generation
             projects = loadedProjects
+            persistProjectListCache()
         } catch is CancellationError {
         } catch {
             guard generation == projectListLoadGeneration,
@@ -1844,6 +1858,14 @@ class ChatViewModel: ObservableObject {
                   SettingsManager.shared.isCloudSyncEnabled else { return }
             projectError = error.localizedDescription
         }
+    }
+
+    /// Mirrors the in-memory project list to the on-device cache so the next
+    /// launch can show it before the cloud fetch completes.
+    private func persistProjectListCache() {
+        guard let userId = currentUserId else { return }
+        let snapshot = projects
+        Task { await ProjectListCache.shared.save(snapshot, userId: userId) }
     }
 
     private func clearProjectState() {
@@ -1888,6 +1910,7 @@ class ChatViewModel: ObservableObject {
             )
             guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return nil }
             projects.insert(project, at: 0)
+            persistProjectListCache()
             await enterProject(projectId: project.id)
             guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return nil }
             return project
@@ -2181,6 +2204,7 @@ class ChatViewModel: ObservableObject {
             activeProject = updated
             if let index = projects.firstIndex(where: { $0.id == updated.id }) {
                 projects[index] = updated
+                persistProjectListCache()
             }
         } catch {
             guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return }
@@ -2198,6 +2222,9 @@ class ChatViewModel: ObservableObject {
         let userId = currentUserId
         _ = try await projectStorage.deleteAllProjects()
         guard isCurrentProjectAccount(accountGeneration) else { return }
+        if let userId {
+            await ProjectListCache.shared.clear(userId: userId)
+        }
         projectListLoadGeneration += 1
         projectLoadGeneration += 1
         detachRetainedChatStateFromProjects()
@@ -2283,6 +2310,7 @@ class ChatViewModel: ObservableObject {
             try await projectStorage.deleteProject(project.id)
             guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return }
             projects.removeAll { $0.id == project.id }
+            persistProjectListCache()
             exitProject()
         } catch {
             guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return }
@@ -6327,6 +6355,9 @@ class ChatViewModel: ObservableObject {
         await cloudSync.clearSyncStatus(forUser: signingOutUserId)
         DeletedChatsTracker.shared.clear()
         CloudKeyAuthorizationStore.shared.clearAuthorization(userId: signingOutUserId)
+        if let signingOutUserId {
+            await ProjectListCache.shared.clear(userId: signingOutUserId)
+        }
 
         // Reset to the default model when signing out
         if let defaultModel = AppConfig.shared.defaultModel {
@@ -7017,6 +7048,7 @@ class ChatViewModel: ObservableObject {
         if let userId = currentUserId {
             await cloudSync.handleLocalStoreWipe(forUser: userId)
             try? await EncryptedFileStorage.cloud.deleteAllChats(userId: userId)
+            await ProjectListCache.shared.clear(userId: userId)
         }
         for chatId in Array(messageQueues.keys) where !localChats.contains(where: { $0.id == chatId }) {
             discardMessageQueue(chatId: chatId)

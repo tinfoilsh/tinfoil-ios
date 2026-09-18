@@ -718,6 +718,10 @@ enum Constants {
         static let defaultImageMimeType = "image/jpeg"
     }
 
+    enum ProjectListCache {
+        static let fileName = "list.enc"
+    }
+
     /// Tiles that stand in for a file: an image thumbnail, a miniature
     /// rendering of a text document, or a file-type glyph.
     enum FilePreview {
