@@ -2326,6 +2326,8 @@ class ChatViewModel: ObservableObject {
             var thumbnailBase64: String? = nil
             if DocumentPickerBatchAdmission.classify(handle) == .image {
                 let processed = try await ImageProcessingService.shared.processImage(at: handle.url)
+                guard self.isCurrentProjectAccount(accountGeneration),
+                      self.hasPremiumAccess else { throw CancellationError() }
                 content = try await self.describeImageForProject(base64: processed.base64)
                 thumbnailBase64 = processed.thumbnailBase64
             } else {
