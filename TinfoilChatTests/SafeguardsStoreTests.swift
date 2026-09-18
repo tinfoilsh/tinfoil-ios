@@ -165,6 +165,61 @@ struct SafeguardsStoreTests {
         #expect(store.isFlagged("chat-a"))
     }
 
+    @Test
+    func flagVisibilityFollowsTheLatestReportWithoutFlickeringDuringRefresh() async throws {
+        let fetcher = ControlledFlagFetcher()
+        defer { fetcher.cancelAll() }
+        let store = SafeguardsStore(usesExamples: false, fetchFlags: fetcher.fetch)
+        store.setUserId("user-a")
+        #expect(!store.isFlagged("chat-a"))
+
+        let first = Task { await store.refresh() }
+        try await fetcher.waitForRequests(1)
+        try fetcher.complete(0, report: Self.report(chatId: "chat-a"))
+        await first.value
+        #expect(store.isFlagged("chat-a"))
+        #expect(!store.isFlagged("chat-b"))
+
+        let second = Task { await store.refresh() }
+        try await fetcher.waitForRequests(2)
+        #expect(store.isLoading)
+        #expect(store.isFlagged("chat-a"))
+        try fetcher.complete(1, report: Self.report(chatId: "chat-b"))
+        await second.value
+        #expect(!store.isFlagged("chat-a"))
+        #expect(store.isFlagged("chat-b"))
+
+        let third = Task { await store.refresh() }
+        try await fetcher.waitForRequests(3)
+        try fetcher.complete(2, report: SafeguardFlagsReport(
+            flags: [], inWindow: 0, windowHours: 168, warnThreshold: 8, banThreshold: 10
+        ))
+        await third.value
+        #expect(!store.isFlagged("chat-a"))
+        #expect(!store.isFlagged("chat-b"))
+        #expect(!store.isLoading)
+    }
+
+    @Test
+    func flagsOutsideTheSuspensionWindowStillIdentifyAffectedChats() async {
+        let store = SafeguardsStore(usesExamples: false) { _ in
+            SafeguardFlagsReport(
+                flags: [SafeguardFlag(id: "old-flag", conversationId: "old-chat", createdAt: .distantPast)],
+                inWindow: 0,
+                windowHours: 168,
+                warnThreshold: 8,
+                banThreshold: 10
+            )
+        }
+        store.setUserId("user-a")
+        await store.refresh()
+
+        #expect(store.report?.inWindow == 0)
+        #expect(store.isFlagged("old-chat"))
+        #expect(!store.isFlagged("old-flag"))
+        #expect(!store.isFlagged("new-chat"))
+    }
+
     #if DEBUG
     @Test
     func examplesAreAccountGatedAndSeparateFromLiveData() async {

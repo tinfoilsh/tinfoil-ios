@@ -320,7 +320,8 @@ final class ProjectStorageService: ObservableObject {
         filename: String,
         contentType: String,
         content: String,
-        sizeBytes: Int
+        sizeBytes: Int,
+        thumbnailBase64: String? = nil
     ) async throws -> ProjectDocument {
         let idResponse = try await generateDocumentId(projectId: projectId)
         let wireId = projectDocumentId(projectId: projectId, documentId: idResponse.documentId)
@@ -330,7 +331,8 @@ final class ProjectStorageService: ObservableObject {
             filename: filename,
             contentType: contentType,
             content: content,
-            sizeBytes: sizeBytes
+            sizeBytes: sizeBytes,
+            thumbnailBase64: thumbnailBase64
         )
 
         let now = isoNow()
@@ -343,7 +345,8 @@ final class ProjectStorageService: ObservableObject {
             syncVersion: syncVersion,
             createdAt: now,
             updatedAt: now,
-            content: payload.content
+            content: payload.content,
+            thumbnailBase64: payload.thumbnailBase64
         )
     }
 
@@ -360,7 +363,8 @@ final class ProjectStorageService: ObservableObject {
             syncVersion: syncVersion,
             createdAt: now,
             updatedAt: now,
-            content: decoded.content
+            content: decoded.content,
+            thumbnailBase64: decoded.thumbnailBase64
         )
     }
 
@@ -417,7 +421,8 @@ final class ProjectStorageService: ObservableObject {
                     createdAt: createdAtFromReverseId(docId),
                     updatedAt: update.updatedAt,
                     content: decoded.0.content,
-                    decryptionFailed: false
+                    decryptionFailed: false,
+                    thumbnailBase64: decoded.0.thumbnailBase64
                 )
             }
         }

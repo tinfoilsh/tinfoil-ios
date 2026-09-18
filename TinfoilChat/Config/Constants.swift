@@ -327,10 +327,16 @@ enum Constants {
         static let toggleWidth: CGFloat = 112
         static let toggleHeight: CGFloat = 56
         static let togglePadding: CGFloat = 4
+        static let toggleThumbSize = toggleHeight - togglePadding * 2
+        static let toggleThumbOffset = (toggleWidth - toggleHeight) / 2
         static let checkmarkSize: CGFloat = 20
         static let animationDuration: TimeInterval = 0.3
         static let replayLaunchArgument = "-show-onboarding"
 
+    }
+
+    enum TextLayout {
+        static let balanceWidthPrecision: CGFloat = 0.5
     }
 
     enum Legal {
@@ -352,6 +358,17 @@ enum Constants {
         static let contentSpacing: CGFloat = 12
         static let flagLabel = "Model response flagged by safeguards"
         static let loadError = "Could not load flagged chats. Please try again."
+
+        enum Banner {
+            static let textSpacing: CGFloat = 4
+            static let cornerRadius: CGFloat = 16
+            static let borderWidth: CGFloat = 1
+            static let borderOpacity = 0.4
+            static let backgroundOpacity = 0.1
+            static let lightTextColorHex = "B91C1C"
+            static let darkTextColorHex = "FECACA"
+            static let message = "Stop using this chat and start a new one to avoid triggering the safeguard again."
+        }
 
         #if DEBUG
         static let useExamples = true
@@ -415,6 +432,8 @@ enum Constants {
 
     enum CloudSync {
         static let clipboardExpirationSeconds: TimeInterval = 300
+        static let attentionBadgeSize: CGFloat = 8
+        static let attentionAccessibilityLabel = "Cloud sync needs attention"
     }
 
     enum Sync {
@@ -476,6 +495,21 @@ enum Constants {
         static let tailWordCount = 200
     }
 
+    enum ImageDescription {
+        /// Prompt used to turn an image into reusable text for project context,
+        /// matching the webapp so descriptions read the same across clients.
+        static let prompt = """
+        Describe this image in detail. Include:
+        - What is happening in the image
+        - Colors (provide hex codes where relevant)
+        - Any text visible in the image
+        - Layout and composition
+        - Other notable details
+        """
+        /// Attribute tag advertised by the controlplane for low-latency models.
+        static let preferredModelAttribute = "fast"
+    }
+
     enum TitleGeneration {
         static let wordThreshold = 100
         static let systemPrompt = "Generate a concise, descriptive title of minimum 2 words, maximum 5 words for the following text. NEVER output markdown."
@@ -494,6 +528,21 @@ enum Constants {
         static let recordingButtonReturnDamping: CGFloat = 0.72
         static let sampleRate: Double = 44100.0
         static let numberOfChannels: Int = 1  // Mono
+
+        enum Waveform {
+            static let sampleInterval: TimeInterval = 0.05
+            static let frameInterval: TimeInterval = 1.0 / 60.0
+            static let completionTransitionDuration: TimeInterval = 0.2
+            static let meteringChannel = 0
+            static let minimumDecibels: Float = -60
+            static let maximumDecibels: Float = 0
+            static let maximumSamples = 256
+            static let height: CGFloat = 32
+            static let barWidth: CGFloat = 3
+            static let barSpacing: CGFloat = 2
+            static let minimumBarHeight: CGFloat = 3
+            static let contentSpacing: CGFloat = 12
+        }
     }
 
     enum WebApp {
@@ -667,6 +716,30 @@ enum Constants {
         static let supportedDocumentExtensions = SharedImportConfiguration.supportedDocumentExtensions
         static let supportedImageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic"]
         static let defaultImageMimeType = "image/jpeg"
+    }
+
+    enum ProjectListCache {
+        static let fileName = "list.enc"
+    }
+
+    /// Tiles that stand in for a file: an image thumbnail, a miniature
+    /// rendering of a text document, or a file-type glyph.
+    enum FilePreview {
+        static let projectRowSize: CGFloat = 36
+        static let cornerRadius: CGFloat = 6
+        /// Files with these extensions are rendered as a miniature page of text.
+        static let textExtensions: Set<String> = [
+            "txt", "md", "csv", "json", "xml", "html", "yaml", "yml", "log",
+            "swift", "py", "js", "ts", "go", "rs", "java", "kt", "c", "h", "cpp", "sh", "sql",
+        ]
+        /// Enough text to fill the tile at the smallest font without laying
+        /// out the whole document.
+        static let textMaxLines = 24
+        static let textMaxCharacters = 600
+        /// The text is intentionally too small to read; only the shape of
+        /// the page shows through, as in a Finder document icon.
+        static let textFontSize: CGFloat = 2.5
+        static let textPadding: CGFloat = 3
     }
 }
 

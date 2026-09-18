@@ -148,6 +148,23 @@ private enum GenUIRetryRequestError: Error {
     case clientUnavailable
 }
 
+private enum ProjectImageDescriptionError: LocalizedError {
+    case clientUnavailable
+    case noMultimodalModel
+    case emptyDescription
+
+    var errorDescription: String? {
+        switch self {
+        case .clientUnavailable:
+            return "The secure connection is still starting. Try again in a moment."
+        case .noMultimodalModel:
+            return "No available model can read images right now."
+        case .emptyDescription:
+            return "The model did not return a description for this image."
+        }
+    }
+}
+
 func shouldBlockMessageSendForRecovery(
     pendingRecoveries: [PendingRecoveryEnvelope],
     isStreaming: Bool
@@ -641,6 +658,12 @@ class ChatViewModel: ObservableObject {
     /// regardless of which chat is on screen.
     func isChatStreaming(_ chatId: String) -> Bool {
         streamState.isStreaming(chatId: chatId)
+    }
+
+    /// Whether any chat has a response being generated, regardless of
+    /// which chat is on screen.
+    var hasActiveStreams: Bool {
+        !streamState.activeChatIds.isEmpty
     }
 
     var thinkingSummary: String {
@@ -1809,6 +1832,19 @@ class ChatViewModel: ObservableObject {
                 isLoadingProjects = false
             }
         }
+
+        // Show the last known list right away so the sidebar is not empty
+        // while the cloud fetch is in flight; the fetch result replaces it.
+        if projects.isEmpty, latestAppliedProjectListLoadGeneration == 0 {
+            let cached = await ProjectListCache.shared.load(userId: userId)
+            guard accountGeneration == projectListAccountGeneration,
+                  generation == projectListLoadGeneration,
+                  currentUserId == userId else { return }
+            if !cached.isEmpty, projects.isEmpty {
+                projects = cached
+            }
+        }
+
         do {
             let loadedProjects = try await projectStorage.loadProjects()
             guard accountGeneration == projectListAccountGeneration,
@@ -1819,6 +1855,7 @@ class ChatViewModel: ObservableObject {
                   hasPremiumAccess else { return }
             latestAppliedProjectListLoadGeneration = generation
             projects = loadedProjects
+            persistProjectListCache()
         } catch is CancellationError {
         } catch {
             guard generation == projectListLoadGeneration,
@@ -1827,6 +1864,14 @@ class ChatViewModel: ObservableObject {
                   SettingsManager.shared.isCloudSyncEnabled else { return }
             projectError = error.localizedDescription
         }
+    }
+
+    /// Mirrors the in-memory project list to the on-device cache so the next
+    /// launch can show it before the cloud fetch completes.
+    private func persistProjectListCache() {
+        guard let userId = currentUserId else { return }
+        let snapshot = projects
+        Task { await ProjectListCache.shared.save(snapshot, userId: userId) }
     }
 
     private func clearProjectState() {
@@ -1871,6 +1916,7 @@ class ChatViewModel: ObservableObject {
             )
             guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return nil }
             projects.insert(project, at: 0)
+            persistProjectListCache()
             await enterProject(projectId: project.id)
             guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return nil }
             return project
@@ -2164,6 +2210,7 @@ class ChatViewModel: ObservableObject {
             activeProject = updated
             if let index = projects.firstIndex(where: { $0.id == updated.id }) {
                 projects[index] = updated
+                persistProjectListCache()
             }
         } catch {
             guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return }
@@ -2181,6 +2228,9 @@ class ChatViewModel: ObservableObject {
         let userId = currentUserId
         _ = try await projectStorage.deleteAllProjects()
         guard isCurrentProjectAccount(accountGeneration) else { return }
+        if let userId {
+            await ProjectListCache.shared.clear(userId: userId)
+        }
         projectListLoadGeneration += 1
         projectLoadGeneration += 1
         detachRetainedChatStateFromProjects()
@@ -2266,6 +2316,7 @@ class ChatViewModel: ObservableObject {
             try await projectStorage.deleteProject(project.id)
             guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return }
             projects.removeAll { $0.id == project.id }
+            persistProjectListCache()
             exitProject()
         } catch {
             guard isCurrentProjectAccount(accountGeneration), hasPremiumAccess else { return }
@@ -2302,10 +2353,23 @@ class ChatViewModel: ObservableObject {
             guard let sizeBytes = resourceValues.fileSize else {
                 throw CocoaError(.fileReadUnknown)
             }
-            let markdown = try await DocumentConversionService.shared.convertToMarkdown(
-                url: handle.url,
-                filename: handle.fileName
-            )
+            // Project documents must carry reusable text, so images are turned
+            // into a model-written description and keep only a small thumbnail
+            // for display; the full image is never stored.
+            let content: String
+            var thumbnailBase64: String? = nil
+            if DocumentPickerBatchAdmission.classify(handle) == .image {
+                let processed = try await ImageProcessingService.shared.processImage(at: handle.url)
+                guard self.isCurrentProjectAccount(accountGeneration),
+                      self.hasPremiumAccess else { throw CancellationError() }
+                content = try await self.describeImageForProject(base64: processed.base64)
+                thumbnailBase64 = processed.thumbnailBase64
+            } else {
+                content = try await DocumentConversionService.shared.convertToMarkdown(
+                    url: handle.url,
+                    filename: handle.fileName
+                )
+            }
             guard self.isCurrentProjectAccount(accountGeneration),
                   self.hasPremiumAccess else { throw CancellationError() }
             let contentType = DocumentConversionService.mimeType(for: handle.fileName)
@@ -2313,8 +2377,9 @@ class ChatViewModel: ObservableObject {
                 projectId: project.id,
                 filename: handle.fileName,
                 contentType: contentType,
-                content: markdown,
-                sizeBytes: sizeBytes
+                content: content,
+                sizeBytes: sizeBytes,
+                thumbnailBase64: thumbnailBase64
             )
             guard self.isCurrentProjectAccount(accountGeneration),
                   self.hasPremiumAccess else { throw CancellationError() }
@@ -2329,6 +2394,49 @@ class ChatViewModel: ObservableObject {
             successCount: result.successes.count,
             failures: pickerFailures + result.failures
         )
+    }
+
+    /// Asks a multimodal model for a text description of an image so it can be
+    /// stored as project context alongside regular documents.
+    private func describeImageForProject(base64: String) async throws -> String {
+        guard let client, !isClientInitializing else {
+            throw ProjectImageDescriptionError.clientUnavailable
+        }
+        guard let model = AppConfig.shared.imageDescriptionModel else {
+            throw ProjectImageDescriptionError.noMultimodalModel
+        }
+
+        try await SessionTokenManager.shared.acquireTokenForSend(forceRefresh: false)
+
+        let imageUrl = ChatQuery.ChatCompletionMessageParam.ContentPartImageParam.ImageURL(
+            url: "data:\(Constants.Attachments.defaultImageMimeType);base64,\(base64)",
+            detail: .auto
+        )
+        let query = ChatQuery(
+            messages: [
+                .user(.init(content: .contentParts([
+                    .text(.init(text: Constants.ImageDescription.prompt)),
+                    .image(.init(imageUrl: imageUrl))
+                ])))
+            ],
+            model: model.modelName,
+            stream: false
+        )
+
+        SessionTokenManager.shared.snapshotAndDecrementRemaining()
+        defer { SessionTokenManager.shared.refreshRateLimit() }
+        let result = try await GenUIRetryRequestExecutor.execute(
+            request: { try await client.chats(query: query) },
+            recoverAuthentication: {
+                try await SessionTokenManager.shared.acquireTokenForSend(forceRefresh: true)
+            },
+            isAuthenticationError: { Self.isAuthenticationError($0) }
+        )
+        guard let description = result.choices.first?.message.content,
+              !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ProjectImageDescriptionError.emptyDescription
+        }
+        return description
     }
 
     func deleteProjectDocument(_ documentId: String) async {
@@ -6253,6 +6361,9 @@ class ChatViewModel: ObservableObject {
         await cloudSync.clearSyncStatus(forUser: signingOutUserId)
         DeletedChatsTracker.shared.clear()
         CloudKeyAuthorizationStore.shared.clearAuthorization(userId: signingOutUserId)
+        if let signingOutUserId {
+            await ProjectListCache.shared.clear(userId: signingOutUserId)
+        }
 
         // Reset to the default model when signing out
         if let defaultModel = AppConfig.shared.defaultModel {
@@ -6943,6 +7054,7 @@ class ChatViewModel: ObservableObject {
         if let userId = currentUserId {
             await cloudSync.handleLocalStoreWipe(forUser: userId)
             try? await EncryptedFileStorage.cloud.deleteAllChats(userId: userId)
+            await ProjectListCache.shared.clear(userId: userId)
         }
         for chatId in Array(messageQueues.keys) where !localChats.contains(where: { $0.id == chatId }) {
             discardMessageQueue(chatId: chatId)
@@ -6974,6 +7086,11 @@ class ChatViewModel: ObservableObject {
             // Initialize cloud sync service
             try await cloudSync.initialize()
             guard isCurrentSignIn(token, userId: userId) else { return }
+
+            // Project metadata does not depend on chat revisions, so fetch it
+            // alongside the chat sync instead of after it; otherwise the
+            // Projects section sits empty until every chat page has landed.
+            let projectsLoad = Task { await self.loadProjects() }
 
             // Perform sync
             let syncResult = await cloudSync.syncAllChats()
@@ -7037,7 +7154,7 @@ class ChatViewModel: ObservableObject {
                 }
             }
 
-            await loadProjects()
+            await projectsLoad.value
             guard isCurrentSignIn(token, userId: userId) else { return }
             scanPendingRecoveries()
         } catch {
@@ -7370,6 +7487,14 @@ class ChatViewModel: ObservableObject {
     
     /// Perform a full sync with the cloud
     func performFullSync() async {
+        // A pull-to-refresh that lands while sign-in is still syncing should
+        // hold the spinner until that pass finishes rather than return at
+        // once with nothing visibly changed. Sign-in already performs a full
+        // sync, so there is nothing left to do once it completes.
+        if isSignInInProgress, let signInTask {
+            await signInTask.value
+            return
+        }
         guard !isSignInInProgress, !needsSignInWhenPresentationReady else { return }
 
         // Gate sync when cloud sync is disabled

@@ -79,6 +79,34 @@ struct ProjectSchemaFidelityTests {
         #expect(payload.resolvedSizeBytes == "café".utf8.count)
     }
 
+    @Test func documentPayloadRoundTripsThumbnail() throws {
+        let payload = ProjectDocumentPayload(
+            content: "A photo of a cat",
+            filename: "cat.png",
+            contentType: "image/png",
+            sizeBytes: 4_096,
+            thumbnailBase64: "dGh1bWI="
+        )
+
+        let decoded = try roundTrip(payload)
+
+        #expect(decoded.thumbnailBase64 == "dGh1bWI=")
+    }
+
+    @Test func documentPayloadOmitsAbsentThumbnail() throws {
+        let payload = ProjectDocumentPayload(
+            content: "Plain notes",
+            filename: "notes.txt",
+            contentType: "text/plain",
+            sizeBytes: 11
+        )
+
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(payload)) as? [String: Any]
+
+        #expect(json?["thumbnailBase64"] == nil)
+        #expect(try roundTrip(payload).thumbnailBase64 == nil)
+    }
+
     private func roundTrip<Value: Codable>(_ value: Value) throws -> Value {
         try JSONDecoder().decode(Value.self, from: JSONEncoder().encode(value))
     }

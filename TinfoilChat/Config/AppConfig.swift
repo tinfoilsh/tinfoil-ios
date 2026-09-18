@@ -633,6 +633,15 @@ class AppConfig: ObservableObject {
         return ModelSelection(representative: representative, autoCandidates: candidates)
     }
 
+    /// Model used for one-off image descriptions, preferring a low-latency
+    /// multimodal model when the controlplane advertises one.
+    var imageDescriptionModel: ModelType? {
+        let multimodal = availableModels.filter { $0.isMultimodal }
+        return multimodal.first {
+            $0.attributes.contains(Constants.ImageDescription.preferredModelAttribute)
+        } ?? multimodal.first
+    }
+
     /// Get the title model for generating titles and thinking summaries
     var titleModel: AppModelConfig? {
         appModels.first { $0.type == "title" }

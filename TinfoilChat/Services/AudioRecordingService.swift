@@ -65,22 +65,29 @@ class AudioRecordingService: NSObject, ObservableObject {
         ]
 
         audioRecorder = try AVAudioRecorder(url: url, settings: settings)
-        audioRecorder?.record()
+        audioRecorder?.isMeteringEnabled = true
+        guard audioRecorder?.record() == true else {
+            audioRecorder = nil
+            cleanupRecordingFile()
+            throw AudioRecordingError.recordingFailed
+        }
         isRecording = true
         disableIdleTimer()
 
         // Auto-stop after timeout
-        timeoutTimer = Timer.scheduledTimer(withTimeInterval: Constants.Audio.recordingTimeoutSeconds, repeats: false) { [weak self] _ in
+        let timer = Timer(timeInterval: Constants.Audio.recordingTimeoutSeconds, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 self?.stopRecording()
             }
         }
+        timeoutTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     /// Stop recording and return the audio file URL
     @discardableResult
     func stopRecording() -> URL? {
-        guard isRecording else { return nil }
+        guard isRecording else { return recordingURL }
 
         timeoutTimer?.invalidate()
         timeoutTimer = nil
@@ -91,6 +98,19 @@ class AudioRecordingService: NSObject, ObservableObject {
         restoreIdleTimer()
 
         return recordingURL
+    }
+
+    func meteringSample() -> AudioMeterSample? {
+        guard isRecording, let audioRecorder else { return nil }
+        guard audioRecorder.isRecording else {
+            stopRecording()
+            return nil
+        }
+        audioRecorder.updateMeters()
+        return AudioMeterSample(
+            decibels: audioRecorder.averagePower(forChannel: Constants.Audio.Waveform.meteringChannel),
+            elapsedTime: audioRecorder.currentTime
+        )
     }
 
     /// Cancel recording without returning the file
@@ -172,6 +192,7 @@ class AudioRecordingService: NSObject, ObservableObject {
 
 enum AudioRecordingError: LocalizedError {
     case permissionDenied
+    case recordingFailed
     case emptyRecording
     case emptyTranscription
     case transcriptionFailed(String)
@@ -180,6 +201,8 @@ enum AudioRecordingError: LocalizedError {
         switch self {
         case .permissionDenied:
             return "Microphone access denied"
+        case .recordingFailed:
+            return "Could not start audio recording. Please try again."
         case .emptyRecording:
             return "Recording is empty"
         case .emptyTranscription:

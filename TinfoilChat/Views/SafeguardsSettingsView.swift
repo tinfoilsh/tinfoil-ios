@@ -29,6 +29,7 @@ struct SafeguardsSettingsView: View {
                             get: { store.usesExamples },
                             set: { store.setUsesExamples($0) }
                         ))
+                        .tint(Color.accentPrimary)
                     } header: {
                         Text("Development")
                     } footer: {
@@ -51,10 +52,15 @@ struct SafeguardsSettingsView: View {
                     Button {
                         Task { await store.refresh() }
                     } label: {
-                        Image(systemName: "arrow.clockwise")
+                        if store.isLoading {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
                     }
                     .disabled(store.isLoading)
-                    .accessibilityLabel("Refresh flagged chats")
+                    .accessibilityLabel(store.isLoading ? "Refreshing flagged chats" : "Refresh flagged chats")
                 }
             }
         }
@@ -126,15 +132,8 @@ struct SafeguardsSettingsView: View {
             }
 
             if let report = store.report {
-                if report.inWindow == 0 {
-                    Text("No flagged chats in the last \(report.windowDescription).")
-                        .foregroundStyle(.secondary)
-                }
                 ForEach(report.flags) { flag in
                     flagRow(flag, report: report)
-                }
-                if store.isLoading {
-                    ProgressView("Refreshing flagged chats…")
                 }
             }
         } header: {

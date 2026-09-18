@@ -60,13 +60,15 @@ struct OnboardingView: View {
                 .frame(maxWidth: Constants.Onboarding.maximumContentWidth)
                 .padding(.horizontal, Constants.Onboarding.horizontalPadding)
 
-                Text("By continuing, you agree to our [Terms](\(Constants.Legal.termsOfServiceURL.absoluteString)) and have read our [Privacy Policy](\(Constants.Legal.privacyPolicyURL.absoluteString)).")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .tint(Color.adaptiveAccent)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, Constants.Onboarding.horizontalPadding)
+                BalancedTextLayout {
+                    Text("By continuing, you agree to our [Terms](\(Constants.Legal.termsOfServiceURL.absoluteString)) and have read our [Privacy Policy](\(Constants.Legal.privacyPolicyURL.absoluteString)).")
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .tint(Color.adaptiveAccent)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, Constants.Onboarding.horizontalPadding)
             }
             .padding(.bottom, Constants.Onboarding.navigationPadding)
         }
@@ -112,6 +114,9 @@ private struct OnboardingLetterPage: View {
                 .scaledToFit()
                 .aspectRatio(Constants.Onboarding.bannerAspectRatio, contentMode: .fit)
                 .clipped()
+                .overlay {
+                    Color.black.opacity(Constants.Onboarding.bannerOverlayOpacity)
+                }
                 .overlay(alignment: .bottomLeading) {
                     Text("Why Tinfoil Chat")
                         .font(.title)
@@ -119,12 +124,13 @@ private struct OnboardingLetterPage: View {
                         .foregroundStyle(.white)
                         .padding(Constants.Onboarding.textSpacing)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.black.opacity(Constants.Onboarding.bannerOverlayOpacity))
                         .accessibilityAddTraits(.isHeader)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: Constants.Onboarding.bannerCornerRadius))
 
             Text("Tinfoil Chat was built as a sanctuary for thought.")
+                .bold()
+                .foregroundStyle(.primary)
             Text("At Tinfoil, we believe that AI is the most intimate technology yet created. We see AI as a space to explore, to make mistakes, to think out loud, to reflect with a beautiful and deep intelligence on the other end.")
             Text("This is *your* space to explore ideas in private.")
         }
@@ -138,7 +144,13 @@ private struct OnboardingLetterPage: View {
 
 private struct OnboardingPrivacyPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.layoutDirection) private var layoutDirection
     @Binding var privacyEnabled: Bool
+
+    private var thumbOffset: CGFloat {
+        let offset = privacyEnabled ? Constants.Onboarding.toggleThumbOffset : -Constants.Onboarding.toggleThumbOffset
+        return layoutDirection == .rightToLeft ? -offset : offset
+    }
 
     var body: some View {
         VStack(spacing: Constants.Onboarding.contentSpacing) {
@@ -148,12 +160,16 @@ private struct OnboardingPrivacyPage: View {
                 .accessibilityHidden(true)
 
             VStack(spacing: Constants.Onboarding.textSpacing) {
-                Text("Private, by Design.")
-                    .font(.title)
-                    .fontWeight(.bold)
-                    .accessibilityAddTraits(.isHeader)
-                Text("Tinfoil Chat runs every conversation inside secure enclaves, giving you access to powerful AI models with verifiable conversation privacy. \(Text("Even Tinfoil cannot access your conversations.").fontWeight(.semibold).foregroundStyle(.primary))")
-                    .foregroundStyle(.secondary)
+                BalancedTextLayout {
+                    Text("Private, by Design.")
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                BalancedTextLayout {
+                    Text("Tinfoil Chat runs every conversation inside secure enclaves, giving you access to powerful AI models with verifiable conversation privacy.\n\n\(Text("Even Tinfoil cannot access your conversations.").fontWeight(.semibold).foregroundStyle(.primary))")
+                        .foregroundStyle(.secondary)
+                }
             }
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
@@ -162,22 +178,19 @@ private struct OnboardingPrivacyPage: View {
                 Button {
                     privacyEnabled.toggle()
                 } label: {
-                    HStack {
-                        if privacyEnabled { Spacer(minLength: .zero) }
-                        Circle()
-                            .fill(.white)
-                            .overlay {
-                                if privacyEnabled {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: Constants.Onboarding.checkmarkSize, weight: .bold))
-                                        .foregroundStyle(Color.tinfoilAccentDark)
-                                }
-                            }
-                        if !privacyEnabled { Spacer(minLength: .zero) }
-                    }
-                    .padding(Constants.Onboarding.togglePadding)
-                    .frame(width: Constants.Onboarding.toggleWidth, height: Constants.Onboarding.toggleHeight)
-                    .background(privacyEnabled ? Color.accentPrimary : .red, in: Capsule())
+                    Circle()
+                        .fill(.white)
+                        .frame(width: Constants.Onboarding.toggleThumbSize, height: Constants.Onboarding.toggleThumbSize)
+                        .overlay {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: Constants.Onboarding.checkmarkSize, weight: .bold))
+                                .foregroundStyle(Color.tinfoilAccentDark)
+                                .opacity(privacyEnabled ? 1 : 0)
+                                .animation(nil, value: privacyEnabled)
+                        }
+                        .offset(x: thumbOffset)
+                        .frame(width: Constants.Onboarding.toggleWidth, height: Constants.Onboarding.toggleHeight)
+                        .background(privacyEnabled ? Color.accentPrimary : .red, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Toggle privacy")
@@ -196,20 +209,36 @@ private struct OnboardingPrivacyPage: View {
 // MARK: - Screen 3: Safeguards
 
 private struct OnboardingSafeguardsPage: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         VStack(spacing: Constants.Onboarding.contentSpacing) {
             Image(systemName: "checkmark.shield")
                 .font(.system(size: Constants.Onboarding.iconSize))
+                .foregroundStyle(colorScheme == .dark ? Color.white : .tinfoilAccentBlue)
                 .frame(height: Constants.Onboarding.iconAreaHeight)
                 .accessibilityHidden(true)
 
             VStack(spacing: Constants.Onboarding.textSpacing) {
-                Text("Tending the Garden")
-                    .font(.title)
-                    .fontWeight(.bold)
-                    .accessibilityAddTraits(.isHeader)
-                Text("Privacy-preserving safeguards review the AI responses in this chat. The safeguards run inside secure enclaves at inference time, always keeping your conversations private. \(Text("Tinfoil cannot see the nature of the violation or conversation content.").fontWeight(.semibold).foregroundStyle(.primary))")
-                    .foregroundStyle(.secondary)
+                BalancedTextLayout {
+                    Text("Tending the Garden")
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                BalancedTextLayout {
+                    Text("Privacy-preserving safeguards review AI responses for safety.")
+                        .foregroundStyle(.secondary)
+                }
+                BalancedTextLayout {
+                    Text("Safeguards run inside secure enclaves at inference time, keeping your conversations private and notifying you in case of a flag.")
+                        .foregroundStyle(.secondary)
+                }
+                BalancedTextLayout {
+                    Text("Tinfoil never sees conversation content or the nature of the flag raised.")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.primary)
+                }
 
                 Link(destination: Constants.Safeguards.infoURL) {
                     Text("Learn more about safeguards")

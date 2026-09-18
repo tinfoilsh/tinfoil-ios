@@ -2256,6 +2256,7 @@ class CloudSyncService: ObservableObject {
         deferredRemoteDeletes.removeAll()
         pendingUploadCounts.removeAll()
         pendingUploadChatIds.removeAll()
+        SyncHealthStore.shared.clearFailedChats()
         await uploadCoalescer.clear()
         if let userId {
             revisionCheckpointStore.clear(userId: userId)

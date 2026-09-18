@@ -244,6 +244,7 @@ struct SettingsView: View {
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var profileManager = ProfileManager.shared
     @ObservedObject private var passkeyManager = PasskeyManager.shared
+    @ObservedObject private var syncHealth = SyncHealthStore.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAuthView = false
     @State private var showDeleteConfirmation = false
@@ -591,6 +592,15 @@ struct SettingsView: View {
                 } label: {
                     HStack {
                         Text("Cloud Sync")
+                        if settings.isCloudSyncEnabled && syncHealth.needsAttention() {
+                            Circle()
+                                .fill(Color.orange)
+                                .frame(
+                                    width: Constants.CloudSync.attentionBadgeSize,
+                                    height: Constants.CloudSync.attentionBadgeSize
+                                )
+                                .accessibilityLabel(Constants.CloudSync.attentionAccessibilityLabel)
+                        }
                         Spacer()
                         Text(settings.isCloudSyncEnabled ? "On" : "Off")
                             .foregroundColor(.secondary)
@@ -613,7 +623,6 @@ struct SettingsView: View {
                         profileManager.defaultPromptPreset?.name
                             ?? (profileManager.defaultPromptPresetId.isEmpty ? "Tinfoil default" : "Unavailable")
                     )
-                        .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                 }
@@ -925,6 +934,9 @@ struct SettingsView: View {
                 accountSection
                 if authManager.isAuthenticated {
                     subscriptionSection
+                }
+                chatSettingsSection
+                if authManager.isAuthenticated {
                     Section {
                         NavigationLink {
                             SafeguardsSettingsView(
@@ -933,11 +945,11 @@ struct SettingsView: View {
                             )
                         } label: {
                             Label("Safeguards", systemImage: "shield.lefthalf.filled")
+                                .foregroundColor(.primary)
                         }
                     }
                     .listRowBackground(Color.cardSurface(for: colorScheme))
                 }
-                chatSettingsSection
                 preferencesSection
                 contactSection
                 legalSection

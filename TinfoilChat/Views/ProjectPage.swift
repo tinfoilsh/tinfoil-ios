@@ -105,6 +105,10 @@ struct ProjectPage: View {
             }
         .scrollContentBackground(.hidden)
         .background(Color.settingsBackground(for: colorScheme))
+        // The app-level adaptive tint does not survive a UIKit-backed
+        // navigation round-trip inside this Form, so it is restated here to
+        // keep row icons monochrome instead of falling back to system blue.
+        .tint(colorScheme == .dark ? .white : .black)
         .onAppear { syncEditingName() }
         .onChange(of: project?.id) { _, _ in syncEditingName() }
         .onChange(of: project?.name) { _, _ in
@@ -395,7 +399,7 @@ struct ProjectDocumentsView: View {
         }
         .sheet(isPresented: $showDocumentPicker) {
             DocumentPickerView(
-                allowedKinds: [.documents],
+                allowedKinds: [.documents, .images],
                 allowsMultipleSelection: true,
                 onDocumentsPicked: { batch in
                     Task {
@@ -419,8 +423,12 @@ struct ProjectDocumentsView: View {
 
     private func documentRow(_ document: ProjectDocument) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: "doc")
-                .foregroundColor(.secondary)
+            FilePreviewView(
+                filename: document.filename,
+                thumbnailBase64: document.thumbnailBase64,
+                textContent: document.content,
+                cacheKey: "project-document-\(document.id)-\(document.syncVersion)"
+            )
             VStack(alignment: .leading, spacing: 2) {
                 Text(document.filename.isEmpty ? "Encrypted" : document.filename)
                     .font(.subheadline)

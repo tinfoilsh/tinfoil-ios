@@ -17,6 +17,8 @@ extension Color {
     static let tinfoilLight = Color(hex: "EEF3F3")
     static let tinfoilAccentDark = Color(hex: "004444")
     static let tinfoilAccentLight = Color(hex: "68C7AC")
+    static let tinfoilAccentBlue = Color(hex: "10347D")
+    static let tinfoilAccentBlueLight = Color(hex: "60A5FA")
     
     // App surface colors
     static let backgroundPrimary = Color(hex: "121212")
@@ -36,10 +38,10 @@ extension Color {
     static let settingsBackgroundLight = Color(UIColor.systemGroupedBackground)
     static let sheetBackgroundDark = Color(hex: "161616")
     static let sheetBackgroundLight = Color(UIColor.systemGroupedBackground)
-    static let sendButtonBackgroundDark = Color.tinfoilDark
-    static let sendButtonBackgroundLight = Color.white
+    static let sendButtonBackgroundDark = Color.tinfoilAccentBlue
+    static let sendButtonBackgroundLight = Color.tinfoilAccentBlue
     static let sendButtonForegroundDark = Color.white
-    static let sendButtonForegroundLight = Color.black
+    static let sendButtonForegroundLight = Color.white
 
     // Reasoning and messaging surfaces
     static let thinkingBackgroundDark = chatSurfaceDark

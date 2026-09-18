@@ -315,8 +315,6 @@ struct ChatSidebar: View {
 
                         if viewModel.hasPremiumAccess {
                             projectsSection
-                                .sidebarRow(top: 8)
-                                .id(ChatNavigationDestination.projects)
                         }
                     }
 
@@ -352,6 +350,11 @@ struct ChatSidebar: View {
                 .applyAlwaysBounceIfAvailable()
                 .refreshable {
                     await authManager.initializeAuthState()
+                    // The premium entitlement comes from the Tinfoil API, not
+                    // from the auth session, and it gates the project list. A
+                    // refresh must re-fetch it or a subscription started on
+                    // another device never shows up here.
+                    await authManager.fetchSubscriptionStatus()
                     await authManager.safeguards.refresh()
                     await viewModel.performFullSync()
                 }
@@ -780,12 +783,15 @@ struct ChatSidebar: View {
     private var settingsGearIcon: some View {
         Image(systemName: "gear")
             .overlay(alignment: .topTrailing) {
-                if syncHealth.needsAttention() {
+                if authManager.isAuthenticated && settings.isCloudSyncEnabled && syncHealth.needsAttention() {
                     Circle()
                         .fill(Color.orange)
-                        .frame(width: 8, height: 8)
+                        .frame(
+                            width: Constants.CloudSync.attentionBadgeSize,
+                            height: Constants.CloudSync.attentionBadgeSize
+                        )
                         .offset(x: 4, y: -4)
-                        .accessibilityLabel("Cloud sync needs attention")
+                        .accessibilityLabel(Constants.CloudSync.attentionAccessibilityLabel)
                 }
             }
     }
@@ -918,85 +924,92 @@ struct ChatSidebar: View {
         }
     }
 
+    /// Emits the header and each project as separate list rows, like the
+    /// Favorites section. Wrapping them in one VStack row would make the
+    /// List animate the whole row's height change, which drags the header
+    /// off screen while the list expands or collapses.
+    @ViewBuilder
     private var projectsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isProjectsExpanded.toggle()
+            }
+        } label: {
+            HStack {
+                Label("Projects", systemImage: "folder")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Spacer()
+                if viewModel.isLoadingProjects {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                }
+                Image(systemName: "chevron.down")
+                    .font(.caption)
+                    .rotationEffect(.degrees(isProjectsExpanded ? 0 : -90))
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Projects")
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityValue(isProjectsExpanded ? "Expanded" : "Collapsed")
+        .accessibilityHint(isProjectsExpanded ? "Collapses the projects list" : "Expands the projects list")
+        .sidebarRow(top: 8)
+        .id(ChatNavigationDestination.projects)
+
+        if isProjectsExpanded {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isProjectsExpanded.toggle()
+                Task {
+                    await viewModel.createProject()
                 }
             } label: {
-                HStack {
-                    Label("Projects", systemImage: "folder")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    Spacer()
-                    if viewModel.isLoadingProjects {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                    }
-                    Image(systemName: "chevron.down")
-                        .font(.caption)
-                        .rotationEffect(.degrees(isProjectsExpanded ? 0 : -90))
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 12)
-                .contentShape(Rectangle())
+                Label("New project", systemImage: "folder.badge.plus")
+                    .font(.subheadline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 14)
+                    .background(Color(UIColor.secondarySystemBackground).opacity(0.3))
+                    .cornerRadius(10)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Projects")
-            .accessibilityAddTraits(.isHeader)
-            .accessibilityValue(isProjectsExpanded ? "Expanded" : "Collapsed")
-            .accessibilityHint(isProjectsExpanded ? "Collapses the projects list" : "Expands the projects list")
+            .sidebarRow(top: 10)
 
-            if isProjectsExpanded {
+            ForEach(viewModel.projects) { project in
                 Button {
                     Task {
-                        await viewModel.createProject()
+                        await viewModel.enterProject(projectId: project.id)
+                        withAnimation {
+                            isOpen = false
+                        }
                     }
                 } label: {
-                    Label("New project", systemImage: "folder.badge.plus")
-                        .font(.subheadline)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 14)
-                        .background(Color(UIColor.secondarySystemBackground).opacity(0.3))
-                        .cornerRadius(10)
+                    HStack(spacing: 12) {
+                        if project.decryptionFailed == true {
+                            Image(systemName: "lock.fill")
+                                .foregroundColor(.orange)
+                        } else {
+                            ProjectFolderIcon(color: project.color)
+                        }
+                        Text(project.name)
+                            .lineLimit(1)
+                        Spacer()
+                    }
+                    .font(.subheadline)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 14)
+                    .background(Color(UIColor.secondarySystemBackground).opacity(0.3))
+                    .cornerRadius(10)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-
-                ForEach(viewModel.projects) { project in
-                    Button {
-                        Task {
-                            await viewModel.enterProject(projectId: project.id)
-                            withAnimation {
-                                isOpen = false
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 12) {
-                            if project.decryptionFailed == true {
-                                Image(systemName: "lock.fill")
-                                    .foregroundColor(.orange)
-                            } else {
-                                ProjectFolderIcon(color: project.color)
-                            }
-                            Text(project.name)
-                                .lineLimit(1)
-                            Spacer()
-                        }
-                        .font(.subheadline)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 14)
-                        .background(Color(UIColor.secondarySystemBackground).opacity(0.3))
-                        .cornerRadius(10)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(project.decryptionFailed == true)
-                    .accessibilityLabel(project.decryptionFailed == true ? "\(project.name), encrypted, unavailable" : project.name)
-                    .accessibilityHint(project.decryptionFailed == true ? "" : "Opens the project")
-                }
+                .disabled(project.decryptionFailed == true)
+                .accessibilityLabel(project.decryptionFailed == true ? "\(project.name), encrypted, unavailable" : project.name)
+                .accessibilityHint(project.decryptionFailed == true ? "" : "Opens the project")
+                .sidebarRow(top: 10)
             }
         }
     }

@@ -46,6 +46,24 @@ func shouldShowAudioInput(
     canUseAudioInput || isRecording || isTranscribing || isStartingRecording
 }
 
+enum MessageInputTrailingAction: Equatable {
+    case voice
+    case send
+    case stop
+
+    static func resolve(
+        showAudioButton: Bool,
+        showsRecordingState: Bool,
+        hasDraftContent: Bool,
+        showStopAction: Bool
+    ) -> Self {
+        if showAudioButton && showsRecordingState { return .voice }
+        if showStopAction { return .stop }
+        if showAudioButton && !hasDraftContent { return .voice }
+        return .send
+    }
+}
+
 func freeRequestsRemainingText(_ remaining: Int) -> String {
     guard remaining > 0 else { return "No free requests left today" }
     return "\(remaining) free request\(remaining == 1 ? "" : "s") left today"
@@ -116,7 +134,7 @@ struct MessageInputView: View {
         shouldShowAudioInput(
             canUseAudioInput: viewModel.canUseAudioInput,
             isRecording: viewModel.isRecording,
-            isTranscribing: viewModel.isTranscribing,
+            isTranscribing: isTranscribingAudio,
             isStartingRecording: isHoldToRecordActive
         )
     }
@@ -125,7 +143,11 @@ struct MessageInputView: View {
     // other action paths don't re-toggle the microphone.
     @State private var isHoldToRecordActive = false
     @State private var isFloatingRecordingBubbleVisible = false
-    @State private var isStandaloneVoiceBubbleVisible = false
+    @State private var isFinishingRecording = false
+
+    private var isTranscribingAudio: Bool {
+        isFinishingRecording || viewModel.isTranscribing
+    }
 
     // The in-flight recorder startup for a hold, awaited on release so a
     // fast release can't try to stop a recording that hasn't started yet
@@ -184,12 +206,6 @@ struct MessageInputView: View {
         )
     }
 
-    private enum TrailingAction {
-        case voice
-        case send
-        case stop
-    }
-
     private var hasDraftContent: Bool {
         messageTextHasNonWhitespace || !viewModel.pendingAttachments.isEmpty
     }
@@ -197,28 +213,15 @@ struct MessageInputView: View {
     /// The trailing button doubles as voice input while the draft is empty
     /// and becomes the send button once the user enters text or attaches
     /// files; while a stream with nothing submittable is in flight it turns
-    /// into a stop button. A recording started from the empty draft pins
-    /// the voice role so the microphone can always be stopped. Once the
-    /// draft has content, voice moves to its own button beside this one.
-    private var trailingAction: TrailingAction {
-        if showAudioButton && showsRecordingState && !hasDraftContent {
-            return .voice
-        }
-        if showStopAction { return .stop }
-        if showAudioButton && !hasDraftContent {
-            return .voice
-        }
-        return .send
-    }
-
-    /// Voice input stays reachable with a single tap even after text has
-    /// been typed or dictated, so a paused recording can always be resumed
-    /// and appended to the draft. Mirrors the webapp's standalone mic.
-    /// Only offered once the draft has content: with an empty draft the
-    /// trailing button owns the voice role, and a hold here would flip it
-    /// to voice and tear this control down mid-recording.
-    private var showsStandaloneVoiceButton: Bool {
-        showAudioButton && hasDraftContent && trailingAction != .voice
+    /// into a stop button. An active recording pins the voice role so it
+    /// can always be stopped, even if the draft changes.
+    private var trailingAction: MessageInputTrailingAction {
+        MessageInputTrailingAction.resolve(
+            showAudioButton: showAudioButton,
+            showsRecordingState: showsRecordingState,
+            hasDraftContent: hasDraftContent,
+            showStopAction: showStopAction
+        )
     }
 
     private var voiceIconName: String {
@@ -245,14 +248,6 @@ struct MessageInputView: View {
         }
     }
 
-    /// Same chat-context gates as the trailing button, plus voice greys out
-    /// while a recording is being transcribed.
-    private var isVoiceActionDisabled: Bool {
-        guard viewModel.canUseCurrentChatActions,
-              viewModel.canSendInCurrentContext else { return true }
-        return viewModel.isTranscribing
-    }
-
     /// The send action greys out while a draft can't be dispatched because
     /// an attachment is still processing, or while a recording is still
     /// capturing or transcribing text that belongs in the draft; voice
@@ -261,11 +256,11 @@ struct MessageInputView: View {
         guard viewModel.canUseCurrentChatActions else { return true }
         guard viewModel.canSendInCurrentContext || trailingAction == .stop else { return true }
         switch trailingAction {
-        case .voice: return viewModel.isTranscribing
+        case .voice: return isTranscribingAudio
         case .send:
             return !attachmentsAreReadyToSend(viewModel.pendingAttachments)
                 || showsRecordingState
-                || viewModel.isTranscribing
+                || isTranscribingAudio
         case .stop: return false
         }
     }
@@ -287,7 +282,7 @@ struct MessageInputView: View {
     /// Icon content shared by both input layouts' trailing action button.
     @ViewBuilder
     private var trailingActionIcon: some View {
-        if trailingAction == .voice && viewModel.isTranscribing {
+        if trailingAction == .voice && isTranscribingAudio {
             ProgressView()
                 .progressViewStyle(CircularProgressViewStyle(tint: trailingActionForegroundColor))
                 .scaleEffect(0.8)
@@ -332,6 +327,10 @@ struct MessageInputView: View {
             }
             .onChange(of: messageText) { _, newValue in
                 messageTextHasNonWhitespace = hasNonWhitespaceContent(newValue)
+            }
+            .onReceive(AudioRecordingService.shared.$isRecording) { isRecording in
+                guard !isRecording, viewModel.isRecording else { return }
+                Task { await stopRecordingAndInsertTranscription() }
             }
             .onChange(of: viewModel.messageEditSession) { _, newSession in
                 handleMessageEditSessionChange(newSession)
@@ -596,6 +595,19 @@ struct MessageInputView: View {
         }
     }
 
+    @ViewBuilder
+    private var messageComposerContent: some View {
+        if viewModel.isRecording || isTranscribingAudio {
+            AudioRecordingWaveformView(recordingService: .shared)
+                .frame(height: Layout.minimumHeight)
+                .padding(.horizontal)
+                .transition(.opacity)
+        } else {
+            messageTextEditor
+                .transition(.opacity)
+        }
+    }
+
     /// Shared between the iOS 26 and pre-26 input layouts so the editor's
     /// growing list of paste/send hooks stays defined in one place.
     private var messageTextEditor: some View {
@@ -644,7 +656,7 @@ struct MessageInputView: View {
                 }
 
                 // Text input area
-                messageTextEditor
+                messageComposerContent
 
                 // Bottom row with action buttons
                 HStack {
@@ -658,10 +670,6 @@ struct MessageInputView: View {
                         modelControlsSelector
 
                         Spacer()
-
-                        if showsStandaloneVoiceButton {
-                            standaloneVoiceButton
-                        }
 
                         trailingActionButton
                     }
@@ -696,7 +704,7 @@ struct MessageInputView: View {
                 }
 
                 // Text input area
-                messageTextEditor
+                messageComposerContent
 
                 // Bottom row with action buttons
                 HStack {
@@ -710,10 +718,6 @@ struct MessageInputView: View {
                         modelControlsSelector
 
                         Spacer()
-
-                        if showsStandaloneVoiceButton {
-                            standaloneVoiceButton
-                        }
 
                         trailingActionButton
                     }
@@ -901,7 +905,7 @@ struct MessageInputView: View {
                 allowsHoldToRecord: allowsTrailingHoldToRecord,
                 reduceMotion: reduceMotion,
                 accessibilityLabel: trailingActionAccessibilityLabel,
-                accessibilityValue: viewModel.isTranscribing ? "Transcribing" : "",
+                accessibilityValue: isTranscribingAudio ? "Transcribing" : "",
                 onTap: handleTrailingActionTap,
                 onHoldBegan: beginHoldToRecord,
                 onHoldEnded: endHoldToRecord,
@@ -921,93 +925,14 @@ struct MessageInputView: View {
         .padding(.trailing, 8)
     }
 
-    /// Voice input beside the send button once the draft has content. Same
-    /// UIKit touch control as the trailing button so tap toggles and
-    /// press-and-hold records with the floating bubble.
-    @ViewBuilder
-    private var standaloneVoiceButton: some View {
-        ZStack {
-            styledVoiceContent
-                .opacity(isStandaloneVoiceBubbleVisible ? 0 : 1)
-                .accessibilityHidden(true)
-
-            HoldToRecordControl(
-                isEnabled: !isVoiceActionDisabled,
-                allowsHoldToRecord: allowsHoldToRecord,
-                reduceMotion: reduceMotion,
-                accessibilityLabel: voiceAccessibilityLabel,
-                accessibilityValue: viewModel.isTranscribing ? "Transcribing" : "",
-                onTap: handleStandaloneVoiceTap,
-                onHoldBegan: beginHoldToRecord,
-                onHoldEnded: endHoldToRecord,
-                onBubbleVisibilityChanged: { isStandaloneVoiceBubbleVisible = $0 }
-            )
-            .frame(
-                width: Constants.Audio.recordingButtonHitTargetSize,
-                height: Constants.Audio.recordingButtonHitTargetSize
-            )
-        }
-        .frame(
-            width: Constants.Audio.recordingButtonHitTargetSize,
-            height: Constants.Audio.recordingButtonHitTargetSize
-        )
-        .opacity(isVoiceActionDisabled ? 0.6 : 1.0)
-        .allowsHitTesting(!isVoiceActionDisabled)
-    }
-
-    private var voiceForegroundColor: Color {
-        showsRecordingState ? .white : .secondary
-    }
-
-    @ViewBuilder
-    private var voiceIcon: some View {
-        if viewModel.isTranscribing {
-            ProgressView()
-                .progressViewStyle(CircularProgressViewStyle(tint: voiceForegroundColor))
-                .scaleEffect(0.8)
-        } else {
-            Image(systemName: voiceIconName)
-                .font(.system(size: 16, weight: .semibold))
-        }
-    }
-
-    /// Plain glyph at rest so the send button stays the primary action;
-    /// a live recording fills red to match the trailing button's look.
-    @ViewBuilder
-    private var styledVoiceContent: some View {
-        if showsRecordingState {
-            if #available(iOS 26, *) {
-                voiceIcon
-                    .frame(width: 24, height: 24)
-                    .foregroundColor(voiceForegroundColor)
-                    .padding(4)
-                    .glassEffect(.regular.tint(.red).interactive(), in: .circle)
-            } else {
-                ZStack {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 32, height: 32)
-
-                    voiceIcon
-                        .foregroundColor(voiceForegroundColor)
-                }
-            }
-        } else {
-            voiceIcon
-                .frame(width: 24, height: 24)
-                .foregroundColor(voiceForegroundColor)
-        }
-    }
-
     private var allowsHoldToRecord: Bool {
         viewModel.canUseAudioInput
             && !viewModel.isRecording
-            && !viewModel.isTranscribing
+            && !isTranscribingAudio
     }
 
-    /// Holding to record is offered wherever the voice role lives: the
-    /// trailing button while the draft is empty, the standalone button
-    /// once it has content. Holding send or stop keeps meaning send or stop.
+    /// Holding to record is offered only while the trailing button has the
+    /// voice role. Holding send or stop keeps meaning send or stop.
     private var allowsTrailingHoldToRecord: Bool {
         allowsHoldToRecord && trailingAction == .voice
     }
@@ -1065,11 +990,6 @@ struct MessageInputView: View {
         } else {
             sendOrCancelMessage()
         }
-    }
-
-    private func handleStandaloneVoiceTap() {
-        if isHoldToRecordActive { return }
-        handleAudioButtonTap()
     }
 
     private func handleMessageEditSessionChange(_ session: MessageEditSession?) {
@@ -1178,12 +1098,20 @@ struct MessageInputView: View {
     }
 
     private func stopRecordingAndInsertTranscription() async {
+        guard viewModel.isRecording, !isFinishingRecording else { return }
+        isFinishingRecording = true
+        defer {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: Constants.Audio.Waveform.completionTransitionDuration)) {
+                isFinishingRecording = false
+            }
+        }
         if let transcription = await viewModel.stopAudioRecordingAndTranscribe() {
             if !hasNonWhitespaceContent(messageText) {
                 messageText = transcription
             } else {
                 messageText += " " + transcription
             }
+            messageTextHasNonWhitespace = hasNonWhitespaceContent(messageText)
         }
     }
 

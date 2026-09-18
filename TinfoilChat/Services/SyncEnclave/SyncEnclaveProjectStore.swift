@@ -84,13 +84,15 @@ struct SyncEnclaveProjectStore {
         filename: String,
         contentType: String,
         content: String,
-        sizeBytes: Int
+        sizeBytes: Int,
+        thumbnailBase64: String? = nil
     ) async throws -> (ProjectDocumentPayload, Int) {
         let payload = ProjectDocumentPayload(
             content: content,
             filename: filename,
             contentType: contentType,
-            sizeBytes: sizeBytes
+            sizeBytes: sizeBytes,
+            thumbnailBase64: thumbnailBase64
         )
         let metadata: [String: AnyCodable] = [
             "filename": AnyCodable(filename),
