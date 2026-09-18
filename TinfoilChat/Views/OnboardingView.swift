@@ -142,7 +142,13 @@ private struct OnboardingLetterPage: View {
 
 private struct OnboardingPrivacyPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.layoutDirection) private var layoutDirection
     @Binding var privacyEnabled: Bool
+
+    private var thumbOffset: CGFloat {
+        let offset = privacyEnabled ? Constants.Onboarding.toggleThumbOffset : -Constants.Onboarding.toggleThumbOffset
+        return layoutDirection == .rightToLeft ? -offset : offset
+    }
 
     var body: some View {
         VStack(spacing: Constants.Onboarding.contentSpacing) {
@@ -170,22 +176,19 @@ private struct OnboardingPrivacyPage: View {
                 Button {
                     privacyEnabled.toggle()
                 } label: {
-                    HStack {
-                        if privacyEnabled { Spacer(minLength: .zero) }
-                        Circle()
-                            .fill(.white)
-                            .overlay {
-                                if privacyEnabled {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: Constants.Onboarding.checkmarkSize, weight: .bold))
-                                        .foregroundStyle(Color.tinfoilAccentDark)
-                                }
-                            }
-                        if !privacyEnabled { Spacer(minLength: .zero) }
-                    }
-                    .padding(Constants.Onboarding.togglePadding)
-                    .frame(width: Constants.Onboarding.toggleWidth, height: Constants.Onboarding.toggleHeight)
-                    .background(privacyEnabled ? Color.accentPrimary : .red, in: Capsule())
+                    Circle()
+                        .fill(.white)
+                        .frame(width: Constants.Onboarding.toggleThumbSize, height: Constants.Onboarding.toggleThumbSize)
+                        .overlay {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: Constants.Onboarding.checkmarkSize, weight: .bold))
+                                .foregroundStyle(Color.tinfoilAccentDark)
+                                .opacity(privacyEnabled ? 1 : 0)
+                                .animation(nil, value: privacyEnabled)
+                        }
+                        .offset(x: thumbOffset)
+                        .frame(width: Constants.Onboarding.toggleWidth, height: Constants.Onboarding.toggleHeight)
+                        .background(privacyEnabled ? Color.accentPrimary : .red, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Toggle privacy")

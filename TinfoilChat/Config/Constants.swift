@@ -327,6 +327,8 @@ enum Constants {
         static let toggleWidth: CGFloat = 112
         static let toggleHeight: CGFloat = 56
         static let togglePadding: CGFloat = 4
+        static let toggleThumbSize = toggleHeight - togglePadding * 2
+        static let toggleThumbOffset = (toggleWidth - toggleHeight) / 2
         static let checkmarkSize: CGFloat = 20
         static let animationDuration: TimeInterval = 0.3
         static let replayLaunchArgument = "-show-onboarding"
