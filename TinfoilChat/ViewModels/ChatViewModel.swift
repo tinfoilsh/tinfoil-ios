@@ -386,12 +386,13 @@ class ChatViewModel: ObservableObject {
     private var isAppPresentationReady = false
     private var needsSignInWhenPresentationReady = false
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
+    @Published private(set) var readyForAccountActionsUserId: String?
     private var signInTask: Task<Void, Never>?
     private var legacyMigrationTask: Task<Void, Never>?
     private var accountOperationFence = AccountOperationFence()
     private let accountOperationTracker = AccountOperationTracker()
     private var activeSignInToken: AccountOperationFence.Token?
-    private var isAccountTeardownInProgress = false
+    @Published private(set) var isAccountTeardownInProgress = false
     private var acceptsChatSaves = true
     private var hasPerformedInitialSync: Bool = false  // Track if initial sync has been done
     private var hasAnonymousChatsToSync: Bool = false  // Track if we have anonymous chats to sync
@@ -6072,6 +6073,7 @@ class ChatViewModel: ObservableObject {
 
     @discardableResult
     private func cancelSignInOperation() -> Task<Void, Never>? {
+        readyForAccountActionsUserId = nil
         let canceledTask = signInTask
         canceledTask?.cancel()
         signInTask = nil
@@ -6530,7 +6532,9 @@ class ChatViewModel: ObservableObject {
             }
             return
         }
-        guard isAppPresentationReady else {
+        guard isAppPresentationReady,
+              authManager?.isLoading == false,
+              authManager?.needsOnboarding == false else {
             needsSignInWhenPresentationReady = true
             return
         }
@@ -6567,6 +6571,7 @@ class ChatViewModel: ObservableObject {
         let token = accountOperationFence.begin(userId: userId)
         activeSignInToken = token
         isSignInInProgress = true
+        readyForAccountActionsUserId = nil
         recoveryScansSuspended = false
         signInTask = Task { [weak self] in
             guard let self,
@@ -6787,6 +6792,7 @@ class ChatViewModel: ObservableObject {
                 ensureBlankChatAtTop()
             }
             finishSignIn(token, userId: userId)
+            readyForAccountActionsUserId = userId
         } catch {
             // If key initialization fails, fall back to showing setup modal
             guard isCurrentSignIn(token, userId: userId) else { return }
