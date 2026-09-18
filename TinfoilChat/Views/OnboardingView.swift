@@ -112,6 +112,9 @@ private struct OnboardingLetterPage: View {
                 .scaledToFit()
                 .aspectRatio(Constants.Onboarding.bannerAspectRatio, contentMode: .fit)
                 .clipped()
+                .overlay {
+                    Color.black.opacity(Constants.Onboarding.bannerOverlayOpacity)
+                }
                 .overlay(alignment: .bottomLeading) {
                     Text("Why Tinfoil Chat")
                         .font(.title)
@@ -119,7 +122,6 @@ private struct OnboardingLetterPage: View {
                         .foregroundStyle(.white)
                         .padding(Constants.Onboarding.textSpacing)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.black.opacity(Constants.Onboarding.bannerOverlayOpacity))
                         .accessibilityAddTraits(.isHeader)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: Constants.Onboarding.bannerCornerRadius))
