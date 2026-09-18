@@ -80,7 +80,7 @@
       <CommandLineArguments>
          <CommandLineArgument
             argument = "-show-onboarding"
-            isEnabled = "YES">
+            isEnabled = "NO">
          </CommandLineArgument>
       </CommandLineArguments>
    </LaunchAction>
