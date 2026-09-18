@@ -353,6 +353,17 @@ enum Constants {
         static let flagLabel = "Model response flagged by safeguards"
         static let loadError = "Could not load flagged chats. Please try again."
 
+        enum Banner {
+            static let textSpacing: CGFloat = 4
+            static let cornerRadius: CGFloat = 16
+            static let borderWidth: CGFloat = 1
+            static let borderOpacity = 0.4
+            static let backgroundOpacity = 0.1
+            static let lightTextColorHex = "B91C1C"
+            static let darkTextColorHex = "FECACA"
+            static let message = "Stop using this chat and start a new one to avoid triggering the safeguard again."
+        }
+
         #if DEBUG
         static let useExamples = true
         static let exampleWindowHours = 7 * hoursPerDay

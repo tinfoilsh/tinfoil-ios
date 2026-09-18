@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct ChatListView: View {
+    @EnvironmentObject private var authManager: AuthManager
     let isDarkMode: Bool
     let isLoading: Bool
     let onRequestSignIn: () -> Void
@@ -19,6 +20,7 @@ struct ChatListView: View {
     @State private var userHasScrolled = false
     @State private var isInputExpanded = false
     @State private var showPromptLibrary = false
+    @State private var showSafeguardsSettings = false
     @State private var isKeyboardVisible = false
     @State private var keyboardHeight: CGFloat = 0
     @State private var scrollTrigger = UUID()
@@ -142,6 +144,14 @@ struct ChatListView: View {
                     )
                     .transition(.opacity)
                 }
+                if authManager.isAuthenticated, let chatId = viewModel.currentChat?.id {
+                    SafeguardFlagBanner(
+                        store: authManager.safeguards,
+                        chatId: chatId,
+                        onOpenSettings: { showSafeguardsSettings = true }
+                    )
+                    .id(chatId)
+                }
                 MessageQueueView(
                     queue: viewModel.queuedMessages,
                     isDarkMode: isDarkMode,
@@ -175,6 +185,23 @@ struct ChatListView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showSafeguardsSettings) {
+            NavigationStack {
+                SafeguardsSettingsView(
+                    store: authManager.safeguards,
+                    onOpenChat: { showSafeguardsSettings = false }
+                )
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { showSafeguardsSettings = false }
+                    }
+                }
+            }
+        }
+        .task(id: isLoading) {
+            guard !isLoading, authManager.isAuthenticated, !Task.isCancelled else { return }
+            await authManager.safeguards.refresh()
         }
         .onAppear {
             refreshArchivedMessagesStartIndex()
