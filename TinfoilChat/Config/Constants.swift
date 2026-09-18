@@ -515,6 +515,7 @@ enum Constants {
         enum Waveform {
             static let sampleInterval: TimeInterval = 0.05
             static let frameInterval: TimeInterval = 1.0 / 60.0
+            static let completionTransitionDuration: TimeInterval = 0.2
             static let meteringChannel = 0
             static let minimumDecibels: Float = -60
             static let maximumDecibels: Float = 0

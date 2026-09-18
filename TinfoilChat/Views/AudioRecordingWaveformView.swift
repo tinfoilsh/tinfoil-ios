@@ -5,7 +5,7 @@ struct AudioRecordingWaveformView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var history = AudioWaveformHistory()
     @State private var lastSampleAt = Date.now
-    let recordingService: AudioRecordingService
+    @ObservedObject var recordingService: AudioRecordingService
 
     @State private var meterTimer = Timer.publish(
         every: Constants.Audio.Waveform.sampleInterval,
@@ -30,7 +30,10 @@ struct AudioRecordingWaveformView: View {
                 .accessibilityLabel("Recording time")
                 .accessibilityValue(elapsedText)
 
-            TimelineView(.animation(minimumInterval: Constants.Audio.Waveform.frameInterval, paused: reduceMotion)) { timeline in
+            TimelineView(.animation(
+                minimumInterval: Constants.Audio.Waveform.frameInterval,
+                paused: reduceMotion || !recordingService.isRecording
+            )) { timeline in
                 Canvas { context, size in
                     let progress = reduceMotion ? .zero : CGFloat(
                         timeline.date.timeIntervalSince(lastSampleAt) / Constants.Audio.Waveform.sampleInterval

@@ -134,7 +134,7 @@ struct MessageInputView: View {
         shouldShowAudioInput(
             canUseAudioInput: viewModel.canUseAudioInput,
             isRecording: viewModel.isRecording,
-            isTranscribing: viewModel.isTranscribing,
+            isTranscribing: isTranscribingAudio,
             isStartingRecording: isHoldToRecordActive
         )
     }
@@ -143,6 +143,11 @@ struct MessageInputView: View {
     // other action paths don't re-toggle the microphone.
     @State private var isHoldToRecordActive = false
     @State private var isFloatingRecordingBubbleVisible = false
+    @State private var isFinishingRecording = false
+
+    private var isTranscribingAudio: Bool {
+        isFinishingRecording || viewModel.isTranscribing
+    }
 
     // The in-flight recorder startup for a hold, awaited on release so a
     // fast release can't try to stop a recording that hasn't started yet
@@ -251,11 +256,11 @@ struct MessageInputView: View {
         guard viewModel.canUseCurrentChatActions else { return true }
         guard viewModel.canSendInCurrentContext || trailingAction == .stop else { return true }
         switch trailingAction {
-        case .voice: return viewModel.isTranscribing
+        case .voice: return isTranscribingAudio
         case .send:
             return !attachmentsAreReadyToSend(viewModel.pendingAttachments)
                 || showsRecordingState
-                || viewModel.isTranscribing
+                || isTranscribingAudio
         case .stop: return false
         }
     }
@@ -277,7 +282,7 @@ struct MessageInputView: View {
     /// Icon content shared by both input layouts' trailing action button.
     @ViewBuilder
     private var trailingActionIcon: some View {
-        if trailingAction == .voice && viewModel.isTranscribing {
+        if trailingAction == .voice && isTranscribingAudio {
             ProgressView()
                 .progressViewStyle(CircularProgressViewStyle(tint: trailingActionForegroundColor))
                 .scaleEffect(0.8)
@@ -592,12 +597,14 @@ struct MessageInputView: View {
 
     @ViewBuilder
     private var messageComposerContent: some View {
-        if viewModel.isRecording {
+        if viewModel.isRecording || isTranscribingAudio {
             AudioRecordingWaveformView(recordingService: .shared)
                 .frame(height: Layout.minimumHeight)
                 .padding(.horizontal)
+                .transition(.opacity)
         } else {
             messageTextEditor
+                .transition(.opacity)
         }
     }
 
@@ -898,7 +905,7 @@ struct MessageInputView: View {
                 allowsHoldToRecord: allowsTrailingHoldToRecord,
                 reduceMotion: reduceMotion,
                 accessibilityLabel: trailingActionAccessibilityLabel,
-                accessibilityValue: viewModel.isTranscribing ? "Transcribing" : "",
+                accessibilityValue: isTranscribingAudio ? "Transcribing" : "",
                 onTap: handleTrailingActionTap,
                 onHoldBegan: beginHoldToRecord,
                 onHoldEnded: endHoldToRecord,
@@ -921,7 +928,7 @@ struct MessageInputView: View {
     private var allowsHoldToRecord: Bool {
         viewModel.canUseAudioInput
             && !viewModel.isRecording
-            && !viewModel.isTranscribing
+            && !isTranscribingAudio
     }
 
     /// Holding to record is offered only while the trailing button has the
@@ -1091,12 +1098,20 @@ struct MessageInputView: View {
     }
 
     private func stopRecordingAndInsertTranscription() async {
+        guard viewModel.isRecording, !isFinishingRecording else { return }
+        isFinishingRecording = true
+        defer {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: Constants.Audio.Waveform.completionTransitionDuration)) {
+                isFinishingRecording = false
+            }
+        }
         if let transcription = await viewModel.stopAudioRecordingAndTranscribe() {
             if !hasNonWhitespaceContent(messageText) {
                 messageText = transcription
             } else {
                 messageText += " " + transcription
             }
+            messageTextHasNonWhitespace = hasNonWhitespaceContent(messageText)
         }
     }
 
