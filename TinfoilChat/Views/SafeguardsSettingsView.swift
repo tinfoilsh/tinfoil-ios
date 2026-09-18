@@ -126,10 +126,6 @@ struct SafeguardsSettingsView: View {
             }
 
             if let report = store.report {
-                if report.inWindow == 0 {
-                    Text("No flagged chats in the last \(report.windowDescription).")
-                        .foregroundStyle(.secondary)
-                }
                 ForEach(report.flags) { flag in
                     flagRow(flag, report: report)
                 }

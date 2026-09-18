@@ -934,6 +934,9 @@ struct SettingsView: View {
                 accountSection
                 if authManager.isAuthenticated {
                     subscriptionSection
+                }
+                chatSettingsSection
+                if authManager.isAuthenticated {
                     Section {
                         NavigationLink {
                             SafeguardsSettingsView(
@@ -942,11 +945,11 @@ struct SettingsView: View {
                             )
                         } label: {
                             Label("Safeguards", systemImage: "shield.lefthalf.filled")
+                                .foregroundColor(.primary)
                         }
                     }
                     .listRowBackground(Color.cardSurface(for: colorScheme))
                 }
-                chatSettingsSection
                 preferencesSection
                 contactSection
                 legalSection
