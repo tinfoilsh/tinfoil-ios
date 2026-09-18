@@ -2,8 +2,7 @@
 //  OnboardingView.swift
 //  TinfoilChat
 //
-//  Onboarding flow shown on first launch to introduce privacy,
-//  end-to-end encryption, and available AI models.
+//  Introduces the founders' letter, conversation privacy, and safeguards.
 //
 
 import SwiftUI
@@ -12,629 +11,218 @@ import SwiftUI
 
 struct OnboardingView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @ObservedObject private var appConfig = AppConfig.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var flow = OnboardingFlow()
     var onComplete: () -> Void
-
-    @State private var currentPage = 0
-    @State private var direction: Edge = .trailing
-    @State private var privacyEnabled = false
-
-    private let totalPages = 3
 
     var body: some View {
         ZStack {
-            backgroundGradient
+            (colorScheme == .dark ? Color.backgroundPrimary : .white)
+                .ignoresSafeArea()
+            GridTexture(isDarkMode: colorScheme == .dark)
                 .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // Page content
-                ZStack {
-                    switch currentPage {
-                    case 0:
-                        OnboardingPrivacyPage(isPrivacyEnabled: $privacyEnabled)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            ))
-                    case 1:
-                        OnboardingEncryptionPage()
-                            .transition(.asymmetric(
-                                insertion: .move(edge: direction).combined(with: .opacity),
-                                removal: .move(edge: direction == .trailing ? .leading : .trailing).combined(with: .opacity)
-                            ))
-                    case 2:
-                        OnboardingModelsPage(models: appConfig.availableModels)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            ))
-                    default:
-                        EmptyView()
+            VStack(spacing: Constants.Onboarding.navigationSpacing) {
+                GeometryReader { geometry in
+                    ScrollView {
+                        pageContent
+                            .frame(maxWidth: Constants.Onboarding.maximumContentWidth)
+                            .padding(.horizontal, Constants.Onboarding.horizontalPadding)
+                            .padding(.vertical, Constants.Onboarding.verticalPadding)
+                            .frame(maxWidth: .infinity, minHeight: geometry.size.height)
                     }
                 }
-                .frame(maxHeight: .infinity)
 
-                // Bottom navigation area
-                VStack(spacing: 20) {
-                    // Page dots
-                    HStack(spacing: 8) {
-                        ForEach(0..<totalPages, id: \.self) { index in
+                VStack(spacing: Constants.Onboarding.navigationSpacing) {
+                    HStack(spacing: Constants.Onboarding.dotSpacing) {
+                        ForEach(OnboardingFlow.Page.allCases, id: \.self) { page in
                             Capsule()
-                                .fill(index == currentPage ? Color.accentPrimary : Color.secondary.opacity(0.3))
-                                .frame(width: index == currentPage ? 24 : 8, height: 8)
-                                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: currentPage)
+                                .fill(page == flow.page ? Color.primary : .secondary.opacity(Constants.Onboarding.inactiveDotOpacity))
+                                .frame(
+                                    width: page == flow.page ? Constants.Onboarding.activeDotWidth : Constants.Onboarding.inactiveDotWidth,
+                                    height: Constants.Onboarding.dotHeight
+                                )
                         }
                     }
                     .accessibilityHidden(true)
 
-                    // Continue / Get Started button
-                    let canContinue = currentPage != 0 || privacyEnabled
                     Button(action: handleContinue) {
-                        Text(currentPage == totalPages - 1 ? "Get Started" : "Continue")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(canContinue
-                                ? (colorScheme == .dark ? .black : .white)
-                                : .secondary)
+                        Text(flow.continueTitle)
+                            .font(.headline)
+                            .foregroundStyle(colorScheme == .dark ? Color.black : .white)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(canContinue
-                                        ? (colorScheme == .dark ? Color.white : Color.black)
-                                        : Color.secondary.opacity(0.2))
-                            )
+                            .padding(.vertical, Constants.Onboarding.navigationPadding)
+                            .background(Color.adaptiveAccent, in: RoundedRectangle(cornerRadius: Constants.UI.actionButtonCornerRadius))
                     }
-                    .disabled(!canContinue)
-                    .animation(.easeInOut(duration: 0.3), value: canContinue)
-                    .padding(.horizontal, 24)
-
-                    // Skip button (not on last page)
-                    if currentPage < totalPages - 1 {
-                        Button(action: { onComplete() }) {
-                            Text("Skip")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                    } else {
-                        // Spacer to maintain layout
-                        Text(" ")
-                            .font(.subheadline)
-                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint(flow.page == .safeguards ? "Finish onboarding" : "Continue onboarding")
                 }
-                .padding(.bottom, 40)
+                .frame(maxWidth: Constants.Onboarding.maximumContentWidth)
+                .padding(.horizontal, Constants.Onboarding.horizontalPadding)
+
+                Text("By continuing, you agree to our [Terms](\(Constants.Legal.termsOfServiceURL.absoluteString)) and have read our [Privacy Policy](\(Constants.Legal.privacyPolicyURL.absoluteString)).")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .tint(Color.adaptiveAccent)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, Constants.Onboarding.horizontalPadding)
             }
+            .padding(.bottom, Constants.Onboarding.navigationPadding)
         }
     }
 
-    private var backgroundGradient: some View {
-        Group {
-            if colorScheme == .dark {
-                Color.backgroundPrimary
-            } else {
-                Color.white
-            }
+    @ViewBuilder
+    private var pageContent: some View {
+        switch flow.page {
+        case .letter:
+            OnboardingLetterPage()
+        case .privacy:
+            OnboardingPrivacyPage(privacyEnabled: $flow.privacyEnabled)
+        case .safeguards:
+            OnboardingSafeguardsPage()
         }
     }
 
     private func handleContinue() {
-        if currentPage < totalPages - 1 {
-            direction = .trailing
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                currentPage += 1
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: Constants.Onboarding.animationDuration)) {
+            if flow.advance() {
+                onComplete()
             }
-        } else {
-            onComplete()
         }
     }
 }
 
-// MARK: - Screen 1: Privacy
+// MARK: - Screen 1: Letter from the Founders
+
+private struct OnboardingLetterPage: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Constants.Onboarding.textSpacing) {
+            Image(colorScheme == .dark ? "logo-white" : "logo-dark")
+                .resizable()
+                .scaledToFit()
+                .frame(height: Constants.Onboarding.logoHeight)
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel("Tinfoil")
+
+            Image(Constants.Onboarding.bannerAssetName)
+                .resizable()
+                .scaledToFit()
+                .aspectRatio(Constants.Onboarding.bannerAspectRatio, contentMode: .fit)
+                .clipped()
+                .overlay(alignment: .bottomLeading) {
+                    Text("Why Tinfoil Chat")
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.white)
+                        .padding(Constants.Onboarding.textSpacing)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.black.opacity(Constants.Onboarding.bannerOverlayOpacity))
+                        .accessibilityAddTraits(.isHeader)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: Constants.Onboarding.bannerCornerRadius))
+
+            Text("Tinfoil Chat was built as a sanctuary for thought.")
+            Text("At Tinfoil, we believe that AI is the most intimate technology yet created. We see AI as a space to explore, to make mistakes, to think out loud, to reflect with a beautiful and deep intelligence on the other end.")
+            Text("This is *your* space to explore ideas in private.")
+        }
+        .font(.body)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+// MARK: - Screen 2: Privacy
 
 private struct OnboardingPrivacyPage: View {
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Binding var isPrivacyEnabled: Bool
-    @State private var isPrivateOn = false
-    @State private var showExplanation = false
-    @State private var shimmerOffset: CGFloat = 0
-    @State private var borderRotation: Double = 0
-    @State private var pulseScale: CGFloat = 1.0
-    @ObservedObject private var settings = SettingsManager.shared
+    @Binding var privacyEnabled: Bool
 
     var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
+        VStack(spacing: Constants.Onboarding.contentSpacing) {
+            Image(systemName: privacyEnabled ? "lock.fill" : "lock.open")
+                .font(.system(size: Constants.Onboarding.iconSize))
+                .frame(height: Constants.Onboarding.iconAreaHeight)
+                .accessibilityHidden(true)
 
-            VStack(spacing: 10) {
-                HStack(spacing: 12) {
-                    Image(systemName: isPrivateOn ? "lock.fill" : "lock.open.fill")
-                        .font(.system(size: 28))
-                        .foregroundColor(.primary)
-                        .contentTransition(.symbolEffect(.replace))
-
-                    Text("Privacy First")
-                        .font(.title)
-                        .fontWeight(.bold)
-                        .accessibilityAddTraits(.isHeader)
-                }
-
-                Text("Tinfoil is built for people who believe their conversations are nobody else's business.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
+            VStack(spacing: Constants.Onboarding.textSpacing) {
+                Text("Private, by Design.")
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Tinfoil Chat runs every conversation inside secure enclaves, giving you access to powerful AI models with verifiable conversation privacy. \(Text("Even Tinfoil cannot access your conversations.").fontWeight(.semibold).foregroundStyle(.primary))")
+                    .foregroundStyle(.secondary)
             }
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
 
-            // The big privacy toggle
-            privacyToggleCard
-
-            // Explanation that appears after toggle
-            if showExplanation {
-                VStack(spacing: 12) {
-                    explanationRow(
-                        icon: "eye.slash.fill",
-                        title: "Sealed Processing",
-                        description: "Your messages are end-to-end encrypted to AI models running inside secure hardware. Tinfoil cannot read them."
-                    )
-
-                    explanationRow(
-                        icon: "checkmark.shield.fill",
-                        title: "Verifiable Privacy",
-                        description: "Our infrastructure runs on confidential computing GPUs with hardware attestation and automatic client-side verification."
-                    )
-
-                    explanationRow(
-                        icon: "lock.doc.fill",
-                        title: "Everything is Protected",
-                        description: "Chats, images, documents, and voice input are all encrypted end-to-end."
-                    )
-                }
-                .padding(.horizontal, 24)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
-            Spacer()
-        }
-    }
-
-    private var privacyToggleCard: some View {
-        Button(action: togglePrivacy) {
-            HStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(isPrivateOn ? "Private" : "Tap to enable privacy")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-
-                    if isPrivateOn {
-                        Text("Your conversations are protected")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                Spacer()
-
-                // Custom animated toggle
-                ZStack {
-                    Capsule()
-                        .fill(isPrivateOn ? Color.accentPrimary : Color.secondary.opacity(0.3))
-                        .frame(width: 56, height: 32)
-
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: 26, height: 26)
-                        .shadow(color: .black.opacity(0.15), radius: 2, x: 0, y: 1)
-                        .offset(x: isPrivateOn ? 12 : -12)
-                }
-                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isPrivateOn)
-            }
-            .padding(20)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(isPrivateOn
-                        ? Color.accentPrimary.opacity(colorScheme == .dark ? 0.15 : 0.08)
-                        : Color(UIColor.secondarySystemBackground))
-            )
-            .overlay {
-                if !isPrivateOn {
-                    GeometryReader { geo in
-                        LinearGradient(
-                            stops: [
-                                .init(color: .clear, location: 0),
-                                .init(color: .white.opacity(0.04), location: 0.4),
-                                .init(color: .white.opacity(0.06), location: 0.5),
-                                .init(color: .white.opacity(0.04), location: 0.6),
-                                .init(color: .clear, location: 1),
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: geo.size.width * 0.7)
-                        .offset(x: -geo.size.width * 0.7 + shimmerOffset * (geo.size.width * 2.1))
-                        .onAppear {
-                            shimmerOffset = 0
-                            withAnimation(.linear(duration: 3.0).repeatForever(autoreverses: false)) {
-                                shimmerOffset = 1
-                            }
-                        }
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .allowsHitTesting(false)
-                }
-            }
-            .overlay {
-                if isPrivateOn {
-                    RoundedRectangle(cornerRadius: 16)
-                        .strokeBorder(Color.accentPrimary.opacity(0.3), lineWidth: 1)
-                } else {
-                    RoundedRectangle(cornerRadius: 16)
-                        .strokeBorder(
-                            AngularGradient(
-                                stops: [
-                                    .init(color: Color.accentPrimary.opacity(0.05), location: 0),
-                                    .init(color: Color.accentPrimary.opacity(0.1), location: 0.1),
-                                    .init(color: Color.accentPrimary.opacity(0.5), location: 0.2),
-                                    .init(color: Color.accentPrimary.opacity(0.1), location: 0.3),
-                                    .init(color: Color.accentPrimary.opacity(0.05), location: 0.4),
-                                    .init(color: Color.accentPrimary.opacity(0.05), location: 1),
-                                ],
-                                center: .center,
-                                angle: .degrees(borderRotation)
-                            ),
-                            lineWidth: 1
-                        )
-                        .onAppear {
-                            if !reduceMotion {
-                                withAnimation(.linear(duration: 4.0).repeatForever(autoreverses: false)) {
-                                    borderRotation = 360
+            VStack(spacing: Constants.Onboarding.navigationSpacing) {
+                Button {
+                    privacyEnabled.toggle()
+                } label: {
+                    HStack {
+                        if privacyEnabled { Spacer(minLength: .zero) }
+                        Circle()
+                            .fill(.white)
+                            .overlay {
+                                if privacyEnabled {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: Constants.Onboarding.checkmarkSize, weight: .bold))
+                                        .foregroundStyle(Color.adaptiveAccent)
                                 }
                             }
-                        }
+                        if !privacyEnabled { Spacer(minLength: .zero) }
+                    }
+                    .padding(Constants.Onboarding.togglePadding)
+                    .frame(width: Constants.Onboarding.toggleWidth, height: Constants.Onboarding.toggleHeight)
+                    .background(privacyEnabled ? Color.adaptiveAccent : .red, in: Capsule())
                 }
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(isPrivateOn ? .isSelected : [])
-        .accessibilityHint(isPrivateOn ? "" : "Enables privacy")
-        .padding(.horizontal, 24)
-    }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Toggle privacy")
+                .accessibilityValue(privacyEnabled ? "Private" : "Enable Privacy")
+                .animation(reduceMotion ? nil : .easeInOut(duration: Constants.Onboarding.animationDuration), value: privacyEnabled)
 
-    private func togglePrivacy() {
-        withAnimation(.easeInOut(duration: 0.5)) {
-            isPrivateOn = true
-            isPrivacyEnabled = true
-        }
-
-        if settings.hapticFeedbackEnabled {
-            let generator = UINotificationFeedbackGenerator()
-            generator.notificationOccurred(.success)
-        }
-
-        pulseScale = 1.08
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            withAnimation(.easeInOut(duration: 0.6)) {
-                showExplanation = true
-            }
-        }
-    }
-
-    private func explanationRow(icon: String, title: String, description: String) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: icon)
-                .font(.system(size: 18))
-                .foregroundColor(.primary)
-                .frame(width: 32, height: 32)
-                .background(
-                    Circle()
-                        .fill(Color.primary.opacity(0.1))
-                )
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.subheadline)
+                Text(privacyEnabled ? "Private" : "Enable Privacy")
                     .fontWeight(.semibold)
-
-                Text(description)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer()
-        }
-    }
-}
-
-// MARK: - Screen 2: Encryption
-
-private struct OnboardingEncryptionPage: View {
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var animateKey = false
-    @State private var animateShield = false
-    @State private var showDetails = false
-
-    var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 32) {
-                Spacer().frame(height: 40)
-
-                // Animated encryption visualization
-                ZStack {
-                    // Outer ring
-                    Circle()
-                        .strokeBorder(
-                            Color.primary.opacity(0.2),
-                            lineWidth: 2
-                        )
-                        .frame(width: 120, height: 120)
-                        .scaleEffect(animateShield ? 1.0 : 0.8)
-                        .opacity(animateShield ? 1.0 : 0)
-
-                    // Phone icon with key
-                    ZStack {
-                        Circle()
-                            .fill(Color.primary.opacity(0.1))
-                            .frame(width: 88, height: 88)
-
-                        Image(systemName: "iphone")
-                            .font(.system(size: 36))
-                            .foregroundColor(.primary)
-
-                        // Key badge
-                        Image(systemName: "key.fill")
-                            .font(.system(size: 16))
-                            .foregroundColor(.primary)
-                            .padding(6)
-                            .background(
-                                Circle()
-                                    .fill(colorScheme == .dark ? Color.backgroundPrimary : Color.white)
-                            )
-                            .offset(x: 28, y: -28)
-                            .scaleEffect(animateKey ? 1.0 : 0)
-                            .opacity(animateKey ? 1.0 : 0)
-                    }
-                }
-                .onAppear {
-                    withAnimation(.spring(response: 0.6, dampingFraction: 0.7).delay(0.2)) {
-                        animateShield = true
-                    }
-                    withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.5)) {
-                        animateKey = true
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                        withAnimation(.easeOut(duration: 0.5)) {
-                            showDetails = true
-                        }
-                    }
-                }
-
-                VStack(spacing: 12) {
-                    Text("Your Key, Your Data")
-                        .font(.title)
-                        .fontWeight(.bold)
-                        .accessibilityAddTraits(.isHeader)
-
-                    Text("Every chat is encrypted with a key that only exists on your device. Nobody but you can read your conversations.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
-                }
-
-                if showDetails {
-                    VStack(spacing: 0) {
-                        encryptionDetailRow(
-                            icon: "key.fill",
-                            title: "Device-Only Key",
-                            description: "Your encryption key never leaves your device. It's the only way to decrypt your conversations - don't lose it!",
-                            isLast: true
-                        )
-                    }
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color(UIColor.secondarySystemBackground))
-                    )
-                    .padding(.horizontal, 24)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-
-                Spacer().frame(height: 20)
-            }
-        }
-    }
-
-    private func encryptionDetailRow(icon: String, title: String, description: String, isLast: Bool) -> some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 16))
-                    .foregroundColor(.primary)
-                    .frame(width: 28, height: 28)
-                    .background(
-                        Circle()
-                            .fill(Color.primary.opacity(0.1))
-                    )
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-
-                    Text(description)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-
-            if !isLast {
-                Divider()
-                    .padding(.leading, 58)
+                    .foregroundStyle(privacyEnabled ? Color.adaptiveAccent : .red)
             }
         }
     }
 }
 
-// MARK: - Screen 3: Models
+// MARK: - Screen 3: Safeguards
 
-private struct OnboardingModelsPage: View {
-    @Environment(\.colorScheme) private var colorScheme
-    let models: [ModelType]
-
-    @State private var selectedModelIndex = 0
-    @State private var showFeatures = false
-
-    private let features: [(icon: String, label: String)] = [
-        ("camera.fill", "Image Upload"),
-        ("doc.text.fill", "Document Processing"),
-        ("globe", "Web Search"),
-        ("waveform", "Voice Input"),
-        ("brain.head.profile", "Reasoning Models"),
-        ("bolt.fill", "Fast Responses"),
-    ]
-
+private struct OnboardingSafeguardsPage: View {
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 24) {
-                Spacer().frame(height: 20)
+        VStack(spacing: Constants.Onboarding.contentSpacing) {
+            Image(systemName: "checkmark.shield")
+                .font(.system(size: Constants.Onboarding.iconSize))
+                .frame(height: Constants.Onboarding.iconAreaHeight)
+                .accessibilityHidden(true)
 
-                // Title
-                VStack(spacing: 12) {
-                    Text("Powerful Models")
-                        .font(.title)
-                        .fontWeight(.bold)
-                        .accessibilityAddTraits(.isHeader)
+            VStack(spacing: Constants.Onboarding.textSpacing) {
+                Text("Tending the Garden")
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Privacy-preserving safeguards review the AI responses in this chat. The safeguards run inside secure enclaves at inference time, always keeping your conversations private. \(Text("Tinfoil cannot see the nature of the violation or conversation content.").fontWeight(.semibold).foregroundStyle(.primary))")
+                    .foregroundStyle(.secondary)
 
-                    Text("Access leading AI models, all running inside secure hardware with verified privacy.")
+                Link(destination: Constants.Safeguards.infoURL) {
+                    Text("Learn more about safeguards")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
+                        .underline()
                 }
-
-                // Model carousel
-                if !models.isEmpty {
-                    modelCarousel
-                }
-
-                // Feature grid
-                VStack(spacing: 16) {
-                    LazyVGrid(columns: [
-                        GridItem(.flexible(), spacing: 12),
-                        GridItem(.flexible(), spacing: 12),
-                    ], spacing: 12) {
-                        ForEach(Array(features.enumerated()), id: \.offset) { index, feature in
-                            featureCard(icon: feature.icon, label: feature.label)
-                                .opacity(showFeatures ? 1 : 0)
-                                .offset(y: showFeatures ? 0 : 20)
-                                .animation(
-                                    .spring(response: 0.4, dampingFraction: 0.8)
-                                        .delay(Double(index) * 0.08),
-                                    value: showFeatures
-                                )
-                        }
-                    }
-                    .padding(.horizontal, 24)
-                }
-                .onAppear {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        showFeatures = true
-                    }
-                }
-
-                Spacer().frame(height: 20)
+                .tint(Color.adaptiveAccent)
             }
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
+}
 
-    private var modelCarousel: some View {
-        VStack(spacing: 16) {
-            // Scrollable model icons
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
-                    ForEach(Array(models.enumerated()), id: \.element.id) { index, model in
-                        let selectModel = {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                selectedModelIndex = index
-                            }
-                        }
-                        modelCard(model: model, isSelected: index == selectedModelIndex)
-                            .onTapGesture(perform: selectModel)
-                            .accessibilityElement(children: .combine)
-                            .accessibilityAddTraits(index == selectedModelIndex ? [.isButton, .isSelected] : .isButton)
-                            .accessibilityAction(.default, selectModel)
-                    }
-                }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 8)
-            }
-
-        
-        }
-    }
-
-    private func modelCard(model: ModelType, isSelected: Bool) -> some View {
-        VStack(spacing: 8) {
-            ZStack {
-                Circle()
-                    .fill(isSelected
-                        ? Color.primary.opacity(0.12)
-                        : Color(UIColor.secondarySystemBackground))
-                    .frame(width: 64, height: 64)
-                    .overlay(
-                        Circle()
-                            .strokeBorder(
-                                isSelected ? Color.primary.opacity(0.3) : Color.clear,
-                                lineWidth: 2
-                            )
-                    )
-
-                Image(model.iconName)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 32, height: 32)
-            }
-            .scaleEffect(isSelected ? 1.1 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
-
-            Text(model.displayName)
-                .font(.caption2)
-                .fontWeight(isSelected ? .semibold : .regular)
-                .foregroundColor(isSelected ? .primary : .secondary)
-                .lineLimit(1)
-        }
-    }
-
-    private func featureCard(icon: String, label: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 14))
-                .foregroundColor(.primary)
-                .frame(width: 28, height: 28)
-                .background(
-                    Circle()
-                        .fill(Color.primary.opacity(0.1))
-                )
-
-            Text(label)
-                .font(.caption)
-                .fontWeight(.medium)
-                .foregroundColor(.primary)
-
-            Spacer()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(UIColor.secondarySystemBackground))
-        )
-    }
+#Preview {
+    OnboardingView(onComplete: {})
 }

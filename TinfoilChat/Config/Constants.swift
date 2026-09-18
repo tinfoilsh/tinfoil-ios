@@ -303,6 +303,43 @@ enum Constants {
     }
 
 
+    enum Onboarding {
+        static let completionMetadataKey = "has_completed_onboarding"
+        static let bannerAssetName = "onboarding-banner"
+        static let bannerAspectRatio: CGFloat = 1024.0 / 338.0
+        static let maximumContentWidth: CGFloat = 448
+        static let contentSpacing: CGFloat = 32
+        static let textSpacing: CGFloat = 16
+        static let horizontalPadding: CGFloat = 24
+        static let verticalPadding: CGFloat = 32
+        static let navigationSpacing: CGFloat = 12
+        static let navigationPadding: CGFloat = 16
+        static let dotSpacing: CGFloat = 8
+        static let activeDotWidth: CGFloat = 24
+        static let inactiveDotWidth: CGFloat = 8
+        static let dotHeight: CGFloat = 6
+        static let inactiveDotOpacity = 0.3
+        static let logoHeight: CGFloat = 32
+        static let iconSize: CGFloat = 96
+        static let iconAreaHeight: CGFloat = 112
+        static let bannerCornerRadius: CGFloat = 12
+        static let bannerOverlayOpacity = 0.5
+        static let toggleWidth: CGFloat = 112
+        static let toggleHeight: CGFloat = 56
+        static let togglePadding: CGFloat = 4
+        static let checkmarkSize: CGFloat = 20
+        static let animationDuration: TimeInterval = 0.3
+        static let replayLaunchArgument = "-show-onboarding"
+
+        static var isReplayRequested: Bool {
+            #if DEBUG
+            ProcessInfo.processInfo.arguments.contains(replayLaunchArgument)
+            #else
+            false
+            #endif
+        }
+    }
+
     enum Legal {
         static let termsOfServiceURL = URL(string: "https://www.tinfoil.sh/terms")!
         static let privacyPolicyURL = URL(string: "https://www.tinfoil.sh/privacy")!
