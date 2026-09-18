@@ -222,7 +222,7 @@ private struct OnboardingSafeguardsPage: View {
                         .accessibilityAddTraits(.isHeader)
                 }
                 BalancedTextLayout {
-                    Text("Privacy-preserving safeguards review the AI responses in this chat. The safeguards run inside secure enclaves at inference time, always keeping your conversations private. \(Text("Tinfoil cannot see the nature of the violation or conversation content.").fontWeight(.semibold).foregroundStyle(.primary))")
+                    Text("Privacy-preserving safeguards review AI responses for safety. Safeguards run inside secure enclaves at inference time, keeping your conversations private and notifying you in case of a flag. \(Text("Tinfoil never sees conversation content or nature of the flag raised.").fontWeight(.semibold).foregroundStyle(.primary))")
                         .foregroundStyle(.secondary)
                 }
 
