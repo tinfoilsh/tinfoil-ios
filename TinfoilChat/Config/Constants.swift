@@ -331,13 +331,6 @@ enum Constants {
         static let animationDuration: TimeInterval = 0.3
         static let replayLaunchArgument = "-show-onboarding"
 
-        static var isReplayRequested: Bool {
-            #if DEBUG
-            ProcessInfo.processInfo.arguments.contains(replayLaunchArgument)
-            #else
-            false
-            #endif
-        }
     }
 
     enum Legal {

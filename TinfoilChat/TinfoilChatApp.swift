@@ -19,10 +19,15 @@ struct TinfoilChatApp: App {
     @State private var clerk: Clerk
     @StateObject private var appConfig = AppConfig.shared
     @StateObject private var authManager = AuthManager()
-    @State private var isReplayingOnboarding = Constants.Onboarding.isReplayRequested
+    @State private var isReplayingOnboarding = false
 
     init() {
         StorageKeysMigration.migrateIfNeeded()
+        #if DEBUG
+        _isReplayingOnboarding = State(initialValue: ProcessInfo.processInfo.arguments.contains(
+            Constants.Onboarding.replayLaunchArgument
+        ))
+        #endif
         Clerk.configure(
             publishableKey: AppConfig.shared.clerkPublishableKey,
             options: Clerk.Options(telemetryEnabled: false)
