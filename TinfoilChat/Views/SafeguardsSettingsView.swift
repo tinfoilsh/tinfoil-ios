@@ -29,6 +29,7 @@ struct SafeguardsSettingsView: View {
                             get: { store.usesExamples },
                             set: { store.setUsesExamples($0) }
                         ))
+                        .tint(Color.accentPrimary)
                     } header: {
                         Text("Development")
                     } footer: {
