@@ -440,12 +440,11 @@ struct CloudSyncSettingsView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "checkmark.shield.fill")
                                 .font(.caption)
-                                .foregroundColor(.green)
                             Text("Passkey active")
                                 .font(.caption)
                                 .fontWeight(.medium)
-                                .foregroundColor(.green)
                         }
+                        .foregroundColor(colorScheme == .dark ? .tinfoilAccentBlueLight : .tinfoilAccentBlue)
                         .padding(.top, 2)
                     }
                     .padding(.vertical, 2)

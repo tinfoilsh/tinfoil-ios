@@ -130,6 +130,7 @@ private struct OnboardingLetterPage: View {
 
             Text("Tinfoil Chat was built as a sanctuary for thought.")
                 .bold()
+                .foregroundStyle(.primary)
             Text("At Tinfoil, we believe that AI is the most intimate technology yet created. We see AI as a space to explore, to make mistakes, to think out loud, to reflect with a beautiful and deep intelligence on the other end.")
             Text("This is *your* space to explore ideas in private.")
         }
@@ -208,11 +209,13 @@ private struct OnboardingPrivacyPage: View {
 // MARK: - Screen 3: Safeguards
 
 private struct OnboardingSafeguardsPage: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         VStack(spacing: Constants.Onboarding.contentSpacing) {
             Image(systemName: "checkmark.shield")
                 .font(.system(size: Constants.Onboarding.iconSize))
-                .foregroundStyle(Color.tinfoilAccentBlue)
+                .foregroundStyle(colorScheme == .dark ? Color.white : .tinfoilAccentBlue)
                 .frame(height: Constants.Onboarding.iconAreaHeight)
                 .accessibilityHidden(true)
 

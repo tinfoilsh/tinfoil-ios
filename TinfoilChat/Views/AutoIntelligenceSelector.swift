@@ -96,7 +96,7 @@ struct SteppedSlider: View {
                 Capsule()
                     .fill(Color.secondary.opacity(0.25))
                 Capsule()
-                    .fill(Color.accentPrimary)
+                    .fill(Color.tinfoilAccentBlue)
                     .frame(width: thumbCenterX + thumbDiameter / 2)
                 ForEach(0..<stepCount, id: \.self) { step in
                     Circle()

@@ -770,7 +770,7 @@ private struct ExternalLink: View {
 
 private extension Color {
     static func verificationAccent(isDarkMode: Bool) -> Color {
-        isDarkMode ? .tinfoilAccentLight : .tinfoilAccentDark
+        isDarkMode ? .tinfoilAccentBlueLight : .tinfoilAccentBlue
     }
 }
 
