@@ -60,13 +60,15 @@ struct OnboardingView: View {
                 .frame(maxWidth: Constants.Onboarding.maximumContentWidth)
                 .padding(.horizontal, Constants.Onboarding.horizontalPadding)
 
-                Text("By continuing, you agree to our [Terms](\(Constants.Legal.termsOfServiceURL.absoluteString)) and have read our [Privacy Policy](\(Constants.Legal.privacyPolicyURL.absoluteString)).")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .tint(Color.adaptiveAccent)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, Constants.Onboarding.horizontalPadding)
+                BalancedTextLayout {
+                    Text("By continuing, you agree to our [Terms](\(Constants.Legal.termsOfServiceURL.absoluteString)) and have read our [Privacy Policy](\(Constants.Legal.privacyPolicyURL.absoluteString)).")
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .tint(Color.adaptiveAccent)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, Constants.Onboarding.horizontalPadding)
             }
             .padding(.bottom, Constants.Onboarding.navigationPadding)
         }
@@ -150,12 +152,16 @@ private struct OnboardingPrivacyPage: View {
                 .accessibilityHidden(true)
 
             VStack(spacing: Constants.Onboarding.textSpacing) {
-                Text("Private, by Design.")
-                    .font(.title)
-                    .fontWeight(.bold)
-                    .accessibilityAddTraits(.isHeader)
-                Text("Tinfoil Chat runs every conversation inside secure enclaves, giving you access to powerful AI models with verifiable conversation privacy. \(Text("Even Tinfoil cannot access your conversations.").fontWeight(.semibold).foregroundStyle(.primary))")
-                    .foregroundStyle(.secondary)
+                BalancedTextLayout {
+                    Text("Private, by Design.")
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                BalancedTextLayout {
+                    Text("Tinfoil Chat runs every conversation inside secure enclaves, giving you access to powerful AI models with verifiable conversation privacy. \(Text("Even Tinfoil cannot access your conversations.").fontWeight(.semibold).foregroundStyle(.primary))")
+                        .foregroundStyle(.secondary)
+                }
             }
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
@@ -206,12 +212,16 @@ private struct OnboardingSafeguardsPage: View {
                 .accessibilityHidden(true)
 
             VStack(spacing: Constants.Onboarding.textSpacing) {
-                Text("Tending the Garden")
-                    .font(.title)
-                    .fontWeight(.bold)
-                    .accessibilityAddTraits(.isHeader)
-                Text("Privacy-preserving safeguards review the AI responses in this chat. The safeguards run inside secure enclaves at inference time, always keeping your conversations private. \(Text("Tinfoil cannot see the nature of the violation or conversation content.").fontWeight(.semibold).foregroundStyle(.primary))")
-                    .foregroundStyle(.secondary)
+                BalancedTextLayout {
+                    Text("Tending the Garden")
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                BalancedTextLayout {
+                    Text("Privacy-preserving safeguards review the AI responses in this chat. The safeguards run inside secure enclaves at inference time, always keeping your conversations private. \(Text("Tinfoil cannot see the nature of the violation or conversation content.").fontWeight(.semibold).foregroundStyle(.primary))")
+                        .foregroundStyle(.secondary)
+                }
 
                 Link(destination: Constants.Safeguards.infoURL) {
                     Text("Learn more about safeguards")

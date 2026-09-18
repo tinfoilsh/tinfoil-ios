@@ -333,6 +333,10 @@ enum Constants {
 
     }
 
+    enum TextLayout {
+        static let balanceWidthPrecision: CGFloat = 0.5
+    }
+
     enum Legal {
         static let termsOfServiceURL = URL(string: "https://www.tinfoil.sh/terms")!
         static let privacyPolicyURL = URL(string: "https://www.tinfoil.sh/privacy")!
