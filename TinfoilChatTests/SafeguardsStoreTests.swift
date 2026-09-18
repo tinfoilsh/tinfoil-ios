@@ -216,6 +216,7 @@ struct SafeguardsStoreTests {
 
         #expect(store.report?.inWindow == 0)
         #expect(store.isFlagged("old-chat"))
+        #expect(!store.isFlagged("old-flag"))
         #expect(!store.isFlagged("new-chat"))
     }
 
