@@ -159,7 +159,7 @@ private struct OnboardingPrivacyPage: View {
                         .accessibilityAddTraits(.isHeader)
                 }
                 BalancedTextLayout {
-                    Text("Tinfoil Chat runs every conversation inside secure enclaves, giving you access to powerful AI models with verifiable conversation privacy. \(Text("Even Tinfoil cannot access your conversations.").fontWeight(.semibold).foregroundStyle(.primary))")
+                    Text("Tinfoil Chat runs every conversation inside secure enclaves, giving you access to powerful AI models with verifiable conversation privacy.\n\(Text("Even Tinfoil cannot access your conversations.").fontWeight(.semibold).foregroundStyle(.primary))")
                         .foregroundStyle(.secondary)
                 }
             }
