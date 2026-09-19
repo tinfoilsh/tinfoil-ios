@@ -187,8 +187,11 @@ struct ShareChatView: View {
 
     private func selectPrivate() {
         guard canChangeSharing else { return }
-        guard let chatId else {
+        guard let chatId, hasShare == true else {
             isShareEnabled = false
+            shareUrl = nil
+            isLinkCopied = false
+            errorMessage = nil
             return
         }
         isRevoking = true

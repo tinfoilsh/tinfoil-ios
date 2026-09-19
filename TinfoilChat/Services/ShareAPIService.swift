@@ -104,12 +104,9 @@ enum ShareAPIService {
             try await Clerk.shared.refreshClient()
         }
 
-        if let session = await Clerk.shared.session {
-            if let token = try? await session.getToken() {
-                return token
-            } else if let tokenResource = session.lastActiveToken {
-                return tokenResource.jwt
-            }
+        if let session = await Clerk.shared.session,
+           let token = try await session.getToken() {
+            return token
         }
 
         throw ShareAPIError.authenticationRequired
