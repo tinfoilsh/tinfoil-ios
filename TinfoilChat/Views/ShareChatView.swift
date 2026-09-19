@@ -19,10 +19,15 @@ struct ShareChatView: View {
     @State private var isShareEnabled = false
     @State private var shareUrl: String?
     @State private var isUploading = false
+    @State private var isRevoking = false
+    @State private var isCheckingShare = true
+    @State private var hasShare: Bool?
     @State private var isLinkCopied = false
     @State private var errorMessage: String?
 
     private var isDark: Bool { colorScheme == .dark }
+    private var isBusy: Bool { isUploading || isRevoking }
+    private var canChangeSharing: Bool { !isBusy && !isCheckingShare && hasShare != nil }
 
     private var sheetBackground: Color {
         Color.sheetBackground(isDarkMode: isDark)
@@ -30,14 +35,16 @@ struct ShareChatView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                titleCard
-                accessCard
-                errorText
-                footer
+            ScrollView {
+                VStack(spacing: 16) {
+                    titleCard
+                    accessCard
+                    errorText
+                    footer
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(sheetBackground)
             .navigationTitle("Share snapshot")
@@ -51,10 +58,15 @@ struct ShareChatView: View {
                             .font(.system(size: 18, weight: .medium))
                     }
                     .accessibilityLabel("Close")
+                    .disabled(isBusy)
                 }
             }
         }
         .presentationBackground(sheetBackground)
+        .interactiveDismissDisabled(isBusy)
+        .task(id: chatId) {
+            await loadShareStatus()
+        }
     }
 
     // MARK: - Title card
@@ -85,6 +97,21 @@ struct ShareChatView: View {
                 .accessibilityAddTraits(.isHeader)
 
             accessOptions
+            if isCheckingShare {
+                ProgressView("Checking share status...")
+            } else if hasShare == nil {
+                Button("Retry share status") {
+                    Task { await loadShareStatus() }
+                }
+            }
+            if isRevoking {
+                ProgressView("Revoking share link...")
+            }
+            if hasShare == true && shareUrl == nil {
+                Text("An existing link is active. Creating a new link will replace it and invalidate the previous link.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             actionButton
             linkRow
         }
@@ -92,18 +119,19 @@ struct ShareChatView: View {
 
     private var accessOptions: some View {
         VStack(spacing: 0) {
-            accessRow(icon: "lock.fill", label: "Only you have access", selected: !isShareEnabled) {
+            accessRow(icon: "lock.fill", label: "Only you have access", selected: hasShare == false && !isShareEnabled) {
                 selectPrivate()
             }
 
             Divider().padding(.leading, 48)
 
-            accessRow(icon: "globe", label: "Anyone with the link", selected: isShareEnabled) {
+            accessRow(icon: "globe", label: "Anyone with the link", selected: hasShare != nil && isShareEnabled) {
                 isShareEnabled = true
             }
         }
         .background(cardColor)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .disabled(!canChangeSharing)
     }
 
     private func accessRow(icon: String, label: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -143,7 +171,7 @@ struct ShareChatView: View {
                 } else {
                     HStack(spacing: 8) {
                         Image(systemName: "square.and.arrow.up")
-                        Text("Share Link")
+                        Text(hasShare == true ? "Replace Share Link" : "Share Link")
                     }
                 }
             }
@@ -154,13 +182,54 @@ struct ShareChatView: View {
             .background(Color.tinfoilAccentDark.opacity(isShareEnabled && shareUrl == nil ? 1.0 : 0.35))
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
-        .disabled(!isShareEnabled || isUploading || chatId == nil || shareUrl != nil)
+        .disabled(!isShareEnabled || !canChangeSharing || chatId == nil || shareUrl != nil)
     }
 
     private func selectPrivate() {
-        isShareEnabled = false
+        guard canChangeSharing else { return }
+        guard let chatId else {
+            isShareEnabled = false
+            return
+        }
+        isRevoking = true
+        errorMessage = nil
+        Task {
+            defer { isRevoking = false }
+            do {
+                try await ShareAPIService.deleteSharedChat(chatId: chatId)
+                isShareEnabled = false
+                hasShare = false
+                shareUrl = nil
+                isLinkCopied = false
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    @MainActor
+    private func loadShareStatus() async {
+        isCheckingShare = true
+        hasShare = nil
         shareUrl = nil
-        isLinkCopied = false
+        errorMessage = nil
+        defer {
+            if !Task.isCancelled { isCheckingShare = false }
+        }
+        guard let chatId else {
+            hasShare = false
+            return
+        }
+        do {
+            let shared = try await ShareAPIService.getShareStatus(chatId: chatId)
+            guard !Task.isCancelled else { return }
+            hasShare = shared
+            isShareEnabled = shared
+            if !shared { shareUrl = nil }
+        } catch {
+            guard !Task.isCancelled else { return }
+            errorMessage = ShareAPIError.statusFailed.localizedDescription
+        }
     }
 
     // MARK: - Error
@@ -179,7 +248,7 @@ struct ShareChatView: View {
 
     @ViewBuilder
     private var linkRow: some View {
-        if isShareEnabled, let url = shareUrl {
+        if isShareEnabled, hasShare == true, let url = shareUrl {
             HStack(spacing: 8) {
                 Text(url)
                     .font(.system(size: 13, design: .monospaced))
@@ -204,6 +273,7 @@ struct ShareChatView: View {
                     .background(Color.tinfoilAccentDark)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
+                .disabled(!canChangeSharing)
             }
         }
     }
@@ -211,7 +281,7 @@ struct ShareChatView: View {
     // MARK: - Footer
 
     private var footer: some View {
-        Text("Only messages up to this point will be shared")
+        Text("Only messages up to this point will be shared. Disabling sharing deactivates existing links. Copies already saved by recipients cannot be removed.")
             .font(.system(size: 13))
             .foregroundStyle(.tertiary)
             .multilineTextAlignment(.center)
@@ -227,6 +297,7 @@ struct ShareChatView: View {
     // MARK: - Actions
 
     private func handleShareLink() {
+        guard canChangeSharing else { return }
         guard let chatId = chatId else {
             errorMessage = "Chat must be saved before sharing"
             return
@@ -259,9 +330,11 @@ struct ShareChatView: View {
 
                 await MainActor.run {
                     shareUrl = url
+                    hasShare = true
                     isUploading = false
                 }
             } catch {
+                await loadShareStatus()
                 await MainActor.run {
                     errorMessage = error.localizedDescription
                     isUploading = false

@@ -172,4 +172,40 @@ struct ShareV2ContractTests {
         #expect(request.value(forHTTPHeaderField: "X-Format-Version") == "1")
         #expect(request.httpBody == ciphertext)
     }
+
+    @Test func authenticatesShareManagementAndBypassesCachedStatus() throws {
+        let status = try ShareAPIService.makeStatusRequest(chatId: "chat-id", token: "owner-token")
+        #expect(status.url?.path == "/api/shares/chat-id/status")
+        #expect(status.httpMethod == "GET")
+        #expect(status.value(forHTTPHeaderField: "Authorization") == "Bearer owner-token")
+        #expect(status.cachePolicy == .reloadIgnoringLocalCacheData)
+
+        let deletion = try ShareAPIService.makeDeleteRequest(chatId: "chat-id", token: "owner-token")
+        #expect(deletion.url?.path == "/api/shares/chat-id")
+        #expect(deletion.httpMethod == "DELETE")
+        #expect(deletion.value(forHTTPHeaderField: "Authorization") == "Bearer owner-token")
+        #expect(deletion.httpBody == nil)
+    }
+
+    @Test func decodesAuthoritativeShareStatus() throws {
+        let response = HTTPURLResponse(url: URL(string: "https://api.tinfoil.sh")!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        #expect(try ShareAPIService.decodeShareStatus(data: Data(#"{"shared":true}"#.utf8), response: response))
+        #expect(try !ShareAPIService.decodeShareStatus(data: Data(#"{"shared":false}"#.utf8), response: response))
+        for invalid in ["{}", "null", #"{"shared":"false"}"#] {
+            #expect(throws: DecodingError.self) {
+                try ShareAPIService.decodeShareStatus(data: Data(invalid.utf8), response: response)
+            }
+        }
+    }
+
+    @Test(arguments: [401, 403, 404, 500])
+    func rejectsFailedShareManagement(statusCode: Int) {
+        let response = HTTPURLResponse(url: URL(string: "https://api.tinfoil.sh")!, statusCode: statusCode, httpVersion: nil, headerFields: nil)!
+        #expect(throws: ShareAPIError.self) {
+            try ShareAPIService.decodeShareStatus(data: Data(#"{"shared":false}"#.utf8), response: response)
+        }
+        #expect(throws: ShareAPIError.self) {
+            try ShareAPIService.validateDeleteResponse(response)
+        }
+    }
 }

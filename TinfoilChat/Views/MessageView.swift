@@ -920,6 +920,7 @@ struct MessageView: View {
                     chatCreatedAt: currentChat.createdAt,
                     chatId: currentChat.id
                 )
+                .id(currentChat.id)
                 .presentationDetents([.medium, .large])
                 .iPadSheetSizing()
             }
