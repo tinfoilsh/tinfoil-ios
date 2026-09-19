@@ -196,6 +196,7 @@ enum Constants {
     }
 
     enum API {
+        static let successStatusCodes = 200...299
         static let chatCompletionsEndpoint = "/v1/chat/completions"
         static let baseURL = "https://api.tinfoil.sh"
         /// Carries the chat id on completion requests so the router's
