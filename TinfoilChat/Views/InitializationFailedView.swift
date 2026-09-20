@@ -12,7 +12,7 @@ struct InitializationFailedView: View {
 
     var body: some View {
         ZStack {
-            Color.backgroundPrimary
+            Color.chatBackground(isDarkMode: colorScheme == .dark)
                 .ignoresSafeArea()
 
             VStack(spacing: Constants.UI.initFailedContentSpacing) {

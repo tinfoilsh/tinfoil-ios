@@ -269,7 +269,6 @@ struct UIKitScrollView: UIViewRepresentable {
             if messages.isEmpty {
                 if let authManager = viewModel.authManager {
                     WelcomeView(
-                        isDarkMode: isDarkMode,
                         authManager: authManager,
                         onRequestSignIn: onRequestSignIn
                     )

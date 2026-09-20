@@ -31,7 +31,7 @@ struct ModularAuthenticationView: View {
       GeometryReader { geometry in
         ZStack {
           // Background
-          (colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
+          Color.settingsBackground(for: colorScheme)
             .edgesIgnoringSafeArea(.all)
 
           VStack(spacing: 0) {
@@ -94,9 +94,14 @@ struct ModularAuthenticationView: View {
         }
         .ignoresSafeArea(.keyboard)
       }
-      .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
+      .background(Color.settingsBackground(for: colorScheme))
       .navigationTitle("")
       .navigationBarTitleDisplayMode(.inline)
+      .adaptiveNavigationBarAppearance(
+        for: colorScheme,
+        background: .settingsBackground(for: colorScheme)
+      )
+      .tint(colorScheme == .dark ? .white : .black)
       .toolbar {
         ToolbarItem(placement: .principal) {
           Image(colorScheme == .dark ? "logo-white" : "logo-dark")
@@ -116,7 +121,6 @@ struct ModularAuthenticationView: View {
         }
       }
       .onAppear {
-        setupNavigationBarAppearance()
         setupNotifications()
       }
       .onDisappear(perform: cleanupNotifications)
@@ -202,24 +206,6 @@ struct ModularAuthenticationView: View {
     clerk.user == nil && !isInVerificationMode
   }
 
-  private func setupNavigationBarAppearance() {
-    let appearance = UINavigationBarAppearance()
-    if #available(iOS 26, *) {
-      appearance.configureWithTransparentBackground()
-    } else {
-      appearance.configureWithOpaqueBackground()
-      appearance.backgroundColor = colorScheme == .dark ? UIColor(Color.backgroundPrimary) : .white
-    }
-    appearance.shadowColor = .clear
-
-    let tintColor: UIColor = colorScheme == .dark ? .white : .black
-
-    UINavigationBar.appearance().standardAppearance = appearance
-    UINavigationBar.appearance().compactAppearance = appearance
-    UINavigationBar.appearance().scrollEdgeAppearance = appearance
-    UINavigationBar.appearance().tintColor = tintColor
-  }
-  
   // MARK: - Authentication Components
   
   @ViewBuilder

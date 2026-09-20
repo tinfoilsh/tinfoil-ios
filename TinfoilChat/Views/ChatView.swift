@@ -85,8 +85,6 @@ struct ChatContainer: View {
         .navigationViewStyle(.stack)
         .environmentObject(viewModel)
         .onAppear {
-            setupNavigationBarAppearance()
-
             dragOffset = 0
             handleNavigationRequest(viewModel.navigationRequest)
         }
@@ -97,9 +95,6 @@ struct ChatContainer: View {
             if !hasPremiumAccess {
                 sidebarNavigationRequest = nil
             }
-        }
-        .onChange(of: colorScheme) { _, _ in
-            setupNavigationBarAppearance()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             // App is going to background, record the time
@@ -171,47 +166,6 @@ struct ChatContainer: View {
         }
     }
     
-    /// Configure navigation bar appearance
-    private func setupNavigationBarAppearance() {
-        if #available(iOS 26, *) {
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithTransparentBackground()
-            appearance.shadowColor = .clear
-
-            updateAllNavigationBars(with: appearance)
-        } else {
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = colorScheme == .dark ? UIColor(Color.backgroundPrimary) : .white
-            appearance.shadowColor = .clear
-
-            updateAllNavigationBars(with: appearance)
-        }
-    }
-
-    /// Update all navigation bars in the app with the given appearance
-    private func updateAllNavigationBars(with appearance: UINavigationBarAppearance) {
-        let tintColor: UIColor = colorScheme == .dark ? .white : .black
-
-        UINavigationBar.appearance().standardAppearance = appearance
-        UINavigationBar.appearance().compactAppearance = appearance
-        UINavigationBar.appearance().scrollEdgeAppearance = appearance
-        UINavigationBar.appearance().tintColor = tintColor
-
-        for scene in UIApplication.shared.connectedScenes {
-            if let windowScene = scene as? UIWindowScene {
-                for window in windowScene.windows {
-                    if let navigationBar = window.rootViewController?.navigationController?.navigationBar {
-                        navigationBar.standardAppearance = appearance
-                        navigationBar.compactAppearance = appearance
-                        navigationBar.scrollEdgeAppearance = appearance
-                        navigationBar.tintColor = tintColor
-                    }
-                }
-            }
-        }
-    }
-    
     /// The main content layout including chat area and sidebar
     private var mainContent: some View {
         Group {
@@ -244,7 +198,10 @@ struct ChatContainer: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .applyTransparentToolbarIfAvailable()
+        .adaptiveNavigationBarAppearance(
+            for: colorScheme,
+            background: .chatBackground(isDarkMode: colorScheme == .dark)
+        )
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 if viewModel.activeProject != nil && !isSidebarOpen {
@@ -644,13 +601,11 @@ struct ChatContainer: View {
 
 /// A view that displays a welcome message when no chat messages are present.
 struct WelcomeView: View {
-    let isDarkMode: Bool
     @ObservedObject var authManager: AuthManager
     let onRequestSignIn: () -> Void
     
     var body: some View {
         TabbedWelcomeView(
-            isDarkMode: isDarkMode,
             authManager: authManager,
             onRequestSignIn: onRequestSignIn
         )
@@ -659,7 +614,6 @@ struct WelcomeView: View {
 
 /// Welcome view shown when a chat has no messages
 struct TabbedWelcomeView: View {
-    let isDarkMode: Bool
     @ObservedObject var authManager: AuthManager
     let onRequestSignIn: () -> Void
     @ObservedObject private var profileManager = ProfileManager.shared
@@ -705,7 +659,7 @@ struct TabbedWelcomeView: View {
         .padding(.top, 24)
         .padding(.bottom, 4)
         .sheet(isPresented: $showPrivacySheet) {
-            PrivacyExplainerSheet(privacyText: Self.privacyText, isDarkMode: isDarkMode)
+            PrivacyExplainerSheet(privacyText: Self.privacyText)
         }
     }
 
@@ -728,7 +682,7 @@ struct TabbedWelcomeView: View {
 /// Popup explaining how chats stay private, shown from the welcome screen
 struct PrivacyExplainerSheet: View {
     let privacyText: String
-    let isDarkMode: Bool
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -756,7 +710,7 @@ struct PrivacyExplainerSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(20)
             }
-            .background(Color.sheetBackground(isDarkMode: isDarkMode).ignoresSafeArea())
+            .background(Color.sheetBackground(isDarkMode: colorScheme == .dark).ignoresSafeArea())
             .navigationTitle("Privacy")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -997,15 +951,6 @@ extension View {
     @ViewBuilder func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
         if condition {
             transform(self)
-        } else {
-            self
-        }
-    }
-
-    @ViewBuilder
-    func applyTransparentToolbarIfAvailable() -> some View {
-        if #available(iOS 26, *) {
-            self.toolbarBackground(.hidden, for: .navigationBar)
         } else {
             self
         }

@@ -235,29 +235,10 @@ struct CloudSyncSettingsView: View {
             await refreshPasskeyBundles()
         }
         .onAppear {
-            // Reset navigation bar to use system colors for settings screens
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithDefaultBackground()
-            
-            UINavigationBar.appearance().standardAppearance = appearance
-            UINavigationBar.appearance().compactAppearance = appearance
-            UINavigationBar.appearance().scrollEdgeAppearance = appearance
-
             // Kick off a quick sync so Last Sync is fresh when opening this screen
             Task {
                 await viewModel.performFullSync()
             }
-        }
-        .onDisappear {
-            // Restore dark navigation bar for main views
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = UIColor(Color.backgroundPrimary)
-            appearance.shadowColor = .clear
-            
-            UINavigationBar.appearance().standardAppearance = appearance
-            UINavigationBar.appearance().compactAppearance = appearance
-            UINavigationBar.appearance().scrollEdgeAppearance = appearance
         }
         .alert(cloudSyncSetupErrorTitle, isPresented: Binding(
             get: { cloudSyncSetupError != nil },
