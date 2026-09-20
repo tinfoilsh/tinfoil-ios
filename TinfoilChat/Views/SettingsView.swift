@@ -969,14 +969,6 @@ struct SettingsView: View {
             }
         }
         .onAppear {
-            // Reset navigation bar to use system colors for settings screens
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithDefaultBackground()
-            
-            UINavigationBar.appearance().standardAppearance = appearance
-            UINavigationBar.appearance().compactAppearance = appearance
-            UINavigationBar.appearance().scrollEdgeAppearance = appearance
-            
             // Auto-navigate to Cloud Sync if requested
             if shouldOpenCloudSync {
             }
@@ -994,17 +986,6 @@ struct SettingsView: View {
                     settings.selectedLanguage = profileManager.language
                 }
             }
-        }
-        .onDisappear {
-            // Restore dark navigation bar for main chat view
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = UIColor(Color.backgroundPrimary)
-            appearance.shadowColor = .clear
-            
-            UINavigationBar.appearance().standardAppearance = appearance
-            UINavigationBar.appearance().compactAppearance = appearance
-            UINavigationBar.appearance().scrollEdgeAppearance = appearance
         }
         // Keep UI settings in sync with ProfileManager when remote changes arrive
         .onReceive(ProfileManager.shared.$language) { newValue in
@@ -1093,27 +1074,10 @@ struct LanguagePickerView: View {
         .navigationTitle("Response Language")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithDefaultBackground()
-
-            UINavigationBar.appearance().standardAppearance = appearance
-            UINavigationBar.appearance().compactAppearance = appearance
-            UINavigationBar.appearance().scrollEdgeAppearance = appearance
-
             // Trigger sync to get latest from cloud
             Task {
                 await profileManager.syncFromCloud()
             }
-        }
-        .onDisappear {
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = UIColor(Color.backgroundPrimary)
-            appearance.shadowColor = .clear
-
-            UINavigationBar.appearance().standardAppearance = appearance
-            UINavigationBar.appearance().compactAppearance = appearance
-            UINavigationBar.appearance().scrollEdgeAppearance = appearance
         }
     }
 }
@@ -1264,24 +1228,6 @@ struct DefaultPromptPresetView: View {
         .background(Color.settingsBackground(for: colorScheme))
         .navigationTitle("Default Prompt")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithDefaultBackground()
-
-            UINavigationBar.appearance().standardAppearance = appearance
-            UINavigationBar.appearance().compactAppearance = appearance
-            UINavigationBar.appearance().scrollEdgeAppearance = appearance
-        }
-        .onDisappear {
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = UIColor(Color.backgroundPrimary)
-            appearance.shadowColor = .clear
-
-            UINavigationBar.appearance().standardAppearance = appearance
-            UINavigationBar.appearance().compactAppearance = appearance
-            UINavigationBar.appearance().scrollEdgeAppearance = appearance
-        }
     }
 
     @ViewBuilder

@@ -61,3 +61,18 @@ enum Theme {
         static let springDampingHigh: Double = 0.9
     }
 } 
+
+extension View {
+    func adaptiveNavigationBarAppearance(for colorScheme: ColorScheme) -> some View {
+        Group {
+            if #available(iOS 26, *) {
+                self.toolbarBackground(.hidden, for: .navigationBar)
+            } else {
+                self
+                    .toolbarBackground(Color.chatBackground(isDarkMode: colorScheme == .dark), for: .navigationBar)
+                    .toolbarBackground(.visible, for: .navigationBar)
+            }
+        }
+        .toolbarColorScheme(colorScheme, for: .navigationBar)
+    }
+}

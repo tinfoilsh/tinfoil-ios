@@ -198,8 +198,7 @@ struct ChatContainer: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .applyChatNavigationBarAppearance(for: colorScheme)
-        .toolbarColorScheme(colorScheme, for: .navigationBar)
+        .adaptiveNavigationBarAppearance(for: colorScheme)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 if viewModel.activeProject != nil && !isSidebarOpen {
@@ -954,17 +953,6 @@ extension View {
             transform(self)
         } else {
             self
-        }
-    }
-
-    @ViewBuilder
-    func applyChatNavigationBarAppearance(for colorScheme: ColorScheme) -> some View {
-        if #available(iOS 26, *) {
-            self.toolbarBackground(.hidden, for: .navigationBar)
-        } else {
-            self
-                .toolbarBackground(Color.chatBackground(isDarkMode: colorScheme == .dark), for: .navigationBar)
-                .toolbarBackground(.visible, for: .navigationBar)
         }
     }
 
