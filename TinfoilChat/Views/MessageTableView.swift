@@ -543,7 +543,6 @@ struct MessageTableView: UIViewRepresentable {
                 cell.contentConfiguration = UIHostingConfiguration {
                     if let authManager = parent.viewModel.authManager {
                         WelcomeView(
-                            isDarkMode: parent.isDarkMode,
                             authManager: authManager,
                             onRequestSignIn: parent.onRequestSignIn
                         )
@@ -551,7 +550,6 @@ struct MessageTableView: UIViewRepresentable {
                         .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 0)
                         .frame(maxWidth: 900)
                         .frame(maxWidth: .infinity)
-                        .markdownStyleHost(isDarkMode: parent.isDarkMode)
                     }
                 }
                 .minSize(width: 0, height: 0)

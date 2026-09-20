@@ -130,6 +130,38 @@ func handleAuthError(_ error: Error) -> String {
 
 // MARK: - Custom TextField to Avoid Constraint Conflicts
 
+final class AdaptiveBorderTextField: UITextField {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        configureBorderAppearance()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureBorderAppearance()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        updateBorderColor()
+    }
+
+    private func configureBorderAppearance() {
+        updateBorderColor()
+        registerForTraitChanges([
+            UITraitUserInterfaceStyle.self,
+            UITraitAccessibilityContrast.self,
+            UITraitUserInterfaceLevel.self
+        ]) { (textField: AdaptiveBorderTextField, _: UITraitCollection) in
+            textField.updateBorderColor()
+        }
+    }
+
+    private func updateBorderColor() {
+        layer.borderColor = UIColor.systemGray4.resolvedColor(with: traitCollection).cgColor
+    }
+}
+
 struct UIKitTextField: UIViewRepresentable {
     @Binding var text: String
     var placeholder: String
@@ -148,7 +180,7 @@ struct UIKitTextField: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UITextField {
-        let textField = UITextField()
+        let textField = AdaptiveBorderTextField()
         textField.delegate = context.coordinator
         textField.placeholder = placeholder
         textField.accessibilityLabel = placeholder
@@ -158,7 +190,6 @@ struct UIKitTextField: UIViewRepresentable {
         textField.backgroundColor = .systemBackground
         textField.layer.cornerRadius = 8
         textField.layer.borderWidth = 1
-        textField.layer.borderColor = UIColor.systemGray4.cgColor
         textField.autocapitalizationType = autocapitalizationType
         textField.autocorrectionType = .no
         textField.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 10, height: textField.frame.height))

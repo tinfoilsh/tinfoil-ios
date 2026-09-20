@@ -1114,7 +1114,7 @@ private struct LongMessageDetailView: View {
                     .padding(20)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(Color.backgroundPrimary)
+            .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
             .navigationTitle("Long Message")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1135,7 +1135,6 @@ private struct LongMessageDetailView: View {
                     .iPadSheetSizing()
             }
         }
-        .preferredColorScheme(.dark)
     }
 }
 
@@ -1171,13 +1170,14 @@ private struct SelectableTextView: UIViewRepresentable {
 private struct UserMessageSelectView: View {
     let content: String
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         NavigationStack {
             SelectableTextView(text: content)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .padding(20)
-                .background(Color.backgroundPrimary)
+                .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
                 .navigationTitle("Select Text")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -1188,7 +1188,6 @@ private struct UserMessageSelectView: View {
                     }
                 }
         }
-        .preferredColorScheme(.dark)
     }
 }
 

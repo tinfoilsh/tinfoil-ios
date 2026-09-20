@@ -598,13 +598,11 @@ struct ChatContainer: View {
 
 /// A view that displays a welcome message when no chat messages are present.
 struct WelcomeView: View {
-    let isDarkMode: Bool
     @ObservedObject var authManager: AuthManager
     let onRequestSignIn: () -> Void
     
     var body: some View {
         TabbedWelcomeView(
-            isDarkMode: isDarkMode,
             authManager: authManager,
             onRequestSignIn: onRequestSignIn
         )
@@ -613,7 +611,6 @@ struct WelcomeView: View {
 
 /// Welcome view shown when a chat has no messages
 struct TabbedWelcomeView: View {
-    let isDarkMode: Bool
     @ObservedObject var authManager: AuthManager
     let onRequestSignIn: () -> Void
     @ObservedObject private var profileManager = ProfileManager.shared
@@ -659,7 +656,7 @@ struct TabbedWelcomeView: View {
         .padding(.top, 24)
         .padding(.bottom, 4)
         .sheet(isPresented: $showPrivacySheet) {
-            PrivacyExplainerSheet(privacyText: Self.privacyText, isDarkMode: isDarkMode)
+            PrivacyExplainerSheet(privacyText: Self.privacyText)
         }
     }
 
@@ -682,7 +679,7 @@ struct TabbedWelcomeView: View {
 /// Popup explaining how chats stay private, shown from the welcome screen
 struct PrivacyExplainerSheet: View {
     let privacyText: String
-    let isDarkMode: Bool
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -710,7 +707,7 @@ struct PrivacyExplainerSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(20)
             }
-            .background(Color.sheetBackground(isDarkMode: isDarkMode).ignoresSafeArea())
+            .background(Color.sheetBackground(isDarkMode: colorScheme == .dark).ignoresSafeArea())
             .navigationTitle("Privacy")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
