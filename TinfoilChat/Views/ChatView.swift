@@ -85,8 +85,6 @@ struct ChatContainer: View {
         .navigationViewStyle(.stack)
         .environmentObject(viewModel)
         .onAppear {
-            setupNavigationBarAppearance()
-
             dragOffset = 0
             handleNavigationRequest(viewModel.navigationRequest)
         }
@@ -97,9 +95,6 @@ struct ChatContainer: View {
             if !hasPremiumAccess {
                 sidebarNavigationRequest = nil
             }
-        }
-        .onChange(of: colorScheme) { _, _ in
-            setupNavigationBarAppearance()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             // App is going to background, record the time
@@ -171,47 +166,6 @@ struct ChatContainer: View {
         }
     }
     
-    /// Configure navigation bar appearance
-    private func setupNavigationBarAppearance() {
-        if #available(iOS 26, *) {
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithTransparentBackground()
-            appearance.shadowColor = .clear
-
-            updateAllNavigationBars(with: appearance)
-        } else {
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = colorScheme == .dark ? UIColor(Color.backgroundPrimary) : .white
-            appearance.shadowColor = .clear
-
-            updateAllNavigationBars(with: appearance)
-        }
-    }
-
-    /// Update all navigation bars in the app with the given appearance
-    private func updateAllNavigationBars(with appearance: UINavigationBarAppearance) {
-        let tintColor: UIColor = colorScheme == .dark ? .white : .black
-
-        UINavigationBar.appearance().standardAppearance = appearance
-        UINavigationBar.appearance().compactAppearance = appearance
-        UINavigationBar.appearance().scrollEdgeAppearance = appearance
-        UINavigationBar.appearance().tintColor = tintColor
-
-        for scene in UIApplication.shared.connectedScenes {
-            if let windowScene = scene as? UIWindowScene {
-                for window in windowScene.windows {
-                    if let navigationBar = window.rootViewController?.navigationController?.navigationBar {
-                        navigationBar.standardAppearance = appearance
-                        navigationBar.compactAppearance = appearance
-                        navigationBar.scrollEdgeAppearance = appearance
-                        navigationBar.tintColor = tintColor
-                    }
-                }
-            }
-        }
-    }
-    
     /// The main content layout including chat area and sidebar
     private var mainContent: some View {
         Group {
@@ -244,7 +198,8 @@ struct ChatContainer: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .applyTransparentToolbarIfAvailable()
+        .applyChatNavigationBarAppearance(for: colorScheme)
+        .toolbarColorScheme(colorScheme, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 if viewModel.activeProject != nil && !isSidebarOpen {
@@ -1003,11 +958,13 @@ extension View {
     }
 
     @ViewBuilder
-    func applyTransparentToolbarIfAvailable() -> some View {
+    func applyChatNavigationBarAppearance(for colorScheme: ColorScheme) -> some View {
         if #available(iOS 26, *) {
             self.toolbarBackground(.hidden, for: .navigationBar)
         } else {
             self
+                .toolbarBackground(Color.chatBackground(isDarkMode: colorScheme == .dark), for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
         }
     }
 
