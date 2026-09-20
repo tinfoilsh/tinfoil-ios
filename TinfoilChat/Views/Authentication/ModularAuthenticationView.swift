@@ -31,7 +31,7 @@ struct ModularAuthenticationView: View {
       GeometryReader { geometry in
         ZStack {
           // Background
-          (colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
+          Color.settingsBackground(for: colorScheme)
             .edgesIgnoringSafeArea(.all)
 
           VStack(spacing: 0) {
@@ -94,10 +94,13 @@ struct ModularAuthenticationView: View {
         }
         .ignoresSafeArea(.keyboard)
       }
-      .background(colorScheme == .dark ? Color.backgroundPrimary : Color(UIColor.systemGroupedBackground))
+      .background(Color.settingsBackground(for: colorScheme))
       .navigationTitle("")
       .navigationBarTitleDisplayMode(.inline)
-      .adaptiveNavigationBarAppearance(for: colorScheme)
+      .adaptiveNavigationBarAppearance(
+        for: colorScheme,
+        background: .settingsBackground(for: colorScheme)
+      )
       .tint(colorScheme == .dark ? .white : .black)
       .toolbar {
         ToolbarItem(placement: .principal) {

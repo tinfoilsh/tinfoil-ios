@@ -198,7 +198,10 @@ struct ChatContainer: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .adaptiveNavigationBarAppearance(for: colorScheme)
+        .adaptiveNavigationBarAppearance(
+            for: colorScheme,
+            background: .chatBackground(isDarkMode: colorScheme == .dark)
+        )
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 if viewModel.activeProject != nil && !isSidebarOpen {

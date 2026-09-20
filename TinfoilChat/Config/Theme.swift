@@ -63,14 +63,14 @@ enum Theme {
 } 
 
 extension View {
-    func adaptiveNavigationBarAppearance(for colorScheme: ColorScheme) -> some View {
+    func adaptiveNavigationBarAppearance(for colorScheme: ColorScheme, background: Color) -> some View {
         Group {
             if #available(iOS 26, *) {
-                self.toolbarBackground(.hidden, for: .navigationBar)
+                self.toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             } else {
                 self
-                    .toolbarBackground(Color.chatBackground(isDarkMode: colorScheme == .dark), for: .navigationBar)
-                    .toolbarBackground(.visible, for: .navigationBar)
+                    .toolbarBackground(background, for: .navigationBar)
+                    .toolbarBackgroundVisibility(.visible, for: .navigationBar)
             }
         }
         .toolbarColorScheme(colorScheme, for: .navigationBar)
