@@ -40,6 +40,12 @@ struct SpeechTextTests {
     }
 
     @Test
+    func footnoteFilteringPreservesInlineCode() throws {
+        let text = "Use `[^1]` or `[^label]` for a note[^1].\n\n[^1]: Omit these citation details."
+        #expect(try SpeechTextProcessor.prepare(text) == "Use [^1] or [^label] for a note.")
+    }
+
+    @Test
     func preservesURLLabelsAndInlineCodeButSkipsRawHTML() throws {
         #expect(try SpeechTextProcessor.prepare("Read [example.com](https://other.example) and `https://example.com`.") == "Read example.com and https://example.com.")
         #expect(try SpeechTextProcessor.prepare("Read <b>this</b>.\n\n<div>Skip this block.</div>\n\nAnswer.") == "Read this.\nAnswer.")
@@ -61,6 +67,15 @@ struct SpeechTextTests {
         #expect(SpeechTextProcessor.removingReasoning("Literal </think>. <think>Private</think>Answer.") == "Literal </think>. Answer.")
         #expect(SpeechTextProcessor.removingReasoning("</think><think>Unclosed private reasoning") == "</think>")
         #expect(try SpeechTextProcessor.prepare("Use `</think>` to close the tag.") == "Use </think> to close the tag.")
+    }
+
+    @Test
+    func reasoningScanHandlesRepeatedTagsAndUnicodeAtTagBoundaries() {
+        let closingTags = String(repeating: Constants.Speech.thinkingCloseTag, count: 2_000)
+        #expect(SpeechTextProcessor.removingReasoning(closingTags + "<think>Private</think>Answer.") == closingTags + "Answer.")
+        let openingTags = String(repeating: Constants.Speech.thinkingOpenTag, count: 2_000)
+        #expect(SpeechTextProcessor.removingReasoning(openingTags + "Private").isEmpty)
+        #expect(SpeechTextProcessor.removingReasoning("<think>\u{301}Private</think>Answer.") == "Answer.")
     }
 
     @Test

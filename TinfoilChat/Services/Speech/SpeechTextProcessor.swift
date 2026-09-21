@@ -7,6 +7,13 @@ enum SpeechTextProcessor {
     private static let footnoteReferencePattern = #"\[\^[^\]\n]+\]"#
     private static let mathPattern = #"(?s)\$\$(.*?)\$\$|(?<![\\$])\$(?![\s$])([^\n$]*[^\s$])\$(?![-+]?\d)"#
     private static let automaticURLPrefixes = ["https://", "http://"]
+    // Both alternatives are escaped constants, never expressions supplied by a message.
+    private static let reasoningTags = try! NSRegularExpression(
+        pattern: [Constants.Speech.thinkingOpenTag, Constants.Speech.thinkingCloseTag]
+            .map { "(" + NSRegularExpression.escapedPattern(for: $0) + ")" }
+            .joined(separator: "|"),
+        options: .caseInsensitive
+    )
 
     static func source(for message: Message) -> String {
         if !message.content.isEmpty { return message.content }
@@ -27,7 +34,6 @@ enum SpeechTextProcessor {
         let markdown = removingReasoning(source)
             .replacingOccurrences(of: lineBreakPattern, with: "\n\n", options: .regularExpression)
             .replacingOccurrences(of: footnoteDefinitionPattern, with: "", options: .regularExpression)
-            .replacingOccurrences(of: footnoteReferencePattern, with: "", options: .regularExpression)
         let parsed = try AttributedString(markdown: markdown, options: .init(interpretedSyntax: .full, failurePolicy: .throwError))
         let links = try NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
         var text = ""
@@ -61,6 +67,9 @@ enum SpeechTextProcessor {
                 if identity != blockIdentity, !text.isEmpty { text += "\n" }
                 blockIdentity = identity
                 var prose = String(parsed[run.range].characters)
+                if !inline.contains(.code) {
+                    prose = prose.replacingOccurrences(of: footnoteReferencePattern, with: "", options: .regularExpression)
+                }
                 if link == nil, !inline.contains(.code) {
                     for match in links.matches(in: prose, range: NSRange(prose.startIndex..., in: prose)).reversed() {
                         if let range = Range(match.range, in: prose),
@@ -89,33 +98,24 @@ enum SpeechTextProcessor {
     }
 
     static func removingReasoning(_ source: String) -> String {
-        var result = ""
-        var cursor = source.startIndex
+        let input = source as NSString
+        let result = NSMutableString(capacity: input.length)
+        var cursor = 0
         var depth = 0
-        while cursor < source.endIndex {
-            let remaining = cursor..<source.endIndex
-            let open = source.range(of: Constants.Speech.thinkingOpenTag, options: .caseInsensitive, range: remaining)
-            let close = source.range(of: Constants.Speech.thinkingCloseTag, options: .caseInsensitive, range: remaining)
-            let next: Range<String.Index>
-            let isOpening: Bool
-            if let open, open.lowerBound < (close?.lowerBound ?? source.endIndex) {
-                next = open
-                isOpening = true
-            } else if let close {
-                next = close
-                isOpening = false
-            } else {
-                if depth == 0 { result += source[cursor...] }
-                break
-            }
+        for match in reasoningTags.matches(in: source, range: NSRange(location: 0, length: input.length)) {
+            let tag = input.substring(with: match.range)
+            let isOpening = match.range(at: 1).location != NSNotFound
             if depth == 0 {
-                result += source[cursor..<next.lowerBound]
-                if !isOpening { result += source[next] }
+                result.append(input.substring(with: NSRange(location: cursor, length: match.range.location - cursor)))
+                if !isOpening { result.append(tag) }
             }
             depth = isOpening ? depth + 1 : max(0, depth - 1)
-            cursor = next.upperBound
+            cursor = NSMaxRange(match.range)
         }
-        return result
+        if depth == 0 {
+            result.append(input.substring(from: cursor))
+        }
+        return result as String
     }
 
     static func split(_ text: String) -> [String] {
