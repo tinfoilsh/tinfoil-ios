@@ -5,7 +5,7 @@ enum SpeechTextProcessor {
     private static let lineBreakPattern = #"(?i)<br\s*/?>"#
     private static let footnoteDefinitionPattern = #"(?m)^ {0,3}\[\^[^\]\n]+\]:[^\n]*(?:\n(?:\t| {4})[^\n]*)*"#
     private static let footnoteReferencePattern = #"\[\^[^\]\n]+\]"#
-    private static let mathPattern = #"(?s)\$\$(.*?)\$\$|(?<!\\)\$([^\n$]+?)\$"#
+    private static let mathPattern = #"(?s)\$\$(.*?)\$\$|(?<![\\$])\$(?![\s$])([^\n$]*[^\s$])\$(?![-+]?\d)"#
     private static let automaticURLPrefixes = ["https://", "http://"]
 
     static func source(for message: Message) -> String {
@@ -108,7 +108,10 @@ enum SpeechTextProcessor {
                 if depth == 0 { result += source[cursor...] }
                 break
             }
-            if depth == 0 { result += source[cursor..<next.lowerBound] }
+            if depth == 0 {
+                result += source[cursor..<next.lowerBound]
+                if !isOpening { result += source[next] }
+            }
             depth = isOpening ? depth + 1 : max(0, depth - 1)
             cursor = next.upperBound
         }

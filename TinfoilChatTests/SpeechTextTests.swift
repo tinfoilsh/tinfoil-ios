@@ -21,6 +21,18 @@ struct SpeechTextTests {
         #expect(try SpeechTextProcessor.prepare(markdown) == "Café & tea\n日本語\nName\nCount\nApples\n3\nx + y")
     }
 
+    @Test(arguments: [
+        ("Prices range from $10 to $20.", "Prices range from $10 to $20."),
+        ("Budget: $20,000 and $30,000.", "Budget: $20,000 and $30,000."),
+        ("Range: $10–$20.", "Range: $10–$20."),
+        ("Range: $-10 to $+20.", "Range: $-10 to $+20."),
+        ("Cost $10; solve $2 + 2$.", "Cost $10; solve 2 + 2."),
+        ("Use $x$ and $$y + z$$.", "Use x and y + z."),
+    ])
+    func distinguishesCurrencyFromMath(input: String, expected: String) throws {
+        #expect(try SpeechTextProcessor.prepare(input) == expected)
+    }
+
     @Test
     func excludesFootnotesImagesAndBareURLs() throws {
         #expect(try SpeechTextProcessor.prepare("Answer[^1]. ![picture](https://image.com) https://example.com\n\n[^1]: Citation details") == "Answer.")
@@ -42,6 +54,13 @@ struct SpeechTextTests {
     ])
     func neverNarratesLegacyReasoning(input: String, expected: String) throws {
         #expect(try SpeechTextProcessor.prepare(input) == expected)
+    }
+
+    @Test
+    func preservesLiteralClosingTagsWithoutExposingLaterReasoning() throws {
+        #expect(SpeechTextProcessor.removingReasoning("Literal </think>. <think>Private</think>Answer.") == "Literal </think>. Answer.")
+        #expect(SpeechTextProcessor.removingReasoning("</think><think>Unclosed private reasoning") == "</think>")
+        #expect(try SpeechTextProcessor.prepare("Use `</think>` to close the tag.") == "Use </think> to close the tag.")
     }
 
     @Test
