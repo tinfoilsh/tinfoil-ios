@@ -42,6 +42,7 @@ final class SpeechPlayer: ObservableObject {
     private var session: Session?
     private var tasks: [Int: Task<Void, Never>] = [:]
     private let output: any SpeechAudioPlaying
+    private var failureAcknowledged = false
 
     init(output: (any SpeechAudioPlaying)? = nil) {
         self.output = output ?? SpeechAudioOutput()
@@ -75,10 +76,21 @@ final class SpeechPlayer: ObservableObject {
 
     func stop() {
         session = nil
+        failureAcknowledged = false
         tasks.values.forEach { $0.cancel() }
         tasks.removeAll()
         output.stop()
         update(owner: nil, status: .idle)
+    }
+
+    func pendingFailure(for owner: SpeechOwner) -> SpeechError? {
+        guard snapshot.owner == owner, !failureAcknowledged,
+              case .failed(let error) = snapshot.status else { return nil }
+        return error
+    }
+
+    func acknowledgeFailure(for owner: SpeechOwner) {
+        if pendingFailure(for: owner) != nil { failureAcknowledged = true }
     }
 
     func reconcile(chatId: String?, messages: [Message]) {

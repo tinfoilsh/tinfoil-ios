@@ -94,6 +94,27 @@ struct SpeechPlayerTests {
         #expect(player.snapshot.status == .idle)
     }
 
+    @Test
+    func failuresRemainPendingUntilAcknowledgedAndResetForEachAttempt() throws {
+        let output = SilentSpeechOutput()
+        output.preparationError = .audioBusy
+        let player = SpeechPlayer(output: output)
+        let other = SpeechOwner(chatId: owner.chatId, messageId: "other-message")
+        try player.read(owner: owner, content: "Answer.", service: WaitingSpeechService())
+        #expect(player.pendingFailure(for: owner) == .audioBusy)
+        #expect(player.pendingFailure(for: other) == nil)
+        player.acknowledgeFailure(for: other)
+        #expect(player.pendingFailure(for: owner) == .audioBusy)
+        player.acknowledgeFailure(for: owner)
+        #expect(player.pendingFailure(for: owner) == nil)
+        #expect(player.snapshot.status == .failed(.audioBusy))
+
+        try player.read(owner: owner, content: "Answer.", service: WaitingSpeechService())
+        #expect(player.pendingFailure(for: owner) == .audioBusy)
+        player.stop()
+        #expect(player.pendingFailure(for: owner) == nil)
+    }
+
     @Test(.timeLimit(.minutes(1)))
     func stopCancelsTheActiveProducer() async throws {
         let service = WaitingSpeechService()
@@ -110,14 +131,20 @@ struct SpeechPlayerTests {
     @Test(.timeLimit(.minutes(1)))
     func releasingThePlayerDoesNotLeaveGenerationAlive() async throws {
         let service = WaitingSpeechService()
-        var player: SpeechPlayer? = SpeechPlayer(output: SilentSpeechOutput())
+        let output = SilentSpeechOutput()
+        var player: SpeechPlayer? = SpeechPlayer(output: output)
         weak var releasedPlayer = player
         var started = service.started.makeAsyncIterator()
         var canceled = service.canceled.makeAsyncIterator()
         try player?.read(owner: owner, content: "Answer.", service: service)
         _ = await started.next()
+        let (stopped, stopContinuation) = AsyncStream<Void>.makeStream()
+        defer { stopContinuation.finish() }
+        output.onStop = { stopContinuation.yield(()) }
+        var stoppedIterator = stopped.makeAsyncIterator()
         player = nil
         _ = await canceled.next()
+        _ = await stoppedIterator.next()
         #expect(releasedPlayer == nil)
     }
 }
@@ -128,6 +155,7 @@ private final class SilentSpeechOutput: SpeechAudioPlaying {
     var preparationError: SpeechError?
     var completions: [@MainActor @Sendable () -> Void] = []
     var buffers: [[Float]] = []
+    var onStop: (@MainActor () -> Void)?
     private let scheduledEvents = AsyncStream<Void>.makeStream()
     var scheduled: AsyncStream<Void> { scheduledEvents.stream }
 
@@ -142,7 +170,7 @@ private final class SilentSpeechOutput: SpeechAudioPlaying {
     }
     func play() {}
     func pause() {}
-    func stop() {}
+    func stop() { onStop?() }
 }
 
 private struct ShortSpeechService: SpeechSynthesizing {

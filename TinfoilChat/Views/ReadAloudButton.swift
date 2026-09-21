@@ -47,14 +47,17 @@ struct ReadAloudButton: View {
         .accessibilityLabel(label)
         .accessibilityValue(status == .loading ? "Preparing audio" : isPlaying ? "Playing" : "")
         .accessibleHitTarget()
-        .onChange(of: status) { _, status in
-            if case .failed(let failure) = status { error = failure }
+        .onChange(of: status, initial: true) { _, _ in
+            if let failure = player.pendingFailure(for: owner) { error = failure }
         }
         .alert("Read Aloud", isPresented: Binding(
             get: { error != nil },
             set: { if !$0 { error = nil } }
         )) {
-            Button("OK", role: .cancel) { error = nil }
+            Button("OK", role: .cancel) {
+                player.acknowledgeFailure(for: owner)
+                error = nil
+            }
         } message: {
             Text(error?.localizedDescription ?? "")
         }
