@@ -51,6 +51,10 @@ enum MessageInputTrailingAction: Equatable {
     case send
     case stop
 
+    func showsSeparateMicrophone(showAudioButton: Bool, hasDraftContent: Bool) -> Bool {
+        showAudioButton && hasDraftContent && self != .voice
+    }
+
     static func resolve(
         showAudioButton: Bool,
         showsRecordingState: Bool,
@@ -671,6 +675,8 @@ struct MessageInputView: View {
 
                         Spacer()
 
+                        microphoneButton
+
                         trailingActionButton
                     }
                 }
@@ -718,6 +724,8 @@ struct MessageInputView: View {
                         modelControlsSelector
 
                         Spacer()
+
+                        microphoneButton
 
                         trailingActionButton
                     }
@@ -888,6 +896,34 @@ struct MessageInputView: View {
         .accessibilityValue(currentModelLabel)
         .accessibilityHint("Changes the AI model")
         .padding(.leading, 4)
+    }
+
+    @ViewBuilder
+    private var microphoneButton: some View {
+        if trailingAction.showsSeparateMicrophone(showAudioButton: showAudioButton, hasDraftContent: hasDraftContent) {
+            Button(action: handleAudioButtonTap) {
+                Group {
+                    if isTranscribingAudio {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: Constants.Audio.microphoneIconName)
+                            .font(.system(size: Constants.Audio.recordingButtonIconPointSize))
+                    }
+                }
+                .frame(
+                    width: Constants.Audio.recordingButtonHitTargetSize,
+                    height: Constants.Audio.recordingButtonHitTargetSize
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .disabled(!viewModel.canUseAudioInput || !viewModel.canSendInCurrentContext || isTranscribingAudio)
+            .accessibilityLabel("Voice input")
+            .accessibilityValue(isTranscribingAudio ? "Transcribing" : "")
+            .accessibilityHint("Adds a recording to your message")
+        }
     }
 
     /// UIKit owns the complete touch lifecycle here. Its long-press

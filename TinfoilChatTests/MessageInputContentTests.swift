@@ -95,6 +95,32 @@ struct MessageInputContentTests {
         ) == .voice)
     }
 
+    @Test("offers another recording after transcription creates a draft")
+    func microphoneRemainsAvailableForRepeatedRecordings() {
+        for (hasDraft, isRecording, expectedMicrophone) in [
+            (false, false, false),
+            (false, true, false),
+            (true, false, true),
+            (true, true, false),
+            (true, false, true),
+        ] {
+            let action = MessageInputTrailingAction.resolve(
+                showAudioButton: true,
+                showsRecordingState: isRecording,
+                hasDraftContent: hasDraft,
+                showStopAction: false
+            )
+            #expect(action.showsSeparateMicrophone(showAudioButton: true, hasDraftContent: hasDraft) == expectedMicrophone)
+            #expect(action == (isRecording || !hasDraft ? .voice : .send))
+        }
+    }
+
+    @Test("separate microphone respects audio availability and draft content", arguments: [false, true])
+    func separateMicrophoneAvailability(hasDraft: Bool) {
+        #expect(!MessageInputTrailingAction.send.showsSeparateMicrophone(showAudioButton: false, hasDraftContent: hasDraft))
+        #expect(MessageInputTrailingAction.stop.showsSeparateMicrophone(showAudioButton: true, hasDraftContent: hasDraft) == hasDraft)
+    }
+
     @Test("retains stop for generation and send when audio is unavailable", arguments: [false, true])
     func trailingActionPreservesStopAndUnavailableAudio(hasDraftContent: Bool) {
         #expect(MessageInputTrailingAction.resolve(

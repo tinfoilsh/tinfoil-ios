@@ -525,6 +525,7 @@ enum Constants {
     }
 
     enum Audio {
+        static let microphoneIconName = "mic"
         static let recordingTimeoutSeconds: TimeInterval = 600  // 10 minutes
         static let holdToRecordMinimumPressSeconds: TimeInterval = 0.3
         static let recordingButtonDiameter: CGFloat = 32
