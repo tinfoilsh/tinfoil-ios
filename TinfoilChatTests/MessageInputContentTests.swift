@@ -106,24 +106,21 @@ struct MessageInputContentTests {
         ) == .voice)
     }
 
-    @Test("offers another recording after transcription creates a draft")
-    func microphoneRemainsAvailableForRepeatedRecordings() {
-        for (hasDraft, isRecording, expectedMicrophone) in [
-            (false, false, false),
-            (false, true, false),
-            (true, false, true),
-            (true, true, false),
-            (true, false, true),
-        ] {
-            let action = MessageInputTrailingAction.resolve(
-                showAudioButton: true,
-                showsRecordingState: isRecording,
-                hasDraftContent: hasDraft,
-                showStopAction: false
-            )
-            #expect(action.showsSeparateMicrophone(showAudioButton: true, hasDraftContent: hasDraft) == expectedMicrophone)
-            #expect(action == (isRecording || !hasDraft ? .voice : .send))
-        }
+    @Test("keeps voice input available across draft and recording states", arguments: [
+        (false, false, false),
+        (false, true, false),
+        (true, false, true),
+        (true, true, false),
+    ])
+    func microphoneAvailabilityFollowsComposerState(hasDraft: Bool, isRecording: Bool, expectedMicrophone: Bool) {
+        let action = MessageInputTrailingAction.resolve(
+            showAudioButton: true,
+            showsRecordingState: isRecording,
+            hasDraftContent: hasDraft,
+            showStopAction: false
+        )
+        #expect(action.showsSeparateMicrophone(showAudioButton: true, hasDraftContent: hasDraft) == expectedMicrophone)
+        #expect(action == (isRecording || !hasDraft ? .voice : .send))
     }
 
     @Test("separate microphone respects audio availability and draft content", arguments: [false, true])
