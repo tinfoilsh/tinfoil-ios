@@ -66,7 +66,8 @@ final class ChatRecoveryPhaseTracker: ObservableObject {
     }
 
     func beginRecovery(chatId: String, turnId: String) -> Bool {
-        guard !StreamingTracker.shared.isStreaming(chatId) else { return false }
+        guard !Task.isCancelled,
+              !StreamingTracker.shared.isStreaming(chatId) else { return false }
         setPhase(.generating, turnId: turnId)
         return true
     }
@@ -707,7 +708,11 @@ actor ChatRecoveryCoordinator {
                 chatId: chatId,
                 turnId: originalEnvelope.turnId
             )
-        }) else { return }
+        }), scanIsCurrent(
+            accountGeneration: accountGeneration,
+            scanGeneration: scanGeneration,
+            userId: userId
+        ) else { return }
         var envelope = originalEnvelope
         let payload: ChatRecoveryEnvelopePayload
         do {

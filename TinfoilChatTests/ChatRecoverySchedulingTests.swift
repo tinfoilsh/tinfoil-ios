@@ -4,6 +4,22 @@ import Testing
 
 struct ChatRecoverySchedulingTests {
     @Test @MainActor
+    func cancelledScanCannotPublishRecoveryPhase() async {
+        let chatId = UUID().uuidString
+        let turnId = UUID().uuidString
+        let tracker = ChatRecoveryPhaseTracker.shared
+        defer { tracker.clear(turnId: turnId) }
+        let task = Task { @MainActor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return tracker.beginRecovery(chatId: chatId, turnId: turnId)
+        }
+
+        let beganRecovery = await task.value
+        #expect(!beganRecovery)
+        #expect(!tracker.isActive(turnId: turnId))
+    }
+
+    @Test @MainActor
     func liveStreamCannotEnterRecoveryPresentation() {
         let chatId = UUID().uuidString
         let turnId = UUID().uuidString
