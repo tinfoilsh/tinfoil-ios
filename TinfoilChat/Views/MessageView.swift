@@ -751,6 +751,18 @@ struct MessageView: View {
                             .accessibilityLabel("Copy")
                             .accessibleHitTarget()
 
+                            if !hasRecoveryDraft,
+                               SpeechTextProcessor.canRead(message),
+                               let chatId = viewModel.currentChat?.id {
+                                ReadAloudButton(
+                                    player: viewModel.speechPlayer,
+                                    owner: SpeechOwner(chatId: chatId, messageId: message.id),
+                                    isDarkMode: isDarkMode
+                                ) {
+                                    try viewModel.toggleReadAloud(messageId: message.id)
+                                }
+                            }
+
                             // Regenerate button - only on the last assistant message
                             if isLastMessage && !viewModel.isLoading && messageIndex > 0 {
                                 Button {

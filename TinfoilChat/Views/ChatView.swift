@@ -397,6 +397,7 @@ struct ChatContainer: View {
                 .ignoresSafeArea(edges: .bottom)
         )
         .ignoresSafeArea(edges: .top)
+        .onDisappear { viewModel.speechPlayer.stop() }
     }
     
     /// The sliding sidebar and dimming overlay

@@ -63,11 +63,17 @@ class AuthManager: ObservableObject {
     let safeguards = SafeguardsStore()
 
     @Published var isAuthenticated = false {
-        didSet { synchronizeSafeguardsAccount() }
+        didSet {
+            if oldValue != isAuthenticated { chatViewModel?.speechPlayer.stop() }
+            synchronizeSafeguardsAccount()
+        }
     }
     @Published var isLoading = true
     @Published var localUserData: [String: Any]? = nil {
-        didSet { synchronizeSafeguardsAccount() }
+        didSet {
+            if oldValue?[Self.userIdKey] as? String != localUserId { chatViewModel?.speechPlayer.stop() }
+            synchronizeSafeguardsAccount()
+        }
     }
     @Published var hasActiveSubscription = false
     @Published private(set) var hasCompletedOnboarding = UserDefaults.standard.bool(
@@ -187,6 +193,7 @@ class AuthManager: ObservableObject {
     }
 
     private func invalidateAccountLifecycle() {
+        chatViewModel?.speechPlayer.stop()
         accountLifecycleGeneration &+= 1
     }
 

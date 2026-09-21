@@ -295,6 +295,7 @@ private final class TimerAlarmController: ObservableObject {
 
     private var timer: Timer?
     private var audioPlayer: AVAudioPlayer?
+    private var audioSessionLease: UUID?
     private let notificationGenerator = UINotificationFeedbackGenerator()
     private let impactGenerator = UIImpactFeedbackGenerator(style: .heavy)
 
@@ -304,14 +305,9 @@ private final class TimerAlarmController: ObservableObject {
         impactGenerator.prepare()
         // `.playback` category lets the alarm play even when the silent
         // switch is on. Mix politely with any audio the user has playing.
-        try? AVAudioSession.sharedInstance().setCategory(
-            .playback,
-            mode: .default,
-            options: [.mixWithOthers, .duckOthers]
-        )
-        try? AVAudioSession.sharedInstance().setActive(true, options: [])
 
         if mode == .sound {
+            audioSessionLease = try? AudioSessionCoordinator.shared.acquire(.alarm)
             audioPlayer = Self.makeBeepPlayer()
             audioPlayer?.prepareToPlay()
         }
@@ -334,7 +330,8 @@ private final class TimerAlarmController: ObservableObject {
         timer = nil
         audioPlayer?.stop()
         audioPlayer = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+        if let audioSessionLease { AudioSessionCoordinator.shared.release(audioSessionLease) }
+        audioSessionLease = nil
     }
 
     private func fire(mode: TimerAlarmMode) {
@@ -350,6 +347,9 @@ private final class TimerAlarmController: ObservableObject {
 
     deinit {
         timer?.invalidate()
+        if let audioSessionLease {
+            Task { @MainActor in AudioSessionCoordinator.shared.release(audioSessionLease) }
+        }
     }
 
     private static func makeBeepPlayer() -> AVAudioPlayer? {
