@@ -177,6 +177,7 @@ struct ContentView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background { chatViewModel.speechPlayer.stop() }
             updateAppPresentationReadiness()
 
             if newPhase == .active {

@@ -1,0 +1,126 @@
+import Foundation
+import OpenAI
+import Testing
+@testable import TinfoilChat
+
+struct SpeechServiceTests {
+    @Test
+    func encodesTheWebappsSpeechConfiguration() throws {
+        let text = "Read this response."
+        let data = try JSONEncoder().encode(SpeechService.query(for: text))
+        let body = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(body["model"] as? String == "qwen3-tts")
+        #expect(body["voice"] as? String == "aiden")
+        #expect(body["input"] as? String == text)
+        #expect(body["instructions"] as? String == Constants.Speech.instructions)
+        #expect(body["response_format"] as? String == "pcm")
+        #expect(body["stream_format"] as? String == "audio")
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func consumesRealSDKResultsAndFlushesTheLastPartialBlock() async throws {
+        let first = try Self.result([0x00])
+        let second = try Self.result([0x80, 0xff, 0x7f])
+        let service = SpeechService { _ in
+            AsyncThrowingStream { continuation in
+                continuation.yield(first)
+                continuation.yield(second)
+                continuation.finish()
+            }
+        }
+        let collector = SpeechSampleCollector()
+        try await service.generate("Hello") { await collector.append($0) }
+        #expect(await collector.blocks == [[-1, Float(Int16.max) / (Float(Int16.max) + 1)]])
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func truncatedAudioFailsWithoutDeliveringThePartialSample() async throws {
+        let result = try Self.result([0xff])
+        let service = SpeechService { _ in
+            AsyncThrowingStream { continuation in
+                continuation.yield(result)
+                continuation.finish()
+            }
+        }
+        let collector = SpeechSampleCollector()
+        await #expect(throws: SpeechError.invalidAudio) {
+            try await service.generate("Hello") { await collector.append($0) }
+        }
+        #expect(await collector.blocks.isEmpty)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func deadlineCancelsAStalledStream() async throws {
+        let source = StalledSpeechSource(first: try Self.result([0xff]))
+        let service = SpeechService(waitForDeadline: {
+            var stalled = source.stalled.makeAsyncIterator()
+            _ = await stalled.next()
+            try Task.checkCancellation()
+        }, makeStream: { _ in
+            AsyncThrowingStream(unfolding: { try await source.next() })
+        })
+        let collector = SpeechSampleCollector()
+        await #expect(throws: SpeechError.timedOut) {
+            try await service.generate("Hello") { await collector.append($0) }
+        }
+        var canceled = source.canceled.makeAsyncIterator()
+        _ = await canceled.next()
+        #expect(await collector.blocks.isEmpty)
+    }
+
+    @Test
+    func unknownErrorsNeverExposeProviderContent() {
+        let error = NSError(domain: "provider", code: 1, userInfo: [NSLocalizedDescriptionKey: "private transcript and credentials"])
+        #expect(SpeechError.sanitized(error) == .requestFailed)
+        #expect(!SpeechError.sanitized(error).localizedDescription.contains("private transcript"))
+        #expect(SpeechError.sanitized(AudioSpeechStreamError.unexpectedContentType("private data")) == .invalidAudio)
+        #expect(SpeechError.sanitized(SessionTokenError.hourlyLimitReached(resetsAt: nil)) == .rateLimited)
+    }
+
+    private static func result(_ bytes: [UInt8]) throws -> AudioSpeechResult {
+        let data = try JSONEncoder().encode(["audio": Data(bytes)])
+        return try JSONDecoder().decode(AudioSpeechResult.self, from: data)
+    }
+}
+
+private actor SpeechSampleCollector {
+    private(set) var blocks: [[Float]] = []
+    func append(_ samples: [Float]) { blocks.append(samples) }
+}
+
+private actor StalledSpeechSource {
+    nonisolated let stalled: AsyncStream<Void>
+    nonisolated let canceled: AsyncStream<Void>
+    private let stalledContinuation: AsyncStream<Void>.Continuation
+    private let canceledContinuation: AsyncStream<Void>.Continuation
+    private let waiting = AsyncStream<Void>.makeStream()
+    private var first: AudioSpeechResult?
+
+    init(first: AudioSpeechResult) {
+        self.first = first
+        let stall = AsyncStream<Void>.makeStream()
+        stalled = stall.stream
+        stalledContinuation = stall.continuation
+        let cancel = AsyncStream<Void>.makeStream()
+        canceled = cancel.stream
+        canceledContinuation = cancel.continuation
+    }
+
+    func next() async throws -> AudioSpeechResult? {
+        if let first {
+            self.first = nil
+            return first
+        }
+        stalledContinuation.yield(())
+        let waitingStream = waiting.stream
+        let canceled = canceledContinuation
+        return try await withTaskCancellationHandler {
+            var iterator = waitingStream.makeAsyncIterator()
+            _ = await iterator.next()
+            try Task.checkCancellation()
+            return nil
+        } onCancel: {
+            canceled.yield(())
+        }
+    }
+}

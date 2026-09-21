@@ -20,6 +20,7 @@ class AudioRecordingService: NSObject, ObservableObject {
     @Published private(set) var isTranscribing = false
 
     private var audioRecorder: AVAudioRecorder?
+    private var audioSessionLease: UUID?
     private var timeoutTimer: Timer?
     private var recordingURL: URL?
     private var didDisableIdleTimer: Bool = false
@@ -50,9 +51,16 @@ class AudioRecordingService: NSObject, ObservableObject {
     func startRecording() throws {
         guard !isRecording else { return }
 
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
-        try session.setActive(true)
+        let lease = try AudioSessionCoordinator.shared.acquire(.recording)
+        audioSessionLease = lease
+        defer {
+            if !isRecording {
+                audioRecorder = nil
+                cleanupRecordingFile()
+                AudioSessionCoordinator.shared.release(lease)
+                audioSessionLease = nil
+            }
+        }
 
         let url = getRecordingURL()
         recordingURL = url
@@ -67,8 +75,6 @@ class AudioRecordingService: NSObject, ObservableObject {
         audioRecorder = try AVAudioRecorder(url: url, settings: settings)
         audioRecorder?.isMeteringEnabled = true
         guard audioRecorder?.record() == true else {
-            audioRecorder = nil
-            cleanupRecordingFile()
             throw AudioRecordingError.recordingFailed
         }
         isRecording = true
@@ -95,6 +101,8 @@ class AudioRecordingService: NSObject, ObservableObject {
         audioRecorder?.stop()
         audioRecorder = nil
         isRecording = false
+        if let audioSessionLease { AudioSessionCoordinator.shared.release(audioSessionLease) }
+        audioSessionLease = nil
         restoreIdleTimer()
 
         return recordingURL

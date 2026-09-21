@@ -260,6 +260,7 @@ class ChatViewModel: ObservableObject {
     var canRetryFailedChatHydration: Bool { failedChatHydration != nil && chatHydrationError != nil }
     @Published var currentChat: Chat? {
         didSet {
+            speechPlayer.reconcile(chatId: currentChat?.id, messages: currentChat?.messages ?? [])
             let reconciledEditSession = MessageEditSessionTransition.reconcile(
                 messageEditSession,
                 chatId: currentChat?.id,
@@ -304,7 +305,11 @@ class ChatViewModel: ObservableObject {
     @Published var shouldOpenCloudSync: Bool = false
     @Published var shouldExpandProjectsInSidebar: Bool = false
     @Published private(set) var navigationRequest: ChatNavigationRequest?
-    @Published var isViewingProjectChat: Bool = false
+    @Published var isViewingProjectChat: Bool = false {
+        didSet {
+            if oldValue && !isViewingProjectChat { speechPlayer.stop() }
+        }
+    }
     @Published var scrollTargetMessageId: String? = nil 
     @Published var scrollTargetOffset: CGFloat = 0 
     /// When set to true, the input field should become first responder (focus keyboard)
@@ -403,7 +408,11 @@ class ChatViewModel: ObservableObject {
     private var isAppPresentationReady = false
     private var needsSignInWhenPresentationReady = false
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
-    @Published private(set) var readyForAccountActionsUserId: String?
+    @Published private(set) var readyForAccountActionsUserId: String? {
+        didSet {
+            if oldValue != readyForAccountActionsUserId { speechPlayer.stop() }
+        }
+    }
     private var signInTask: Task<Void, Never>?
     private var legacyMigrationTask: Task<Void, Never>?
     private var accountOperationFence = AccountOperationFence()
@@ -477,6 +486,7 @@ class ChatViewModel: ObservableObject {
     @Published var verifierView: VerifierView?
 
     // Audio recording properties
+    let speechPlayer = SpeechPlayer()
     @Published var isRecording: Bool = false
     @Published var isTranscribing: Bool = false
     @Published var audioError: String? = nil
@@ -517,7 +527,11 @@ class ChatViewModel: ObservableObject {
 
     // Project properties
     @Published var projects: [Project] = []
-    @Published var activeProject: Project?
+    @Published var activeProject: Project? {
+        didSet {
+            if oldValue?.id != activeProject?.id { speechPlayer.stop() }
+        }
+    }
     @Published var projectDocuments: [ProjectDocument] = []
     @Published private(set) var favoriteChats: [Chat] = []
     @Published var isLoadingProjects: Bool = false
@@ -583,6 +597,7 @@ class ChatViewModel: ObservableObject {
     // Auth reference for Premium features
     @Published var authManager: AuthManager? {
         didSet {
+            if authManager !== oldValue { speechPlayer.stop() }
             cancelMessageEdit()
             // Load user-specific last sync date when auth changes
             if let userId = currentUserId {
@@ -632,6 +647,18 @@ class ChatViewModel: ObservableObject {
 
     var canUseCurrentChatActions: Bool {
         isCurrentChatHydrated
+    }
+
+    var canUseReadAloud: Bool {
+        canUseCurrentChatActions && acceptsChatSaves
+            && !isRecording && !AudioRecordingService.shared.isRecording
+            && client != nil && isVerified && !isClientInitializing
+            && AccountActionReadiness.canPerform(
+                isTearingDown: isAccountTeardownInProgress,
+                isAuthenticated: authManager?.isAuthenticated == true,
+                userId: currentUserId,
+                readyUserId: readyForAccountActionsUserId
+            )
     }
 
     var isLoading: Bool {
@@ -1603,6 +1630,7 @@ class ChatViewModel: ObservableObject {
             return
         }
 
+        speechPlayer.stop()
         isClientInitializing = true
         verification.error = nil
         verification.isVerifying = true
@@ -1681,6 +1709,44 @@ class ChatViewModel: ObservableObject {
     }
     
     // MARK: - Public Methods
+
+    func invalidateAccountPlayback() {
+        guard speechPlayer.snapshot.owner != nil else { return }
+        speechPlayer.stop()
+    }
+
+    func toggleReadAloud(messageId: String) throws {
+        guard let chat = currentChat else { throw SpeechError.unavailable }
+        let owner = SpeechOwner(chatId: chat.id, messageId: messageId)
+        if speechPlayer.snapshot.owner == owner,
+           speechPlayer.snapshot.status == .playing || speechPlayer.snapshot.status == .loading {
+            speechPlayer.stop()
+            return
+        }
+        guard !isRecording, !AudioRecordingService.shared.isRecording else { throw SpeechError.audioBusy }
+        guard canUseReadAloud,
+              let message = chat.messages.first(where: { $0.id == messageId }),
+              SpeechTextProcessor.canRead(message) else { throw SpeechError.unavailable }
+        let accountId = currentUserId
+        let service = SpeechService { [weak self] text in
+            try Task.checkCancellation()
+            guard let self, self.currentUserId == accountId,
+                  self.currentChat?.id == owner.chatId,
+                  self.canUseReadAloud else { throw CancellationError() }
+            try await SessionTokenManager.shared.acquireTokenForSend(forceRefresh: false)
+            try Task.checkCancellation()
+            guard self.currentUserId == accountId, self.currentChat?.id == owner.chatId,
+                  self.canUseReadAloud,
+                  UIApplication.shared.applicationState != .background else { throw CancellationError() }
+            guard let client = self.client,
+                  !SessionTokenManager.shared.currentToken.isEmpty else { throw SpeechError.unavailable }
+            return client.audioCreateSpeechStream(
+                query: SpeechService.query(for: text),
+                options: .init(expectedContentType: Constants.Speech.contentType)
+            )
+        }
+        try speechPlayer.read(owner: owner, content: SpeechTextProcessor.source(for: message), service: service)
+    }
     
     /// Switches the active storage tab and selects an appropriate chat
     func switchStorageTab(to tab: ChatStorageTab) {
@@ -1713,6 +1779,7 @@ class ChatViewModel: ObservableObject {
             to: destination,
             hasPremiumAccess: hasPremiumAccess
         ) else { return }
+        if destination != .chat { speechPlayer.stop() }
         navigationRequest = ChatNavigationRequest(destination: destination)
     }
 
@@ -3002,6 +3069,7 @@ class ChatViewModel: ObservableObject {
 
         guard let userId = currentUserId else { return }
         guard chatMutationGate.begin(chatId: id) else { return }
+        if speechPlayer.snapshot.owner?.chatId == id { speechPlayer.stop() }
         let storageGeneration = favoriteStorageGeneration
         let deletionToken = UUID()
         favoriteDeletionTokens[id] = deletionToken
@@ -6310,6 +6378,7 @@ class ChatViewModel: ObservableObject {
     
     /// Handle sign-out by clearing current chats but preserving them in storage
     func handleSignOut() async {
+        speechPlayer.stop()
         cancelMessageEdit()
         // Capture the signing-out user's id up front. Later steps (and
         // the auth manager's cleanup) clear the authenticated state, after
@@ -6412,6 +6481,7 @@ class ChatViewModel: ObservableObject {
         resumeRecoveryScans: Bool = true,
         reopenAccountOperations: Bool = true
     ) async {
+        speechPlayer.stop()
         cancelMessageEdit()
         clearHydratedFavorites()
         acceptsChatSaves = false
@@ -6921,6 +6991,7 @@ class ChatViewModel: ObservableObject {
     @MainActor
     func deleteAllChats() async throws {
         guard let userId = currentUserId else { return }
+        speechPlayer.stop()
         let allChatIds = Set(
             cloudSidebarSummaries.map(\.id)
                 + localSidebarSummaries.map(\.id)
@@ -7048,6 +7119,7 @@ class ChatViewModel: ObservableObject {
     /// Removes all cloud (non-local) chats from the device
     @MainActor
     func deleteNonLocalChats() async {
+        if currentChat?.isLocalOnly == false { speechPlayer.stop() }
         clearHydratedFavorites()
         // Delete all cloud chats from storage (the cloud store only has
         // cloud chats), fencing in-flight sync before the deletion.

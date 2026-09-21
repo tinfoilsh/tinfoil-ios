@@ -197,6 +197,7 @@ enum Constants {
 
     enum API {
         static let successStatusCodes = 200...299
+        static let tooManyRequestsStatusCode = 429
         static let chatCompletionsEndpoint = "/v1/chat/completions"
         static let baseURL = "https://api.tinfoil.sh"
         /// Carries the chat id on completion requests so the router's
@@ -544,6 +545,33 @@ enum Constants {
             static let minimumBarHeight: CGFloat = 3
             static let contentSpacing: CGFloat = 12
         }
+    }
+
+    enum Speech {
+        static let model = "qwen3-tts"
+        static let voice = "aiden"
+        static let instructions = "Read in a calm, natural conversational voice with a steady pace, consistent pitch range, and restrained expression. Use natural sentence pauses and maintain an even narration style."
+        static let contentType = "audio/pcm"
+        static let sampleRate = 24_000
+        static let channels: UInt32 = 1
+        static let bytesPerSample = MemoryLayout<Int16>.size
+        static let pcmScale: Float = 32_768
+        static let blockSamples = 6_000
+        static let targetChunkCharacters = 300
+        static let maxChunkCharacters = 600
+        static let maxTextCharacters = 100_000
+        static let concurrentRequests = 2
+        static let lookaheadChunks = 4
+        static let startBufferSeconds = 12
+        static let highWaterSeconds = 60
+        static let maxChunkAudioSeconds = 120
+        static let requestTimeoutSeconds: Double = 120
+        static let maxChunkSamples = maxChunkAudioSeconds * sampleRate
+        static let maxBufferedSamples = (highWaterSeconds + concurrentRequests * maxChunkAudioSeconds) * sampleRate
+        static let actionSize: CGFloat = 32
+        static let actionIconSize: CGFloat = 16
+        static let thinkingOpenTag = "<think>"
+        static let thinkingCloseTag = "</think>"
     }
 
     enum WebApp {
