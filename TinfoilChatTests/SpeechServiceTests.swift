@@ -50,14 +50,21 @@ struct SpeechServiceTests {
     }
 
     @Test(.timeLimit(.minutes(1)))
-    func deadlineCancelsAStalledStream() async {
-        let (stream, continuation) = AsyncThrowingStream<AudioSpeechResult, Error>.makeStream()
-        defer { continuation.finish() }
-        let service = SpeechService(timeout: .zero) { _ in stream }
+    func deadlineCancelsAStalledStream() async throws {
+        let source = StalledSpeechSource(first: try Self.result([0xff]))
+        let service = SpeechService(waitForDeadline: {
+            var stalled = source.stalled.makeAsyncIterator()
+            _ = await stalled.next()
+            try Task.checkCancellation()
+        }, makeStream: { _ in
+            AsyncThrowingStream(unfolding: { try await source.next() })
+        })
         let collector = SpeechSampleCollector()
         await #expect(throws: SpeechError.timedOut) {
             try await service.generate("Hello") { await collector.append($0) }
         }
+        var canceled = source.canceled.makeAsyncIterator()
+        _ = await canceled.next()
         #expect(await collector.blocks.isEmpty)
     }
 
@@ -79,4 +86,41 @@ struct SpeechServiceTests {
 private actor SpeechSampleCollector {
     private(set) var blocks: [[Float]] = []
     func append(_ samples: [Float]) { blocks.append(samples) }
+}
+
+private actor StalledSpeechSource {
+    nonisolated let stalled: AsyncStream<Void>
+    nonisolated let canceled: AsyncStream<Void>
+    private let stalledContinuation: AsyncStream<Void>.Continuation
+    private let canceledContinuation: AsyncStream<Void>.Continuation
+    private let waiting = AsyncStream<Void>.makeStream()
+    private var first: AudioSpeechResult?
+
+    init(first: AudioSpeechResult) {
+        self.first = first
+        let stall = AsyncStream<Void>.makeStream()
+        stalled = stall.stream
+        stalledContinuation = stall.continuation
+        let cancel = AsyncStream<Void>.makeStream()
+        canceled = cancel.stream
+        canceledContinuation = cancel.continuation
+    }
+
+    func next() async throws -> AudioSpeechResult? {
+        if let first {
+            self.first = nil
+            return first
+        }
+        stalledContinuation.yield(())
+        let waitingStream = waiting.stream
+        let canceled = canceledContinuation
+        return try await withTaskCancellationHandler {
+            var iterator = waitingStream.makeAsyncIterator()
+            _ = await iterator.next()
+            try Task.checkCancellation()
+            return nil
+        } onCancel: {
+            canceled.yield(())
+        }
+    }
 }

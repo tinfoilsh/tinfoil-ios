@@ -11,10 +11,14 @@ protocol SpeechSynthesizing: Sendable {
 struct SpeechService: SpeechSynthesizing {
     typealias StreamFactory = @MainActor @Sendable (String) async throws -> AsyncThrowingStream<AudioSpeechResult, Error>
     let makeStream: StreamFactory
-    private let timeout: Duration
+    private let waitForDeadline: @Sendable () async throws -> Void
 
     init(timeout: Duration = .seconds(Constants.Speech.requestTimeoutSeconds), makeStream: @escaping StreamFactory) {
-        self.timeout = timeout
+        self.init(waitForDeadline: { try await Task.sleep(for: timeout) }, makeStream: makeStream)
+    }
+
+    init(waitForDeadline: @escaping @Sendable () async throws -> Void, makeStream: @escaping StreamFactory) {
+        self.waitForDeadline = waitForDeadline
         self.makeStream = makeStream
     }
 
@@ -50,7 +54,8 @@ struct SpeechService: SpeechSynthesizing {
                 if !tail.isEmpty { try await receive(tail) }
             }
             group.addTask {
-                try await Task.sleep(for: timeout)
+                try await waitForDeadline()
+                try Task.checkCancellation()
                 throw SpeechError.timedOut
             }
             defer { group.cancelAll() }
