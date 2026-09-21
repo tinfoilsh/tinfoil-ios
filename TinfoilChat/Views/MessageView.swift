@@ -752,6 +752,7 @@ struct MessageView: View {
                             .accessibleHitTarget()
 
                             if !hasRecoveryDraft,
+                               viewModel.canUseReadAloud,
                                SpeechTextProcessor.canRead(message),
                                let chatId = viewModel.currentChat?.id {
                                 ReadAloudButton(

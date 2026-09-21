@@ -305,7 +305,11 @@ class ChatViewModel: ObservableObject {
     @Published var shouldOpenCloudSync: Bool = false
     @Published var shouldExpandProjectsInSidebar: Bool = false
     @Published private(set) var navigationRequest: ChatNavigationRequest?
-    @Published var isViewingProjectChat: Bool = false
+    @Published var isViewingProjectChat: Bool = false {
+        didSet {
+            if oldValue && !isViewingProjectChat { speechPlayer.stop() }
+        }
+    }
     @Published var scrollTargetMessageId: String? = nil 
     @Published var scrollTargetOffset: CGFloat = 0 
     /// When set to true, the input field should become first responder (focus keyboard)
@@ -404,7 +408,11 @@ class ChatViewModel: ObservableObject {
     private var isAppPresentationReady = false
     private var needsSignInWhenPresentationReady = false
     private var isSignInInProgress: Bool = false  // Prevent duplicate sign-in flows
-    @Published private(set) var readyForAccountActionsUserId: String?
+    @Published private(set) var readyForAccountActionsUserId: String? {
+        didSet {
+            if oldValue != readyForAccountActionsUserId { speechPlayer.stop() }
+        }
+    }
     private var signInTask: Task<Void, Never>?
     private var legacyMigrationTask: Task<Void, Never>?
     private var accountOperationFence = AccountOperationFence()
@@ -519,7 +527,11 @@ class ChatViewModel: ObservableObject {
 
     // Project properties
     @Published var projects: [Project] = []
-    @Published var activeProject: Project?
+    @Published var activeProject: Project? {
+        didSet {
+            if oldValue?.id != activeProject?.id { speechPlayer.stop() }
+        }
+    }
     @Published var projectDocuments: [ProjectDocument] = []
     @Published private(set) var favoriteChats: [Chat] = []
     @Published var isLoadingProjects: Bool = false
@@ -635,6 +647,18 @@ class ChatViewModel: ObservableObject {
 
     var canUseCurrentChatActions: Bool {
         isCurrentChatHydrated
+    }
+
+    var canUseReadAloud: Bool {
+        canUseCurrentChatActions && acceptsChatSaves
+            && !isRecording && !AudioRecordingService.shared.isRecording
+            && client != nil && isVerified && !isClientInitializing
+            && AccountActionReadiness.canPerform(
+                isTearingDown: isAccountTeardownInProgress,
+                isAuthenticated: authManager?.isAuthenticated == true,
+                userId: currentUserId,
+                readyUserId: readyForAccountActionsUserId
+            )
     }
 
     var isLoading: Bool {
@@ -1695,7 +1719,7 @@ class ChatViewModel: ObservableObject {
             return
         }
         guard !isRecording, !AudioRecordingService.shared.isRecording else { throw SpeechError.audioBusy }
-        guard canUseCurrentChatActions, acceptsChatSaves, !isAccountTeardownInProgress,
+        guard canUseReadAloud,
               let message = chat.messages.first(where: { $0.id == messageId }),
               SpeechTextProcessor.canRead(message) else { throw SpeechError.unavailable }
         let accountId = currentUserId
@@ -1703,13 +1727,13 @@ class ChatViewModel: ObservableObject {
             try Task.checkCancellation()
             guard let self, self.currentUserId == accountId,
                   self.currentChat?.id == owner.chatId,
-                  self.acceptsChatSaves, !self.isAccountTeardownInProgress else { throw CancellationError() }
+                  self.canUseReadAloud else { throw CancellationError() }
             try await SessionTokenManager.shared.acquireTokenForSend(forceRefresh: false)
             try Task.checkCancellation()
             guard self.currentUserId == accountId, self.currentChat?.id == owner.chatId,
-                  self.acceptsChatSaves, !self.isAccountTeardownInProgress,
+                  self.canUseReadAloud,
                   UIApplication.shared.applicationState != .background else { throw CancellationError() }
-            guard let client = self.client, self.isVerified, !self.isClientInitializing,
+            guard let client = self.client,
                   !SessionTokenManager.shared.currentToken.isEmpty else { throw SpeechError.unavailable }
             return client.audioCreateSpeechStream(
                 query: SpeechService.query(for: text),
