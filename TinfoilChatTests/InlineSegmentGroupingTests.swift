@@ -6,7 +6,7 @@ struct InlineSegmentGroupingTests {
     private func runs(_ segments: [MessageSegment]) -> [MessageView.IdentifiedInlineSegmentRun] {
         var message = Message(role: .assistant, content: "")
         message.webSearches = ["first", "second", "third"].map {
-            WebSearchInstance(id: $0, query: $0, status: .completed, sources: [], reason: nil)
+            WebSearchInstance(id: $0, query: "query-\($0)", status: .completed, sources: [], reason: nil)
         }
         return MessageView.inlineSegmentRuns(from: segments, message: message)
     }
@@ -28,6 +28,7 @@ struct InlineSegmentGroupingTests {
             return
         }
         #expect(searches.map(\.id) == ["first", "second", "third"])
+        #expect(searches.map(\.query) == ["query-first", "query-second", "query-third"])
         #expect(content == "Compare\n\nVerify")
         #expect(active)
         #expect(duration == 3)

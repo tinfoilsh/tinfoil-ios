@@ -255,12 +255,10 @@ struct MessageView: View {
                 guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                 flushSearches()
                 flushFetches()
-                if !text.isEmpty {
-                    runs.append(IdentifiedInlineSegmentRun(
-                        id: "text:\(index)",
-                        run: .text(text, isTrailing: index == lastTextIndex)
-                    ))
-                }
+                runs.append(IdentifiedInlineSegmentRun(
+                    id: "text:\(index)",
+                    run: .text(text, isTrailing: index == lastTextIndex)
+                ))
             case .thinking(let content, let isThinking, let duration):
                 if !searchBuffer.isEmpty {
                     if let previous = searchThinking {

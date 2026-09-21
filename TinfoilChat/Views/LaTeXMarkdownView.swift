@@ -216,11 +216,11 @@ struct LaTeXMarkdownView: View, Equatable {
         }
         .task(id: ParsingIdentity(content: content, isStreaming: isStreaming)) {
             guard !isStreaming else { return }
-            segments = nil
             if let cached = MarkdownRenderCache.shared.get(for: content) {
                 segments = cached
                 return
             }
+            segments = nil
             let contentToProcess = content
             let parsingTask = Task.detached(priority: .userInitiated) {
                 Self.parseContent(contentToProcess)
