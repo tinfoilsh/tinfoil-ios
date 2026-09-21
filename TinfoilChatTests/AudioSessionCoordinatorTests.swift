@@ -1,0 +1,63 @@
+import Foundation
+import Testing
+@testable import TinfoilChat
+
+@MainActor
+struct AudioSessionCoordinatorTests {
+    @Test
+    func recordingStopsNarrationBeforeTakingOwnership() throws {
+        var configured: [AudioSessionCoordinator.Activity?] = []
+        let coordinator = AudioSessionCoordinator { configured.append($0) }
+        var speechLease: UUID?
+        var interrupted = false
+        speechLease = try coordinator.acquire(.speech) {
+            interrupted = true
+            if let speechLease { coordinator.release(speechLease) }
+        }
+        let recording = try coordinator.acquire(.recording)
+        #expect(interrupted)
+        #expect(configured == [.speech, nil, .recording])
+        coordinator.release(try #require(speechLease))
+        #expect(configured.last == .some(.recording))
+        coordinator.release(recording)
+        #expect(configured.last == .some(nil))
+    }
+
+    @Test
+    func stoppingOneAlarmDoesNotDeactivateRecordingOrAnotherAlarm() throws {
+        var configured: [AudioSessionCoordinator.Activity?] = []
+        let coordinator = AudioSessionCoordinator { configured.append($0) }
+        let first = try coordinator.acquire(.alarm)
+        let second = try coordinator.acquire(.alarm)
+        let recording = try coordinator.acquire(.recording)
+        coordinator.release(first)
+        #expect(configured == [.alarm, .recording])
+        coordinator.release(recording)
+        #expect(configured == [.alarm, .recording, .alarm])
+        coordinator.release(second)
+        #expect(configured.last == .some(nil))
+    }
+
+    @Test(arguments: [AudioSessionCoordinator.Activity.recording, .alarm])
+    func narrationDoesNotTakeOverAnActiveInputOrAlarm(activity: AudioSessionCoordinator.Activity) throws {
+        var configured: [AudioSessionCoordinator.Activity?] = []
+        let coordinator = AudioSessionCoordinator { configured.append($0) }
+        _ = try coordinator.acquire(activity)
+        #expect(throws: SpeechError.audioBusy) { try coordinator.acquire(.speech) }
+        #expect(configured == [activity])
+    }
+
+    @Test
+    func failedActivationRestoresThePreviousAudioConfiguration() throws {
+        var configured: [AudioSessionCoordinator.Activity?] = []
+        let coordinator = AudioSessionCoordinator { activity in
+            configured.append(activity)
+            if activity == .recording { throw SpeechError.interrupted }
+        }
+        let alarm = try coordinator.acquire(.alarm)
+        #expect(throws: SpeechError.interrupted) { try coordinator.acquire(.recording) }
+        #expect(configured == [.alarm, .recording, .alarm])
+        coordinator.release(alarm)
+        #expect(configured.last == .some(nil))
+    }
+}
