@@ -7,6 +7,27 @@ struct SpeechPlayerTests {
     private let owner = SpeechOwner(chatId: "chat", messageId: "message")
 
     @Test(.timeLimit(.minutes(1)))
+    func aCurrentInterruptionStopsPlaybackAndSurfacesTheError() async throws {
+        let output = SilentSpeechOutput()
+        let player = SpeechPlayer(output: output)
+        var scheduled = output.scheduled.makeAsyncIterator()
+        try player.read(owner: owner, content: "Answer.", service: ShortSpeechService())
+        _ = await scheduled.next()
+        #expect(player.snapshot.status == .playing)
+        var stopped = false
+        output.onStop = { stopped = true }
+        let interruption = try #require(output.interruptions.last)
+        interruption(.interrupted)
+        #expect(stopped)
+        #expect(player.snapshot.owner == owner)
+        #expect(player.snapshot.status == .failed(.interrupted))
+        #expect(player.pendingFailure(for: owner) == .interrupted)
+        let lateCompletion = try #require(output.completions.last)
+        lateCompletion()
+        #expect(player.snapshot.status == .failed(.interrupted))
+    }
+
+    @Test(.timeLimit(.minutes(1)))
     func playbackCompletionIsScopedToItsGeneration() async throws {
         let output = SilentSpeechOutput()
         let player = SpeechPlayer(output: output)

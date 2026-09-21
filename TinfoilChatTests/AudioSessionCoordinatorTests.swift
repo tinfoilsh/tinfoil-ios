@@ -24,6 +24,25 @@ struct AudioSessionCoordinatorTests {
     }
 
     @Test
+    func aNewNarrationReplacesThePreviousSpeechOwner() throws {
+        var configured: [AudioSessionCoordinator.Activity?] = []
+        var interruptions = 0
+        let coordinator = AudioSessionCoordinator { configured.append($0) }
+        var first: UUID?
+        first = try coordinator.acquire(.speech) {
+            interruptions += 1
+            if let first { coordinator.release(first) }
+        }
+        let second = try coordinator.acquire(.speech)
+        #expect(interruptions == 1)
+        #expect(configured == [.speech, nil, .speech])
+        coordinator.release(try #require(first))
+        #expect(configured == [.speech, nil, .speech])
+        coordinator.release(second)
+        #expect(configured == [.speech, nil, .speech, nil])
+    }
+
+    @Test
     func stoppingOneAlarmDoesNotDeactivateRecordingOrAnotherAlarm() throws {
         var configured: [AudioSessionCoordinator.Activity?] = []
         let coordinator = AudioSessionCoordinator { configured.append($0) }

@@ -59,4 +59,19 @@ struct PCMStreamDecoderTests {
         #expect(throws: SpeechError.invalidAudio) { try decoder.decode(Data(repeating: 0, count: count)) }
         #expect(decoder.receivedBytes == 0)
     }
+
+    @Test
+    func limitsTotalResponseBytesAcrossMultipleNetworkChunks() throws {
+        var decoder = PCMStreamDecoder()
+        let maximumBytes = Constants.Speech.maxChunkSamples * Constants.Speech.bytesPerSample
+        let half = maximumBytes / 2
+        _ = try decoder.decode(Data(repeating: 0, count: half))
+        #expect(throws: SpeechError.invalidAudio) { try decoder.decode(Data(repeating: 0, count: half + 1)) }
+        #expect(decoder.receivedBytes == half)
+        _ = try decoder.decode(Data(repeating: 0, count: maximumBytes - half))
+        #expect(decoder.receivedBytes == maximumBytes)
+        #expect(throws: SpeechError.invalidAudio) { try decoder.decode(Data([0])) }
+        #expect(decoder.receivedBytes == maximumBytes)
+        #expect(try decoder.finish().count == Constants.Speech.maxChunkSamples % Constants.Speech.blockSamples)
+    }
 }
