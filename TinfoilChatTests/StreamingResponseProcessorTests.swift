@@ -5,6 +5,19 @@ import Testing
 
 @Suite("Streaming response completion")
 struct StreamingResponseProcessorTests {
+    @Test("tracks stream establishment even before visible text", arguments: ["", "Partial answer"])
+    func recordsReceivedChunk(content: String) throws {
+        let processor = SynchronizedStreamingResponseProcessor(
+            StreamingResponseProcessor(isWebSearchEnabled: false, hapticEnabled: false)
+        )
+        #expect(!processor.hasReceivedChunk)
+
+        let parsed = processor.parse(try chunk(content: content))
+        #expect(processor.hasReceivedChunk)
+        _ = processor.process(parsed)
+        #expect(processor.hasReceivedChunk)
+    }
+
     @Test("rejects a response without a finish reason")
     func rejectsIncompleteResponse() throws {
         let processor = StreamingResponseProcessor(

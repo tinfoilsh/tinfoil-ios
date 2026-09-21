@@ -253,6 +253,13 @@ enum Constants {
         /// never gives up on a slow origin before the edge would, and long
         /// reasoning or tool-call gaps are not reported as a lost connection.
         static let streamIdleTimeoutSeconds: TimeInterval = 120
+        static let keyConfigurationErrorStatus = 422
+        static let problemContentType = "application/problem+json"
+        static let keyConfigurationErrorType = "urn:ietf:params:ehbp:error:key-config"
+        static let maximumDiagnosticBytes = 4 * 1024
+        static let interruptedStreamMessage = "The response was interrupted before it finished. Please try again."
+        // OpenAI's ChatStreamResult decoder reads ParsingOptions from this user-info key.
+        static let sdkParsingOptionsKey = CodingUserInfoKey(rawValue: "parsingOptions")!
         static let scanStallTimeoutSeconds: TimeInterval = 120
         static let hkdfInfo = "tinfoil-chat-recovery-envelope-v1"
         static let aadLabel = "tinfoil-chat-recovery-envelope-aad-v1"
@@ -518,6 +525,7 @@ enum Constants {
     }
 
     enum Audio {
+        static let microphoneIconName = "mic"
         static let recordingTimeoutSeconds: TimeInterval = 600  // 10 minutes
         static let holdToRecordMinimumPressSeconds: TimeInterval = 0.3
         static let recordingButtonDiameter: CGFloat = 32

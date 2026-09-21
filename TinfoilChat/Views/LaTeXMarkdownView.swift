@@ -35,7 +35,7 @@ private func citationStructuredText(
         .fixedSize(horizontal: false, vertical: true)
 }
 
-private enum SegmentKind: Sendable {
+enum SegmentKind: Sendable {
     case markdown(String)
     case latex(String, isDisplay: Bool)
     case table(ParsedTable)
@@ -43,7 +43,7 @@ private enum SegmentKind: Sendable {
 
 
 
-private struct ContentSegment: Sendable {
+struct ContentSegment: Sendable {
     let id: String
     let kind: SegmentKind
 }
@@ -136,6 +136,11 @@ private class MarkdownRenderCache: @unchecked Sendable {
 
 /// A view that renders mixed Markdown and LaTeX content
 struct LaTeXMarkdownView: View, Equatable {
+    struct ParsingIdentity: Equatable {
+        let content: String
+        let isStreaming: Bool
+    }
+
     let content: String
     let isDarkMode: Bool
     let horizontalPadding: CGFloat
@@ -152,7 +157,7 @@ struct LaTeXMarkdownView: View, Equatable {
     // Pre-compiled regex patterns (compiled once, reused across all renders)
     private nonisolated static let codeBlockRegex = try? NSRegularExpression(pattern: "```[\\s\\S]*?```", options: [])
     private nonisolated static let inlineCodeRegex = try? NSRegularExpression(pattern: "`[^`]+`", options: [])
-    private nonisolated static let displayLatexRegex = try? NSRegularExpression(pattern: "\\\\\\[(.+?)\\\\\\]", options: [.dotMatchesLineSeparators])
+    private nonisolated static let displayLatexRegex = try? NSRegularExpression(pattern: #"\\\[(.+?)\\\]|\$\$(.+?)\$\$"#, options: [.dotMatchesLineSeparators])
     private nonisolated static let inlineLatexRegex = try? NSRegularExpression(pattern: "\\\\\\((.+?)\\\\\\)", options: [])
     static func == (lhs: LaTeXMarkdownView, rhs: LaTeXMarkdownView) -> Bool {
         lhs.content == rhs.content &&
@@ -209,12 +214,13 @@ struct LaTeXMarkdownView: View, Equatable {
         .transaction { transaction in
             transaction.animation = nil
         }
-        .task(id: content) {
+        .task(id: ParsingIdentity(content: content, isStreaming: isStreaming)) {
             guard !isStreaming else { return }
             if let cached = MarkdownRenderCache.shared.get(for: content) {
                 segments = cached
                 return
             }
+            segments = nil
             let contentToProcess = content
             let parsingTask = Task.detached(priority: .userInitiated) {
                 Self.parseContent(contentToProcess)
@@ -459,7 +465,7 @@ struct LaTeXMarkdownView: View, Equatable {
     }
 
     /// Parse content into segments of markdown and LaTeX
-    private nonisolated static func parseContent(_ content: String) -> [ContentSegment] {
+    nonisolated static func parseContent(_ content: String) -> [ContentSegment] {
         guard !Task.isCancelled else { return [] }
         if content.count > Constants.Rendering.maxFullParsingCharacters {
             return splitLargeContent(content)
@@ -548,6 +554,8 @@ struct LaTeXMarkdownView: View, Equatable {
 
                 if isDisplay {
                     if fullMatch.hasPrefix("\\[") && fullMatch.hasSuffix("\\]") {
+                        latex = String(fullMatch.dropFirst(2).dropLast(2))
+                    } else if fullMatch.hasPrefix("$$") && fullMatch.hasSuffix("$$") {
                         latex = String(fullMatch.dropFirst(2).dropLast(2))
                     } else {
                         latex = fullMatch
@@ -1033,13 +1041,13 @@ struct LaTeXMarkdownView: View, Equatable {
     }
 }
 
-private struct ParsedTable: Sendable {
+struct ParsedTable: Sendable {
     let headers: [String]
     let alignments: [TableAlignment]
     let rows: [[String]]
 }
 
-private enum TableAlignment: Sendable {
+enum TableAlignment: Sendable {
     case leading
     case center
     case trailing

@@ -48,6 +48,22 @@ struct PendingResponseRecoveryPresentationTests {
         ))
     }
 
+    @Test func interruptedResponseShowsErrorOnlyIfRecoveryCannotContinue() {
+        var message = Message(role: .assistant, turnId: "turn-1", content: "Partial answer")
+        message.streamError = Constants.ChatRecovery.interruptedStreamMessage
+        #expect(!shouldShowStreamError(message: message, pendingRecoveries: [recovery]))
+        #expect(shouldShowStreamError(message: message, pendingRecoveries: []))
+
+        message.streamError = "Connection lost"
+        message.isConnectionError = true
+        #expect(!shouldShowStreamError(message: message, pendingRecoveries: [recovery]))
+        #expect(shouldShowStreamError(message: message, pendingRecoveries: []))
+
+        message.isConnectionError = false
+        message.streamError = "Rate limit reached"
+        #expect(shouldShowStreamError(message: message, pendingRecoveries: [recovery]))
+    }
+
     @Test func draftSuppressesPlaceholder() {
         let user = Message(role: .user, turnId: "turn-1", content: "Question")
 
