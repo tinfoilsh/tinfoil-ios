@@ -60,4 +60,44 @@ struct AudioSessionCoordinatorTests {
         coordinator.release(alarm)
         #expect(configured.last == .some(nil))
     }
+
+    @Test
+    func anAcquisitionRecoversFromFailedDeactivation() throws {
+        var configured: [AudioSessionCoordinator.Activity?] = []
+        var failDeactivation = true
+        let coordinator = AudioSessionCoordinator { activity in
+            configured.append(activity)
+            if activity == nil, failDeactivation {
+                failDeactivation = false
+                throw SpeechError.interrupted
+            }
+        }
+        let first = try coordinator.acquire(.speech)
+        coordinator.release(first)
+        let second = try coordinator.acquire(.speech)
+        coordinator.release(second)
+        #expect(configured == [.speech, nil, .speech, nil])
+    }
+
+    @Test
+    func anAcquisitionRetriesTheRemainingOwnersFailedConfiguration() throws {
+        var configured: [AudioSessionCoordinator.Activity?] = []
+        var failAlarmConfiguration = false
+        let coordinator = AudioSessionCoordinator { activity in
+            configured.append(activity)
+            if activity == .alarm, failAlarmConfiguration {
+                failAlarmConfiguration = false
+                throw SpeechError.interrupted
+            }
+        }
+        let alarm = try coordinator.acquire(.alarm)
+        let recording = try coordinator.acquire(.recording)
+        failAlarmConfiguration = true
+        coordinator.release(recording)
+        let nextAlarm = try coordinator.acquire(.alarm)
+        #expect(configured == [.alarm, .recording, .alarm, .alarm])
+        coordinator.release(alarm)
+        coordinator.release(nextAlarm)
+        #expect(configured.last == .some(nil))
+    }
 }

@@ -6,7 +6,8 @@ struct PCMStreamDecoderTests {
     @Test
     func decodesSignedLittleEndianSamplesAcrossEveryByteSplit() throws {
         let bytes = Data([0x00, 0x80, 0xff, 0xff, 0x00, 0x00, 0x01, 0x00, 0xff, 0x7f])
-        let expected = [Int16.min, -1, 0, 1, Int16.max].map { Float($0) / Constants.Speech.pcmScale }
+        let scale = Float(Int16.max) + 1
+        let expected = [Int16.min, -1, 0, 1, Int16.max].map { Float($0) / scale }
         for split in 0...bytes.count {
             var decoder = PCMStreamDecoder()
             var samples = try decoder.decode(bytes.prefix(split)).flatMap { $0 }
@@ -24,8 +25,22 @@ struct PCMStreamDecoderTests {
         var decoder = PCMStreamDecoder()
         let blocks = try decoder.decode(Data(repeating: 0, count: count * Constants.Speech.bytesPerSample))
         #expect(blocks.count == 1)
-        #expect(blocks[0].count == Constants.Speech.blockSamples)
+        #expect(blocks.first?.count == Constants.Speech.blockSamples)
         #expect(try decoder.finish() == [Float](repeating: 0, count: tailCount))
+    }
+
+    @Test
+    func completesBlocksAcrossNetworkChunksWithoutLosingTheNextSample() throws {
+        var decoder = PCMStreamDecoder()
+        let prefixSamples = Constants.Speech.blockSamples - 1
+        let prefix = try decoder.decode(Data(repeating: 0, count: prefixSamples * Constants.Speech.bytesPerSample))
+        #expect(prefix.isEmpty)
+        let blocks = try decoder.decode(Data([0x00, 0x80, 0xff]))
+        #expect(blocks.count == 1)
+        let block = try #require(blocks.first)
+        #expect(block == [Float](repeating: 0, count: prefixSamples) + [-1])
+        #expect(try decoder.decode(Data([0x7f])).isEmpty)
+        #expect(try decoder.finish() == [Float(Int16.max) / (Float(Int16.max) + 1)])
     }
 
     @Test

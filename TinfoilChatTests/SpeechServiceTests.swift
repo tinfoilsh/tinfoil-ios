@@ -30,7 +30,7 @@ struct SpeechServiceTests {
         }
         let collector = SpeechSampleCollector()
         try await service.generate("Hello") { await collector.append($0) }
-        #expect(await collector.blocks == [[-1, Float(Int16.max) / Constants.Speech.pcmScale]])
+        #expect(await collector.blocks == [[-1, Float(Int16.max) / (Float(Int16.max) + 1)]])
     }
 
     @Test(.timeLimit(.minutes(1)))
