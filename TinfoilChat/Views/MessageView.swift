@@ -57,6 +57,15 @@ func pendingResponseRecoveryDetail(phase: ChatRecoveryPhase) -> String {
     }
 }
 
+func shouldShowStreamError(message: Message, pendingRecoveries: [PendingRecoveryEnvelope]) -> Bool {
+    guard message.role == .assistant, let error = message.streamError else { return false }
+    let canRecover = message.isConnectionError || error == Constants.ChatRecovery.interruptedStreamMessage
+    let hasPendingRecovery = message.turnId.map { turnId in
+        pendingRecoveries.contains { $0.turnId == turnId }
+    } ?? false
+    return !canRecover || !hasPendingRecovery
+}
+
 private struct PendingResponseRecoveryView: View {
     let isDarkMode: Bool
     let phase: ChatRecoveryPhase
@@ -181,7 +190,7 @@ struct MessageView: View {
     /// Runs of adjacent segments collapsed for inline rendering. Adjacent
     /// searches/fetches are merged into one row so long tool-call chains
     /// don't stack N full-height pills in the chat.
-    private enum InlineSegmentRun {
+    enum InlineSegmentRun {
         case text(String, isTrailing: Bool)
         case thinking(content: String, isThinking: Bool, duration: Double?)
         case webSearches([WebSearchInstance])
@@ -189,15 +198,16 @@ struct MessageView: View {
         case toolCall(GenUIToolCall)
     }
 
-    private struct IdentifiedInlineSegmentRun: Identifiable {
+    struct IdentifiedInlineSegmentRun: Identifiable {
         let id: String
         let run: InlineSegmentRun
     }
 
-    private func inlineSegmentRuns(from segments: [MessageSegment]) -> [IdentifiedInlineSegmentRun] {
+    static func inlineSegmentRuns(from segments: [MessageSegment], message: Message) -> [IdentifiedInlineSegmentRun] {
         let lastTextIndex: Int? = {
             for i in segments.indices.reversed() {
-                if case .text = segments[i] { return i }
+                if case .text(let text) = segments[i],
+                   !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return i }
             }
             return nil
         }()
@@ -205,6 +215,7 @@ struct MessageView: View {
         var runs: [IdentifiedInlineSegmentRun] = []
         var searchBuffer: [WebSearchInstance] = []
         var searchBufferStartIndex: Int?
+        var searchThinking: (content: String, isThinking: Bool, duration: Double?, index: Int)?
         var fetchBuffer: [URLFetchState] = []
         var fetchBufferStartIndex: Int?
 
@@ -217,6 +228,13 @@ struct MessageView: View {
                 ))
                 searchBuffer.removeAll()
                 searchBufferStartIndex = nil
+            }
+            if let thinking = searchThinking {
+                runs.append(IdentifiedInlineSegmentRun(
+                    id: "thinking:\(thinking.index)",
+                    run: .thinking(content: thinking.content, isThinking: thinking.isThinking, duration: thinking.duration)
+                ))
+                searchThinking = nil
             }
         }
         func flushFetches() {
@@ -234,6 +252,7 @@ struct MessageView: View {
         for (index, segment) in segments.enumerated() {
             switch segment {
             case .text(let text):
+                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                 flushSearches()
                 flushFetches()
                 if !text.isEmpty {
@@ -243,6 +262,20 @@ struct MessageView: View {
                     ))
                 }
             case .thinking(let content, let isThinking, let duration):
+                if !searchBuffer.isEmpty {
+                    if let previous = searchThinking {
+                        let durations = [previous.duration, duration].compactMap { $0 }
+                        searchThinking = (
+                            content: [previous.content, content].filter { !$0.isEmpty }.joined(separator: "\n\n"),
+                            isThinking: previous.isThinking || isThinking,
+                            duration: durations.isEmpty ? nil : durations.reduce(0, +),
+                            index: previous.index
+                        )
+                    } else {
+                        searchThinking = (content, isThinking, duration, index)
+                    }
+                    continue
+                }
                 flushSearches()
                 flushFetches()
                 runs.append(IdentifiedInlineSegmentRun(
@@ -319,7 +352,7 @@ struct MessageView: View {
     /// same-kind event segments are grouped into one row.
     @ViewBuilder
     private func inlineSegmentsView(segments: [MessageSegment]) -> some View {
-        let runs = inlineSegmentRuns(from: segments)
+        let runs = Self.inlineSegmentRuns(from: segments, message: message)
         VStack(alignment: .leading, spacing: 4) {
             ForEach(runs) { identifiedRun in
                 switch identifiedRun.run {
@@ -703,7 +736,7 @@ struct MessageView: View {
                 }
 
                 // Show error box with regenerate button if stream failed
-                if message.streamError != nil && message.role == .assistant {
+                if shouldShowStreamError(message: message, pendingRecoveries: recoveryContext.pendingRecoveries) {
                     ErrorMessageView(
                         errorMessage: message.streamError!,
                         isDarkMode: isDarkMode,

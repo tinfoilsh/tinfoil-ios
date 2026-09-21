@@ -14,6 +14,12 @@ func shouldRetryRecoveryError(_ error: Error) -> Bool {
     return shouldRetryRecoveryResponse(statusCode: statusCode)
 }
 
+func shouldRecoverInterruptedStream(_ error: Error, recoveryRegistered: Bool) -> Bool {
+    guard recoveryRegistered else { return false }
+    return URLErrorClassifier.isConnectivityFailure(error)
+        || error is StreamingResponseProcessorError
+}
+
 struct ChatRecoveryAttempt: Sendable {
     let chatId: String
     let turnId: String
@@ -57,6 +63,12 @@ final class ChatRecoveryPhaseTracker: ObservableObject {
     func setPhase(_ phase: ChatRecoveryPhase, turnId: String) {
         guard phases[turnId] != phase else { return }
         phases[turnId] = phase
+    }
+
+    func beginRecovery(chatId: String, turnId: String) -> Bool {
+        guard !StreamingTracker.shared.isStreaming(chatId) else { return false }
+        setPhase(.generating, turnId: turnId)
+        return true
     }
 
     func clear(turnId: String) {
@@ -657,12 +669,6 @@ actor ChatRecoveryCoordinator {
             turnId: envelope.turnId,
             task: task
         )
-        await MainActor.run {
-            ChatRecoveryPhaseTracker.shared.setPhase(
-                .generating,
-                turnId: envelope.turnId
-            )
-        }
         await withTaskCancellationHandler {
             await task.value
         } onCancel: {
@@ -696,6 +702,12 @@ actor ChatRecoveryCoordinator {
         else {
             return
         }
+        guard await MainActor.run(body: {
+            ChatRecoveryPhaseTracker.shared.beginRecovery(
+                chatId: chatId,
+                turnId: originalEnvelope.turnId
+            )
+        }) else { return }
         var envelope = originalEnvelope
         let payload: ChatRecoveryEnvelopePayload
         do {

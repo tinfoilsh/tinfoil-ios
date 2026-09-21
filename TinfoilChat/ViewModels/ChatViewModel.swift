@@ -4120,6 +4120,7 @@ class ChatViewModel: ObservableObject {
             var recoveryRegistered = false
             var recoveryRegistrationAttempted = false
             var recoverySessionMayHaveStarted = false
+            var streamWasEstablished = false
             var activeSnapshotPublisher: LazySnapshotPublisher<StreamingResponseProcessor.Snapshot>?
             let snapshotPublicationIDs = SnapshotPublicationIDs()
             let snapshotPublicationFence = SnapshotPublicationFence()
@@ -4377,6 +4378,7 @@ class ChatViewModel: ObservableObject {
                         headers: [Constants.API.conversationIdHeader: streamChatId]
                     )
                 }
+                streamWasEstablished = recoveryRegistered
 
                 // Applies one decoded marker event to the current chat.
                 // Mirrors the behavior the legacy SDK onWebSearchEvent
@@ -4863,7 +4865,7 @@ class ChatViewModel: ObservableObject {
 
                 // Check if this is a 401 auth error and we haven't retried yet
                 let shouldRetry = await MainActor.run {
-                    if !hasRetriedWithFreshKey && ChatViewModel.isAuthenticationError(error) {
+                    if !hasRetriedWithFreshKey && !streamWasEstablished && ChatViewModel.isAuthenticationError(error) {
                         #if DEBUG
                         print("[Chat] Will retry with fresh key")
                         #endif
@@ -4928,9 +4930,11 @@ class ChatViewModel: ObservableObject {
                 }
                 recoveryAttempts.removeValue(forKey: streamChatId)
 
+                let willRecover = shouldRecoverInterruptedStream(error, recoveryRegistered: recoveryRegistered)
+
                 // Handle error
                 await MainActor.run {
-                    if self.currentChat?.id == streamChatId {
+                    if !willRecover && self.currentChat?.id == streamChatId {
                         AccessibilityAnnouncer.announce(Constants.Accessibility.responseFailed)
                         HapticFeedback.trigger(.error)
                     }
@@ -4982,6 +4986,9 @@ class ChatViewModel: ObservableObject {
                         }
                     }
                     self.finishStreamState(chatId: sid)
+                }
+                if willRecover {
+                    scanPendingRecoveries()
                 }
             }
 
@@ -5074,6 +5081,10 @@ class ChatViewModel: ObservableObject {
         // Authentication issues
         if nsError.domain == "TinfoilChat" && nsError.code == 401 {
             return "Authentication error. Please sign in again."
+        }
+
+        if error is StreamingResponseProcessorError {
+            return Constants.ChatRecovery.interruptedStreamMessage
         }
 
         if error is PromptResolutionError {

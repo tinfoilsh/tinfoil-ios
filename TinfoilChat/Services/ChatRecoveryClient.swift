@@ -69,10 +69,35 @@ private actor ChatRecoveryByteCounter {
     }
 }
 
+enum ChatRecoveryKeyConfiguration {
+    private struct Problem: Decodable {
+        let type: String?
+    }
+
+    static func shouldInspect(_ response: HTTPURLResponse) -> Bool {
+        let contentType = response.value(forHTTPHeaderField: "Content-Type")?
+            .split(separator: ";", maxSplits: 1).first?
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return response.statusCode == Constants.ChatRecovery.keyConfigurationErrorStatus
+            && contentType == Constants.ChatRecovery.problemContentType
+            && response.expectedContentLength >= 0
+            && response.expectedContentLength <= Constants.ChatRecovery.maximumDiagnosticBytes
+    }
+
+    static func isMismatch(response: HTTPURLResponse, body: Data) -> Bool {
+        guard shouldInspect(response),
+              body.count == response.expectedContentLength,
+              body.count <= Constants.ChatRecovery.maximumDiagnosticBytes,
+              let problem = try? JSONDecoder().decode(Problem.self, from: body) else { return false }
+        return problem.type == Constants.ChatRecovery.keyConfigurationErrorType
+    }
+}
+
 actor ChatRecoveryClient {
     static let shared = ChatRecoveryClient()
 
     private var verifiedEndpoint: (enclaveURL: String, publicKey: Data)?
+    private var endpointGeneration: UInt64 = 0
 
     /// Session for the live completion stream. The shared session's 60s
     /// idle timeout is shorter than the gaps a slow origin or long tool call
@@ -91,8 +116,27 @@ actor ChatRecoveryClient {
         bearerToken: String,
         userId: String
     ) async throws -> RecoverableChatStream {
+        try await start(
+            query: query,
+            conversationId: conversationId,
+            sessionId: sessionId,
+            bearerToken: bearerToken,
+            userId: userId,
+            mayRefreshKey: true
+        )
+    }
+
+    private func start(
+        query: ChatQuery,
+        conversationId: String,
+        sessionId: String,
+        bearerToken: String,
+        userId: String,
+        mayRefreshKey: Bool
+    ) async throws -> RecoverableChatStream {
         try validateSessionId(sessionId)
         let endpoint = try await endpoint()
+        try Task.checkCancellation()
         let client = try EHBPClient(
             baseURL: Constants.API.baseURL,
             publicKey: endpoint.publicKey,
@@ -122,6 +166,32 @@ actor ChatRecoveryClient {
             body: body
         )
         guard (200..<300).contains(response.response.statusCode) else {
+            // Replay only an explicit pre-inference key rejection, using a newly attested key.
+            if mayRefreshKey, ChatRecoveryKeyConfiguration.shouldInspect(response.response) {
+                var diagnostic = Data()
+                for try await chunk in response.stream {
+                    try Task.checkCancellation()
+                    guard chunk.count <= Constants.ChatRecovery.maximumDiagnosticBytes - diagnostic.count else {
+                        throw ChatRecoveryClientError.httpStatus(response.response.statusCode)
+                    }
+                    diagnostic.append(chunk)
+                }
+                if ChatRecoveryKeyConfiguration.isMismatch(response: response.response, body: diagnostic) {
+                    if verifiedEndpoint?.enclaveURL == endpoint.enclaveURL,
+                       verifiedEndpoint?.publicKey == endpoint.publicKey {
+                        verifiedEndpoint = nil
+                        endpointGeneration &+= 1
+                    }
+                    return try await start(
+                        query: query,
+                        conversationId: conversationId,
+                        sessionId: sessionId,
+                        bearerToken: bearerToken,
+                        userId: userId,
+                        mayRefreshKey: false
+                    )
+                }
+            }
             throw ChatRecoveryClientError.httpStatus(response.response.statusCode)
         }
         let token = try client.getSessionRecoveryToken()
@@ -239,8 +309,10 @@ actor ChatRecoveryClient {
         if let verifiedEndpoint {
             return verifiedEndpoint
         }
+        let generation = endpointGeneration
         let verifier = SecureClient()
         let groundTruth = try await verifier.verify()
+        try Task.checkCancellation()
         guard let url = verifier.verifiedEnclaveURL,
               let keyHex = groundTruth.hpkePublicKey,
               let publicKey = Data(lowercaseHex: keyHex),
@@ -249,6 +321,7 @@ actor ChatRecoveryClient {
             throw ChatRecoveryClientError.unavailable
         }
         let endpoint = (enclaveURL: url, publicKey: publicKey)
+        guard generation == endpointGeneration else { return try await self.endpoint() }
         verifiedEndpoint = endpoint
         return endpoint
     }
@@ -322,12 +395,14 @@ actor ChatRecoveryClient {
         }
     }
 
-    private static func decodeSSE(
+    static func decodeSSE(
         _ byteStream: AsyncThrowingStream<Data, Error>
     ) -> AsyncThrowingStream<ChatStreamResult, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
+                    let decoder = JSONDecoder()
+                    decoder.userInfo[Constants.ChatRecovery.sdkParsingOptionsKey] = ParsingOptions.relaxed
                     var buffer = Data()
                     for try await chunk in byteStream {
                         try Task.checkCancellation()
@@ -338,9 +413,13 @@ actor ChatRecoveryClient {
                             guard let payload = event.ssePayload, payload != "[DONE]" else {
                                 continue
                             }
-                            let result = try JSONDecoder().decode(
+                            let data = Data(payload.utf8)
+                            if let error = try? decoder.decode(APIErrorResponse.self, from: data) {
+                                throw error
+                            }
+                            let result = try decoder.decode(
                                 ChatStreamResult.self,
-                                from: Data(payload.utf8)
+                                from: data
                             )
                             continuation.yield(result)
                         }

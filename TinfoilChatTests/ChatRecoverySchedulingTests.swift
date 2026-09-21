@@ -3,6 +3,46 @@ import Testing
 @testable import TinfoilChat
 
 struct ChatRecoverySchedulingTests {
+    @Test @MainActor
+    func liveStreamCannotEnterRecoveryPresentation() {
+        let chatId = UUID().uuidString
+        let turnId = UUID().uuidString
+        let tracker = ChatRecoveryPhaseTracker.shared
+        StreamingTracker.shared.startStreaming(chatId)
+        defer {
+            StreamingTracker.shared.endStreaming(chatId)
+            tracker.clear(turnId: turnId)
+        }
+        #expect(!tracker.beginRecovery(chatId: chatId, turnId: turnId))
+        #expect(!tracker.isActive(turnId: turnId))
+
+        StreamingTracker.shared.endStreaming(chatId)
+        #expect(tracker.beginRecovery(chatId: chatId, turnId: turnId))
+        #expect(tracker.isActive(turnId: turnId))
+    }
+
+    @Test func onlyRecoverableInterruptionsDeferTheErrorCard() {
+        let interruptions: [Error] = [
+            URLError(.networkConnectionLost),
+            URLError(.timedOut),
+            StreamingResponseProcessorError.incompleteResponse,
+        ]
+        for error in interruptions {
+            #expect(shouldRecoverInterruptedStream(error, recoveryRegistered: true))
+            #expect(!shouldRecoverInterruptedStream(error, recoveryRegistered: false))
+        }
+        let terminalErrors: [Error] = [
+            CancellationError(),
+            URLError(.cancelled),
+            URLError(.serverCertificateUntrusted),
+            ChatRecoveryClientError.httpStatus(401),
+            ChatRecoveryClientError.httpStatus(429),
+        ]
+        for error in terminalErrors {
+            #expect(!shouldRecoverInterruptedStream(error, recoveryRegistered: true))
+        }
+    }
+
     @Test func emptyThinkingDraftDoesNotReplaceRecoveryIndicator() {
         let emptyThinking = Message(
             role: .assistant,
