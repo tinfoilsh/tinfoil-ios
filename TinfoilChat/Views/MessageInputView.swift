@@ -37,6 +37,10 @@ func hasNonWhitespaceContent(_ text: String) -> Bool {
     text.contains { !$0.isWhitespace }
 }
 
+func shouldShowComposerText(hasDraftText: Bool, showsAudioWaveform: Bool) -> Bool {
+    hasDraftText || !showsAudioWaveform
+}
+
 func shouldShowAudioInput(
     canUseAudioInput: Bool,
     isRecording: Bool,
@@ -601,14 +605,18 @@ struct MessageInputView: View {
 
     @ViewBuilder
     private var messageComposerContent: some View {
-        if viewModel.isRecording || isTranscribingAudio {
-            AudioRecordingWaveformView(recordingService: .shared)
-                .frame(height: Layout.minimumHeight)
-                .padding(.horizontal)
-                .transition(.opacity)
-        } else {
-            messageTextEditor
-                .transition(.opacity)
+        let showsAudioWaveform = viewModel.isRecording || isTranscribingAudio
+        VStack(spacing: 0) {
+            if shouldShowComposerText(hasDraftText: messageTextHasNonWhitespace, showsAudioWaveform: showsAudioWaveform) {
+                messageTextEditor
+                    .transition(.opacity)
+            }
+            if showsAudioWaveform {
+                AudioRecordingWaveformView(recordingService: .shared)
+                    .frame(height: Layout.minimumHeight)
+                    .padding(.horizontal)
+                    .transition(.opacity)
+            }
         }
     }
 
@@ -1083,6 +1091,7 @@ struct MessageInputView: View {
     }
 
     private func submitEditorText(_ text: String) -> Bool {
+        guard !showsRecordingState, !isTranscribingAudio else { return false }
         guard isEditingMessage else {
             return viewModel.sendMessage(text: text)
         }

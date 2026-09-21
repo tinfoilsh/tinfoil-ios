@@ -13,6 +13,17 @@ struct MessageInputContentTests {
         #expect(!hasNonWhitespaceContent(text))
     }
 
+    @Test("keeps existing text above an active audio waveform", arguments: ["", " \n", "Existing draft"], [false, true])
+    func composerTextVisibility(text: String, showsAudioWaveform: Bool) {
+        let hasDraftText = hasNonWhitespaceContent(text)
+        let showsText = shouldShowComposerText(hasDraftText: hasDraftText, showsAudioWaveform: showsAudioWaveform)
+        if showsAudioWaveform {
+            #expect(showsText == hasDraftText)
+        } else {
+            #expect(showsText)
+        }
+    }
+
     @Test("describes remaining free requests", arguments: [
         (3, "3 free requests left today"),
         (1, "1 free request left today"),
