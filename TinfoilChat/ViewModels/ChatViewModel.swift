@@ -1710,6 +1710,11 @@ class ChatViewModel: ObservableObject {
     
     // MARK: - Public Methods
 
+    func invalidateAccountPlayback() {
+        guard speechPlayer.snapshot.owner != nil else { return }
+        speechPlayer.stop()
+    }
+
     func toggleReadAloud(messageId: String) throws {
         guard let chat = currentChat else { throw SpeechError.unavailable }
         let owner = SpeechOwner(chatId: chat.id, messageId: messageId)

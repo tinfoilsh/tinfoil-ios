@@ -55,10 +55,10 @@ class AudioRecordingService: NSObject, ObservableObject {
         audioSessionLease = lease
         defer {
             if !isRecording {
-                AudioSessionCoordinator.shared.release(lease)
-                audioSessionLease = nil
                 audioRecorder = nil
                 cleanupRecordingFile()
+                AudioSessionCoordinator.shared.release(lease)
+                audioSessionLease = nil
             }
         }
 
@@ -75,8 +75,6 @@ class AudioRecordingService: NSObject, ObservableObject {
         audioRecorder = try AVAudioRecorder(url: url, settings: settings)
         audioRecorder?.isMeteringEnabled = true
         guard audioRecorder?.record() == true else {
-            audioRecorder = nil
-            cleanupRecordingFile()
             throw AudioRecordingError.recordingFailed
         }
         isRecording = true

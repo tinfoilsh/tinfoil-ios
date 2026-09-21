@@ -64,14 +64,14 @@ class AuthManager: ObservableObject {
 
     @Published var isAuthenticated = false {
         didSet {
-            if oldValue != isAuthenticated { chatViewModel?.speechPlayer.stop() }
+            if oldValue != isAuthenticated { chatViewModel?.invalidateAccountPlayback() }
             synchronizeSafeguardsAccount()
         }
     }
     @Published var isLoading = true
     @Published var localUserData: [String: Any]? = nil {
         didSet {
-            if oldValue?[Self.userIdKey] as? String != localUserId { chatViewModel?.speechPlayer.stop() }
+            if oldValue?[Self.userIdKey] as? String != localUserId { chatViewModel?.invalidateAccountPlayback() }
             synchronizeSafeguardsAccount()
         }
     }
@@ -193,7 +193,7 @@ class AuthManager: ObservableObject {
     }
 
     private func invalidateAccountLifecycle() {
-        chatViewModel?.speechPlayer.stop()
+        chatViewModel?.invalidateAccountPlayback()
         accountLifecycleGeneration &+= 1
     }
 
