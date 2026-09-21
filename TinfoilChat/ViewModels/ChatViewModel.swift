@@ -4120,7 +4120,8 @@ class ChatViewModel: ObservableObject {
             var recoveryRegistered = false
             var recoveryRegistrationAttempted = false
             var recoverySessionMayHaveStarted = false
-            var streamWasEstablished = false
+            var recoverableStreamWasEstablished = false
+            var activeStreamProcessor: SynchronizedStreamingResponseProcessor?
             var activeSnapshotPublisher: LazySnapshotPublisher<StreamingResponseProcessor.Snapshot>?
             let snapshotPublicationIDs = SnapshotPublicationIDs()
             let snapshotPublicationFence = SnapshotPublicationFence()
@@ -4302,6 +4303,7 @@ class ChatViewModel: ObservableObject {
                         isInThinkingMode: initialIsThinking
                     )
                 )
+                activeStreamProcessor = processor
                 let snapshotPublisher = LazySnapshotPublisher(
                     interval: Constants.Streaming.uiUpdateInterval,
                     publicationIDs: snapshotPublicationIDs,
@@ -4378,7 +4380,7 @@ class ChatViewModel: ObservableObject {
                         headers: [Constants.API.conversationIdHeader: streamChatId]
                     )
                 }
-                streamWasEstablished = recoveryRegistered
+                recoverableStreamWasEstablished = recoveryRegistered
 
                 // Applies one decoded marker event to the current chat.
                 // Mirrors the behavior the legacy SDK onWebSearchEvent
@@ -4865,7 +4867,10 @@ class ChatViewModel: ObservableObject {
 
                 // Check if this is a 401 auth error and we haven't retried yet
                 let shouldRetry = await MainActor.run {
-                    if !hasRetriedWithFreshKey && !streamWasEstablished && ChatViewModel.isAuthenticationError(error) {
+                    if !hasRetriedWithFreshKey,
+                       !recoverableStreamWasEstablished,
+                       activeStreamProcessor?.hasReceivedChunk != true,
+                       ChatViewModel.isAuthenticationError(error) {
                         #if DEBUG
                         print("[Chat] Will retry with fresh key")
                         #endif

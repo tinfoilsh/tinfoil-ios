@@ -124,6 +124,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     private var currentThoughts: String?
     private var generationTimeSeconds: TimeInterval?
     private var receivedFinishReason = false
+    private(set) var hasReceivedChunk = false
 
     private let isWebSearchEnabled: Bool
     private let hapticEnabled: Bool
@@ -206,6 +207,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     /// the main actor before `process` runs so segment ordering matches the
     /// order in which markers arrived relative to the surrounding text.
     func parse(_ chunk: ChatStreamResult) -> ParsedChunk {
+        hasReceivedChunk = true
         if chunk.choices.contains(where: { $0.finishReason != nil }) {
             receivedFinishReason = true
         }
@@ -632,6 +634,10 @@ final class SynchronizedStreamingResponseProcessor: @unchecked Sendable {
 
     init(_ processor: StreamingResponseProcessor) {
         self.processor = processor
+    }
+
+    var hasReceivedChunk: Bool {
+        withProcessor { $0.hasReceivedChunk }
     }
 
     func withProcessor<Result>(
