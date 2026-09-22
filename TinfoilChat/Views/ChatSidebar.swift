@@ -1225,6 +1225,12 @@ struct ChatListItem: View {
                                     .foregroundColor(.red)
                                     .accessibilityHidden(true)
                             }
+
+                            if chat.pendingSave {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                    .accessibilityLabel(Constants.ChatFork.sidebarSpinnerLabel)
+                            }
                             
                             if chat.isBlankChat {
                                 // Blue dot indicator for new chats
@@ -1334,7 +1340,9 @@ struct ChatListItem: View {
                 components.append(updatedTimeString)
             }
         }
-        if isGenerating {
+        if chat.pendingSave {
+            components.append(Constants.ChatFork.sidebarSpinnerLabel)
+        } else if isGenerating {
             components.append("Generating response")
         } else if syncFailed {
             components.append("Couldn't sync with cloud")

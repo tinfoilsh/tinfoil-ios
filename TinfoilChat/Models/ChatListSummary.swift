@@ -16,6 +16,7 @@ struct ChatListSummary: Identifiable, Equatable, Sendable {
     let dataCorrupted: Bool
     let isBlankChat: Bool
     let isTemporary: Bool
+    let pendingSave: Bool
 
     init(from chat: Chat) {
         id = chat.id
@@ -28,6 +29,7 @@ struct ChatListSummary: Identifiable, Equatable, Sendable {
         dataCorrupted = chat.dataCorrupted
         isBlankChat = chat.isBlankChat
         isTemporary = chat.isTemporary
+        pendingSave = chat.pendingSave
     }
 
     init(from entry: ChatIndexEntry) {
@@ -41,5 +43,6 @@ struct ChatListSummary: Identifiable, Equatable, Sendable {
         dataCorrupted = entry.dataCorrupted
         isBlankChat = entry.messageCount == 0 && !entry.decryptionFailed
         isTemporary = false
+        pendingSave = false
     }
 }

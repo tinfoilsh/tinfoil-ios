@@ -163,6 +163,7 @@ struct ChatListView: View {
                     isInputExpanded: $isInputExpanded,
                     isKeyboardVisible: isKeyboardVisible
                 )
+                .disabled(isForkingCurrentChat)
                 .environmentObject(viewModel.authManager ?? AuthManager())
             }
             .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
@@ -299,6 +300,45 @@ struct ChatListView: View {
                 .accessibilityLabel(viewModel.chatHydrationError ?? "Loading conversation")
             }
         }
+        .overlay {
+            if isForkingCurrentChat {
+                forkingOverlay
+            }
+        }
+    }
+
+    private var isForkingCurrentChat: Bool {
+        viewModel.forkingChatId != nil && viewModel.forkingChatId == viewModel.currentChat?.id
+    }
+
+    /// Dims the transcript and blocks interaction while a fork of the
+    /// current chat is landing, so the user cannot edit or send into the
+    /// source until the fork has been selected.
+    private var forkingOverlay: some View {
+        ZStack {
+            Color.chatBackground(isDarkMode: isDarkMode)
+                .opacity(Constants.ChatFork.overlayDimOpacity)
+                .ignoresSafeArea()
+            HStack(spacing: 12) {
+                ProgressView()
+                Text(Constants.ChatFork.overlayLabel)
+                    .font(.subheadline.weight(.medium))
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.chatBackground(isDarkMode: isDarkMode))
+                    .shadow(radius: 8, y: 2)
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Constants.ChatFork.overlayLabel)
+        .accessibilityAddTraits(.updatesFrequently)
+        .transition(.opacity)
+        .animation(.easeInOut(duration: Constants.ChatFork.overlayFadeSeconds), value: viewModel.forkingChatId)
     }
 
     private func pruneRecoveryDrafts() {

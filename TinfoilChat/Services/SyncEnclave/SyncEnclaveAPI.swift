@@ -411,6 +411,48 @@ struct EnclaveOKResponse: Decodable {
     let ok: Bool
 }
 
+// MARK: - Fork
+
+/// Server-side chat fork. The enclave unseals the source under the CEK,
+/// keeps the first `messageCount` messages, re-uploads every image so the
+/// fork owns its own attachment blobs, and seals the result as a new
+/// create-only row. `createdAt` is caller-supplied so a retry under the
+/// same idempotency key seals byte-identical plaintext.
+struct EnclaveForkRequest: Encodable, Sendable {
+    let sourceId: String
+    let targetId: String
+    /// Base64 CEK.
+    let key: String
+    let messageCount: Int
+    let title: String
+    /// RFC 3339 timestamp stamped as the fork's createdAt/updatedAt.
+    let createdAt: String
+    let idempotencyKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case key, title
+        case sourceId = "source_id"
+        case targetId = "target_id"
+        case messageCount = "message_count"
+        case createdAt = "created_at"
+        case idempotencyKey = "idempotency_key"
+    }
+}
+
+struct EnclaveForkResponse: Decodable, Sendable {
+    let ok: Bool
+    let id: String
+    let etag: String
+    let keyId: String
+    let searchIndexed: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case ok, id, etag
+        case keyId = "key_id"
+        case searchIndexed = "search_indexed"
+    }
+}
+
 // MARK: - Key registry
 
 struct EnclaveKeyRegisterBundleInput: Encodable {
@@ -870,6 +912,10 @@ enum SyncEnclaveAPI {
         _ request: EnclaveDeleteAllProjectsRequest
     ) async throws -> EnclaveDeleteAllProjectsResponse {
         try await SyncEnclaveClient.shared.post(path: "/v1/sync/delete-all-projects", body: request)
+    }
+
+    static func fork(_ request: EnclaveForkRequest) async throws -> EnclaveForkResponse {
+        try await SyncEnclaveClient.shared.post(path: "/v1/sync/fork", body: request)
     }
 
     // MARK: Key registry
