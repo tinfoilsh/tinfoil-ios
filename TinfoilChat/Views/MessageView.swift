@@ -758,17 +758,6 @@ struct MessageView: View {
                         )
 
                         HStack(spacing: 16) {
-                            // Sources button - only show if we have web search sources
-                            if let webSearchState = message.webSearchState,
-                               !webSearchState.sources.isEmpty {
-                                SourcesButton(
-                                    sources: webSearchState.sources,
-                                    isDarkMode: isDarkMode
-                                ) {
-                                    showSourcesSheet = true
-                                }
-                            }
-
                             Button {
                                 showRawContentModal = true
                             } label: {
@@ -828,6 +817,17 @@ struct MessageView: View {
                             }
 
                             Spacer()
+                        }
+
+                        // Sources button - only show if we have web search sources
+                        if let webSearchState = message.webSearchState,
+                           !webSearchState.sources.isEmpty {
+                            SourcesButton(
+                                sources: webSearchState.sources,
+                                isDarkMode: isDarkMode
+                            ) {
+                                showSourcesSheet = true
+                            }
                         }
                     }
                     .padding(.vertical, 8)
@@ -2255,7 +2255,6 @@ private struct SourcesButton: View {
             .padding(.vertical, 8)
             .background(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
             .cornerRadius(20)
-            .fixedSize()
         }
         .buttonStyle(PlainButtonStyle())
         .foregroundColor(isDarkMode ? .white : .black)
