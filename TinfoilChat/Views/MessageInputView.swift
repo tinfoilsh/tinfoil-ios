@@ -671,7 +671,7 @@ struct MessageInputView: View {
                 messageComposerContent
 
                 // Bottom row with action buttons
-                HStack {
+                HStack(spacing: Constants.UI.composerActionSpacing) {
                     if isEditingMessage {
                         messageEditActions
                     } else {
@@ -681,7 +681,7 @@ struct MessageInputView: View {
 
                         modelControlsSelector
 
-                        Spacer()
+                        Spacer(minLength: 0)
 
                         microphoneButton
 
@@ -721,7 +721,7 @@ struct MessageInputView: View {
                 messageComposerContent
 
                 // Bottom row with action buttons
-                HStack {
+                HStack(spacing: Constants.UI.composerActionSpacing) {
                     if isEditingMessage {
                         messageEditActions
                     } else {
@@ -731,7 +731,7 @@ struct MessageInputView: View {
 
                         modelControlsSelector
 
-                        Spacer()
+                        Spacer(minLength: 0)
 
                         microphoneButton
 
@@ -904,6 +904,7 @@ struct MessageInputView: View {
         .accessibilityValue(currentModelLabel)
         .accessibilityHint("Changes the AI model")
         .padding(.leading, 4)
+        .layoutPriority(Constants.UI.modelSelectorLayoutPriority)
     }
 
     @ViewBuilder
