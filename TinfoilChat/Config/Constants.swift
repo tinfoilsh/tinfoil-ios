@@ -153,6 +153,16 @@ enum Constants {
         static let iconSize: CGFloat = 10
     }
 
+    enum SourcesButton {
+        static let faviconSize: CGFloat = 18
+        static let faviconOverlap: CGFloat = 6
+        static let labelSpacing: CGFloat = 4
+        static let horizontalPadding: CGFloat = 12
+        /// The pill never grows past this share of the screen width; favicons
+        /// that would push it wider are dropped.
+        static let maxWidthFraction: CGFloat = 0.6
+    }
+
     enum StreamingBuffer {
         static let initialMultiplier: CGFloat = 50.0
         static let multiplierIncrement: CGFloat = 10.0
