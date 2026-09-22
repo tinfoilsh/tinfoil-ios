@@ -7,7 +7,7 @@ struct SafeguardFlagBanner: View {
     let onOpenSettings: () -> Void
 
     private var isSimulated: Bool {
-        store.isSimulatedFlag(chatId)
+        store.isSimulatedFlag(chatId) && !store.flaggedChatIds.contains(chatId)
     }
 
     private var title: String {

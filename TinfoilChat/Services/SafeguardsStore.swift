@@ -104,7 +104,7 @@ final class SafeguardsStore: ObservableObject {
     func setUsesExamples(_ value: Bool) {
         guard usesExamples != value else { return }
         usesExamples = value
-        clear()
+        clearReport()
     }
 
     func toggleSimulatedFlag(_ chatId: String) {
@@ -122,13 +122,17 @@ final class SafeguardsStore: ObservableObject {
     #endif
 
     private func clear() {
+        #if DEBUG
+        simulatedFlaggedChatIds = []
+        #endif
+        clearReport()
+    }
+
+    private func clearReport() {
         generation = UUID()
         request?.cancel()
         request = nil
         flaggedChatIds = []
-        #if DEBUG
-        simulatedFlaggedChatIds = []
-        #endif
         report = nil
         errorMessage = nil
         isLoading = false
