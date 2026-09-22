@@ -473,6 +473,15 @@ enum Constants {
         static let actionSystemImage = "arrow.triangle.branch"
     }
 
+    enum MessageActions {
+        static let iconSize: CGFloat = 16
+        static let buttonSize: CGFloat = 32
+        static let moreLabel = "More actions"
+        static let moreSystemImage = "ellipsis"
+        static let shareLabel = "Share"
+        static let shareSystemImage = "square.and.arrow.up"
+    }
+
     enum Sync {
         static let protocolVersion = 2
         static let maxConcurrentChatUploads = 2

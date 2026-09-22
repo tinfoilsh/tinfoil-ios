@@ -170,10 +170,12 @@ struct MessageView: View {
         !viewModel.isLoading && viewModel.messageEditSession == nil
     }
 
+    private func forkFromHere() {
+        Task { await viewModel.forkChat(throughMessageIndex: messageIndex) }
+    }
+
     private var forkActionButton: some View {
-        Button {
-            Task { await viewModel.forkChat(throughMessageIndex: messageIndex) }
-        } label: {
+        Button(action: forkFromHere) {
             Image(systemName: Constants.ChatFork.actionSystemImage)
                 .font(.system(size: 16))
                 .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
@@ -182,6 +184,52 @@ struct MessageView: View {
         }
         .buttonStyle(PlainButtonStyle())
         .accessibilityLabel(Constants.ChatFork.actionLabel)
+        .accessibleHitTarget()
+    }
+
+    private var canShareAssistantMessage: Bool {
+        isLastMessage && !viewModel.isLoading
+    }
+
+    private var showsAssistantMoreMenu: Bool {
+        canShareAssistantMessage || viewModel.canForkMessage(at: messageIndex)
+    }
+
+    /// Secondary actions for assistant messages live behind an ellipsis so the
+    /// inline row stays short enough for narrow screens.
+    private var assistantMoreMenu: some View {
+        Menu {
+            if canShareAssistantMessage {
+                Button {
+                    showShareSheet = true
+                } label: {
+                    Label(
+                        Constants.MessageActions.shareLabel,
+                        systemImage: Constants.MessageActions.shareSystemImage
+                    )
+                }
+            }
+
+            if viewModel.canForkMessage(at: messageIndex) {
+                Button(action: forkFromHere) {
+                    Label(
+                        Constants.ChatFork.actionLabel,
+                        systemImage: Constants.ChatFork.actionSystemImage
+                    )
+                }
+            }
+        } label: {
+            Image(systemName: Constants.MessageActions.moreSystemImage)
+                .font(.system(size: Constants.MessageActions.iconSize))
+                .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                .frame(
+                    width: Constants.MessageActions.buttonSize,
+                    height: Constants.MessageActions.buttonSize
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+        .accessibilityLabel(Constants.MessageActions.moreLabel)
         .accessibleHitTarget()
     }
 
@@ -815,24 +863,8 @@ struct MessageView: View {
                                 .accessibleHitTarget()
                             }
 
-                            // Share button - only on the last assistant message
-                            if isLastMessage && !viewModel.isLoading {
-                                Button {
-                                    showShareSheet = true
-                                } label: {
-                                    Image(systemName: "square.and.arrow.up")
-                                        .font(.system(size: 16))
-                                        .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
-                                        .frame(width: 32, height: 32)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                                .accessibilityLabel("Share")
-                                .accessibleHitTarget()
-                            }
-
-                            if viewModel.canForkMessage(at: messageIndex) {
-                                forkActionButton
+                            if showsAssistantMoreMenu {
+                                assistantMoreMenu
                             }
 
                             Spacer()
