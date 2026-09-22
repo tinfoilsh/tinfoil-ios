@@ -8320,8 +8320,12 @@ extension ChatViewModel {
 
     /// Stop recording and transcribe the audio
     func stopAudioRecordingAndTranscribe() async -> String? {
-        guard isRecording, canGenerateInCurrentChat,
-              let chatId = currentChat?.id else { return nil }
+        guard isRecording else { return nil }
+        guard canGenerateInCurrentChat,
+              let chatId = currentChat?.id else {
+            cancelAudioRecording()
+            return nil
+        }
 
         let accountId = currentUserId
         let generation = audioTranscriptionFence.begin(id: chatId)
