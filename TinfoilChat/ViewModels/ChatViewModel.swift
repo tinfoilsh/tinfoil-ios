@@ -1842,11 +1842,15 @@ class ChatViewModel: ObservableObject {
 
         // A reused blank represents a fresh chat, so reset its preferences to
         // the current global defaults before selecting it, then layer on any
-        // model or web search choice the default preset carries.
+        // model or web search choice the default preset carries. The device
+        // default model is used rather than the picker, which may be showing
+        // a model pinned by the previous chat's prompt preset.
         let defaultPreset = ProfileManager.shared.defaultPromptPreset
         let defaultPresetId = defaultPreset?.id
+        let newChatModel = modelType ?? AppConfig.shared.currentModel ?? currentModel
         if shouldBeLocal {
             if let index = localChats.firstIndex(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
+                localChats[index].modelType = newChatModel
                 localChats[index].webSearchEnabled = SettingsManager.shared.webSearchAvailable
                 localChats[index].promptPresetId = defaultPresetId
                 applyPresetSettings(defaultPreset, to: &localChats[index])
@@ -1856,6 +1860,7 @@ class ChatViewModel: ObservableObject {
             }
         } else {
             if let index = chats.firstIndex(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
+                chats[index].modelType = newChatModel
                 chats[index].webSearchEnabled = SettingsManager.shared.webSearchAvailable
                 chats[index].promptPresetId = defaultPresetId
                 applyPresetSettings(defaultPreset, to: &chats[index])
@@ -1867,7 +1872,7 @@ class ChatViewModel: ObservableObject {
         
         // Create new chat with temporary ID (instant, no network call)
         var newChat = Chat.create(
-            modelType: modelType ?? currentModel,
+            modelType: newChatModel,
             language: nil,
             userId: currentUserId,
             isLocalOnly: shouldBeLocal,
