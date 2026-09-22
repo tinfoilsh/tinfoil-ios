@@ -383,6 +383,16 @@ struct PromptDetailView: View {
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
 
+            if !preset.isBuiltIn {
+                Section {
+                    LabeledContent("Model", value: modelLabel(for: preset.model))
+                    LabeledContent("Web search", value: webSearchLabel(for: preset.webSearchEnabled))
+                } header: {
+                    Text("Chat Settings")
+                }
+                .listRowBackground(Color.cardSurface(for: colorScheme))
+            }
+
             Section {
                 Button {
                     let presetId = preset.id
@@ -420,6 +430,16 @@ struct PromptDetailView: View {
         .navigationTitle(preset.name)
         .navigationBarTitleDisplayMode(.inline)
     }
+
+    private func modelLabel(for modelId: String?) -> String {
+        guard let modelId else { return Constants.PromptLibrary.noOverrideLabel }
+        return AppConfig.shared.findSelectableModel(id: modelId)?.displayName ?? modelId
+    }
+
+    private func webSearchLabel(for enabled: Bool?) -> String {
+        guard let enabled else { return Constants.PromptLibrary.noOverrideLabel }
+        return enabled ? "On" : "Off"
+    }
 }
 
 // MARK: - Editor
@@ -446,6 +466,16 @@ struct PromptEditorView: View {
     @State private var name: String = ""
     @State private var description: String = ""
     @State private var systemPrompt: String = ""
+    /// Model picker id, or nil for no override.
+    @State private var model: String?
+    /// Web search choice, or nil for no override.
+    @State private var webSearchEnabled: Bool?
+
+    /// Models offered for the override: Auto followed by the real chat models,
+    /// the same list the chat's model picker shows.
+    private var modelOptions: [ModelType] {
+        AppConfig.shared.selectableModels
+    }
 
     private var isEditing: Bool {
         if case .edit = target { return true }
@@ -471,6 +501,26 @@ struct PromptEditorView: View {
                     TextField("What does this prompt do?", text: $description)
                 } header: {
                     Text("Short Description")
+                }
+                .listRowBackground(Color.cardSurface(for: colorScheme))
+
+                Section {
+                    Picker("Model", selection: $model) {
+                        Text(Constants.PromptLibrary.noOverrideLabel).tag(String?.none)
+                        ForEach(modelOptions) { option in
+                            Text(option.displayName).tag(String?.some(option.id))
+                        }
+                    }
+                    Picker("Web search", selection: $webSearchEnabled) {
+                        Text(Constants.PromptLibrary.noOverrideLabel).tag(Bool?.none)
+                        Text("On").tag(Bool?.some(true))
+                        Text("Off").tag(Bool?.some(false))
+                    }
+                } header: {
+                    Text("Chat Settings")
+                } footer: {
+                    Text("Applied to the chat when this prompt is selected. You can still change either afterwards.")
+                        .font(.caption)
                 }
                 .listRowBackground(Color.cardSurface(for: colorScheme))
 
@@ -511,6 +561,8 @@ struct PromptEditorView: View {
         name = preset.name
         description = preset.description
         systemPrompt = stripSystemTags(preset.systemPrompt)
+        model = preset.model
+        webSearchEnabled = preset.webSearchEnabled
     }
 
     private func save() {
@@ -524,14 +576,18 @@ struct PromptEditorView: View {
             profileManager.createPromptPreset(
                 name: trimmedName,
                 description: trimmedDescription,
-                systemPrompt: wrappedPrompt
+                systemPrompt: wrappedPrompt,
+                model: model,
+                webSearchEnabled: webSearchEnabled
             )
         case .edit(let presetId):
             profileManager.updatePromptPreset(
                 id: presetId,
                 name: trimmedName,
                 description: trimmedDescription,
-                systemPrompt: wrappedPrompt
+                systemPrompt: wrappedPrompt,
+                model: model,
+                webSearchEnabled: webSearchEnabled
             )
         }
         dismiss()

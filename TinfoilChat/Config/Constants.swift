@@ -412,6 +412,9 @@ enum Constants {
         /// it is converted into a library preset.
         static let migratedCustomPromptName = "My default prompt"
         static let migratedCustomPromptDescription = "Migrated from the custom system prompt setting"
+        /// Label for an unset per-preset model or web search override, shown
+        /// in the editor pickers and the detail view.
+        static let noOverrideLabel = "No override set"
     }
 
     enum ChatFavorites {
