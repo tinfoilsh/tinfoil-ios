@@ -91,6 +91,7 @@ class ProfileManager: ObservableObject {
         loadFromKeychain()
         migrateLegacyCustomPrompt()
         setupChangeObservers()
+        setupModelCatalogObserver()
         setupAutoSync()
         // Trigger an initial sync shortly after initialization
         Task { @MainActor in
@@ -395,12 +396,25 @@ class ProfileManager: ObservableObject {
         isApplyingProfile = false  // Re-enable observers
 
         // Presets synced from another device may name a retired model. Prune
-        // only once the catalog is authoritative; the config load prunes on
-        // its own when it completes later. Runs after observers are back on
-        // so the cleanup persists and syncs like any other preset edit.
+        // only once the catalog is authoritative; the catalog observer prunes
+        // on its own when the config load completes later. Runs after
+        // observers are back on so the cleanup persists and syncs like any
+        // other preset edit.
         if AppConfig.shared.isInitialized {
             pruneUnavailablePresetModels(available: AppConfig.shared.availableModels)
         }
+    }
+
+    /// Prompt presets may pin a model the controlplane has since retired.
+    /// Drop those each time the catalog becomes authoritative, so the
+    /// cleanup happens after the initial config load and after any retry.
+    private func setupModelCatalogObserver() {
+        AppConfig.shared.$isInitialized
+            .filter { $0 }
+            .sink { [weak self] _ in
+                self?.pruneUnavailablePresetModels(available: AppConfig.shared.availableModels)
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Change Observers
