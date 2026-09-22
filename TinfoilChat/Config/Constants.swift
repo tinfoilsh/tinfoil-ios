@@ -62,6 +62,8 @@ enum Constants {
         static let initFailedIconSize: CGFloat = 72
         static let actionButtonCornerRadius: CGFloat = 6
         static let iPadInputBottomPadding: CGFloat = 16
+        static let composerActionSpacing: CGFloat = 4
+        static let modelSelectorLayoutPriority: Double = 1
 
         enum TextureGrid {
             static let spacing: CGFloat = 16
