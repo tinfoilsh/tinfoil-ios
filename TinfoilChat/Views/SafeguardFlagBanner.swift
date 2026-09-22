@@ -6,8 +6,12 @@ struct SafeguardFlagBanner: View {
     let chatId: String
     let onOpenSettings: () -> Void
 
+    private var isSimulated: Bool {
+        store.isSimulatedFlag(chatId) && !store.flaggedChatIds.contains(chatId)
+    }
+
     private var title: String {
-        store.usesExamples
+        isSimulated
             ? "Local preview: this chat was flagged by a safeguard model."
             : "This chat was flagged by a safeguard model."
     }
@@ -24,7 +28,7 @@ struct SafeguardFlagBanner: View {
                         .accessibilityAddTraits(.isHeader)
                     Text(Constants.Safeguards.Banner.message)
                         .font(.caption)
-                    if store.usesExamples {
+                    if isSimulated {
                         Text("This is a simulated flag. Your account is unaffected.")
                             .font(.caption)
                     }
@@ -44,10 +48,14 @@ struct SafeguardFlagBanner: View {
                 ? Constants.Safeguards.Banner.darkTextColorHex
                 : Constants.Safeguards.Banner.lightTextColorHex))
             .padding(Constants.Safeguards.contentSpacing)
-            .background(
-                Color.red.opacity(Constants.Safeguards.Banner.backgroundOpacity),
-                in: RoundedRectangle(cornerRadius: Constants.Safeguards.Banner.cornerRadius)
-            )
+            .background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: Constants.Safeguards.Banner.cornerRadius)
+                        .fill(.thickMaterial)
+                    RoundedRectangle(cornerRadius: Constants.Safeguards.Banner.cornerRadius)
+                        .fill(Color.red.opacity(Constants.Safeguards.Banner.backgroundOpacity))
+                }
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: Constants.Safeguards.Banner.cornerRadius)
                     .strokeBorder(

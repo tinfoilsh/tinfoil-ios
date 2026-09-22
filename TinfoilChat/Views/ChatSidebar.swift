@@ -1242,20 +1242,6 @@ struct ChatListItem: View {
                             
                             Spacer()
                         }
-                        
-                        if isSelected && showEditDelete && !chat.isBlankChat {
-                            // Edit and Delete buttons (not shown for new/blank chats)
-                            HStack(spacing: 12) {
-                                Button(action: onEdit) {
-                                    Image(systemName: "square.and.pencil")
-                                        .foregroundColor(.gray)
-                                }
-                                Button(action: onDelete) {
-                                    Image(systemName: "trash")
-                                        .foregroundColor(.gray)
-                                }
-                            }
-                        }
                     }
                 }
                 
@@ -1304,9 +1290,8 @@ struct ChatListItem: View {
                 .strokeBorder(Color.gray.opacity(0.1), lineWidth: 1)
         )
         // Collapse the row into a single VoiceOver element when not editing so
-        // the title, timestamp and state read as one item; the nested edit and
-        // delete buttons are surfaced as custom actions instead of becoming
-        // unreachable elements inside the row button.
+        // the title, timestamp and state read as one item. Rename and Delete
+        // remain available through the custom accessibility actions below.
         .accessibilityElement(children: isEditing ? .contain : .ignore)
         .accessibilityLabel(rowAccessibilityLabel)
         .accessibilityAddTraits(rowAccessibilityTraits)

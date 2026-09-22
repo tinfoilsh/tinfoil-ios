@@ -29,6 +29,70 @@ struct SafeguardsStoreTests {
         #expect(store.errorMessage == nil)
     }
 
+    #if DEBUG
+    @Test
+    func simulatedFlagsApplyOnlyToTheSignedInDebugSession() {
+        let store = SafeguardsStore(usesExamples: false)
+        store.setUserId("user-a")
+
+        store.toggleSimulatedFlag("chat-a")
+        #expect(store.isFlagged("chat-a"))
+        #expect(store.isSimulatedFlag("chat-a"))
+
+        store.toggleSimulatedFlag("chat-a")
+        #expect(!store.isFlagged("chat-a"))
+
+        store.toggleSimulatedFlag("chat-a")
+        store.setUserId(nil)
+        #expect(!store.isFlagged("chat-a"))
+        #expect(store.simulatedFlaggedChatIds.isEmpty)
+    }
+
+    @Test
+    func exampleModePreservesSimulatedFlagsButSessionChangesClearThem() async {
+        let store = SafeguardsStore(usesExamples: false) { _ in
+            Self.report(chatId: "live-chat")
+        }
+        store.setUserId("user-a")
+        store.setSessionId("session-a")
+        store.toggleSimulatedFlag("simulated-chat")
+        await store.refresh()
+
+        store.setUsesExamples(true)
+        #expect(store.report == nil)
+        #expect(!store.isFlagged("live-chat"))
+        #expect(store.isFlagged("simulated-chat"))
+        await store.refresh()
+        #expect(store.isSimulatedFlag("simulated-chat"))
+
+        store.setUsesExamples(false)
+        await store.refresh()
+        #expect(store.isFlagged("live-chat"))
+        #expect(store.isFlagged("simulated-chat"))
+
+        store.setSessionId("session-b")
+        #expect(store.report == nil)
+        #expect(!store.isFlagged("live-chat"))
+        #expect(!store.isSimulatedFlag("simulated-chat"))
+    }
+
+    @Test
+    func removingSimulatedFlagsDoesNotRemoveServerFlags() async {
+        let store = SafeguardsStore(usesExamples: false) { _ in
+            Self.report(chatId: "live-chat")
+        }
+        store.setUserId("user-a")
+        await store.refresh()
+        store.toggleSimulatedFlag("live-chat")
+        #expect(store.isSimulatedFlag("live-chat"))
+        #expect(store.flaggedChatIds.contains("live-chat"))
+
+        store.clearSimulatedFlags()
+        #expect(!store.isSimulatedFlag("live-chat"))
+        #expect(store.isFlagged("live-chat"))
+    }
+    #endif
+
     @Test
     func emptyResultsRetainThePolicyForZeroProgress() async throws {
         let store = SafeguardsStore(usesExamples: false) { _ in

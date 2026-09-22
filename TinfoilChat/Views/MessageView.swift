@@ -159,7 +159,7 @@ struct MessageView: View {
     }
 
     private var canUseUserMessageActions: Bool {
-        viewModel.canUseCurrentChatActions
+        viewModel.canGenerateInCurrentChat
             && !viewModel.isLoading
             && viewModel.messageEditSession == nil
             && viewModel.pendingAttachments.isEmpty
@@ -167,7 +167,9 @@ struct MessageView: View {
     }
 
     private var canShowUserMessageMenu: Bool {
-        !viewModel.isLoading && viewModel.messageEditSession == nil
+        !viewModel.isCurrentChatSafeguardFlagged
+            && !viewModel.isLoading
+            && viewModel.messageEditSession == nil
     }
 
     private func forkFromHere() {
@@ -490,7 +492,7 @@ struct MessageView: View {
                 messageId: message.id,
                 toolCallId: toolCall.id
             ),
-            onRetry: isRenderingStream ? nil : {
+            onRetry: (isRenderingStream || !viewModel.canGenerateInCurrentChat) ? nil : {
                 viewModel.retryGenUIToolCall(
                     messageId: message.id,
                     toolCallId: toolCall.id
@@ -805,7 +807,9 @@ struct MessageView: View {
                         isRateLimitError: message.isRateLimitError,
                         isHourlyLimit: message.isHourlyLimitError,
                         isConnectionError: message.isConnectionError,
-                        onRegenerate: isLastMessage ? { viewModel.regenerateLastResponse() } : nil,
+                        onRegenerate: isLastMessage && viewModel.canGenerateInCurrentChat
+                            ? { viewModel.regenerateLastResponse() }
+                            : nil,
                         onUpgrade: (message.isRateLimitError && !message.isHourlyLimitError) ? { viewModel.showRateLimitPaywall = true } : nil
                     )
                     .padding(.top, message.content.isEmpty && message.thoughts == nil ? 0 : 8)
@@ -820,54 +824,56 @@ struct MessageView: View {
                             isDarkMode: isDarkMode
                         )
 
-                        HStack(spacing: 16) {
-                            Button {
-                                showRawContentModal = true
-                            } label: {
-                                Image(systemName: "doc.on.doc")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
-                                    .frame(width: 32, height: 32)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            .accessibilityLabel("Copy")
-                            .accessibleHitTarget()
-
-                            if !hasRecoveryDraft,
-                               viewModel.canUseReadAloud,
-                               SpeechTextProcessor.canRead(message),
-                               let chatId = viewModel.currentChat?.id {
-                                ReadAloudButton(
-                                    player: viewModel.speechPlayer,
-                                    owner: SpeechOwner(chatId: chatId, messageId: message.id),
-                                    isDarkMode: isDarkMode
-                                ) {
-                                    try viewModel.toggleReadAloud(messageId: message.id)
-                                }
-                            }
-
-                            // Regenerate button - only on the last assistant message
-                            if isLastMessage && !viewModel.isLoading && messageIndex > 0 {
+                        if !viewModel.isCurrentChatSafeguardFlagged {
+                            HStack(spacing: 16) {
                                 Button {
-                                    viewModel.regenerateMessage(at: messageIndex - 1)
+                                    showRawContentModal = true
                                 } label: {
-                                    Image(systemName: "arrow.clockwise")
+                                    Image(systemName: "doc.on.doc")
                                         .font(.system(size: 16))
                                         .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
                                         .frame(width: 32, height: 32)
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(PlainButtonStyle())
-                                .accessibilityLabel("Regenerate response")
+                                .accessibilityLabel("Copy")
                                 .accessibleHitTarget()
-                            }
 
-                            if showsAssistantMoreMenu {
-                                assistantMoreMenu
-                            }
+                                if !hasRecoveryDraft,
+                                   viewModel.canUseReadAloud,
+                                   SpeechTextProcessor.canRead(message),
+                                   let chatId = viewModel.currentChat?.id {
+                                    ReadAloudButton(
+                                        player: viewModel.speechPlayer,
+                                        owner: SpeechOwner(chatId: chatId, messageId: message.id),
+                                        isDarkMode: isDarkMode
+                                    ) {
+                                        try viewModel.toggleReadAloud(messageId: message.id)
+                                    }
+                                }
 
-                            Spacer()
+                                // Regenerate button - only on the last assistant message
+                                if isLastMessage && viewModel.canGenerateInCurrentChat && !viewModel.isLoading && messageIndex > 0 {
+                                    Button {
+                                        viewModel.regenerateMessage(at: messageIndex - 1)
+                                    } label: {
+                                        Image(systemName: "arrow.clockwise")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                                            .frame(width: 32, height: 32)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                    .accessibilityLabel("Regenerate response")
+                                    .accessibleHitTarget()
+                                }
+
+                                if showsAssistantMoreMenu {
+                                    assistantMoreMenu
+                                }
+
+                                Spacer()
+                            }
                         }
 
                         // Sources button - only show if we have web search sources

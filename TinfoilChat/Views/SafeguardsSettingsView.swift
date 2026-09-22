@@ -30,10 +30,24 @@ struct SafeguardsSettingsView: View {
                             set: { store.setUsesExamples($0) }
                         ))
                         .tint(Color.accentPrimary)
+
+                        if let chatId = chatViewModel.currentChat?.id {
+                            Button(store.isSimulatedFlag(chatId)
+                                ? "Unflag current chat"
+                                : "Flag current chat") {
+                                store.toggleSimulatedFlag(chatId)
+                            }
+                        }
+
+                        if !store.simulatedFlaggedChatIds.isEmpty {
+                            Button("Clear simulated flags", role: .destructive) {
+                                store.clearSimulatedFlags()
+                            }
+                        }
                     } header: {
                         Text("Development")
                     } footer: {
-                        Text("Example flags are sample data, not flags on your account. Turn this off to load your account's flags.")
+                        Text("Example and simulated flags are local sample data and do not affect your account. Turn off example flags to load your account's real flags.")
                     }
                     .listRowBackground(Color.cardSurface(for: colorScheme))
                     #endif

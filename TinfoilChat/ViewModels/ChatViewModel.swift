@@ -134,11 +134,14 @@ enum GenUIRetryRequestExecutor {
         recoverAuthentication: () async throws -> Void,
         isAuthenticationError: (Error) -> Bool
     ) async throws -> Response {
+        try Task.checkCancellation()
         do {
             return try await request()
         } catch {
+            try Task.checkCancellation()
             guard isAuthenticationError(error) else { throw error }
             try await recoverAuthentication()
+            try Task.checkCancellation()
             return try await request()
         }
     }
@@ -272,6 +275,7 @@ class ChatViewModel: ObservableObject {
                 messageEditSession = reconciledEditSession
             }
             if currentChat?.id != oldValue?.id {
+                cancelAudioRecording()
                 selectedChatImageTask?.cancel()
                 selectedChatImageTask = nil
             }
@@ -287,6 +291,7 @@ class ChatViewModel: ObservableObject {
             // backgrounded. Guarded on the id changing so the frequent
             // same-chat reassignments during streaming stay cheap.
             if let chatId = currentChat?.id, chatId != oldValue?.id {
+                enforceSafeguardReadOnlyIfNeeded(chatId: chatId)
                 scheduleMessageQueueDrain(chatId: chatId)
             }
         }
@@ -493,6 +498,8 @@ class ChatViewModel: ObservableObject {
     @Published var isTranscribing: Bool = false
     @Published var audioError: String? = nil
     @Published var showMicrophonePermissionAlert: Bool = false
+    private var audioRecordingStartId: UUID?
+    private var audioTranscriptionFence = ChatSelectionFence()
 
     // Temporary (incognito) chat mode. When active, the current chat is an
     // ephemeral in-memory chat that is never persisted or synced.
@@ -515,6 +522,8 @@ class ChatViewModel: ObservableObject {
     // messages and resumes draining when reopened. In-memory only, mirroring
     // the webapp's per-session queue.
     @Published private(set) var messageQueues: [String: [QueuedMessage]] = [:]
+    @Published private(set) var safeguardFlaggedChatIds: Set<String> = []
+    @Published private(set) var safeguardsHaveLoaded = false
 
     /// Queued messages for the chat on screen.
     var queuedMessages: [QueuedMessage] {
@@ -586,6 +595,7 @@ class ChatViewModel: ObservableObject {
     private var cloudRemoteDeleteObserver: NSObjectProtocol?
     private var networkStatusCancellable: AnyCancellable?
     private var defaultPromptPresetCancellable: AnyCancellable?
+    private var safeguardsCancellable: AnyCancellable?
     private var streamUpdateTimers: [String: Timer] = [:]
     private var pendingStreamUpdates: [String: Chat] = [:]
     private var pendingSaveTask: Task<Void, Never>?
@@ -595,11 +605,13 @@ class ChatViewModel: ObservableObject {
     private var lastKnownProjectAccess: Bool?
     @Published private var genUIRetryStates: [GenUIRetryKey: GenUIRetryState] = [:]
     private var activeGenUIRetryIds: [GenUIRetryKey: UUID] = [:]
+    private var genUIRetryTasks: [UUID: Task<Void, Never>] = [:]
     
     // Auth reference for Premium features
     @Published var authManager: AuthManager? {
         didSet {
             if authManager !== oldValue { speechPlayer.stop() }
+            bindSafeguardsStore()
             cancelMessageEdit()
             // Load user-specific last sync date when auth changes
             if let userId = currentUserId {
@@ -637,6 +649,73 @@ class ChatViewModel: ObservableObject {
         }
     }
     
+    private func bindSafeguardsStore() {
+        safeguardsCancellable?.cancel()
+        safeguardsCancellable = nil
+        safeguardFlaggedChatIds = []
+        safeguardsHaveLoaded = false
+
+        guard let store = authManager?.safeguards else { return }
+        #if DEBUG
+        safeguardsCancellable = Publishers.CombineLatest3(
+            store.$flaggedChatIds,
+            store.$simulatedFlaggedChatIds,
+            store.$report
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] flaggedChatIds, simulatedFlaggedChatIds, report in
+            self?.applySafeguardsState(
+                flaggedChatIds: flaggedChatIds.union(simulatedFlaggedChatIds),
+                hasLoaded: report != nil
+            )
+        }
+        #else
+        safeguardsCancellable = Publishers.CombineLatest(
+            store.$flaggedChatIds,
+            store.$report
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] flaggedChatIds, report in
+            self?.applySafeguardsState(
+                flaggedChatIds: flaggedChatIds,
+                hasLoaded: report != nil
+            )
+        }
+        #endif
+    }
+
+    private func applySafeguardsState(
+        flaggedChatIds: Set<String>,
+        hasLoaded: Bool
+    ) {
+        let newlyFlaggedChatIds = flaggedChatIds.subtracting(safeguardFlaggedChatIds)
+        safeguardFlaggedChatIds = flaggedChatIds
+        safeguardsHaveLoaded = hasLoaded
+        for chatId in newlyFlaggedChatIds {
+            enforceSafeguardReadOnlyIfNeeded(chatId: chatId)
+        }
+    }
+
+    private func enforceSafeguardReadOnlyIfNeeded(chatId: String) {
+        guard authManager?.isAuthenticated == true,
+              safeguardFlaggedChatIds.contains(chatId) else { return }
+        if currentChat?.id == chatId {
+            cancelMessageEdit()
+            cancelAudioRecording()
+            clearPendingAttachments()
+        }
+        discardMessageQueue(chatId: chatId)
+        for key in activeGenUIRetryIds.keys.filter({ $0.chatId == chatId }) {
+            if let requestId = activeGenUIRetryIds.removeValue(forKey: key) {
+                genUIRetryTasks.removeValue(forKey: requestId)?.cancel()
+            }
+            genUIRetryStates[key] = nil
+        }
+        if cancelGeneration(chatId: chatId, announce: false) == nil {
+            cancelRecoveredGeneration(chatId: chatId)
+        }
+    }
+
     var messages: [Message] {
         currentChat?.messages ?? []
     }
@@ -651,8 +730,23 @@ class ChatViewModel: ObservableObject {
         isCurrentChatHydrated
     }
 
+    var isCurrentChatSafeguardFlagged: Bool {
+        guard authManager?.isAuthenticated == true,
+              let chatId = currentChat?.id else { return false }
+        return safeguardFlaggedChatIds.contains(chatId)
+    }
+
+    var isSafeguardGenerationBlocked: Bool {
+        guard authManager?.isAuthenticated == true else { return false }
+        return !safeguardsHaveLoaded || isCurrentChatSafeguardFlagged
+    }
+
+    var canGenerateInCurrentChat: Bool {
+        canUseCurrentChatActions && !isSafeguardGenerationBlocked
+    }
+
     var canUseReadAloud: Bool {
-        canUseCurrentChatActions && acceptsChatSaves
+        canUseCurrentChatActions && !isCurrentChatSafeguardFlagged && acceptsChatSaves
             && !isRecording && !AudioRecordingService.shared.isRecording
             && client != nil && isVerified && !isClientInitializing
             && AccountActionReadiness.canPerform(
@@ -944,7 +1038,7 @@ class ChatViewModel: ObservableObject {
     }
 
     var canSendInCurrentContext: Bool {
-        PremiumProjectPolicy.includesChat(
+        !isSafeguardGenerationBlocked && PremiumProjectPolicy.includesChat(
             projectId: currentChat?.projectId,
             hasPremiumAccess: hasPremiumAccess
         )
@@ -1149,6 +1243,7 @@ class ChatViewModel: ObservableObject {
         streamUpdateTimers.removeAll()
         streamTasks.values.forEach { $0.cancel() }
         streamTasks.removeAll()
+        genUIRetryTasks.values.forEach { $0.cancel() }
         recoverySessionCleanupTasks.values.forEach { $0.cancel() }
         recoverySessionCleanupTasks.removeAll()
 
@@ -3524,7 +3619,7 @@ class ChatViewModel: ObservableObject {
               !chat.dataCorrupted,
               chat.messages.indices.contains(index)
         else { return false }
-        return canUseCurrentChatActions
+        return canGenerateInCurrentChat
             && !isLoading
             && messageEditSession == nil
             && !hasPendingResponseRecovery
@@ -3645,7 +3740,7 @@ class ChatViewModel: ObservableObject {
         resultText: String,
         resultData: JSONValue?
     ) {
-        guard !isLoading else { return }
+        guard canGenerateInCurrentChat, !isLoading else { return }
         guard var chat = currentChat else { return }
 
         var didResolve = false
@@ -3696,7 +3791,7 @@ class ChatViewModel: ObservableObject {
     /// can keep the draft in the input when it wasn't.
     @discardableResult
     func sendMessage(text: String) -> Bool {
-        guard canUseCurrentChatActions else { return false }
+        guard canGenerateInCurrentChat else { return false }
         guard currentChat?.projectId == nil || PremiumProjectPolicy.allowsMutation(
             .sendProjectChat,
             hasPremiumAccess: hasPremiumAccess
@@ -3748,6 +3843,8 @@ class ChatViewModel: ObservableObject {
         attachments: [Attachment],
         dismissKeyboard: Bool
     ) {
+        guard canGenerateInCurrentChat else { return }
+
         // Optimistically decrement the remaining request count
         SessionTokenManager.shared.snapshotAndDecrementRemaining()
 
@@ -4198,7 +4295,8 @@ class ChatViewModel: ObservableObject {
 
     /// Generates an assistant response for the current conversation (expects user message to already be in chat)
     private func generateResponse(dismissKeyboard: Bool = true) {
-        guard let initialChat = currentChat,
+        guard canGenerateInCurrentChat,
+              let initialChat = currentChat,
               !streamState.isStreaming(chatId: initialChat.id) else {
             return
         }
@@ -5642,7 +5740,8 @@ class ChatViewModel: ObservableObject {
     }
 
     func retryGenUIToolCall(messageId: String, toolCallId: String) {
-        guard let chat = currentChat,
+        guard canGenerateInCurrentChat,
+              let chat = currentChat,
               !chat.hasActiveStream,
               !streamingTracker.isStreaming(chat.id),
               let messageIndex = chat.messages.firstIndex(where: { $0.id == messageId }),
@@ -5667,7 +5766,7 @@ class ChatViewModel: ObservableObject {
         activeGenUIRetryIds[key] = requestId
         genUIRetryStates[key] = .generating
 
-        Task { [weak self] in
+        genUIRetryTasks[requestId] = Task { [weak self] in
             await self?.performGenUIToolCallRetry(
                 key: key,
                 requestId: requestId,
@@ -5692,12 +5791,15 @@ class ChatViewModel: ObservableObject {
         requiresTimelineBlock: Bool,
         widget: AnyGenUIWidget
     ) async {
+        defer { genUIRetryTasks.removeValue(forKey: requestId) }
         do {
+            try Task.checkCancellation()
             guard let client, !isClientInitializing else {
                 throw GenUIRetryRequestError.clientUnavailable
             }
 
             try await SessionTokenManager.shared.acquireTokenForSend(forceRefresh: false)
+            try Task.checkCancellation()
 
             let history = GenUIRetryContext.sanitizedHistory(
                 Array(sourceChat.messages.prefix(messageIndex + 1))
@@ -5758,6 +5860,7 @@ class ChatViewModel: ObservableObject {
                     Self.isAuthenticationError(error)
                 }
             )
+            try Task.checkCancellation()
             guard let choice = result.choices.first else {
                 finishGenUIRetry(
                     key: key,
@@ -5861,7 +5964,8 @@ class ChatViewModel: ObservableObject {
 
     /// Regenerates the last assistant response by removing it and resending the last user message
     func regenerateLastResponse() {
-        guard messageEditSession == nil,
+        guard canGenerateInCurrentChat,
+              messageEditSession == nil,
               let chat = currentChat,
               !isLoading else {
             return
@@ -5903,7 +6007,8 @@ class ChatViewModel: ObservableObject {
     }
 
     func beginMessageEdit(at messageIndex: Int) {
-        guard messageEditSession == nil,
+        guard canGenerateInCurrentChat,
+              messageEditSession == nil,
               acceptsChatSaves,
               !isAccountTeardownInProgress else { return }
         messageEditSession = MessageEditSessionTransition.begin(
@@ -5924,7 +6029,8 @@ class ChatViewModel: ObservableObject {
     /// Replaces the edited user message and everything after it, then generates a new response.
     @discardableResult
     func saveMessageEdit(newContent: String) -> Bool {
-        guard let session = messageEditSession,
+        guard canGenerateInCurrentChat,
+              let session = messageEditSession,
               let chat = currentChat,
               acceptsChatSaves,
               !isAccountTeardownInProgress,
@@ -5975,7 +6081,8 @@ class ChatViewModel: ObservableObject {
     /// Regenerates the response for a user message at a specific index
     /// - Parameter messageIndex: The index of the user message to regenerate from
     func regenerateMessage(at messageIndex: Int) {
-        guard messageEditSession == nil,
+        guard canGenerateInCurrentChat,
+              messageEditSession == nil,
               !hasPendingResponseRecovery,
               let chat = currentChat,
               !isLoading,
@@ -6570,6 +6677,11 @@ class ChatViewModel: ObservableObject {
     func handleSignOut() async {
         speechPlayer.stop()
         cancelMessageEdit()
+        cancelAudioRecording()
+        genUIRetryTasks.values.forEach { $0.cancel() }
+        genUIRetryTasks.removeAll()
+        activeGenUIRetryIds.removeAll()
+        genUIRetryStates.removeAll()
         // Capture the signing-out user's id up front. Later steps (and
         // the auth manager's cleanup) clear the authenticated state, after
         // which currentUserId no longer resolves this user.
@@ -8129,14 +8241,17 @@ extension ChatViewModel {
         case start
         case showUpgrade
         case accountChanged
+        case chatUnavailable
     }
 
     static func audioRecordingStartDecision(
         canUseAudioInput: Bool,
+        canGenerateInCurrentChat: Bool,
         requestedAccountId: String?,
         currentAccountId: String?
     ) -> AudioRecordingStartDecision {
         guard requestedAccountId == currentAccountId else { return .accountChanged }
+        guard canGenerateInCurrentChat else { return .chatUnavailable }
         return canUseAudioInput ? .start : .showUpgrade
     }
 
@@ -8147,11 +8262,20 @@ extension ChatViewModel {
 
     /// Start recording audio
     func startAudioRecording() async {
+        guard canGenerateInCurrentChat, !isAccountTeardownInProgress, !Task.isCancelled else { return }
         guard canUseAudioInput else {
             showRateLimitPaywall = true
             return
         }
         let requestedAccountId = authManager?.localUserId
+        let requestedChatId = currentChat?.id
+        let requestId = UUID()
+        audioRecordingStartId = requestId
+        defer {
+            if audioRecordingStartId == requestId {
+                audioRecordingStartId = nil
+            }
+        }
 
         audioError = nil
 
@@ -8160,10 +8284,14 @@ extension ChatViewModel {
         if !AudioRecordingService.shared.hasPermission {
             hasMicrophonePermission = await AudioRecordingService.shared.requestPermission()
         }
-        guard !isAccountTeardownInProgress else { return }
+        guard !isAccountTeardownInProgress,
+              !Task.isCancelled,
+              audioRecordingStartId == requestId,
+              currentChat?.id == requestedChatId else { return }
 
         switch Self.audioRecordingStartDecision(
             canUseAudioInput: canUseAudioInput,
+            canGenerateInCurrentChat: canGenerateInCurrentChat,
             requestedAccountId: requestedAccountId,
             currentAccountId: authManager?.localUserId
         ) {
@@ -8172,7 +8300,7 @@ extension ChatViewModel {
         case .showUpgrade:
             showRateLimitPaywall = true
             return
-        case .accountChanged:
+        case .accountChanged, .chatUnavailable:
             return
         }
 
@@ -8192,6 +8320,22 @@ extension ChatViewModel {
     /// Stop recording and transcribe the audio
     func stopAudioRecordingAndTranscribe() async -> String? {
         guard isRecording else { return nil }
+        guard canGenerateInCurrentChat,
+              let chatId = currentChat?.id else {
+            cancelAudioRecording()
+            return nil
+        }
+
+        let accountId = currentUserId
+        let generation = audioTranscriptionFence.begin(id: chatId)
+        func isCurrentTranscription() -> Bool {
+            audioTranscriptionFence.accepts(id: chatId, generation: generation)
+                && currentChat?.id == chatId
+                && currentUserId == accountId
+                && canGenerateInCurrentChat
+                && !isAccountTeardownInProgress
+                && !Task.isCancelled
+        }
 
         isRecording = false
 
@@ -8210,11 +8354,14 @@ extension ChatViewModel {
                 client: client,
                 model: audioModel.modelName
             )
+            guard isCurrentTranscription() else { return nil }
             return transcription
         } catch {
+            guard isCurrentTranscription() else { return nil }
             // Retry once with a fresh token if the error is an auth failure
             if ChatViewModel.isAuthenticationError(error) {
                 await refreshSessionTokenForRetry()
+                guard isCurrentTranscription() else { return nil }
                 if let retryClient = self.client {
                     do {
                         let transcription = try await AudioRecordingService.shared.transcribe(
@@ -8222,8 +8369,10 @@ extension ChatViewModel {
                             client: retryClient,
                             model: audioModel.modelName
                         )
+                        guard isCurrentTranscription() else { return nil }
                         return transcription
                     } catch {
+                        guard isCurrentTranscription() else { return nil }
                         audioError = error.localizedDescription
                         return nil
                     }
@@ -8236,6 +8385,8 @@ extension ChatViewModel {
 
     /// Cancel recording without transcribing
     func cancelAudioRecording() {
+        audioRecordingStartId = nil
+        audioTranscriptionFence.invalidate()
         isRecording = false
         AudioRecordingService.shared.cancelRecording()
     }

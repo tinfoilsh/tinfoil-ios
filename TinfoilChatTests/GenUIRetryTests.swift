@@ -229,6 +229,49 @@ struct GenUIRetryTests {
         #expect(recorder.recoveryCount == 1)
     }
 
+    @MainActor
+    @Test func canceledRetryDoesNotStartARequest() async {
+        let recorder = RequestRecorder()
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await GenUIRetryRequestExecutor.execute(
+                request: {
+                    recorder.requestCount += 1
+                    return "structured output"
+                },
+                recoverAuthentication: { recorder.recoveryCount += 1 },
+                isAuthenticationError: { $0 is RequestError }
+            )
+        }
+
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(recorder.requestCount == 0)
+        #expect(recorder.recoveryCount == 0)
+    }
+
+    @MainActor
+    @Test func cancellationDuringAuthenticationRecoveryPreventsAnotherRequest() async {
+        let recorder = RequestRecorder()
+        let task = Task {
+            let result: String = try await GenUIRetryRequestExecutor.execute(
+                request: {
+                    recorder.requestCount += 1
+                    throw RequestError.authentication
+                },
+                recoverAuthentication: {
+                    recorder.recoveryCount += 1
+                    withUnsafeCurrentTask { $0?.cancel() }
+                },
+                isAuthenticationError: { $0 is RequestError }
+            )
+            return result
+        }
+
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(recorder.requestCount == 1)
+        #expect(recorder.recoveryCount == 1)
+    }
+
     @Test func patchesOnlyTheMatchingToolCallAndTimelineBlock() throws {
         let failedArguments = #"{"source":{"type":"markdown"}}"#
         let regeneratedArguments = #"{"source":{"type":"markdown","markdown":"Complete"}}"#

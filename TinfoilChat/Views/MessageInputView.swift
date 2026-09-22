@@ -1145,6 +1145,8 @@ struct MessageInputView: View {
 
     private func stopRecordingAndInsertTranscription() async {
         guard viewModel.isRecording, !isFinishingRecording else { return }
+        let chatId = viewModel.currentChat?.id
+        let accountId = authManager.localUserId
         isFinishingRecording = true
         defer {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: Constants.Audio.Waveform.completionTransitionDuration)) {
@@ -1152,6 +1154,10 @@ struct MessageInputView: View {
             }
         }
         if let transcription = await viewModel.stopAudioRecordingAndTranscribe() {
+            guard viewModel.currentChat?.id == chatId,
+                  authManager.localUserId == accountId,
+                  viewModel.canGenerateInCurrentChat,
+                  !Task.isCancelled else { return }
             if !hasNonWhitespaceContent(messageText) {
                 messageText = transcription
             } else {
