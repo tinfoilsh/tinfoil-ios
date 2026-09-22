@@ -468,6 +468,10 @@ class AppConfig: ObservableObject {
             initializationError = nil
             // Set initialization as complete
             isInitialized = true
+
+            // Prompt presets may pin a model the controlplane has since
+            // retired; drop those now that the catalog is authoritative.
+            ProfileManager.shared.pruneUnavailablePresetModels(available: availableModels)
         } catch {
             initializationError = error
         }
