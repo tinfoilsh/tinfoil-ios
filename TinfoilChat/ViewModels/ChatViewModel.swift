@@ -257,6 +257,8 @@ class ChatViewModel: ObservableObject {
     @Published private(set) var selectedChatId: String?
     @Published private(set) var hydratingChatId: String?
     @Published private(set) var chatHydrationError: String?
+    /// The chat currently being forked, while its placeholder is landing.
+    @Published private(set) var forkingChatId: String?
     var canRetryFailedChatHydration: Bool { failedChatHydration != nil && chatHydrationError != nil }
     @Published var currentChat: Chat? {
         didSet {
@@ -3468,6 +3470,129 @@ class ChatViewModel: ObservableObject {
             await cloudSync.backupChat(id, ensureLatestUpload: true)
             guard currentUserId == userId else { return }
         }
+    }
+
+    // MARK: - Fork
+
+    /// Whether "Fork from here" may be offered on the message at `index` of
+    /// the current chat. Mirrors the other per-message actions and also
+    /// refuses while another fork is still landing.
+    func canForkMessage(at index: Int) -> Bool {
+        guard hasChatAccess,
+              let chat = currentChat,
+              !chat.isTemporary,
+              !chat.isBlankChat,
+              !chat.decryptionFailed,
+              !chat.dataCorrupted,
+              chat.messages.indices.contains(index)
+        else { return false }
+        return canUseCurrentChatActions
+            && !isLoading
+            && messageEditSession == nil
+            && !hasPendingResponseRecovery
+            && forkingChatId == nil
+    }
+
+    /// Start a new conversation from the messages up to and including the
+    /// one at `index`. A placeholder appears in the sidebar at once and the
+    /// transcript is dimmed while storage does the real work: local-only
+    /// chats (or any chat while cloud sync is off) are copied on this
+    /// device, synced chats are forked by the enclave. The placeholder is
+    /// then swapped for the stored row, which becomes the current chat if
+    /// the user is still viewing the source.
+    func forkChat(throughMessageIndex index: Int) async {
+        guard canForkMessage(at: index),
+              let userId = currentUserId,
+              let source = currentChat
+        else { return }
+        guard chatMutationGate.begin(chatId: source.id) else { return }
+        defer { chatMutationGate.end(chatId: source.id) }
+
+        let forkId = Chat.generateReverseId()
+        let forksLocally = source.isLocalOnly || !SettingsManager.shared.isCloudSyncEnabled
+        var placeholder: Chat
+        do {
+            placeholder = try source.forked(throughMessageIndex: index, id: forkId)
+        } catch {
+            syncErrors.append(error.localizedDescription)
+            return
+        }
+        placeholder.isLocalOnly = forksLocally
+        placeholder.pendingSave = true
+
+        forkingChatId = source.id
+        defer { forkingChatId = nil }
+        insertForkPlaceholder(placeholder)
+        let startedAt = Date()
+
+        let fork: Chat
+        do {
+            if forksLocally {
+                var local = placeholder
+                local.pendingSave = false
+                local.messages = try await hydratingSyncedImages(
+                    in: local.messages,
+                    chatId: source.id
+                )
+                try await chatLoadingService.saveChat(local, userId: userId, storage: .local)
+                fork = local
+            } else {
+                fork = try await cloudSync.forkChat(
+                    sourceId: source.id,
+                    targetId: forkId,
+                    messageCount: index + 1,
+                    title: Chat.forkTitle(for: source.title)
+                )
+            }
+        } catch {
+            removeForkPlaceholder(placeholder)
+            guard currentUserId == userId, !(error is CancellationError) else { return }
+            syncErrors.append(error.localizedDescription)
+            return
+        }
+        guard currentUserId == userId else {
+            removeForkPlaceholder(placeholder)
+            return
+        }
+
+        await holdForkOverlay(since: startedAt)
+
+        replaceChat(fork)
+        if currentChat?.id == source.id {
+            selectChat(fork)
+        }
+        do {
+            if fork.isLocalOnly {
+                try await refreshLocalSummaryIndex(userId: userId)
+            } else {
+                _ = try await refreshCloudSummaryIndex(userId: userId)
+            }
+        } catch {
+            // The fork is already stored and selected; a stale index refresh
+            // is corrected by the next sync pass.
+        }
+    }
+
+    private func insertForkPlaceholder(_ placeholder: Chat) {
+        if placeholder.isLocalOnly {
+            localChats.insert(placeholder, at: 0)
+        } else {
+            chats.insert(placeholder, at: 0)
+        }
+    }
+
+    private func removeForkPlaceholder(_ placeholder: Chat) {
+        localChats.removeAll { $0.id == placeholder.id }
+        chats.removeAll { $0.id == placeholder.id }
+        removeSummary(id: placeholder.id, isLocalOnly: placeholder.isLocalOnly)
+    }
+
+    /// Keeps the fork overlay up for its minimum display time so a fast fork
+    /// still reads as an action rather than a flicker.
+    private func holdForkOverlay(since startedAt: Date) async {
+        let remaining = Constants.ChatFork.overlayMinVisibleSeconds - Date().timeIntervalSince(startedAt)
+        guard remaining > 0 else { return }
+        try? await Task.sleep(for: .seconds(remaining))
     }
 
     /// Resolves a pending input-surface GenUI tool call: writes the

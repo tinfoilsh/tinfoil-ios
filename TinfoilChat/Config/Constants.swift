@@ -453,8 +453,11 @@ enum Constants {
         /// still reads as an action instead of a flicker.
         static let overlayMinVisibleSeconds: TimeInterval = 0.6
         static let overlayLabel = "Forking conversation..."
-        static let menuTitle = "Fork from here"
-        static let menuSystemImage = "arrow.triangle.branch"
+        static let overlayDimOpacity: Double = 0.7
+        static let overlayFadeSeconds: TimeInterval = 0.15
+        static let sidebarSpinnerLabel = "Saving conversation"
+        static let actionLabel = "Fork from here"
+        static let actionSystemImage = "arrow.triangle.branch"
     }
 
     enum Sync {

@@ -167,3 +167,82 @@ struct ChatForkTests {
         #expect(decoded.pendingSave == false)
     }
 }
+
+private actor ForkRecordingChatLoadingService: ChatLoadingService {
+    private var storedChats: [ChatStorageTab: [String: Chat]] = [:]
+    private var saveCalls: [(String, ChatStorageTab)] = []
+
+    func setChat(_ chat: Chat, storage: ChatStorageTab) {
+        storedChats[storage, default: [:]][chat.id] = chat
+    }
+
+    func loadIndex(userId: String, storage: ChatStorageTab) async throws -> [ChatIndexEntry] {
+        (storedChats[storage] ?? [:]).values.map { ChatIndexEntry(from: $0) }
+    }
+
+    func loadChat(id: String, userId: String, storage: ChatStorageTab) async throws -> Chat {
+        guard let chat = storedChats[storage]?[id] else {
+            throw ChatLoadingError.chatNotFound(id: id, storage: storage)
+        }
+        return chat
+    }
+
+    func saveChat(_ chat: Chat, userId: String, storage: ChatStorageTab) async throws {
+        saveCalls.append((chat.id, storage))
+        storedChats[storage, default: [:]][chat.id] = chat
+    }
+
+    func applyRemoteChatIfFreshResult(
+        _ chat: Chat,
+        userId: String,
+        expectedLocalUpdatedAt: Date?,
+        allowLocallyModified: Bool
+    ) async throws -> RevisionApplyResult {
+        storedChats[.cloud, default: [:]][chat.id] = chat
+        return .applied
+    }
+
+    func deleteChat(id: String, userId: String, storage: ChatStorageTab) async throws {
+        storedChats[storage]?[id] = nil
+    }
+
+    func saves() -> [(String, ChatStorageTab)] { saveCalls }
+    func savedChat(id: String, storage: ChatStorageTab) -> Chat? { storedChats[storage]?[id] }
+}
+
+struct ChatForkLocalStorageTests {
+    @Test func localForkIsStoredAsASeparateRowAndLeavesTheSourceUntouched() async throws {
+        let service = ForkRecordingChatLoadingService()
+        var source = Chat(
+            id: "chat-source",
+            title: "Trip planning",
+            messages: [
+                Message(role: .user, content: "one"),
+                Message(role: .assistant, content: "two"),
+                Message(role: .user, content: "three"),
+            ],
+            modelType: ChatForkTests.model,
+            userId: "user-1",
+            syncVersion: 4,
+            locallyModified: false,
+            isLocalOnly: true
+        )
+        source.clock = 2
+        await service.setChat(source, storage: .local)
+
+        let fork = try source.forked(throughMessageIndex: 1, id: "chat-fork")
+        try await service.saveChat(fork, userId: "user-1", storage: .local)
+
+        let storedFork = try #require(await service.savedChat(id: "chat-fork", storage: .local))
+        let storedSource = try #require(await service.savedChat(id: "chat-source", storage: .local))
+        #expect(storedFork.messages.map(\.content) == ["one", "two"])
+        #expect(storedFork.title == "Trip planning (fork)")
+        #expect(storedFork.isLocalOnly)
+        #expect(storedFork.syncVersion == 0)
+        #expect(storedFork.clock == nil)
+        #expect(storedSource.messages.count == 3)
+        #expect(storedSource.syncVersion == 4)
+        #expect(await service.saves().map(\.0) == ["chat-fork"])
+        #expect(await service.savedChat(id: "chat-fork", storage: .cloud) == nil)
+    }
+}

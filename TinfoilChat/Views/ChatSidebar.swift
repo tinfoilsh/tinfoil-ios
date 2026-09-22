@@ -1225,6 +1225,12 @@ struct ChatListItem: View {
                                     .foregroundColor(.red)
                                     .accessibilityHidden(true)
                             }
+
+                            if chat.pendingSave {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                    .accessibilityLabel(Constants.ChatFork.sidebarSpinnerLabel)
+                            }
                             
                             if chat.isBlankChat {
                                 // Blue dot indicator for new chats

@@ -170,6 +170,21 @@ struct MessageView: View {
         !viewModel.isLoading && viewModel.messageEditSession == nil
     }
 
+    private var forkActionButton: some View {
+        Button {
+            Task { await viewModel.forkChat(throughMessageIndex: messageIndex) }
+        } label: {
+            Image(systemName: Constants.ChatFork.actionSystemImage)
+                .font(.system(size: 16))
+                .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+        .accessibilityLabel(Constants.ChatFork.actionLabel)
+        .accessibleHitTarget()
+    }
+
     private var recoveryContext: (pendingRecoveries: [PendingRecoveryEnvelope], activeTurnId: String?) {
         (
             pendingRecoveries: viewModel.currentChat?.pendingRecoveries ?? [],
@@ -827,6 +842,10 @@ struct MessageView: View {
                                 .accessibleHitTarget()
                             }
 
+                            if viewModel.canForkMessage(at: messageIndex) {
+                                forkActionButton
+                            }
+
                             Spacer()
                         }
                     }
@@ -884,6 +903,15 @@ struct MessageView: View {
                     }
                 }
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
+
+                // Fork action for user messages, trailing-aligned under the bubble
+                if message.role == .user && viewModel.canForkMessage(at: messageIndex) {
+                    HStack {
+                        Spacer()
+                        forkActionButton
+                    }
+                    .padding(.top, 2)
+                }
 
                 if showsPendingResponseRecovery {
                     PendingResponseRecoveryView(
