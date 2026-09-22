@@ -22,6 +22,13 @@ struct PromptPreset: Identifiable, Equatable {
     let iconName: String
     let systemPrompt: String
     let isBuiltIn: Bool
+    /// Model picker id (a real model name or the Auto id) applied to a chat
+    /// when this preset is selected, or nil to leave the chat's model alone.
+    /// Always nil for built-in presets.
+    let model: String?
+    /// Web search choice applied when this preset is selected, or nil to
+    /// leave the chat's setting alone. Always nil for built-in presets.
+    let webSearchEnabled: Bool?
 
     static let userIdPrefix = "user:"
 
@@ -39,6 +46,8 @@ struct PromptPreset: Identifiable, Equatable {
         self.iconName = PromptPreset.defaultUserIcon
         self.systemPrompt = stored.systemPrompt
         self.isBuiltIn = false
+        self.model = stored.model
+        self.webSearchEnabled = stored.webSearchEnabled
     }
 
     init(
@@ -47,7 +56,9 @@ struct PromptPreset: Identifiable, Equatable {
         description: String,
         iconName: String,
         systemPrompt: String,
-        isBuiltIn: Bool
+        isBuiltIn: Bool,
+        model: String? = nil,
+        webSearchEnabled: Bool? = nil
     ) {
         self.id = id
         self.name = name
@@ -55,6 +66,54 @@ struct PromptPreset: Identifiable, Equatable {
         self.iconName = iconName
         self.systemPrompt = systemPrompt
         self.isBuiltIn = isBuiltIn
+        self.model = model
+        self.webSearchEnabled = webSearchEnabled
+    }
+}
+
+/// Pure helpers for the optional model and web search settings a user preset
+/// can carry. Kept free of `ProfileManager` and `AppConfig` so they can be
+/// unit tested directly.
+enum PromptPresetSettings {
+    /// Resolve a preset's model choice against the catalog. Auto (including
+    /// legacy Auto tier ids) maps to the synthetic Auto entry; an id not in
+    /// `available` resolves to nil so a stale choice is skipped rather than
+    /// substituted with a fallback.
+    static func resolveModel(_ id: String?, available: [ModelType]) -> ModelType? {
+        guard let id else { return nil }
+        if AutoModel.isAutoId(id) { return ModelAvailability.autoModel(from: available) }
+        return available.first { $0.id == id }
+    }
+
+    /// Whether a preset's model id still refers to something in the catalog.
+    static func isModelAvailable(_ id: String, available: [ModelType]) -> Bool {
+        resolveModel(id, available: available) != nil
+    }
+
+    struct PruneResult: Equatable {
+        let presets: [SyncedPromptPreset]
+        let changedIds: [String]
+    }
+
+    /// Clear the model from every preset whose model is not in `available`,
+    /// bumping `updatedAt` on the ones changed so the edit syncs like any
+    /// other. Presets with no model, or with Auto, are left alone.
+    static func pruningUnavailableModels(
+        in presets: [SyncedPromptPreset],
+        available: [ModelType],
+        now: Date = Date()
+    ) -> PruneResult {
+        var changedIds: [String] = []
+        let updated = presets.map { preset -> SyncedPromptPreset in
+            guard let model = preset.model,
+                  !isModelAvailable(model, available: available) else { return preset }
+            changedIds.append(preset.id)
+            var next = preset
+            next.model = nil
+            next.updatedAt = now.timeIntervalSince1970 * 1000
+            return next
+        }
+        return PruneResult(presets: updated, changedIds: changedIds)
     }
 }
 

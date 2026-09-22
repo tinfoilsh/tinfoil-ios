@@ -1841,20 +1841,29 @@ class ChatViewModel: ObservableObject {
         }
 
         // A reused blank represents a fresh chat, so reset its preferences to
-        // the current global defaults before selecting it.
-        let defaultPresetId = ProfileManager.shared.defaultPromptPresetIdForNewChat
+        // the current global defaults before selecting it, then layer on any
+        // model or web search choice the default preset carries. The device
+        // default model is used rather than the picker, which may be showing
+        // a model pinned by the previous chat's prompt preset.
+        let defaultPreset = ProfileManager.shared.defaultPromptPreset
+        let defaultPresetId = defaultPreset?.id
+        let newChatModel = modelType ?? AppConfig.shared.currentModel ?? currentModel
         if shouldBeLocal {
             if let index = localChats.firstIndex(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
+                localChats[index].modelType = newChatModel
                 localChats[index].webSearchEnabled = SettingsManager.shared.webSearchAvailable
                 localChats[index].promptPresetId = defaultPresetId
+                applyPresetSettings(defaultPreset, to: &localChats[index])
                 selectChat(localChats[index])
                 shouldFocusInput = focusInput
                 return
             }
         } else {
             if let index = chats.firstIndex(where: { $0.isBlankChat && $0.projectId == targetProjectId }) {
+                chats[index].modelType = newChatModel
                 chats[index].webSearchEnabled = SettingsManager.shared.webSearchAvailable
                 chats[index].promptPresetId = defaultPresetId
+                applyPresetSettings(defaultPreset, to: &chats[index])
                 selectChat(chats[index])
                 shouldFocusInput = focusInput
                 return
@@ -1862,14 +1871,15 @@ class ChatViewModel: ObservableObject {
         }
         
         // Create new chat with temporary ID (instant, no network call)
-        let newChat = Chat.create(
-            modelType: modelType ?? currentModel,
+        var newChat = Chat.create(
+            modelType: newChatModel,
             language: nil,
             userId: currentUserId,
             isLocalOnly: shouldBeLocal,
             projectId: targetProjectId,
             promptPresetId: defaultPresetId
         )
+        applyPresetSettings(defaultPreset, to: &newChat)
 
         if shouldBeLocal {
             localChats.insert(newChat, at: 0)
@@ -2638,12 +2648,34 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Stamp a preset's optional model and web search choice onto a chat.
+    /// Applied once, when the preset is selected, so the user can still change
+    /// either for that chat afterwards. A model missing from the catalog is
+    /// skipped. Returns the model applied, if any, so callers that own the
+    /// current chat can move the picker to match.
+    @discardableResult
+    private func applyPresetSettings(_ preset: PromptPreset?, to chat: inout Chat) -> ModelType? {
+        guard let preset else { return nil }
+        let presetModel = PromptPresetSettings.resolveModel(
+            preset.model,
+            available: AppConfig.shared.availableModels
+        )
+        if let presetModel { chat.modelType = presetModel }
+        if let webSearch = preset.webSearchEnabled { chat.webSearchEnabled = webSearch }
+        return presetModel
+    }
+
     /// Sets (or clears) the prompt-library preset for the current chat. The
-    /// preset's system prompt overrides the default for this conversation.
+    /// preset's system prompt overrides the default for this conversation, and
+    /// any model or web search choice the preset carries is applied to the
+    /// chat without becoming the device default.
     func setPromptPreset(_ presetId: String?) {
         guard var chat = currentChat else { return }
+        let preset = ProfileManager.shared.promptPreset(for: presetId)
+        var presetModel: ModelType?
         if let updated = updateChatInPlace(chat.id, update: { c in
             c.promptPresetId = presetId
+            presetModel = applyPresetSettings(preset, to: &c)
             c.locallyModified = true
             c.updatedAt = Date()
         }) {
@@ -2652,9 +2684,15 @@ class ChatViewModel: ObservableObject {
             // Chat not yet in either array (e.g. a transient blank chat):
             // update the in-memory current chat so the preset still applies.
             chat.promptPresetId = presetId
+            presetModel = applyPresetSettings(preset, to: &chat)
             chat.locallyModified = true
             chat.updatedAt = Date()
             currentChat = chat
+        }
+        // The chat's model was written above, so only the picker state needs
+        // to follow; `currentChat`'s didSet already mirrors web search.
+        if let presetModel, currentModel != presetModel {
+            changeModel(to: presetModel, shouldUpdateChat: false, persistAsDefault: false)
         }
     }
 
@@ -6309,15 +6347,24 @@ class ChatViewModel: ObservableObject {
     
     // MARK: - Model Management
     
-    /// Changes the current model and re-initializes the Tinfoil client
-    func changeModel(to modelType: ModelType, shouldUpdateChat: Bool = true) {
+    /// Changes the current model and re-initializes the Tinfoil client.
+    /// Pass `persistAsDefault: false` when the change is driven by a chat's
+    /// own settings (e.g. a prompt preset's model) and must not become the
+    /// device-wide default that new chats start from.
+    func changeModel(
+        to modelType: ModelType,
+        shouldUpdateChat: Bool = true,
+        persistAsDefault: Bool = true
+    ) {
         // Only proceed if the model is actually changing
         guard modelType != currentModel else { return }
         
         // Update model settings
         self.currentModel = modelType
-        // This will trigger the didSet in AppConfig which persists to UserDefaults
-        AppConfig.shared.currentModel = modelType
+        if persistAsDefault {
+            // This will trigger the didSet in AppConfig which persists to UserDefaults
+            AppConfig.shared.currentModel = modelType
+        }
         
         // Update the current chat's model if requested
         if shouldUpdateChat, var chat = currentChat {
