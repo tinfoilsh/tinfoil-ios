@@ -3532,7 +3532,7 @@ class ChatViewModel: ObservableObject {
                 // which the fork copy sheds, so hydrate before re-forking.
                 var hydratedSource = source
                 hydratedSource.messages = try await hydratingSyncedImages(
-                    in: source.messages,
+                    in: Array(source.messages.prefix(index + 1)),
                     chatId: source.id
                 )
                 var local = try hydratedSource.forked(throughMessageIndex: index, id: forkId)
