@@ -78,6 +78,10 @@ struct Chat: Identifiable, Codable {
     // or cloud. Used to power the toolbar incognito toggle.
     var isTemporary: Bool = false
 
+    // Transient flag for a chat whose first save is still landing (e.g. a
+    // fork placeholder). Never persisted; drives the sidebar row spinner.
+    var pendingSave: Bool = false
+
     // Computed properties for sync filtering
     var isBlankChat: Bool {
         // Don't treat failed-to-decrypt chats as blank
@@ -95,6 +99,45 @@ struct Chat: Identifiable, Codable {
         let unpadded = String(reverseTimestamp)
         let reverseTsStr = String(repeating: "0", count: max(0, Constants.Sync.reverseTimestampDigits - unpadded.count)) + unpadded
         return "\(reverseTsStr)_\(UUID().uuidString.lowercased())"
+    }
+
+    /// Title for a fork of a chat titled `sourceTitle`. Idempotent on the
+    /// suffix so forking a fork does not stack "(fork) (fork)".
+    static func forkTitle(for sourceTitle: String) -> String {
+        let trimmed = sourceTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = trimmed.isEmpty ? placeholderTitle : trimmed
+        return base.hasSuffix(Constants.ChatFork.titleSuffix)
+            ? base
+            : base + Constants.ChatFork.titleSuffix
+    }
+
+    /// Builds a client-side fork holding the messages up to and including
+    /// `index`. Only conversation content and settings carry over; sync
+    /// bookkeeping, the edit clock, and recovery envelopes belong to the
+    /// source row. Attachments get fresh ids and shed their server key so
+    /// the fork's first upload stores its own copies of their bytes. Cloud
+    /// chats are forked by the sync enclave instead, since their image
+    /// bytes live server-side.
+    func forked(throughMessageIndex index: Int, id forkId: String = Chat.generateReverseId()) throws -> Chat {
+        guard messages.indices.contains(index) else {
+            throw ChatForkError.messageIndexOutOfRange
+        }
+        let now = Date()
+        return Chat(
+            id: forkId,
+            title: Chat.forkTitle(for: title),
+            titleState: .manual,
+            messages: messages.prefix(index + 1).map { $0.forkCopy() },
+            createdAt: now,
+            modelType: modelType,
+            language: language,
+            userId: userId,
+            updatedAt: now,
+            isLocalOnly: isLocalOnly,
+            projectId: projectId,
+            promptPresetId: promptPresetId,
+            webSearchEnabled: webSearchEnabled
+        )
     }
 
     static func deriveTitleState(for title: String, messages: [Message]) -> TitleState {
@@ -366,6 +409,31 @@ struct Chat: Identifiable, Codable {
 }
 
 /// Represents a message role
+enum ChatForkError: Error, Equatable {
+    case messageIndexOutOfRange
+}
+
+extension Message {
+    /// A copy suitable for a forked chat: same content and state, with
+    /// attachments detached from the source's server-side storage.
+    func forkCopy() -> Message {
+        var copy = self
+        copy.attachments = attachments.map { $0.forkCopy() }
+        return copy
+    }
+}
+
+extension Attachment {
+    /// A copy with a fresh id and no server key, so the fork's first upload
+    /// registers its own blob instead of sharing the source's.
+    func forkCopy() -> Attachment {
+        var copy = self
+        copy.id = UUID().uuidString.lowercased()
+        copy.encryptionKey = nil
+        return copy
+    }
+}
+
 enum MessageRole: String, Codable {
     case user
     case assistant

@@ -447,6 +447,16 @@ enum Constants {
         static let attentionAccessibilityLabel = "Cloud sync needs attention"
     }
 
+    enum ChatFork {
+        static let titleSuffix = " (fork)"
+        /// The "forking" overlay stays up at least this long so a fast fork
+        /// still reads as an action instead of a flicker.
+        static let overlayMinVisibleSeconds: TimeInterval = 0.6
+        static let overlayLabel = "Forking conversation..."
+        static let menuTitle = "Fork from here"
+        static let menuSystemImage = "arrow.triangle.branch"
+    }
+
     enum Sync {
         static let protocolVersion = 2
         static let maxConcurrentChatUploads = 2
