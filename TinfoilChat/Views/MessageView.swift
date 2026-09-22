@@ -2255,6 +2255,7 @@ private struct SourcesButton: View {
             .padding(.vertical, 8)
             .background(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
             .cornerRadius(20)
+            .fixedSize()
         }
         .buttonStyle(PlainButtonStyle())
         .foregroundColor(isDarkMode ? .white : .black)
