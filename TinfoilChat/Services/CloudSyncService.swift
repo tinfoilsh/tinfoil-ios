@@ -856,6 +856,114 @@ class CloudSyncService: ObservableObject {
         throw SyncEnclaveError(message: "required chat turn could not be backed up")
     }
 
+    // MARK: - Fork
+
+    enum ForkError: LocalizedError, Equatable {
+        case notReady
+        case sourceIneligible(ChatForkPolicy.SourceReadiness.Reason)
+        case invalidMessageCount
+        case sourceChangedDuringFlush
+        case forkNotFound(String)
+        case forkNotStored(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .notReady:
+                return "chat is not ready for cloud fork"
+            case .sourceIneligible(let reason):
+                return "chat cannot be forked through the cloud: \(reason)"
+            case .invalidMessageCount:
+                return "fork point is outside the conversation"
+            case .sourceChangedDuringFlush:
+                return "chat changed while preparing to fork"
+            case .forkNotFound(let id):
+                return "forked chat was not found after creation: \(id)"
+            case .forkNotStored(let id):
+                return "forked chat could not be stored locally: \(id)"
+            }
+        }
+    }
+
+    /// Fork a synced chat server-side and bring the new row into local
+    /// storage. Pending local edits are flushed first so the enclave copies
+    /// exactly what the user sees; the fork is then pulled back through the
+    /// same path a chat created on another device takes, so its local sync
+    /// bookkeeping starts out correct.
+    func forkChat(
+        sourceId: String,
+        targetId: String,
+        messageCount: Int,
+        title: String
+    ) async throws -> Chat {
+        guard !uploadsSuspended else { throw CancellationError() }
+        let generation = accountGeneration
+        _ = try CloudUploadGate.allowsWrite(required: true)
+        guard let userId = await getCurrentUserId(),
+              await cloudStorage.isAuthenticated(), await canWriteToCloud(),
+              generation == accountGeneration
+        else {
+            throw ForkError.notReady
+        }
+
+        await uploadCoalescer.waitForUpload(sourceId)
+        var source = try await EncryptedFileStorage.cloud.loadChat(chatId: sourceId, userId: userId)
+        guard generation == accountGeneration else { throw CancellationError() }
+
+        switch ChatForkPolicy.sourceReadiness(source, activeUserId: userId) {
+        case .ineligible(let reason):
+            throw ForkError.sourceIneligible(reason)
+        case .needsFlush:
+            await backupChat(sourceId, ensureLatestUpload: true)
+            guard generation == accountGeneration else { throw CancellationError() }
+            source = try await EncryptedFileStorage.cloud.loadChat(chatId: sourceId, userId: userId)
+            guard ChatForkPolicy.isFlushed(source) else {
+                throw ForkError.sourceChangedDuringFlush
+            }
+        case .ready:
+            break
+        }
+        guard let source else { throw ForkError.sourceIneligible(.notFound) }
+        guard ChatForkPolicy.isValidMessageCount(
+            messageCount,
+            sourceMessageCount: source.messages.count
+        ) else {
+            throw ForkError.invalidMessageCount
+        }
+
+        _ = try await cloudStorage.forkChat(
+            sourceId: sourceId,
+            targetId: targetId,
+            messageCount: messageCount,
+            title: title,
+            createdAt: Date(),
+            idempotencyKey: newSyncEnclaveIdempotencyKey()
+        )
+        guard generation == accountGeneration else { throw CancellationError() }
+
+        guard let remote = try await cloudStorage.downloadChat(targetId),
+              let pulled = await convertStoredChat(remote)
+        else {
+            throw ForkError.forkNotFound(targetId)
+        }
+        guard generation == accountGeneration else { throw CancellationError() }
+
+        let fork = ChatForkPolicy.localFork(from: pulled, sourceModel: source.modelType)
+        let applied = try await EncryptedFileStorage.cloud.applyRemoteChatIfFreshResult(
+            fork,
+            userId: userId,
+            expectedLocalUpdatedAt: nil
+        )
+        guard generation == accountGeneration,
+              await getCurrentUserId() == userId else {
+            throw CancellationError()
+        }
+        guard applied == .applied else {
+            throw ForkError.forkNotStored(targetId)
+        }
+        SyncHealthStore.shared.reportChatSynced(targetId)
+        return fork
+    }
+
     private func trustedChatClock(_ chat: Chat) -> EditClock? {
         guard let clock = chat.clock,
               let writer = chat.writer,

@@ -158,6 +158,39 @@ class CloudStorageService: ObservableObject {
         )
     }
 
+    /// Ask the enclave to copy the first `messageCount` messages of a
+    /// synced chat into a new row. Image bytes never leave the server: the
+    /// enclave re-uploads them under the new chat so each chat owns its own
+    /// attachment blobs. Returns the new row's sync version.
+    func forkChat(
+        sourceId: String,
+        targetId: String,
+        messageCount: Int,
+        title: String,
+        createdAt: Date,
+        idempotencyKey: String
+    ) async throws -> Int? {
+        let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
+        let response = try await SyncEnclaveAPI.fork(
+            EnclaveForkRequest(
+                sourceId: sourceId,
+                targetId: targetId,
+                key: keyB64,
+                messageCount: messageCount,
+                title: title,
+                createdAt: Self.forkTimestampFormatter.string(from: createdAt),
+                idempotencyKey: idempotencyKey
+            )
+        )
+        return etagToSyncVersion(response.etag)
+    }
+
+    private static let forkTimestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
     private func encryptAndUploadAttachments(
         _ chat: inout StoredChat
     ) async throws -> [AttachmentRewrite] {
