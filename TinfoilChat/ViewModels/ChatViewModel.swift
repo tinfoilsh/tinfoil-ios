@@ -3528,12 +3528,15 @@ class ChatViewModel: ObservableObject {
         let fork: Chat
         do {
             if forksLocally {
-                var local = placeholder
-                local.pendingSave = false
-                local.messages = try await hydratingSyncedImages(
-                    in: local.messages,
+                // Image bytes are fetched with the source's attachment keys,
+                // which the fork copy sheds, so hydrate before re-forking.
+                var hydratedSource = source
+                hydratedSource.messages = try await hydratingSyncedImages(
+                    in: source.messages,
                     chatId: source.id
                 )
+                var local = try hydratedSource.forked(throughMessageIndex: index, id: forkId)
+                local.isLocalOnly = true
                 try await chatLoadingService.saveChat(local, userId: userId, storage: .local)
                 fork = local
             } else {
@@ -3550,12 +3553,11 @@ class ChatViewModel: ObservableObject {
             syncErrors.append(error.localizedDescription)
             return
         }
+        await holdForkOverlay(since: startedAt)
         guard currentUserId == userId else {
             removeForkPlaceholder(placeholder)
             return
         }
-
-        await holdForkOverlay(since: startedAt)
 
         replaceChat(fork)
         if currentChat?.id == source.id {
