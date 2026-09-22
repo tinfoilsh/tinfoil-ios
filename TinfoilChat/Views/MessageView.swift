@@ -758,17 +758,6 @@ struct MessageView: View {
                         )
 
                         HStack(spacing: 16) {
-                            // Sources button - only show if we have web search sources
-                            if let webSearchState = message.webSearchState,
-                               !webSearchState.sources.isEmpty {
-                                SourcesButton(
-                                    sources: webSearchState.sources,
-                                    isDarkMode: isDarkMode
-                                ) {
-                                    showSourcesSheet = true
-                                }
-                            }
-
                             Button {
                                 showRawContentModal = true
                             } label: {
@@ -828,6 +817,17 @@ struct MessageView: View {
                             }
 
                             Spacer()
+                        }
+
+                        // Sources button - only show if we have web search sources
+                        if let webSearchState = message.webSearchState,
+                           !webSearchState.sources.isEmpty {
+                            SourcesButton(
+                                sources: webSearchState.sources,
+                                isDarkMode: isDarkMode
+                            ) {
+                                showSourcesSheet = true
+                            }
                         }
                     }
                     .padding(.vertical, 8)
@@ -2193,16 +2193,39 @@ private struct SourcesButton: View {
     let isDarkMode: Bool
     let action: () -> Void
 
+    private static let label = "Sources"
+
+    private var labelWidth: CGFloat {
+        let descriptor = UIFontDescriptor
+            .preferredFontDescriptor(withTextStyle: .footnote)
+            .addingAttributes([.traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.medium]])
+        let font = UIFont(descriptor: descriptor, size: 0)
+        return (Self.label as NSString).size(withAttributes: [.font: font]).width
+    }
+
+    /// How many overlapping favicons fit beside the label without the pill
+    /// exceeding its share of the screen. Each favicon after the first only
+    /// adds its non-overlapped portion.
+    private var maxFaviconCount: Int {
+        let layout = Constants.SourcesButton.self
+        let maxWidth = UIScreen.main.bounds.width * layout.maxWidthFraction
+        let fixedWidth = layout.horizontalPadding * 2 + labelWidth + layout.labelSpacing
+        let faviconStride = layout.faviconSize - layout.faviconOverlap
+        let available = maxWidth - fixedWidth - layout.faviconOverlap
+        return max(1, Int(available / faviconStride))
+    }
+
     private var uniqueDomainSources: [(domain: String, url: String)] {
         var seen = Set<String>()
         var entries: [(domain: String, url: String)] = []
+        let limit = maxFaviconCount
         for source in sources {
             let domain = getDomain(from: source.url)
             if !seen.contains(domain) {
                 seen.insert(domain)
                 entries.append((domain: domain, url: source.url))
             }
-            if entries.count >= 4 { break }
+            if entries.count >= limit { break }
         }
         return entries
     }
@@ -2226,7 +2249,7 @@ private struct SourcesButton: View {
             placeholderColor: .gray,
             placeholderFontSize: 10
         )
-        .frame(width: 18, height: 18)
+        .frame(width: Constants.SourcesButton.faviconSize, height: Constants.SourcesButton.faviconSize)
         .background(backgroundColor)
         .clipShape(Circle())
         .overlay(Circle().stroke(borderColor, lineWidth: 1))
@@ -2237,12 +2260,12 @@ private struct SourcesButton: View {
         let displayedSources = uniqueDomainSources
 
         Button(action: action) {
-            HStack(spacing: 4) {
-                Text("Sources")
+            HStack(spacing: Constants.SourcesButton.labelSpacing) {
+                Text(Self.label)
                     .font(.system(.footnote, weight: .medium))
 
                 // Overlapping favicons
-                HStack(spacing: -6) {
+                HStack(spacing: -Constants.SourcesButton.faviconOverlap) {
                     ForEach(Array(displayedSources.enumerated()), id: \.offset) { index, entry in
                         sourceFavicon(
                             url: entry.url,
@@ -2251,14 +2274,14 @@ private struct SourcesButton: View {
                     }
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, Constants.SourcesButton.horizontalPadding)
             .padding(.vertical, 8)
             .background(isDarkMode ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
             .cornerRadius(20)
         }
         .buttonStyle(PlainButtonStyle())
         .foregroundColor(isDarkMode ? .white : .black)
-        .accessibilityLabel("Sources")
+        .accessibilityLabel(Self.label)
         .accessibilityValue("\(sources.count) source\(sources.count == 1 ? "" : "s")")
         .accessibilityHint("Shows web sources")
     }
