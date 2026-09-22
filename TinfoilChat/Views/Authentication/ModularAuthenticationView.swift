@@ -81,11 +81,15 @@ struct ModularAuthenticationView: View {
                   action: { Task { await signInWithApple() } }
                 )
                 .padding(.horizontal)
-                .padding(.bottom, geometry.safeAreaInsets.bottom > 0 ? geometry.safeAreaInsets.bottom : 20)
+                .padding(.bottom)
                 .transition(.opacity)
               }
             }
             .frame(maxHeight: .infinity, alignment: .top)
+
+            authenticationDisclaimer
+              .padding(.horizontal)
+              .padding(.bottom, geometry.safeAreaInsets.bottom > 0 ? geometry.safeAreaInsets.bottom : 20)
           }
           .contentShape(Rectangle())
           .onTapGesture {
@@ -130,19 +134,25 @@ struct ModularAuthenticationView: View {
   // MARK: - Main Content Components
   
   private var authenticationContent: some View {
-    VStack(spacing: 16) {
-      authenticationForms
+    authenticationForms
+      .onChange(of: clerk.user != nil) { _, isSignedIn in
+        if isSignedIn && onAuthenticated == nil {
+          completeAuthentication()
+        }
+      }
+  }
+
+  private var authenticationDisclaimer: some View {
+    VStack(spacing: 0) {
+      Divider()
+
       Text("By continuing, you agree to our [Terms](\(Constants.Legal.termsOfServiceURL.absoluteString)) and acknowledge our [Privacy Policy](\(Constants.Legal.privacyPolicyURL.absoluteString)).")
         .font(.footnote)
         .foregroundColor(.secondary)
         .tint(Color.adaptiveAccent)
         .multilineTextAlignment(.center)
         .fixedSize(horizontal: false, vertical: true)
-    }
-    .onChange(of: clerk.user != nil) { _, isSignedIn in
-      if isSignedIn && onAuthenticated == nil {
-        completeAuthentication()
-      }
+        .padding(.top)
     }
   }
   
