@@ -276,6 +276,7 @@ class ChatViewModel: ObservableObject {
             }
             if currentChat?.id != oldValue?.id {
                 audioRecordingStartId = nil
+                audioTranscriptionFence.invalidate()
                 selectedChatImageTask?.cancel()
                 selectedChatImageTask = nil
             }
@@ -499,6 +500,7 @@ class ChatViewModel: ObservableObject {
     @Published var audioError: String? = nil
     @Published var showMicrophonePermissionAlert: Bool = false
     private var audioRecordingStartId: UUID?
+    private var audioTranscriptionFence = ChatSelectionFence()
 
     // Temporary (incognito) chat mode. When active, the current chat is an
     // ephemeral in-memory chat that is never persisted or synced.
@@ -701,6 +703,7 @@ class ChatViewModel: ObservableObject {
         if currentChat?.id == chatId {
             cancelMessageEdit()
             cancelAudioRecording()
+            clearPendingAttachments()
         }
         discardMessageQueue(chatId: chatId)
         for key in activeGenUIRetryIds.keys.filter({ $0.chatId == chatId }) {
@@ -6675,6 +6678,7 @@ class ChatViewModel: ObservableObject {
     func handleSignOut() async {
         speechPlayer.stop()
         cancelMessageEdit()
+        cancelAudioRecording()
         genUIRetryTasks.values.forEach { $0.cancel() }
         genUIRetryTasks.removeAll()
         activeGenUIRetryIds.removeAll()
@@ -8316,7 +8320,19 @@ extension ChatViewModel {
 
     /// Stop recording and transcribe the audio
     func stopAudioRecordingAndTranscribe() async -> String? {
-        guard isRecording else { return nil }
+        guard isRecording, canGenerateInCurrentChat,
+              let chatId = currentChat?.id else { return nil }
+
+        let accountId = currentUserId
+        let generation = audioTranscriptionFence.begin(id: chatId)
+        func isCurrentTranscription() -> Bool {
+            audioTranscriptionFence.accepts(id: chatId, generation: generation)
+                && currentChat?.id == chatId
+                && currentUserId == accountId
+                && canGenerateInCurrentChat
+                && !isAccountTeardownInProgress
+                && !Task.isCancelled
+        }
 
         isRecording = false
 
@@ -8335,11 +8351,14 @@ extension ChatViewModel {
                 client: client,
                 model: audioModel.modelName
             )
+            guard isCurrentTranscription() else { return nil }
             return transcription
         } catch {
+            guard isCurrentTranscription() else { return nil }
             // Retry once with a fresh token if the error is an auth failure
             if ChatViewModel.isAuthenticationError(error) {
                 await refreshSessionTokenForRetry()
+                guard isCurrentTranscription() else { return nil }
                 if let retryClient = self.client {
                     do {
                         let transcription = try await AudioRecordingService.shared.transcribe(
@@ -8347,8 +8366,10 @@ extension ChatViewModel {
                             client: retryClient,
                             model: audioModel.modelName
                         )
+                        guard isCurrentTranscription() else { return nil }
                         return transcription
                     } catch {
+                        guard isCurrentTranscription() else { return nil }
                         audioError = error.localizedDescription
                         return nil
                     }
@@ -8362,6 +8383,7 @@ extension ChatViewModel {
     /// Cancel recording without transcribing
     func cancelAudioRecording() {
         audioRecordingStartId = nil
+        audioTranscriptionFence.invalidate()
         isRecording = false
         AudioRecordingService.shared.cancelRecording()
     }
