@@ -275,6 +275,7 @@ class ChatViewModel: ObservableObject {
                 messageEditSession = reconciledEditSession
             }
             if currentChat?.id != oldValue?.id {
+                audioRecordingStartId = nil
                 selectedChatImageTask?.cancel()
                 selectedChatImageTask = nil
             }
@@ -497,6 +498,7 @@ class ChatViewModel: ObservableObject {
     @Published var isTranscribing: Bool = false
     @Published var audioError: String? = nil
     @Published var showMicrophonePermissionAlert: Bool = false
+    private var audioRecordingStartId: UUID?
 
     // Temporary (incognito) chat mode. When active, the current chat is an
     // ephemeral in-memory chat that is never persisted or synced.
@@ -8236,14 +8238,17 @@ extension ChatViewModel {
         case start
         case showUpgrade
         case accountChanged
+        case chatUnavailable
     }
 
     static func audioRecordingStartDecision(
         canUseAudioInput: Bool,
+        canGenerateInCurrentChat: Bool,
         requestedAccountId: String?,
         currentAccountId: String?
     ) -> AudioRecordingStartDecision {
         guard requestedAccountId == currentAccountId else { return .accountChanged }
+        guard canGenerateInCurrentChat else { return .chatUnavailable }
         return canUseAudioInput ? .start : .showUpgrade
     }
 
@@ -8254,11 +8259,20 @@ extension ChatViewModel {
 
     /// Start recording audio
     func startAudioRecording() async {
+        guard canGenerateInCurrentChat, !isAccountTeardownInProgress, !Task.isCancelled else { return }
         guard canUseAudioInput else {
             showRateLimitPaywall = true
             return
         }
         let requestedAccountId = authManager?.localUserId
+        let requestedChatId = currentChat?.id
+        let requestId = UUID()
+        audioRecordingStartId = requestId
+        defer {
+            if audioRecordingStartId == requestId {
+                audioRecordingStartId = nil
+            }
+        }
 
         audioError = nil
 
@@ -8267,10 +8281,14 @@ extension ChatViewModel {
         if !AudioRecordingService.shared.hasPermission {
             hasMicrophonePermission = await AudioRecordingService.shared.requestPermission()
         }
-        guard !isAccountTeardownInProgress else { return }
+        guard !isAccountTeardownInProgress,
+              !Task.isCancelled,
+              audioRecordingStartId == requestId,
+              currentChat?.id == requestedChatId else { return }
 
         switch Self.audioRecordingStartDecision(
             canUseAudioInput: canUseAudioInput,
+            canGenerateInCurrentChat: canGenerateInCurrentChat,
             requestedAccountId: requestedAccountId,
             currentAccountId: authManager?.localUserId
         ) {
@@ -8279,7 +8297,7 @@ extension ChatViewModel {
         case .showUpgrade:
             showRateLimitPaywall = true
             return
-        case .accountChanged:
+        case .accountChanged, .chatUnavailable:
             return
         }
 
@@ -8343,6 +8361,7 @@ extension ChatViewModel {
 
     /// Cancel recording without transcribing
     func cancelAudioRecording() {
+        audioRecordingStartId = nil
         isRecording = false
         AudioRecordingService.shared.cancelRecording()
     }

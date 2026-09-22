@@ -70,19 +70,33 @@ struct MessageInputContentTests {
     func delayedMicrophonePermissionAccess() {
         #expect(ChatViewModel.audioRecordingStartDecision(
             canUseAudioInput: true,
+            canGenerateInCurrentChat: true,
             requestedAccountId: "account",
             currentAccountId: "account"
         ) == .start)
         #expect(ChatViewModel.audioRecordingStartDecision(
             canUseAudioInput: false,
+            canGenerateInCurrentChat: true,
             requestedAccountId: "account",
             currentAccountId: "account"
         ) == .showUpgrade)
         #expect(ChatViewModel.audioRecordingStartDecision(
             canUseAudioInput: true,
+            canGenerateInCurrentChat: true,
             requestedAccountId: "account-a",
             currentAccountId: "account-b"
         ) == .accountChanged)
+    }
+
+    @Test("does not start recording or show an upgrade for a blocked chat", arguments: [false, true])
+    @MainActor
+    func blockedChatRejectsMicrophoneStart(canUseAudioInput: Bool) {
+        #expect(ChatViewModel.audioRecordingStartDecision(
+            canUseAudioInput: canUseAudioInput,
+            canGenerateInCurrentChat: false,
+            requestedAccountId: "account",
+            currentAccountId: "account"
+        ) == .chatUnavailable)
     }
 
     @Test("uses one voice or send action based on draft content", arguments: ["", " ", "hello", "  hello  "])

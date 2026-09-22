@@ -492,7 +492,7 @@ struct MessageView: View {
                 messageId: message.id,
                 toolCallId: toolCall.id
             ),
-            onRetry: (isRenderingStream || viewModel.isCurrentChatSafeguardFlagged) ? nil : {
+            onRetry: (isRenderingStream || !viewModel.canGenerateInCurrentChat) ? nil : {
                 viewModel.retryGenUIToolCall(
                     messageId: message.id,
                     toolCallId: toolCall.id
@@ -807,7 +807,7 @@ struct MessageView: View {
                         isRateLimitError: message.isRateLimitError,
                         isHourlyLimit: message.isHourlyLimitError,
                         isConnectionError: message.isConnectionError,
-                        onRegenerate: isLastMessage && !viewModel.isCurrentChatSafeguardFlagged
+                        onRegenerate: isLastMessage && viewModel.canGenerateInCurrentChat
                             ? { viewModel.regenerateLastResponse() }
                             : nil,
                         onUpgrade: (message.isRateLimitError && !message.isHourlyLimitError) ? { viewModel.showRateLimitPaywall = true } : nil
@@ -853,7 +853,7 @@ struct MessageView: View {
                                 }
 
                                 // Regenerate button - only on the last assistant message
-                                if isLastMessage && !viewModel.isLoading && messageIndex > 0 {
+                                if isLastMessage && viewModel.canGenerateInCurrentChat && !viewModel.isLoading && messageIndex > 0 {
                                     Button {
                                         viewModel.regenerateMessage(at: messageIndex - 1)
                                     } label: {

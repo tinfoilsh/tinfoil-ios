@@ -217,6 +217,16 @@ struct ChatListView: View {
         .onDisappear {
             viewModel.isScrollInteractionActive = false
         }
+        .onChange(of: isCurrentChatReadOnly, initial: true) { _, isReadOnly in
+            guard isReadOnly else { return }
+            messageText = ""
+            isInputExpanded = false
+            isKeyboardVisible = false
+            keyboardHeight = 0
+            showPromptLibrary = false
+            viewModel.shouldFocusInput = false
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
             if let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
                 isKeyboardVisible = true
