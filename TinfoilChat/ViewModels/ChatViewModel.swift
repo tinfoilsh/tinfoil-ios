@@ -134,11 +134,14 @@ enum GenUIRetryRequestExecutor {
         recoverAuthentication: () async throws -> Void,
         isAuthenticationError: (Error) -> Bool
     ) async throws -> Response {
+        try Task.checkCancellation()
         do {
             return try await request()
         } catch {
+            try Task.checkCancellation()
             guard isAuthenticationError(error) else { throw error }
             try await recoverAuthentication()
+            try Task.checkCancellation()
             return try await request()
         }
     }
@@ -287,7 +290,7 @@ class ChatViewModel: ObservableObject {
             // backgrounded. Guarded on the id changing so the frequent
             // same-chat reassignments during streaming stay cheap.
             if let chatId = currentChat?.id, chatId != oldValue?.id {
-                enforceSafeguardReadOnlyIfNeeded()
+                enforceSafeguardReadOnlyIfNeeded(chatId: chatId)
                 scheduleMessageQueueDrain(chatId: chatId)
             }
         }
@@ -599,6 +602,7 @@ class ChatViewModel: ObservableObject {
     private var lastKnownProjectAccess: Bool?
     @Published private var genUIRetryStates: [GenUIRetryKey: GenUIRetryState] = [:]
     private var activeGenUIRetryIds: [GenUIRetryKey: UUID] = [:]
+    private var genUIRetryTasks: [UUID: Task<Void, Never>] = [:]
     
     // Auth reference for Premium features
     @Published var authManager: AuthManager? {
@@ -681,19 +685,26 @@ class ChatViewModel: ObservableObject {
         flaggedChatIds: Set<String>,
         hasLoaded: Bool
     ) {
+        let newlyFlaggedChatIds = flaggedChatIds.subtracting(safeguardFlaggedChatIds)
         safeguardFlaggedChatIds = flaggedChatIds
         safeguardsHaveLoaded = hasLoaded
-        enforceSafeguardReadOnlyIfNeeded()
+        for chatId in newlyFlaggedChatIds {
+            enforceSafeguardReadOnlyIfNeeded(chatId: chatId)
+        }
     }
 
-    private func enforceSafeguardReadOnlyIfNeeded() {
-        guard isCurrentChatSafeguardFlagged,
-              let chatId = currentChat?.id else { return }
-        cancelMessageEdit()
-        cancelAudioRecording()
+    private func enforceSafeguardReadOnlyIfNeeded(chatId: String) {
+        guard authManager?.isAuthenticated == true,
+              safeguardFlaggedChatIds.contains(chatId) else { return }
+        if currentChat?.id == chatId {
+            cancelMessageEdit()
+            cancelAudioRecording()
+        }
         discardMessageQueue(chatId: chatId)
         for key in activeGenUIRetryIds.keys.filter({ $0.chatId == chatId }) {
-            activeGenUIRetryIds[key] = nil
+            if let requestId = activeGenUIRetryIds.removeValue(forKey: key) {
+                genUIRetryTasks.removeValue(forKey: requestId)?.cancel()
+            }
             genUIRetryStates[key] = nil
         }
         if cancelGeneration(chatId: chatId, announce: false) == nil {
@@ -1228,6 +1239,7 @@ class ChatViewModel: ObservableObject {
         streamUpdateTimers.removeAll()
         streamTasks.values.forEach { $0.cancel() }
         streamTasks.removeAll()
+        genUIRetryTasks.values.forEach { $0.cancel() }
         recoverySessionCleanupTasks.values.forEach { $0.cancel() }
         recoverySessionCleanupTasks.removeAll()
 
@@ -5750,7 +5762,7 @@ class ChatViewModel: ObservableObject {
         activeGenUIRetryIds[key] = requestId
         genUIRetryStates[key] = .generating
 
-        Task { [weak self] in
+        genUIRetryTasks[requestId] = Task { [weak self] in
             await self?.performGenUIToolCallRetry(
                 key: key,
                 requestId: requestId,
@@ -5775,12 +5787,15 @@ class ChatViewModel: ObservableObject {
         requiresTimelineBlock: Bool,
         widget: AnyGenUIWidget
     ) async {
+        defer { genUIRetryTasks.removeValue(forKey: requestId) }
         do {
+            try Task.checkCancellation()
             guard let client, !isClientInitializing else {
                 throw GenUIRetryRequestError.clientUnavailable
             }
 
             try await SessionTokenManager.shared.acquireTokenForSend(forceRefresh: false)
+            try Task.checkCancellation()
 
             let history = GenUIRetryContext.sanitizedHistory(
                 Array(sourceChat.messages.prefix(messageIndex + 1))
@@ -5841,6 +5856,7 @@ class ChatViewModel: ObservableObject {
                     Self.isAuthenticationError(error)
                 }
             )
+            try Task.checkCancellation()
             guard let choice = result.choices.first else {
                 finishGenUIRetry(
                     key: key,
@@ -6657,6 +6673,10 @@ class ChatViewModel: ObservableObject {
     func handleSignOut() async {
         speechPlayer.stop()
         cancelMessageEdit()
+        genUIRetryTasks.values.forEach { $0.cancel() }
+        genUIRetryTasks.removeAll()
+        activeGenUIRetryIds.removeAll()
+        genUIRetryStates.removeAll()
         // Capture the signing-out user's id up front. Later steps (and
         // the auth manager's cleanup) clear the authenticated state, after
         // which currentUserId no longer resolves this user.
