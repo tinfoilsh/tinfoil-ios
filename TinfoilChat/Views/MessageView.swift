@@ -170,10 +170,12 @@ struct MessageView: View {
         !viewModel.isLoading && viewModel.messageEditSession == nil
     }
 
+    private func forkFromHere() {
+        Task { await viewModel.forkChat(throughMessageIndex: messageIndex) }
+    }
+
     private var forkActionButton: some View {
-        Button {
-            Task { await viewModel.forkChat(throughMessageIndex: messageIndex) }
-        } label: {
+        Button(action: forkFromHere) {
             Image(systemName: Constants.ChatFork.actionSystemImage)
                 .font(.system(size: 16))
                 .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
@@ -209,9 +211,7 @@ struct MessageView: View {
             }
 
             if viewModel.canForkMessage(at: messageIndex) {
-                Button {
-                    Task { await viewModel.forkChat(throughMessageIndex: messageIndex) }
-                } label: {
+                Button(action: forkFromHere) {
                     Label(
                         Constants.ChatFork.actionLabel,
                         systemImage: Constants.ChatFork.actionSystemImage
