@@ -275,8 +275,7 @@ class ChatViewModel: ObservableObject {
                 messageEditSession = reconciledEditSession
             }
             if currentChat?.id != oldValue?.id {
-                audioRecordingStartId = nil
-                audioTranscriptionFence.invalidate()
+                cancelAudioRecording()
                 selectedChatImageTask?.cancel()
                 selectedChatImageTask = nil
             }
