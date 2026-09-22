@@ -373,6 +373,7 @@ enum Constants {
         static let secondsPerHour: TimeInterval = 60 * 60
         static let hoursPerDay = 24
         static let requestTimeoutSeconds: TimeInterval = 30
+        static let refreshIntervalSeconds: TimeInterval = 30
         static let suspensionColorHex = "991B1B"
         static let progressTrackHeight: CGFloat = 4
         static let progressTrackOpacity: Double = 0.15

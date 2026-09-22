@@ -60,10 +60,20 @@ struct ContentView: View {
             }
         }
         .task(id: safeguardsRefreshID) {
-            guard !Task.isCancelled else { return }
             authManager.safeguards.setSessionId(clerk.session?.id)
-            guard scenePhase == .active else { return }
-            await authManager.safeguards.refresh()
+            guard safeguardsRefreshID.isActive,
+                  safeguardsRefreshID.userId != nil else { return }
+
+            while !Task.isCancelled {
+                await authManager.safeguards.refresh()
+                do {
+                    try await Task.sleep(
+                        for: .seconds(Constants.Safeguards.refreshIntervalSeconds)
+                    )
+                } catch {
+                    return
+                }
+            }
         }
         .onAppear {
             chatViewModel.authManager = authManager

@@ -48,10 +48,14 @@ struct SafeguardFlagBanner: View {
                 ? Constants.Safeguards.Banner.darkTextColorHex
                 : Constants.Safeguards.Banner.lightTextColorHex))
             .padding(Constants.Safeguards.contentSpacing)
-            .background(
-                Color.red.opacity(Constants.Safeguards.Banner.backgroundOpacity),
-                in: RoundedRectangle(cornerRadius: Constants.Safeguards.Banner.cornerRadius)
-            )
+            .background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: Constants.Safeguards.Banner.cornerRadius)
+                        .fill(.thickMaterial)
+                    RoundedRectangle(cornerRadius: Constants.Safeguards.Banner.cornerRadius)
+                        .fill(Color.red.opacity(Constants.Safeguards.Banner.backgroundOpacity))
+                }
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: Constants.Safeguards.Banner.cornerRadius)
                     .strokeBorder(
