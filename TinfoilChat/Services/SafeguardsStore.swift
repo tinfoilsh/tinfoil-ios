@@ -12,7 +12,10 @@ final class SafeguardsStore: ObservableObject {
     private(set) var userId: String?
     private var sessionId: String?
     private let fetchFlags: FetchFlags
-    private var flaggedChatIds: Set<String> = []
+    @Published private(set) var flaggedChatIds: Set<String> = []
+    #if DEBUG
+    @Published private(set) var simulatedFlaggedChatIds: Set<String> = []
+    #endif
     private var generation = UUID()
     private var request: Task<Void, Never>?
 
@@ -37,7 +40,19 @@ final class SafeguardsStore: ObservableObject {
     }
 
     func isFlagged(_ chatId: String) -> Bool {
-        userId != nil && flaggedChatIds.contains(chatId)
+        guard userId != nil else { return false }
+        #if DEBUG
+        if simulatedFlaggedChatIds.contains(chatId) { return true }
+        #endif
+        return flaggedChatIds.contains(chatId)
+    }
+
+    func isSimulatedFlag(_ chatId: String) -> Bool {
+        #if DEBUG
+        simulatedFlaggedChatIds.contains(chatId)
+        #else
+        false
+        #endif
     }
 
     func refresh() async {
@@ -91,6 +106,19 @@ final class SafeguardsStore: ObservableObject {
         usesExamples = value
         clear()
     }
+
+    func toggleSimulatedFlag(_ chatId: String) {
+        guard userId != nil else { return }
+        if simulatedFlaggedChatIds.contains(chatId) {
+            simulatedFlaggedChatIds.remove(chatId)
+        } else {
+            simulatedFlaggedChatIds.insert(chatId)
+        }
+    }
+
+    func clearSimulatedFlags() {
+        simulatedFlaggedChatIds.removeAll()
+    }
     #endif
 
     private func clear() {
@@ -98,6 +126,9 @@ final class SafeguardsStore: ObservableObject {
         request?.cancel()
         request = nil
         flaggedChatIds = []
+        #if DEBUG
+        simulatedFlaggedChatIds = []
+        #endif
         report = nil
         errorMessage = nil
         isLoading = false

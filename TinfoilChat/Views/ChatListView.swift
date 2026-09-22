@@ -32,6 +32,10 @@ struct ChatListView: View {
         Set((viewModel.currentChat?.pendingRecoveries ?? []).map(\.turnId))
     }
 
+    private var isCurrentChatReadOnly: Bool {
+        viewModel.isCurrentChatSafeguardFlagged
+    }
+
     private var recoveryDraftTurnIds: Set<String> {
         let chatId = viewModel.currentChat?.id
         return Set(recoveryDraftStore.drafts.keys.compactMap { key in
@@ -137,7 +141,7 @@ struct ChatListView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
-                if messages.isEmpty && !isInputExpanded && !isKeyboardVisible {
+                if messages.isEmpty && !isInputExpanded && !isKeyboardVisible && !isCurrentChatReadOnly {
                     PromptSuggestionsBar(
                         viewModel: viewModel,
                         onOpenLibrary: { showPromptLibrary = true }
@@ -152,19 +156,21 @@ struct ChatListView: View {
                     )
                     .id(chatId)
                 }
-                MessageQueueView(
-                    queue: viewModel.queuedMessages,
-                    isDarkMode: isDarkMode,
-                    onRemove: { viewModel.removeQueuedMessage(id: $0) }
-                )
-                MessageInputView(
-                    messageText: $messageText,
-                    viewModel: viewModel,
-                    isInputExpanded: $isInputExpanded,
-                    isKeyboardVisible: isKeyboardVisible
-                )
-                .disabled(isForkingCurrentChat)
-                .environmentObject(viewModel.authManager ?? AuthManager())
+                if !isCurrentChatReadOnly {
+                    MessageQueueView(
+                        queue: viewModel.queuedMessages,
+                        isDarkMode: isDarkMode,
+                        onRemove: { viewModel.removeQueuedMessage(id: $0) }
+                    )
+                    MessageInputView(
+                        messageText: $messageText,
+                        viewModel: viewModel,
+                        isInputExpanded: $isInputExpanded,
+                        isKeyboardVisible: isKeyboardVisible
+                    )
+                    .disabled(isForkingCurrentChat)
+                    .environmentObject(viewModel.authManager ?? AuthManager())
+                }
             }
             .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
                 HStack {

@@ -29,6 +29,26 @@ struct SafeguardsStoreTests {
         #expect(store.errorMessage == nil)
     }
 
+    #if DEBUG
+    @Test
+    func simulatedFlagsApplyOnlyToTheSignedInDebugSession() {
+        let store = SafeguardsStore(usesExamples: false)
+        store.setUserId("user-a")
+
+        store.toggleSimulatedFlag("chat-a")
+        #expect(store.isFlagged("chat-a"))
+        #expect(store.isSimulatedFlag("chat-a"))
+
+        store.toggleSimulatedFlag("chat-a")
+        #expect(!store.isFlagged("chat-a"))
+
+        store.toggleSimulatedFlag("chat-a")
+        store.setUserId(nil)
+        #expect(!store.isFlagged("chat-a"))
+        #expect(store.simulatedFlaggedChatIds.isEmpty)
+    }
+    #endif
+
     @Test
     func emptyResultsRetainThePolicyForZeroProgress() async throws {
         let store = SafeguardsStore(usesExamples: false) { _ in

@@ -93,17 +93,19 @@ struct OptimizedChatListView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            MessageInputView(
-                messageText: $messageText,
-                viewModel: viewModel,
-                isKeyboardVisible: isKeyboardVisible
-            )
-            .environmentObject(viewModel.authManager ?? AuthManager())
-            .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
-                HStack {
-                    Spacer()
-                    view.frame(maxWidth: 600)
-                    Spacer()
+            if !viewModel.isCurrentChatSafeguardFlagged {
+                MessageInputView(
+                    messageText: $messageText,
+                    viewModel: viewModel,
+                    isKeyboardVisible: isKeyboardVisible
+                )
+                .environmentObject(viewModel.authManager ?? AuthManager())
+                .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
+                    HStack {
+                        Spacer()
+                        view.frame(maxWidth: 600)
+                        Spacer()
+                    }
                 }
             }
         }

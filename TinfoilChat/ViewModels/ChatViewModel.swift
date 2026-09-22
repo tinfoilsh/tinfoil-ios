@@ -287,6 +287,7 @@ class ChatViewModel: ObservableObject {
             // backgrounded. Guarded on the id changing so the frequent
             // same-chat reassignments during streaming stay cheap.
             if let chatId = currentChat?.id, chatId != oldValue?.id {
+                enforceSafeguardReadOnlyIfNeeded()
                 scheduleMessageQueueDrain(chatId: chatId)
             }
         }
@@ -515,6 +516,8 @@ class ChatViewModel: ObservableObject {
     // messages and resumes draining when reopened. In-memory only, mirroring
     // the webapp's per-session queue.
     @Published private(set) var messageQueues: [String: [QueuedMessage]] = [:]
+    @Published private(set) var safeguardFlaggedChatIds: Set<String> = []
+    @Published private(set) var safeguardsHaveLoaded = false
 
     /// Queued messages for the chat on screen.
     var queuedMessages: [QueuedMessage] {
@@ -586,6 +589,7 @@ class ChatViewModel: ObservableObject {
     private var cloudRemoteDeleteObserver: NSObjectProtocol?
     private var networkStatusCancellable: AnyCancellable?
     private var defaultPromptPresetCancellable: AnyCancellable?
+    private var safeguardsCancellable: AnyCancellable?
     private var streamUpdateTimers: [String: Timer] = [:]
     private var pendingStreamUpdates: [String: Chat] = [:]
     private var pendingSaveTask: Task<Void, Never>?
@@ -600,6 +604,7 @@ class ChatViewModel: ObservableObject {
     @Published var authManager: AuthManager? {
         didSet {
             if authManager !== oldValue { speechPlayer.stop() }
+            bindSafeguardsStore()
             cancelMessageEdit()
             // Load user-specific last sync date when auth changes
             if let userId = currentUserId {
@@ -637,6 +642,65 @@ class ChatViewModel: ObservableObject {
         }
     }
     
+    private func bindSafeguardsStore() {
+        safeguardsCancellable?.cancel()
+        safeguardsCancellable = nil
+        safeguardFlaggedChatIds = []
+        safeguardsHaveLoaded = false
+
+        guard let store = authManager?.safeguards else { return }
+        #if DEBUG
+        safeguardsCancellable = Publishers.CombineLatest3(
+            store.$flaggedChatIds,
+            store.$simulatedFlaggedChatIds,
+            store.$report
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] flaggedChatIds, simulatedFlaggedChatIds, report in
+            self?.applySafeguardsState(
+                flaggedChatIds: flaggedChatIds.union(simulatedFlaggedChatIds),
+                hasLoaded: report != nil
+            )
+        }
+        #else
+        safeguardsCancellable = Publishers.CombineLatest(
+            store.$flaggedChatIds,
+            store.$report
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] flaggedChatIds, report in
+            self?.applySafeguardsState(
+                flaggedChatIds: flaggedChatIds,
+                hasLoaded: report != nil
+            )
+        }
+        #endif
+    }
+
+    private func applySafeguardsState(
+        flaggedChatIds: Set<String>,
+        hasLoaded: Bool
+    ) {
+        safeguardFlaggedChatIds = flaggedChatIds
+        safeguardsHaveLoaded = hasLoaded
+        enforceSafeguardReadOnlyIfNeeded()
+    }
+
+    private func enforceSafeguardReadOnlyIfNeeded() {
+        guard isCurrentChatSafeguardFlagged,
+              let chatId = currentChat?.id else { return }
+        cancelMessageEdit()
+        cancelAudioRecording()
+        discardMessageQueue(chatId: chatId)
+        for key in activeGenUIRetryIds.keys.filter({ $0.chatId == chatId }) {
+            activeGenUIRetryIds[key] = nil
+            genUIRetryStates[key] = nil
+        }
+        if cancelGeneration(chatId: chatId, announce: false) == nil {
+            cancelRecoveredGeneration(chatId: chatId)
+        }
+    }
+
     var messages: [Message] {
         currentChat?.messages ?? []
     }
@@ -651,8 +715,23 @@ class ChatViewModel: ObservableObject {
         isCurrentChatHydrated
     }
 
+    var isCurrentChatSafeguardFlagged: Bool {
+        guard authManager?.isAuthenticated == true,
+              let chatId = currentChat?.id else { return false }
+        return safeguardFlaggedChatIds.contains(chatId)
+    }
+
+    var isSafeguardGenerationBlocked: Bool {
+        guard authManager?.isAuthenticated == true else { return false }
+        return !safeguardsHaveLoaded || isCurrentChatSafeguardFlagged
+    }
+
+    var canGenerateInCurrentChat: Bool {
+        canUseCurrentChatActions && !isSafeguardGenerationBlocked
+    }
+
     var canUseReadAloud: Bool {
-        canUseCurrentChatActions && acceptsChatSaves
+        canUseCurrentChatActions && !isCurrentChatSafeguardFlagged && acceptsChatSaves
             && !isRecording && !AudioRecordingService.shared.isRecording
             && client != nil && isVerified && !isClientInitializing
             && AccountActionReadiness.canPerform(
@@ -944,7 +1023,7 @@ class ChatViewModel: ObservableObject {
     }
 
     var canSendInCurrentContext: Bool {
-        PremiumProjectPolicy.includesChat(
+        !isSafeguardGenerationBlocked && PremiumProjectPolicy.includesChat(
             projectId: currentChat?.projectId,
             hasPremiumAccess: hasPremiumAccess
         )
@@ -3524,7 +3603,7 @@ class ChatViewModel: ObservableObject {
               !chat.dataCorrupted,
               chat.messages.indices.contains(index)
         else { return false }
-        return canUseCurrentChatActions
+        return canGenerateInCurrentChat
             && !isLoading
             && messageEditSession == nil
             && !hasPendingResponseRecovery
@@ -3645,7 +3724,7 @@ class ChatViewModel: ObservableObject {
         resultText: String,
         resultData: JSONValue?
     ) {
-        guard !isLoading else { return }
+        guard canGenerateInCurrentChat, !isLoading else { return }
         guard var chat = currentChat else { return }
 
         var didResolve = false
@@ -3696,7 +3775,7 @@ class ChatViewModel: ObservableObject {
     /// can keep the draft in the input when it wasn't.
     @discardableResult
     func sendMessage(text: String) -> Bool {
-        guard canUseCurrentChatActions else { return false }
+        guard canGenerateInCurrentChat else { return false }
         guard currentChat?.projectId == nil || PremiumProjectPolicy.allowsMutation(
             .sendProjectChat,
             hasPremiumAccess: hasPremiumAccess
@@ -3748,6 +3827,8 @@ class ChatViewModel: ObservableObject {
         attachments: [Attachment],
         dismissKeyboard: Bool
     ) {
+        guard canGenerateInCurrentChat else { return }
+
         // Optimistically decrement the remaining request count
         SessionTokenManager.shared.snapshotAndDecrementRemaining()
 
@@ -4198,7 +4279,8 @@ class ChatViewModel: ObservableObject {
 
     /// Generates an assistant response for the current conversation (expects user message to already be in chat)
     private func generateResponse(dismissKeyboard: Bool = true) {
-        guard let initialChat = currentChat,
+        guard canGenerateInCurrentChat,
+              let initialChat = currentChat,
               !streamState.isStreaming(chatId: initialChat.id) else {
             return
         }
@@ -5642,7 +5724,8 @@ class ChatViewModel: ObservableObject {
     }
 
     func retryGenUIToolCall(messageId: String, toolCallId: String) {
-        guard let chat = currentChat,
+        guard canGenerateInCurrentChat,
+              let chat = currentChat,
               !chat.hasActiveStream,
               !streamingTracker.isStreaming(chat.id),
               let messageIndex = chat.messages.firstIndex(where: { $0.id == messageId }),
@@ -5861,7 +5944,8 @@ class ChatViewModel: ObservableObject {
 
     /// Regenerates the last assistant response by removing it and resending the last user message
     func regenerateLastResponse() {
-        guard messageEditSession == nil,
+        guard canGenerateInCurrentChat,
+              messageEditSession == nil,
               let chat = currentChat,
               !isLoading else {
             return
@@ -5903,7 +5987,8 @@ class ChatViewModel: ObservableObject {
     }
 
     func beginMessageEdit(at messageIndex: Int) {
-        guard messageEditSession == nil,
+        guard canGenerateInCurrentChat,
+              messageEditSession == nil,
               acceptsChatSaves,
               !isAccountTeardownInProgress else { return }
         messageEditSession = MessageEditSessionTransition.begin(
@@ -5924,7 +6009,8 @@ class ChatViewModel: ObservableObject {
     /// Replaces the edited user message and everything after it, then generates a new response.
     @discardableResult
     func saveMessageEdit(newContent: String) -> Bool {
-        guard let session = messageEditSession,
+        guard canGenerateInCurrentChat,
+              let session = messageEditSession,
               let chat = currentChat,
               acceptsChatSaves,
               !isAccountTeardownInProgress,
@@ -5975,7 +6061,8 @@ class ChatViewModel: ObservableObject {
     /// Regenerates the response for a user message at a specific index
     /// - Parameter messageIndex: The index of the user message to regenerate from
     func regenerateMessage(at messageIndex: Int) {
-        guard messageEditSession == nil,
+        guard canGenerateInCurrentChat,
+              messageEditSession == nil,
               !hasPendingResponseRecovery,
               let chat = currentChat,
               !isLoading,

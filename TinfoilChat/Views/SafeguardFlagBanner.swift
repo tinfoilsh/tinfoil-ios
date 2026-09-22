@@ -6,8 +6,12 @@ struct SafeguardFlagBanner: View {
     let chatId: String
     let onOpenSettings: () -> Void
 
+    private var isSimulated: Bool {
+        store.isSimulatedFlag(chatId)
+    }
+
     private var title: String {
-        store.usesExamples
+        isSimulated
             ? "Local preview: this chat was flagged by a safeguard model."
             : "This chat was flagged by a safeguard model."
     }
@@ -24,7 +28,7 @@ struct SafeguardFlagBanner: View {
                         .accessibilityAddTraits(.isHeader)
                     Text(Constants.Safeguards.Banner.message)
                         .font(.caption)
-                    if store.usesExamples {
+                    if isSimulated {
                         Text("This is a simulated flag. Your account is unaffected.")
                             .font(.caption)
                     }
