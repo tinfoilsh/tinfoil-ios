@@ -510,6 +510,32 @@ struct SyncedPromptPreset: Codable, Equatable {
     var systemPrompt: String
     var createdAt: Double
     var updatedAt: Double
+    /// Optional chat settings applied once when the preset is selected for a
+    /// chat. Nil means "leave the chat as is". Field names are part of the
+    /// wire format shared with the webapp, and nil values are omitted from
+    /// the encoded JSON rather than written as null.
+    var model: String?
+    var webSearchEnabled: Bool?
+
+    init(
+        id: String,
+        name: String,
+        description: String,
+        systemPrompt: String,
+        createdAt: Double,
+        updatedAt: Double,
+        model: String? = nil,
+        webSearchEnabled: Bool? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.systemPrompt = systemPrompt
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.model = model
+        self.webSearchEnabled = webSearchEnabled
+    }
 }
 
 /// Profile data structure matching React implementation

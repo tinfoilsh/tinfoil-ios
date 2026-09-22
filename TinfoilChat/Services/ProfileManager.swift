@@ -393,6 +393,14 @@ class ProfileManager: ObservableObject {
 
         SettingsManager.shared.isApplyingSharedProfile = false
         isApplyingProfile = false  // Re-enable observers
+
+        // Presets synced from another device may name a retired model. Prune
+        // only once the catalog is authoritative; the config load prunes on
+        // its own when it completes later. Runs after observers are back on
+        // so the cleanup persists and syncs like any other preset edit.
+        if AppConfig.shared.isInitialized {
+            pruneUnavailablePresetModels(available: AppConfig.shared.availableModels)
+        }
     }
 
     // MARK: - Change Observers
@@ -575,7 +583,13 @@ class ProfileManager: ObservableObject {
 
     /// Create a new user preset and return its library representation.
     @discardableResult
-    func createPromptPreset(name: String, description: String, systemPrompt: String) -> PromptPreset {
+    func createPromptPreset(
+        name: String,
+        description: String,
+        systemPrompt: String,
+        model: String? = nil,
+        webSearchEnabled: Bool? = nil
+    ) -> PromptPreset {
         let now = Date().timeIntervalSince1970 * 1000
         let preset = SyncedPromptPreset(
             id: generatePresetId(),
@@ -583,19 +597,46 @@ class ProfileManager: ObservableObject {
             description: description,
             systemPrompt: systemPrompt,
             createdAt: now,
-            updatedAt: now
+            updatedAt: now,
+            model: model,
+            webSearchEnabled: webSearchEnabled
         )
         customPromptPresets.append(preset)
         return PromptPreset(from: preset)
     }
 
     /// Update an existing user preset in place.
-    func updatePromptPreset(id: String, name: String, description: String, systemPrompt: String) {
+    func updatePromptPreset(
+        id: String,
+        name: String,
+        description: String,
+        systemPrompt: String,
+        model: String?,
+        webSearchEnabled: Bool?
+    ) {
         guard let index = customPromptPresets.firstIndex(where: { $0.id == id }) else { return }
         customPromptPresets[index].name = name
         customPromptPresets[index].description = description
         customPromptPresets[index].systemPrompt = systemPrompt
+        customPromptPresets[index].model = model
+        customPromptPresets[index].webSearchEnabled = webSearchEnabled
         customPromptPresets[index].updatedAt = Date().timeIntervalSince1970 * 1000
+    }
+
+    /// Clear the model choice from any user preset whose model is no longer
+    /// in the catalog, so a retired model does not linger in prompt settings.
+    /// Mutating `customPromptPresets` persists and syncs the profile like any
+    /// other preset edit. Returns the ids of the presets changed.
+    @discardableResult
+    func pruneUnavailablePresetModels(available: [ModelType]) -> [String] {
+        let pruned = PromptPresetSettings.pruningUnavailableModels(
+            in: customPromptPresets,
+            available: available
+        )
+        if !pruned.changedIds.isEmpty {
+            customPromptPresets = pruned.presets
+        }
+        return pruned.changedIds
     }
 
     /// Delete a user preset.
@@ -708,7 +749,9 @@ class ProfileManager: ObservableObject {
         return createPromptPreset(
             name: "\(source.name) (copy)",
             description: source.description,
-            systemPrompt: source.systemPrompt
+            systemPrompt: source.systemPrompt,
+            model: source.model,
+            webSearchEnabled: source.webSearchEnabled
         )
     }
     
