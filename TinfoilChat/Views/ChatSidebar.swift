@@ -1340,7 +1340,9 @@ struct ChatListItem: View {
                 components.append(updatedTimeString)
             }
         }
-        if isGenerating {
+        if chat.pendingSave {
+            components.append(Constants.ChatFork.sidebarSpinnerLabel)
+        } else if isGenerating {
             components.append("Generating response")
         } else if syncFailed {
             components.append("Couldn't sync with cloud")
