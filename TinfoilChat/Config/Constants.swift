@@ -370,7 +370,7 @@ enum Constants {
         static let checkboxHitTargetSize: CGFloat = 44
         static let consentSpacing: CGFloat = 8
         static let completionSpacing: CGFloat = 16
-        static let completionButtonHeight: CGFloat = 50
+        static let completionControlHeight: CGFloat = 50
     }
 
     enum Safeguards {

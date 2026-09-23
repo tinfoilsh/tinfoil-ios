@@ -203,6 +203,26 @@ struct ModularAuthenticationView: View {
       Text("Complete your sign-up")
         .font(.headline)
 
+      if signUp.missingFields.contains(.firstName) {
+        UIKitTextField(
+          text: $legalConsent.firstName,
+          placeholder: "First Name",
+          autocapitalizationType: .words,
+          textContentType: .givenName
+        )
+        .frame(height: Constants.Legal.completionControlHeight)
+      }
+
+      if signUp.missingFields.contains(.lastName) {
+        UIKitTextField(
+          text: $legalConsent.lastName,
+          placeholder: "Last Name",
+          autocapitalizationType: .words,
+          textContentType: .familyName
+        )
+        .frame(height: Constants.Legal.completionControlHeight)
+      }
+
       if signUp.missingFields.contains(.legalAccepted) {
         Text("Before creating your account, please review and accept our terms and privacy policy.")
           .font(.subheadline)
@@ -219,11 +239,11 @@ struct ModularAuthenticationView: View {
           .font(.headline)
           .foregroundStyle(colorScheme == .dark ? .black : .white)
           .frame(maxWidth: .infinity)
-          .frame(height: Constants.Legal.completionButtonHeight)
+          .frame(height: Constants.Legal.completionControlHeight)
           .background(colorScheme == .dark ? Color.white : Color.black)
           .cornerRadius(Constants.UI.actionButtonCornerRadius)
       }
-      .disabled(!legalConsent.isAccepted || signUp.status != .missingRequirements || !signUp.missingFields.contains(.legalAccepted))
+      .disabled(!legalConsent.canSubmit)
 
       if isLoading {
         ProgressView()
@@ -347,9 +367,7 @@ struct ModularAuthenticationView: View {
       if case .signUp(let signUp) = result {
         let updatedSignUp = try await legalConsent.resolve(signUp)
         guard updatedSignUp.status == .complete else {
-          if updatedSignUp.status == .missingRequirements,
-             updatedSignUp.missingFields.contains(.legalAccepted),
-             !legalConsent.isAccepted {
+          if legalConsent.hasCollectableRequirements {
             return
           }
           if !updatedSignUp.missingFields.isEmpty {
@@ -380,11 +398,8 @@ struct ModularAuthenticationView: View {
 
   @MainActor
   private func completeSocialSignUp() async {
-    guard !isLoading, let signUp = legalConsent.pendingSignUp else { return }
-    guard legalConsent.isAccepted else {
-      errorMessage = Constants.Legal.consentRequiredMessage
-      return
-    }
+    guard !isLoading, legalConsent.canSubmit,
+          let signUp = legalConsent.pendingSignUp else { return }
     isLoading = true
     errorMessage = nil
     defer { isLoading = false }

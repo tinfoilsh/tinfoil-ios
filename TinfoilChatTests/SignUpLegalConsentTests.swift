@@ -28,9 +28,11 @@ struct SignUpLegalConsentTests {
         completedSignUp.status = .complete
         completedSignUp.missingFields = []
         completedSignUp.createdSessionId = "session-social"
-        let model = SignUpLegalConsent(updateSignUp: { attempt, accepted in
+        let model = SignUpLegalConsent(updateSignUp: { attempt, details in
             #expect(attempt == signUp)
-            #expect(accepted)
+            #expect(details.legalAccepted == true)
+            #expect(details.firstName == nil)
+            #expect(details.lastName == nil)
             return completedSignUp
         })
 
@@ -49,8 +51,8 @@ struct SignUpLegalConsentTests {
         completedSignUp.status = .complete
         completedSignUp.missingFields = []
         completedSignUp.createdSessionId = "session-social"
-        let model = SignUpLegalConsent(updateSignUp: { _, accepted in
-            #expect(accepted)
+        let model = SignUpLegalConsent(updateSignUp: { _, details in
+            #expect(details.legalAccepted == true)
             return completedSignUp
         })
         model.isAccepted = true
@@ -84,9 +86,9 @@ struct SignUpLegalConsentTests {
         completedSignUp.missingFields = []
         completedSignUp.createdSessionId = "session-social"
         var attempts = 0
-        let model = SignUpLegalConsent(updateSignUp: { attempt, accepted in
+        let model = SignUpLegalConsent(updateSignUp: { attempt, details in
             #expect(attempt == signUp)
-            #expect(accepted)
+            #expect(details.legalAccepted == true)
             attempts += 1
             if attempts == 1 {
                 throw URLError(.notConnectedToInternet)
@@ -131,12 +133,12 @@ struct SignUpLegalConsentTests {
     @Test
     func completedAbandonedAndUnrelatedAttemptsAreNotUpdated() async throws {
         let model = SignUpLegalConsent(updateSignUp: { signUp, _ in
-            Issue.record("Only pending legal acceptance should update Clerk")
+            Issue.record("Only supported pending requirements should update Clerk")
             return signUp
         })
         model.isAccepted = true
         var signUp = Self.pendingSignUp()
-        signUp.missingFields = [.firstName]
+        signUp.missingFields = [.phoneNumber]
         let incomplete = try await model.resolve(signUp)
         #expect(incomplete == signUp)
         #expect(model.pendingSignUp == signUp)
@@ -163,10 +165,111 @@ struct SignUpLegalConsentTests {
         let model = SignUpLegalConsent(updateSignUp: { signUp, _ in signUp })
         _ = try await model.resolve(Self.pendingSignUp())
         model.isAccepted = true
+        model.firstName = "New"
+        model.lastName = "Person"
 
         model.reset()
 
         #expect(!model.isAccepted)
+        #expect(model.firstName.isEmpty)
+        #expect(model.lastName.isEmpty)
+        #expect(model.pendingSignUp == nil)
+    }
+
+    @Test
+    func missingNameCanBeCompletedAfterLegalAcceptance() async throws {
+        let signUp = Self.pendingSignUp()
+        var needsName = signUp
+        needsName.missingFields = [.firstName]
+        var completed = needsName
+        completed.status = .complete
+        completed.missingFields = []
+        completed.createdSessionId = "session-social"
+        var attempts = 0
+        let model = SignUpLegalConsent(updateSignUp: { attempt, details in
+            attempts += 1
+            if attempts == 1 {
+                #expect(attempt == signUp)
+                #expect(details.legalAccepted == true)
+                return needsName
+            }
+            #expect(attempt == needsName)
+            #expect(details.firstName == "New")
+            #expect(details.lastName == nil)
+            #expect(details.legalAccepted == nil)
+            return completed
+        })
+        model.isAccepted = true
+
+        _ = try await model.resolve(signUp)
+
+        #expect(model.hasCollectableRequirements)
+        #expect(!model.canSubmit)
+        model.firstName = "  New  "
+        #expect(model.canSubmit)
+        let pending = try #require(model.pendingSignUp)
+        let result = try await model.resolve(pending)
+
+        #expect(attempts == 2)
+        #expect(result == completed)
+        #expect(model.pendingSignUp == nil)
+    }
+
+    @Test
+    func namesAndConsentMustBeProvidedBeforeUpdatingTheSocialAttempt() async throws {
+        var signUp = Self.pendingSignUp()
+        signUp.missingFields = [.firstName, .lastName, .legalAccepted]
+        var completed = signUp
+        completed.status = .complete
+        completed.missingFields = []
+        completed.createdSessionId = "session-social"
+        let model = SignUpLegalConsent(updateSignUp: { attempt, details in
+            #expect(attempt == signUp)
+            #expect(details.firstName == "New")
+            #expect(details.lastName == "Person")
+            #expect(details.legalAccepted == true)
+            return completed
+        })
+        _ = try await model.resolve(signUp)
+        model.firstName = "New"
+        model.lastName = "Person"
+        #expect(!model.canSubmit)
+        #expect(try await model.resolve(signUp) == signUp)
+
+        model.isAccepted = true
+        model.lastName = " \n "
+        #expect(!model.canSubmit)
+        #expect(try await model.resolve(signUp) == signUp)
+
+        model.lastName = " Person "
+        #expect(model.canSubmit)
+        let result = try await model.resolve(signUp)
+
+        #expect(result == completed)
+        #expect(model.pendingSignUp == nil)
+    }
+
+    @Test
+    func namesOnlyDoNotRequireAcceptingLegalDocumentsAgain() async throws {
+        var signUp = Self.pendingSignUp()
+        signUp.missingFields = [.lastName]
+        var completed = signUp
+        completed.status = .complete
+        completed.missingFields = []
+        completed.createdSessionId = "session-social"
+        let model = SignUpLegalConsent(updateSignUp: { attempt, details in
+            #expect(attempt == signUp)
+            #expect(details.firstName == nil)
+            #expect(details.lastName == "Person")
+            #expect(details.legalAccepted == nil)
+            return completed
+        })
+        _ = try await model.resolve(signUp)
+        model.lastName = "Person"
+
+        #expect(!model.isAccepted)
+        #expect(model.canSubmit)
+        #expect(try await model.resolve(signUp) == completed)
         #expect(model.pendingSignUp == nil)
     }
 
