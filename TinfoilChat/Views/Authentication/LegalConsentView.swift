@@ -20,7 +20,7 @@ struct LegalConsentView: View {
             .foregroundStyle(Color.adaptiveAccent)
             .accessibilityLabel(Constants.Legal.consentAccessibilityLabel)
             .accessibilityValue(isAccepted ? "Checked" : "Unchecked")
-            .accessibilityAddTraits(isAccepted ? .isSelected : [])
+            .accessibilityAddTraits(isAccepted ? [.isToggle, .isSelected] : .isToggle)
 
             Text("I have read and agree to the [Terms of Service](\(Constants.Legal.termsOfServiceURL.absoluteString)) and [Privacy Policy](\(Constants.Legal.privacyPolicyURL.absoluteString)).")
                 .font(.footnote)
