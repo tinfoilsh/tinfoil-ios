@@ -24,7 +24,7 @@ struct SignUpView: View {
     @Binding var email: String
     @Binding var errorMessage: String?
     @Binding var isLoading: Bool
-    @Binding var isSignUp: Bool
+    @Binding var legalAccepted: Bool
     var onDismiss: () -> Void
     
     @State private var fullName = ""
@@ -152,6 +152,9 @@ struct SignUpView: View {
                     )
                     .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 1)
                 
+                LegalConsentView(isAccepted: $legalAccepted)
+                    .disabled(isLoading)
+
                 Button(action: {
                     if fullNameIsEmpty || emailIsEmpty || passwordIsEmpty {
                         attemptedSubmit = true
@@ -171,6 +174,7 @@ struct SignUpView: View {
                         .cornerRadius(8)
                         .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
                 }
+                .disabled(isLoading || !legalAccepted)
                 
                 // Error message and loading indicator moved to the bottom
                 if isLoading {
@@ -201,11 +205,15 @@ struct SignUpView: View {
         }
     }
     
+    @MainActor
     private func signUp(fullName: String, email: String, password: String) async {
-        await MainActor.run {
-            isLoading = true
-            errorMessage = nil
+        guard !isLoading else { return }
+        guard legalAccepted else {
+            errorMessage = Constants.Legal.consentRequiredMessage
+            return
         }
+        isLoading = true
+        errorMessage = nil
         
         do {
             // Split full name into first and last name
@@ -218,7 +226,8 @@ struct SignUpView: View {
                 emailAddress: email,
                 password: password,
                 firstName: firstName,
-                lastName: lastName
+                lastName: lastName,
+                legalAccepted: legalAccepted
             )
             
             // Store the SignUp instance
@@ -236,7 +245,7 @@ struct SignUpView: View {
                 }
             } else {
                 // Email verification not required, proceed with session creation
-                if signUp.createdSessionId != nil {
+                if signUp.status == .complete, signUp.createdSessionId != nil {
                     // Just reload clerk and initialize auth state
                     try await clerk.refreshClient()
                     await authManager.initializeAuthState()
@@ -318,6 +327,12 @@ struct SignUpView: View {
                 return
             }
             
+            guard verifiedSignUp.status == .complete else {
+                errorMessage = "Sign-up could not be completed. Please try again."
+                isVerifyingCode = false
+                return
+            }
+
             // Manually complete the sign-up process if needed
             if verifiedSignUp.createdSessionId == nil {
                 // Force completion of the sign-up process
