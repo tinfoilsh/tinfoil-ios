@@ -29,7 +29,7 @@ struct ModularAuthenticationView: View {
   
   var body: some View {
     NavigationView {
-      GeometryReader { geometry in
+      GeometryReader { _ in
         ZStack {
           // Background
           Color.settingsBackground(for: colorScheme)
@@ -87,12 +87,6 @@ struct ModularAuthenticationView: View {
               }
             }
             .frame(maxHeight: .infinity, alignment: .top)
-
-            if !isSignUp && legalConsent.pendingSignUp == nil {
-              authenticationDisclaimer
-                .padding(.horizontal)
-                .padding(.bottom, geometry.safeAreaInsets.bottom > 0 ? geometry.safeAreaInsets.bottom : 20)
-            }
           }
           .contentShape(Rectangle())
           .onTapGesture {
@@ -145,20 +139,6 @@ struct ModularAuthenticationView: View {
       }
   }
 
-  private var authenticationDisclaimer: some View {
-    VStack(spacing: 0) {
-      Divider()
-
-      Text("Read our [Terms of Service](\(Constants.Legal.termsOfServiceURL.absoluteString)) and [Privacy Policy](\(Constants.Legal.privacyPolicyURL.absoluteString)).")
-        .font(.footnote)
-        .foregroundColor(.secondary)
-        .tint(Color.adaptiveAccent)
-        .multilineTextAlignment(.center)
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.top)
-    }
-  }
-  
   private var authenticationForms: some View {
     VStack(spacing: 4) {
       if let signUp = legalConsent.pendingSignUp {

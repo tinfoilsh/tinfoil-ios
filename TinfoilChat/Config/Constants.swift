@@ -361,8 +361,8 @@ enum Constants {
     }
 
     enum Legal {
-        static let termsOfServiceURL = URL(string: "https://www.tinfoil.sh/terms")!
-        static let privacyPolicyURL = URL(string: "https://www.tinfoil.sh/privacy")!
+        static let termsOfServiceURL = URL(string: "https://tinfoil.sh/terms")!
+        static let privacyPolicyURL = URL(string: "https://tinfoil.sh/privacy")!
         static let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
         static let consentRequiredMessage = "Please confirm that you have read and agree to the Terms of Service and Privacy Policy."
         static let consentAccessibilityLabel = "I have read and agree to the Terms of Service and Privacy Policy"
