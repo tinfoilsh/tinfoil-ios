@@ -302,7 +302,7 @@ struct ModularAuthenticationView: View {
       .cornerRadius(14)
     }
     .shadow(color: Color.black.opacity(0.15), radius: 6, x: 0, y: 3)
-    .disabled(isLoading || (isSignUp && !legalConsent.isAccepted))
+    .disabled(isLoading)
   }
   
   // MARK: - Authentication Methods
@@ -310,10 +310,6 @@ struct ModularAuthenticationView: View {
   @MainActor
   private func signInWithOAuth(provider: OAuthProvider) async {
     guard !isLoading else { return }
-    guard !isSignUp || legalConsent.isAccepted else {
-      errorMessage = Constants.Legal.consentRequiredMessage
-      return
-    }
     errorMessage = nil
     isLoading = true
     
@@ -332,10 +328,6 @@ struct ModularAuthenticationView: View {
   @MainActor
   private func signInWithApple() async {
     guard !isLoading else { return }
-    guard !isSignUp || legalConsent.isAccepted else {
-      errorMessage = Constants.Legal.consentRequiredMessage
-      return
-    }
     errorMessage = nil
     isLoading = true
     
