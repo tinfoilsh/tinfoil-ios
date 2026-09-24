@@ -293,6 +293,9 @@ enum Constants {
     enum SyncEnclave {
         static let url = "https://sync.tinfoil.sh"
         static let configRepo = "tinfoilsh/confidential-sync"
+        static let goErrorDomain = "go"
+        static let goErrorCode = 1
+        static let certificateMismatchMessage = "certificate fingerprint mismatch"
         static let chatListLimit = 100
         static let projectListLimit = 100
         static let projectChatListLimit = 100

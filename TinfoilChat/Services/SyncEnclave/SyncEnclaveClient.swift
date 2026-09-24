@@ -74,15 +74,18 @@ struct SyncEnclaveError: LocalizedError, Equatable {
     )
 }
 
-/// Singleton attested client for the sync enclave. Verification runs once
-/// per app launch (lazy); concurrent callers share the in-flight task.
+/// Singleton attested client for the sync enclave. Verification is cached
+/// until certificate rotation; concurrent callers share the in-flight task.
 actor SyncEnclaveClient {
     static let shared = SyncEnclaveClient()
 
     private let enclaveURL: String
     private let configRepo: String
+    typealias ClientVerifier = @Sendable (SecureClient) async throws -> Void
+    private let verifyClient: ClientVerifier
     private var client: SecureClient?
-    private var verificationTask: Task<SecureClient, Error>?
+    private var verificationTask: (id: UUID, task: Task<SecureClient, Error>)?
+    private var verificationGeneration = 0
     /// Returns nil only when there is no session to mint a token for.
     /// Transient failures (offline, Clerk unreachable) must throw so the
     /// request is retried instead of being treated as a sign-out.
@@ -95,10 +98,12 @@ actor SyncEnclaveClient {
 
     init(
         enclaveURL: String = Constants.SyncEnclave.url,
-        configRepo: String = Constants.SyncEnclave.configRepo
+        configRepo: String = Constants.SyncEnclave.configRepo,
+        verifyClient: @escaping ClientVerifier = { _ = try await $0.verify() }
     ) {
         self.enclaveURL = enclaveURL
         self.configRepo = configRepo
+        self.verifyClient = verifyClient
     }
 
     /// Inject the function used to retrieve the user's bearer token.
@@ -113,8 +118,9 @@ actor SyncEnclaveClient {
 
     /// Drop the cached client so the next call re-verifies. Used on sign-out.
     func reset() {
+        verificationGeneration += 1
         client = nil
-        verificationTask?.cancel()
+        verificationTask?.task.cancel()
         verificationTask = nil
         tokenGeneration += 1
         tokenRefreshTask?.task.cancel()
@@ -146,8 +152,6 @@ actor SyncEnclaveClient {
         skipAuth: Bool = false
     ) async throws -> Response {
         try Self.assertRelativePath(path)
-        let requestGeneration = tokenGeneration
-        let client = try await getClient()
         let url = enclaveURL + path
 
         var headers: [String: String] = [
@@ -162,71 +166,116 @@ actor SyncEnclaveClient {
             bodyData = nil
         }
 
-        if skipAuth {
-            return try Self.decode(
-                response: try await performPost(client: client, url: url, headers: headers, body: bodyData),
-                path: path
-            )
-        }
+        return try await withAttestedClient(skipAuth: skipAuth) { client in
+            let requestGeneration = tokenGeneration
+            if skipAuth {
+                return try Self.decode(
+                    response: try await performPost(client: client, url: url, headers: headers, body: bodyData),
+                    path: path
+                )
+            }
 
-        let token = try await requireToken(
-            forceRefresh: false,
-            generation: requestGeneration
-        )
-        headers["Authorization"] = "Bearer \(token)"
-        var response = try await performPost(client: client, url: url, headers: headers, body: bodyData)
-        if response.statusCode == 401 {
-            guard requestGeneration == tokenGeneration else { throw CancellationError() }
-            let refreshedToken = try await requireToken(
-                forceRefresh: true,
+            let token = try await requireToken(
+                forceRefresh: false,
                 generation: requestGeneration
             )
-            headers["Authorization"] = "Bearer \(refreshedToken)"
-            response = try await performPost(client: client, url: url, headers: headers, body: bodyData)
+            headers["Authorization"] = "Bearer \(token)"
+            var response = try await performPost(client: client, url: url, headers: headers, body: bodyData)
             if response.statusCode == 401 {
-                let error = try await persistentAuthenticationError(generation: requestGeneration)
-                throw error
+                guard requestGeneration == tokenGeneration else { throw CancellationError() }
+                let refreshedToken = try await requireToken(
+                    forceRefresh: true,
+                    generation: requestGeneration
+                )
+                headers["Authorization"] = "Bearer \(refreshedToken)"
+                response = try await performPost(client: client, url: url, headers: headers, body: bodyData)
+                if response.statusCode == 401 {
+                    let error = try await persistentAuthenticationError(generation: requestGeneration)
+                    throw error
+                }
             }
+            guard requestGeneration == tokenGeneration else { throw CancellationError() }
+            authenticationNotificationGeneration = nil
+            return try Self.decode(response: response, path: path)
         }
-        guard requestGeneration == tokenGeneration else { throw CancellationError() }
-        authenticationNotificationGeneration = nil
-        return try Self.decode(response: response, path: path)
     }
 
     /// Issue an attested GET against the sync enclave. Used by `/v1/health`.
     func get<Response: Decodable>(path: String) async throws -> Response {
         try Self.assertRelativePath(path)
-        let requestGeneration = tokenGeneration
-        let client = try await getClient()
         let url = enclaveURL + path
 
         var headers: [String: String] = [
             "Accept": "application/json",
             SyncHeaders.protocolVersion: String(Constants.Sync.protocolVersion)
         ]
-        let token = try await requireToken(
-            forceRefresh: false,
-            generation: requestGeneration
-        )
-        headers["Authorization"] = "Bearer \(token)"
-
-        var response = try await performGet(client: client, url: url, headers: headers)
-        if response.statusCode == 401 {
-            guard requestGeneration == tokenGeneration else { throw CancellationError() }
-            let refreshedToken = try await requireToken(
-                forceRefresh: true,
+        return try await withAttestedClient { client in
+            let requestGeneration = tokenGeneration
+            let token = try await requireToken(
+                forceRefresh: false,
                 generation: requestGeneration
             )
-            headers["Authorization"] = "Bearer \(refreshedToken)"
-            response = try await performGet(client: client, url: url, headers: headers)
+            headers["Authorization"] = "Bearer \(token)"
+
+            var response = try await performGet(client: client, url: url, headers: headers)
             if response.statusCode == 401 {
-                let error = try await persistentAuthenticationError(generation: requestGeneration)
-                throw error
+                guard requestGeneration == tokenGeneration else { throw CancellationError() }
+                let refreshedToken = try await requireToken(
+                    forceRefresh: true,
+                    generation: requestGeneration
+                )
+                headers["Authorization"] = "Bearer \(refreshedToken)"
+                response = try await performGet(client: client, url: url, headers: headers)
+                if response.statusCode == 401 {
+                    let error = try await persistentAuthenticationError(generation: requestGeneration)
+                    throw error
+                }
+            }
+            guard requestGeneration == tokenGeneration else { throw CancellationError() }
+            authenticationNotificationGeneration = nil
+            return try Self.decode(response: response, path: path)
+        }
+    }
+
+    func withAttestedClient<Response>(
+        skipAuth: Bool = false,
+        _ request: (SecureClient) async throws -> Response
+    ) async throws -> Response {
+        let generation = tokenGeneration
+        var activeClient = try await getClient()
+        var refreshed = false
+        while true {
+            try Task.checkCancellation()
+            guard skipAuth || generation == tokenGeneration else { throw CancellationError() }
+            do {
+                let response = try await request(activeClient)
+                try Task.checkCancellation()
+                guard skipAuth || generation == tokenGeneration else { throw CancellationError() }
+                return response
+            } catch {
+                try Task.checkCancellation()
+                guard skipAuth || generation == tokenGeneration else { throw CancellationError() }
+                guard Self.isCertificateMismatch(error) else { throw error }
+                // A late failure from an older client must not evict a replacement.
+                if client === activeClient { client = nil }
+                guard !refreshed else { throw Self.wrapVerificationError(error) }
+                refreshed = true
+                activeClient = try await getClient()
             }
         }
-        guard requestGeneration == tokenGeneration else { throw CancellationError() }
-        authenticationNotificationGeneration = nil
-        return try Self.decode(response: response, path: path)
+    }
+
+    static func isCertificateMismatch(_ error: Error) -> Bool {
+        // gomobile exposes Go's ErrCertMismatch as NSError text, not a typed
+        // sentinel. Match its exact suffix only at the attested request boundary;
+        // HTTP error bodies and verification failures cannot authorize a replay.
+        guard !(error is SyncEnclaveError), !(error is VerificationError) else { return false }
+        let nsError = error as NSError
+        guard nsError.domain == Constants.SyncEnclave.goErrorDomain,
+              nsError.code == Constants.SyncEnclave.goErrorCode else { return false }
+        let message = nsError.localizedDescription
+        let mismatch = Constants.SyncEnclave.certificateMismatchMessage
+        return message == mismatch || message.hasSuffix(": \(mismatch)")
     }
 
     /// Stamp the NETWORK wire code only on transport failures that a
@@ -242,10 +291,10 @@ actor SyncEnclaveClient {
         )
     }
 
-    /// Attestation failures can only originate from the `verify()` call
-    /// below, so they are stamped with the ATTESTATION_FAILED wire code
-    /// here at the source — the recovery classifier matches the typed
-    /// code, never the error text. Transient transport failures keep the
+    /// Verification failures and certificate mismatches that exhaust refresh
+    /// are stamped with the ATTESTATION_FAILED wire code here at the source —
+    /// the recovery classifier matches the typed code, never the error text.
+    /// Transient transport failures keep the
     /// NETWORK code so verification is retried, and cancellation is
     /// rethrown untouched.
     static func wrapVerificationError(_ error: Error) -> Error {
@@ -265,37 +314,51 @@ actor SyncEnclaveClient {
     // MARK: - Private
 
     private func getClient() async throws -> SecureClient {
+        try Task.checkCancellation()
         if let client {
             return client
         }
-        if let existing = verificationTask {
-            return try await existing.value
-        }
         try Self.assertSecureURL(enclaveURL)
+        let generation = verificationGeneration
         // The task itself produces the wrapped error so concurrent callers
-        // awaiting `existing.value` above receive the same typed error as
+        // awaiting the shared task receive the same typed error as
         // the creator, keeping every waiter on the recovery path.
-        let task = Task<SecureClient, Error> { [enclaveURL, configRepo] in
-            let newClient = SecureClient(
-                githubRepo: configRepo,
-                enclaveURL: enclaveURL
-            )
-            do {
-                _ = try await newClient.verify()
-            } catch {
-                throw Self.wrapVerificationError(error)
+        let operation: (id: UUID, task: Task<SecureClient, Error>)
+        if let existing = verificationTask {
+            operation = existing
+        } else {
+            let task = Task<SecureClient, Error> { [enclaveURL, configRepo, verifyClient] in
+                let newClient = SecureClient(
+                    githubRepo: configRepo,
+                    enclaveURL: enclaveURL
+                )
+                do {
+                    try Task.checkCancellation()
+                    try await verifyClient(newClient)
+                    try Task.checkCancellation()
+                } catch {
+                    throw Self.wrapVerificationError(error)
+                }
+                return newClient
             }
-            return newClient
+            operation = (UUID(), task)
+            verificationTask = operation
         }
-        verificationTask = task
 
         do {
-            let verified = try await task.value
-            self.client = verified
-            self.verificationTask = nil
+            let verified = try await operation.task.value
+            guard generation == verificationGeneration else { throw CancellationError() }
+            if verificationTask?.id == operation.id {
+                self.client = verified
+                self.verificationTask = nil
+            }
+            try Task.checkCancellation()
             return verified
         } catch {
-            self.verificationTask = nil
+            guard generation == verificationGeneration else { throw CancellationError() }
+            if verificationTask?.id == operation.id {
+                self.verificationTask = nil
+            }
             throw error
         }
     }
