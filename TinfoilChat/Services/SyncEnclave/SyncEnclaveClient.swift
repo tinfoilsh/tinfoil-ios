@@ -166,7 +166,7 @@ actor SyncEnclaveClient {
             bodyData = nil
         }
 
-        return try await withAttestedClient { client in
+        return try await withAttestedClient(skipAuth: skipAuth) { client in
             let requestGeneration = tokenGeneration
             if skipAuth {
                 return try Self.decode(
@@ -238,6 +238,7 @@ actor SyncEnclaveClient {
     }
 
     func withAttestedClient<Response>(
+        skipAuth: Bool = false,
         _ request: (SecureClient) async throws -> Response
     ) async throws -> Response {
         let generation = tokenGeneration
@@ -245,15 +246,15 @@ actor SyncEnclaveClient {
         var refreshed = false
         while true {
             try Task.checkCancellation()
-            guard generation == tokenGeneration else { throw CancellationError() }
+            guard skipAuth || generation == tokenGeneration else { throw CancellationError() }
             do {
                 let response = try await request(activeClient)
                 try Task.checkCancellation()
-                guard generation == tokenGeneration else { throw CancellationError() }
+                guard skipAuth || generation == tokenGeneration else { throw CancellationError() }
                 return response
             } catch {
                 try Task.checkCancellation()
-                guard generation == tokenGeneration else { throw CancellationError() }
+                guard skipAuth || generation == tokenGeneration else { throw CancellationError() }
                 guard Self.isCertificateMismatch(error) else { throw error }
                 // A late failure from an older client must not evict a replacement.
                 if client === activeClient { client = nil }

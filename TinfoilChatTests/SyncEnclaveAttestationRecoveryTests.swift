@@ -253,7 +253,8 @@ struct SyncEnclaveAttestationRecoveryTests {
         #expect(await probe.verificationCount() == 2)
     }
 
-    @Test func resetDuringRequestPreventsReplay() async throws {
+    @Test(arguments: [false, true])
+    func sessionChangeDuringAuthenticatedRequestPreventsReplay(reset: Bool) async throws {
         let probe = AttestationRecoveryProbe()
         let client = makeClient(probe)
         let requestStarted = AttestationRecoveryGate()
@@ -267,7 +268,11 @@ struct SyncEnclaveAttestationRecoveryTests {
             }
         }
         await requestStarted.wait()
-        await client.reset()
+        if reset {
+            await client.reset()
+        } else {
+            await client.setTokenGetter { _ in "new-session-token" }
+        }
         try await client.ready()
         await releaseRequest.open()
         do {
@@ -278,7 +283,37 @@ struct SyncEnclaveAttestationRecoveryTests {
             Issue.record("Expected CancellationError, got \(error)")
         }
         #expect(await probe.requestClients() == [1])
-        #expect(await probe.verificationCount() == 2)
+        #expect(await probe.verificationCount() == (reset ? 2 : 1))
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func publicRequestsSurviveSessionChanges(reset: Bool, certificateRotated: Bool) async throws {
+        let probe = AttestationRecoveryProbe()
+        let client = makeClient(probe)
+        let requestStarted = AttestationRecoveryGate()
+        let releaseRequest = AttestationRecoveryGate()
+        let request = Task {
+            try await client.withAttestedClient(skipAuth: true) { transport in
+                let number = await probe.recordRequest(transport)
+                if number == 1 {
+                    await requestStarted.open()
+                    await releaseRequest.wait()
+                    if certificateRotated { throw AttestationRecoveryFixture.mismatch }
+                }
+                return number
+            }
+        }
+        await requestStarted.wait()
+        if reset {
+            await client.reset()
+        } else {
+            await client.setTokenGetter { _ in "new-session-token" }
+        }
+        await releaseRequest.open()
+        let result = try await request.value
+        #expect(result == (certificateRotated ? 2 : 1))
+        #expect(await probe.requestClients() == (certificateRotated ? [1, 2] : [1]))
+        #expect(await probe.verificationCount() == (certificateRotated ? 2 : 1))
     }
 
     @Test func cancelingWaiterDoesNotCancelSharedVerification() async throws {
