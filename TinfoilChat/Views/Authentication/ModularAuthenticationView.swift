@@ -25,10 +25,11 @@ struct ModularAuthenticationView: View {
   @State private var hasCompletedAuthentication = false
   @State private var notificationObservers: [NSObjectProtocol] = []
   @State private var email = ""
+  @StateObject private var legalConsent = SignUpLegalConsent()
   
   var body: some View {
     NavigationView {
-      GeometryReader { geometry in
+      GeometryReader { _ in
         ZStack {
           // Background
           Color.settingsBackground(for: colorScheme)
@@ -86,10 +87,6 @@ struct ModularAuthenticationView: View {
               }
             }
             .frame(maxHeight: .infinity, alignment: .top)
-
-            authenticationDisclaimer
-              .padding(.horizontal)
-              .padding(.bottom, geometry.safeAreaInsets.bottom > 0 ? geometry.safeAreaInsets.bottom : 20)
           }
           .contentShape(Rectangle())
           .onTapGesture {
@@ -142,28 +139,17 @@ struct ModularAuthenticationView: View {
       }
   }
 
-  private var authenticationDisclaimer: some View {
-    VStack(spacing: 0) {
-      Divider()
-
-      Text("By continuing, you agree to our [Terms](\(Constants.Legal.termsOfServiceURL.absoluteString)) and acknowledge our [Privacy Policy](\(Constants.Legal.privacyPolicyURL.absoluteString)).")
-        .font(.footnote)
-        .foregroundColor(.secondary)
-        .tint(Color.adaptiveAccent)
-        .multilineTextAlignment(.center)
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.top)
-    }
-  }
-  
   private var authenticationForms: some View {
     VStack(spacing: 4) {
-      if isSignUp {
+      if let signUp = legalConsent.pendingSignUp {
+        socialSignUpConsent(signUp)
+          .padding(.top, Constants.Legal.completionSpacing)
+      } else if isSignUp {
         SignUpView(
           email: $email,
           errorMessage: $errorMessage,
           isLoading: $isLoading,
-          isSignUp: $isSignUp,
+          legalAccepted: $legalConsent.isAccepted,
           onDismiss: { DispatchQueue.main.async { completeAuthentication() } }
         )
         .onPreferenceChange(VerificationModePreferenceKey.self) { inVerificationMode in
@@ -173,6 +159,7 @@ struct ModularAuthenticationView: View {
         if !isInVerificationMode {
           Button("Already have an account? Sign In") {
             errorMessage = nil
+            legalConsent.reset()
             isSignUp = false
           }
           .font(.subheadline)
@@ -186,6 +173,7 @@ struct ModularAuthenticationView: View {
           isLoading: $isLoading,
           onRequestSignUp: {
             errorMessage = nil
+            legalConsent.reset()
             isSignUp = true
           },
           onDismiss: { DispatchQueue.main.async { completeAuthentication() } }
@@ -198,6 +186,7 @@ struct ModularAuthenticationView: View {
         if !isInVerificationMode {
           Button("Don't have an account? Sign Up") {
             errorMessage = nil
+            legalConsent.reset()
             isSignUp = true
           }
           .font(.subheadline)
@@ -206,6 +195,73 @@ struct ModularAuthenticationView: View {
         }
       }
     }
+    .disabled(isLoading)
+  }
+
+  private func socialSignUpConsent(_ signUp: SignUp) -> some View {
+    VStack(spacing: Constants.Legal.completionSpacing) {
+      Text("Complete your sign-up")
+        .font(.headline)
+
+      if signUp.missingFields.contains(.firstName) {
+        UIKitTextField(
+          text: $legalConsent.firstName,
+          placeholder: "First Name",
+          autocapitalizationType: .words,
+          textContentType: .givenName
+        )
+        .frame(height: Constants.Legal.completionControlHeight)
+      }
+
+      if signUp.missingFields.contains(.lastName) {
+        UIKitTextField(
+          text: $legalConsent.lastName,
+          placeholder: "Last Name",
+          autocapitalizationType: .words,
+          textContentType: .familyName
+        )
+        .frame(height: Constants.Legal.completionControlHeight)
+      }
+
+      if signUp.missingFields.contains(.legalAccepted) {
+        Text("Before creating your account, please review and accept our terms and privacy policy.")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+
+        LegalConsentView(isAccepted: $legalConsent.isAccepted)
+      }
+
+      Button {
+        Task { await completeSocialSignUp() }
+      } label: {
+        Text("Create Account")
+          .font(.headline)
+          .foregroundStyle(colorScheme == .dark ? .black : .white)
+          .frame(maxWidth: .infinity)
+          .frame(height: Constants.Legal.completionControlHeight)
+          .background(colorScheme == .dark ? Color.white : Color.black)
+          .cornerRadius(Constants.UI.actionButtonCornerRadius)
+      }
+      .disabled(!legalConsent.canSubmit)
+
+      if isLoading {
+        ProgressView()
+      }
+
+      if let errorMessage {
+        AuthErrorBanner(message: errorMessage)
+      }
+
+      Button("Back to Sign In") {
+        legalConsent.reset()
+        errorMessage = nil
+        isInVerificationMode = false
+        isSignUp = false
+      }
+      .font(.subheadline)
+      .foregroundStyle(.secondary)
+    }
   }
   
   private var thirdPartyAuthOptions: some View {
@@ -213,7 +269,7 @@ struct ModularAuthenticationView: View {
   }
   
   private var shouldShowThirdPartyAuth: Bool {
-    clerk.user == nil && !isInVerificationMode
+    clerk.user == nil && !isInVerificationMode && legalConsent.pendingSignUp == nil
   }
 
   // MARK: - Authentication Components
@@ -246,11 +302,18 @@ struct ModularAuthenticationView: View {
       .cornerRadius(14)
     }
     .shadow(color: Color.black.opacity(0.15), radius: 6, x: 0, y: 3)
+    .disabled(isLoading || (isSignUp && !legalConsent.isAccepted))
   }
   
   // MARK: - Authentication Methods
   
+  @MainActor
   private func signInWithOAuth(provider: OAuthProvider) async {
+    guard !isLoading else { return }
+    guard !isSignUp || legalConsent.isAccepted else {
+      errorMessage = Constants.Legal.consentRequiredMessage
+      return
+    }
     errorMessage = nil
     isLoading = true
     
@@ -266,7 +329,13 @@ struct ModularAuthenticationView: View {
     isLoading = false
   }
   
+  @MainActor
   private func signInWithApple() async {
+    guard !isLoading else { return }
+    guard !isSignUp || legalConsent.isAccepted else {
+      errorMessage = Constants.Legal.consentRequiredMessage
+      return
+    }
     errorMessage = nil
     isLoading = true
     
@@ -284,13 +353,33 @@ struct ModularAuthenticationView: View {
   
   /// Completes an OAuth or Apple sign-in, keeping the modal open when the
   /// account still needs a second factor so SignInView can prompt for it.
+  @MainActor
   private func handleAuthResult(_ result: TransferFlowResult) async {
+    if case .signIn = result {
+      legalConsent.reset()
+    }
     if case .signIn(let signIn) = result, signIn.status == .needsSecondFactor {
       isSignUp = false
       return
     }
     
     do {
+      if case .signUp(let signUp) = result {
+        let updatedSignUp = try await legalConsent.resolve(signUp)
+        guard updatedSignUp.status == .complete else {
+          if legalConsent.hasCollectableRequirements {
+            return
+          }
+          if !updatedSignUp.missingFields.isEmpty {
+            errorMessage = "Additional information required: \(updatedSignUp.missingFields.map(\.rawValue).joined(separator: ", "))"
+          } else if !updatedSignUp.unverifiedFields.isEmpty {
+            errorMessage = "Additional verification required: \(updatedSignUp.unverifiedFields.map(\.rawValue).joined(separator: ", "))"
+          } else {
+            errorMessage = "Sign-up could not be completed. Please start again."
+          }
+          return
+        }
+      }
       try await clerk.refreshClient()
     } catch {
       errorMessage = handleAuthError(error)
@@ -305,6 +394,16 @@ struct ModularAuthenticationView: View {
     } else {
       errorMessage = "Sign-in could not be completed. Please try again."
     }
+  }
+
+  @MainActor
+  private func completeSocialSignUp() async {
+    guard !isLoading, legalConsent.canSubmit,
+          let signUp = legalConsent.pendingSignUp else { return }
+    isLoading = true
+    errorMessage = nil
+    defer { isLoading = false }
+    await handleAuthResult(.signUp(signUp))
   }
   
   // MARK: - Lifecycle Methods

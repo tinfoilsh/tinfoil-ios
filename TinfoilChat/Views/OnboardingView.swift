@@ -59,16 +59,6 @@ struct OnboardingView: View {
                 }
                 .frame(maxWidth: Constants.Onboarding.maximumContentWidth)
                 .padding(.horizontal, Constants.Onboarding.horizontalPadding)
-
-                BalancedTextLayout {
-                    Text("By continuing, you agree to our [Terms](\(Constants.Legal.termsOfServiceURL.absoluteString)) and have read our [Privacy Policy](\(Constants.Legal.privacyPolicyURL.absoluteString)).")
-                }
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .tint(Color.adaptiveAccent)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, Constants.Onboarding.horizontalPadding)
             }
             .padding(.bottom, Constants.Onboarding.navigationPadding)
         }
