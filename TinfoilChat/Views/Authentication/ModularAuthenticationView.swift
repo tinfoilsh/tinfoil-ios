@@ -200,7 +200,7 @@ struct ModularAuthenticationView: View {
 
   private func socialSignUpConsent(_ signUp: SignUp) -> some View {
     VStack(spacing: Constants.Legal.completionSpacing) {
-      Text("Complete your sign-up")
+      Text("Complete your account")
         .font(.headline)
 
       if signUp.missingFields.contains(.firstName) {
