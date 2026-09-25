@@ -539,6 +539,7 @@ struct ChatSidebar: View {
                     }
                 },
                 onDelete: { confirmDelete(chat) },
+                onCancel: cancelEditing,
                 showEditDelete: authManager.isAuthenticated
             )
             .contextMenu {
@@ -694,6 +695,7 @@ struct ChatSidebar: View {
                 }
             },
             onDelete: { confirmDelete(summary) },
+            onCancel: cancelEditing,
             showEditDelete: true
         )
         .contextMenu {
@@ -1129,6 +1131,11 @@ struct ChatSidebar: View {
         editingChatId = chat.id
         editingTitle = chat.title
     }
+
+    private func cancelEditing() {
+        editingChatId = nil
+        editingTitle = ""
+    }
     
     private func confirmDelete(_ chat: ChatListSummary) {
         deletingChatId = chat.id
@@ -1175,10 +1182,11 @@ struct ChatListItem: View {
     let onSelect: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
+    let onCancel: () -> Void
     let showEditDelete: Bool
     
     var body: some View {
-        Button(action: onSelect) {
+        Group {
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     if isEditing {
@@ -1195,11 +1203,21 @@ struct ChatListItem: View {
                             Button(action: onEdit) {
                                 Image(systemName: "checkmark")
                                     .foregroundColor(.primary)
+                                    .frame(
+                                        width: Constants.UI.chatTitleActionHitTargetSize,
+                                        height: Constants.UI.chatTitleActionHitTargetSize
+                                    )
+                                    .contentShape(Rectangle())
                             }
                             .accessibilityLabel("Save title")
-                            Button(action: { editingTitle = chat.title; onEdit() }) {
+                            Button(action: onCancel) {
                                 Image(systemName: "xmark")
                                     .foregroundColor(.primary)
+                                    .frame(
+                                        width: Constants.UI.chatTitleActionHitTargetSize,
+                                        height: Constants.UI.chatTitleActionHitTargetSize
+                                    )
+                                    .contentShape(Rectangle())
                             }
                             .accessibilityLabel("Cancel editing")
                         }
@@ -1280,6 +1298,11 @@ struct ChatListItem: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
+        .if(!isEditing) { content in
+            Button(action: onSelect) {
+                content
+            }
+        }
         .buttonStyle(PlainButtonStyle())
         .background(
             RoundedRectangle(cornerRadius: 8)
@@ -1338,7 +1361,10 @@ struct ChatListItem: View {
     }
 
     private var rowAccessibilityTraits: AccessibilityTraits {
-        isSelected ? [.isButton, .isSelected] : .isButton
+        if isEditing {
+            return isSelected ? .isSelected : []
+        }
+        return isSelected ? [.isButton, .isSelected] : .isButton
     }
 
     private var rowAccessibilityHint: String {

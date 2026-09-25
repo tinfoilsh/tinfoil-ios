@@ -64,6 +64,7 @@ enum Constants {
         static let iPadInputBottomPadding: CGFloat = 16
         static let composerActionSpacing: CGFloat = 4
         static let modelSelectorLayoutPriority: Double = 1
+        static let chatTitleActionHitTargetSize: CGFloat = 44
 
         enum TextureGrid {
             static let spacing: CGFloat = 16
