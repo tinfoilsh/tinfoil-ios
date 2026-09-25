@@ -624,7 +624,6 @@ struct MessageInputView: View {
     /// growing list of paste/send hooks stays defined in one place.
     private var messageTextEditor: some View {
         CustomTextEditor(text: $messageText,
-                         textHeight: $textHeight,
                          placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "How can I help you?" : "Reply to Al...",
                          shouldFocusInput: viewModel.shouldFocusInput,
                          handle: editorHandle,
@@ -635,7 +634,11 @@ struct MessageInputView: View {
                          onPasteImage: isEditingMessage ? nil : { data, fileName in viewModel.addImageAttachment(data: data, fileName: fileName) },
                          onPasteFile: isEditingMessage ? nil : { handle in viewModel.addDocumentAttachment(handle: handle) },
                          onPasteFileError: { message in viewModel.attachmentError = message })
-            .frame(height: textHeight)
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { height in
+                textHeight = height
+            }
             .padding(.horizontal)
     }
 
@@ -1749,7 +1752,6 @@ final class CustomTextEditorHandle {
 /// Custom UIViewRepresentable for a properly managed text editor
 struct CustomTextEditor: UIViewRepresentable {
     @Binding var text: String
-    @Binding var textHeight: CGFloat
     var placeholderText: String
     var shouldFocusInput: Bool
     var handle: CustomTextEditorHandle? = nil
@@ -1884,14 +1886,15 @@ struct CustomTextEditor: UIViewRepresentable {
 
         uiView.isEditable = true
         context.coordinator.refreshAccessibility(uiView)
+    }
 
-        let newHeight = context.coordinator.measuredHeight(for: uiView)
-
-        if textHeight != newHeight {
-            DispatchQueue.main.async {
-                self.textHeight = newHeight
-            }
-        }
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        guard let width = proposal.width, width.isFinite, width > .zero else { return nil }
+        // Calculate and update the height
+        return CGSize(
+            width: width,
+            height: context.coordinator.measuredHeight(for: uiView, width: width)
+        )
     }
     
     func makeCoordinator() -> Coordinator {
@@ -1939,7 +1942,6 @@ struct CustomTextEditor: UIViewRepresentable {
             }
             parent.text = ""
             currentTextSnapshot = ""
-            parent.textHeight = MessageInputView.Layout.defaultHeight
             refreshAccessibility(textView)
         }
 
@@ -1955,7 +1957,6 @@ struct CustomTextEditor: UIViewRepresentable {
             parent.text = text
             currentTextSnapshot = text
             textView.selectedRange = NSRange(location: text.utf16.count, length: 0)
-            parent.textHeight = measuredHeight(for: textView)
             refreshAccessibility(textView)
         }
 
@@ -1964,9 +1965,8 @@ struct CustomTextEditor: UIViewRepresentable {
         /// so keyboard-driven SwiftUI updates don't re-measure an unchanged
         /// draft, and drafts that trivially exceed the height cap skip
         /// measurement entirely.
-        func measuredHeight(for textView: UITextView) -> CGFloat {
+        func measuredHeight(for textView: UITextView, width: CGFloat) -> CGFloat {
             let text = currentTextSnapshot
-            let width = textView.frame.width
             let pointSize = textView.font?.pointSize ?? 0
 
             if let last = lastMeasurement,
@@ -2046,13 +2046,6 @@ struct CustomTextEditor: UIViewRepresentable {
                 let snapshot = immutableTextSnapshot(from: textView)
                 currentTextSnapshot = snapshot
                 parent.text = snapshot
-                
-                // Calculate and update the height
-                let newHeight = measuredHeight(for: textView)
-                
-                if parent.textHeight != newHeight {
-                    parent.textHeight = newHeight
-                }
             }
             refreshAccessibility(textView)
         }
