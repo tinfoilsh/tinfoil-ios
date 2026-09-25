@@ -92,6 +92,16 @@ struct Chat: Identifiable, Codable {
         return titleState == .placeholder
     }
 
+    /// List refreshes must retain the draft identity used by recording and transcription.
+    func blankDraftForListRefresh(isLocalOnly: Bool, userId: String?) -> Chat? {
+        guard isBlankChat,
+              self.isLocalOnly == isLocalOnly,
+              self.userId == nil || self.userId == userId else { return nil }
+        var draft = self
+        draft.userId = userId
+        return draft
+    }
+
     /// Generates a permanent reverse-timestamp ID locally (matching the web app format).
     /// Format: {reverseTimestamp padded to 13 digits}_{UUID}
     static func generateReverseId(timestampMs: Int = Int(Date().timeIntervalSince1970 * 1000)) -> String {

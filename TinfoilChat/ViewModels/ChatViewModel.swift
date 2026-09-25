@@ -6245,7 +6245,10 @@ class ChatViewModel: ObservableObject {
             let promptPresetId = wasCurrentChatBlank
                 ? currentChat?.promptPresetId
                 : ProfileManager.shared.defaultPromptPresetIdForNewChat
-            let blankChat = Chat.create(
+            let blankChat = currentChat?.blankDraftForListRefresh(
+                isLocalOnly: isLocal,
+                userId: currentUserId
+            ) ?? Chat.create(
                 modelType: currentModel,
                 language: nil,
                 userId: currentUserId,
