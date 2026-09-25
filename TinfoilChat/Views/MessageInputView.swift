@@ -1890,7 +1890,6 @@ struct CustomTextEditor: UIViewRepresentable {
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
         guard let width = proposal.width, width.isFinite, width > .zero else { return nil }
-        // Calculate and update the height
         return CGSize(
             width: width,
             height: context.coordinator.measuredHeight(for: uiView, width: width)
