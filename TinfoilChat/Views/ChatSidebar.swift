@@ -52,6 +52,7 @@ struct ChatSidebar: View {
     let onRequestSignIn: () -> Void
     @State private var editingChatId: String? = nil
     @State private var editingTitle: String = ""
+    @State private var editingSessionId = UUID()
     @State private var deletingChatId: String? = nil
     @State private var showDeleteAlert: Bool = false
 
@@ -528,9 +529,10 @@ struct ChatSidebar: View {
                     if editingChatId == chat.id {
                         let editedChatId = chat.id
                         let editedTitle = editingTitle
+                        let editedSessionId = editingSessionId
                         Task {
                             await viewModel.updateChatTitle(editedChatId, newTitle: editedTitle)
-                            if editingChatId == editedChatId {
+                            if editingChatId == editedChatId && editingSessionId == editedSessionId {
                                 editingChatId = nil
                             }
                         }
@@ -684,9 +686,10 @@ struct ChatSidebar: View {
                 if editingChatId == chat.id {
                     let editedChatId = chat.id
                     let editedTitle = editingTitle
+                    let editedSessionId = editingSessionId
                     Task {
                         await viewModel.updateChatTitle(editedChatId, newTitle: editedTitle)
-                        if editingChatId == editedChatId {
+                        if editingChatId == editedChatId && editingSessionId == editedSessionId {
                             editingChatId = nil
                         }
                     }
@@ -1128,6 +1131,7 @@ struct ChatSidebar: View {
     }
 
     private func startEditing(_ chat: ChatListSummary) {
+        editingSessionId = UUID()
         editingChatId = chat.id
         editingTitle = chat.title
     }
