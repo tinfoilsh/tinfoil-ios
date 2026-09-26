@@ -1545,7 +1545,7 @@ class SessionTokenManager {
     private let stateLock = NSLock()
 
     /// Deduplicates background refreshes kicked off from `currentToken`.
-    private var backgroundRefreshInFlight = false
+    private var backgroundRefreshAdmission = SessionTokenRefreshAdmission()
 
     /// Current rate limit info for free-tier users (nil for premium)
     @MainActor private(set) var rateLimitInfo: RateLimitInfo? {
@@ -1605,20 +1605,15 @@ class SessionTokenManager {
     /// Kicks off a single background token refresh, coalescing concurrent
     /// callers so a burst of requests does not trigger a stampede of fetches.
     private func triggerBackgroundRefresh() {
-        stateLock.lock()
-        if backgroundRefreshInFlight {
-            stateLock.unlock()
-            return
-        }
-        backgroundRefreshInFlight = true
-        stateLock.unlock()
+        guard let refreshID = stateLock.withLock({ backgroundRefreshAdmission.begin() }) else { return }
 
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
-            _ = await self.fetchFreshSessionToken()
-            self.stateLock.withLock {
-                self.backgroundRefreshInFlight = false
+            guard self.stateLock.withLock({ self.backgroundRefreshAdmission.requestID == refreshID }) else { return }
+            defer {
+                self.stateLock.withLock { self.backgroundRefreshAdmission.finish(refreshID) }
             }
+            _ = await self.fetchFreshSessionToken()
         }
     }
 
@@ -1886,6 +1881,7 @@ class SessionTokenManager {
     /// Clears the cached session token and rate limit info
     @MainActor func clearSessionToken() {
         sessionGeneration = UUID()
+        stateLock.withLock { backgroundRefreshAdmission.reset() }
         chatTokenRequests.reset()
         refreshTask?.cancel()
         refreshTask = nil
