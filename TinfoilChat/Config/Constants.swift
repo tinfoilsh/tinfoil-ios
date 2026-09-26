@@ -226,6 +226,17 @@ enum Constants {
         static let legacyPasskeyCredentialsPath = "/api/passkey-credentials/"
         static let sessionTokenExpiryBufferSeconds: TimeInterval = 300  // 5 minutes
 
+        enum SessionToken {
+            static let chatPath = "/api/chat/token"
+            static let requestTimeoutSeconds: TimeInterval = 60
+            static let rateLimitFallbackSeconds: TimeInterval = 60
+            static let maximumCooldownSeconds: TimeInterval = 60 * 60
+            static let retryAfterHeader = "Retry-After"
+            static let serverDateHeader = "Date"
+            static let httpDateFormat = "EEE, dd MMM yyyy HH:mm:ss z"
+            static let httpDateLocale = "en_US_POSIX"
+        }
+
         enum ErrorCode {
             static let invalidAPIKey = "invalid_api_key"
             /// Wire code returned with a 429 when a subscriber exceeds the
@@ -777,6 +788,8 @@ enum Constants {
 
     enum RateLimit {
         static let warningThreshold = 3
+        static let checkAgainLabel = "Check again"
+        static let checkingLabel = "Checking…"
     }
 
     enum MessageQueue {

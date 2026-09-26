@@ -1530,7 +1530,14 @@ class SessionTokenManager {
     private var sessionToken: String?
     private var sessionTokenExpiresAt: Date?
     private let sessionTokenEndpoint = "\(Constants.API.baseURL)/api/keys/chat"
-    private let chatTokenEndpoint = "\(Constants.API.baseURL)/api/chat/token"
+    @MainActor private var sessionGeneration = UUID()
+    @MainActor private lazy var chatTokenRequests: ChatTokenRequestGate = {
+        let requests = ChatTokenRequestGate()
+        requests.onCooldownExpired = { [weak self] in
+            _ = await self?.fetchFreshSessionToken()
+        }
+        return requests
+    }()
 
     /// Serializes access to `sessionToken` / `sessionTokenExpiresAt` so the
     /// synchronous `currentToken` provider can be read from the SDK's
@@ -1541,18 +1548,18 @@ class SessionTokenManager {
     private var backgroundRefreshInFlight = false
 
     /// Current rate limit info for free-tier users (nil for premium)
-    private(set) var rateLimitInfo: RateLimitInfo? {
+    @MainActor private(set) var rateLimitInfo: RateLimitInfo? {
         didSet { onRateLimitChanged?(rateLimitInfo) }
     }
 
     /// Callback invoked whenever rateLimitInfo changes, used by ChatViewModel to sync state
-    var onRateLimitChanged: ((RateLimitInfo?) -> Void)?
+    @MainActor var onRateLimitChanged: ((RateLimitInfo?) -> Void)?
 
     /// Snapshot of remaining count taken before a request, used for stale-response detection
-    private var remainingBeforeRequest: Int?
+    @MainActor private var remainingBeforeRequest: Int?
 
     /// Guards against concurrent refreshRateLimit calls
-    private var refreshTask: Task<Void, Never>?
+    @MainActor private var refreshTask: Task<Void, Never>?
 
     /// Returns true if the cached token is expired or near expiry and needs refresh
     var needsRefresh: Bool {
@@ -1617,7 +1624,8 @@ class SessionTokenManager {
 
     /// Retrieves the session token, returning the cached value if still valid
     /// - Returns: Session token string or empty string if unavailable
-    func getSessionToken() async -> String {
+    @MainActor func getSessionToken() async -> String {
+        guard !Task.isCancelled else { return "" }
         let snapshot = tokenSnapshot()
         if let token = snapshot.token,
            let expiresAt = snapshot.expiresAt,
@@ -1636,8 +1644,10 @@ class SessionTokenManager {
     /// preserved; the throw happens only when no usable token could be obtained
     /// because the cap was hit.
     /// - Parameter forceRefresh: bypass the cached token (used on a 401 retry).
-    func acquireTokenForSend(forceRefresh: Bool) async throws {
+    @MainActor func acquireTokenForSend(forceRefresh: Bool) async throws {
+        let generation = sessionGeneration
         let token = forceRefresh ? await fetchFreshSessionToken() : await getSessionToken()
+        guard generation == sessionGeneration, !Task.isCancelled else { throw CancellationError() }
         if !token.isEmpty { return }
         if rateLimitInfo?.kind == .hourly {
             throw SessionTokenError.hourlyLimitReached(resetsAt: rateLimitInfo?.resetsAt)
@@ -1646,7 +1656,12 @@ class SessionTokenManager {
 
     /// Forces a fresh session token fetch, ignoring any cached value
     /// - Returns: Session token string or empty string if unavailable
-    func fetchFreshSessionToken() async -> String {
+    @MainActor func fetchFreshSessionToken(bypassRateLimit: Bool = false) async -> String {
+        guard !Task.isCancelled else { return "" }
+        if !bypassRateLimit, chatTokenRequests.isCoolingDown {
+            return tokenDuringCooldown()
+        }
+        let generation = sessionGeneration
         do {
             // Try to load Clerk if it's not loaded
             let isLoaded = await Clerk.shared.isLoaded
@@ -1654,12 +1669,15 @@ class SessionTokenManager {
             if !isLoaded {
                 try await Clerk.shared.refreshClient()
             }
+            guard isCurrentRequest(generation) else { return "" }
 
             // Try a few times with a small delay for the session to be available
             for attempt in 1...3 {
                 let session = await Clerk.shared.session
+                guard isCurrentRequest(generation) else { return "" }
                 if let session = session {
                     let token = try? await session.getToken()
+                    guard isCurrentRequest(generation) else { return "" }
 
                     guard let jwt = token ?? session.lastActiveToken?.jwt else {
                         // No token available at all, wait and retry
@@ -1671,7 +1689,8 @@ class SessionTokenManager {
 
                     // Resolve a token with this JWT: subscribers mint a stateless
                     // JWT inference token, everyone else falls back to an opaque key.
-                    let result = await fetchAuthenticatedSessionToken(jwt: jwt)
+                    let result = await fetchAuthenticatedSessionToken(jwt: jwt, generation: generation, bypassRateLimit: bypassRateLimit)
+                    guard isCurrentRequest(generation) else { return "" }
 
                     if let key = result {
                         return key
@@ -1688,8 +1707,9 @@ class SessionTokenManager {
                     // Refresh the Clerk client to get a new JWT and retry.
                     _ = try? await Clerk.shared.refreshClient()
                     let refreshedSession = await Clerk.shared.session
+                    guard isCurrentRequest(generation) else { return "" }
                     if let refreshedToken = try? await refreshedSession?.getToken() {
-                        if let key = await fetchAuthenticatedSessionToken(jwt: refreshedToken) {
+                        if let key = await fetchAuthenticatedSessionToken(jwt: refreshedToken, generation: generation, bypassRateLimit: bypassRateLimit) {
                             return key
                         }
                     }
@@ -1704,7 +1724,7 @@ class SessionTokenManager {
             }
 
             // No Clerk session — fetch an anonymous key without auth
-            if let key = await fetchSessionKey(jwt: nil) {
+            if let key = await fetchSessionKey(jwt: nil, generation: generation) {
                 return key
             }
 
@@ -1714,9 +1734,21 @@ class SessionTokenManager {
         }
     }
 
+    @MainActor private func isCurrentRequest(_ generation: UUID) -> Bool {
+        generation == sessionGeneration && !Task.isCancelled
+    }
+
+    private func tokenDuringCooldown() -> String {
+        let snapshot = tokenSnapshot()
+        guard let token = snapshot.token, let expiresAt = snapshot.expiresAt,
+              expiresAt.timeIntervalSinceNow > 0 else { return "" }
+        return token
+    }
+
     /// Exchanges a Clerk JWT for a session API key, or fetches an anonymous key when jwt is nil
     /// - Returns: The API key string, or nil on failure
-    private func fetchSessionKey(jwt: String?) async -> String? {
+    @MainActor private func fetchSessionKey(jwt: String?, generation: UUID) async -> String? {
+        guard isCurrentRequest(generation) else { return nil }
         do {
             var request = URLRequest(url: URL(string: sessionTokenEndpoint)!)
             request.httpMethod = "GET"
@@ -1725,6 +1757,7 @@ class SessionTokenManager {
             }
 
             let (data, response) = try await URLSession.shared.data(for: request)
+            guard isCurrentRequest(generation) else { return nil }
 
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200 else {
@@ -1772,26 +1805,22 @@ class SessionTokenManager {
         }
     }
 
-    /// Outcome of attempting to mint a stateless JWT inference token.
-    private enum ChatJWTResult {
-        case token(key: String, expiresAt: Date?)
-        case rateLimited(resetsAt: String?)
-        case unavailable
-    }
-
     /// Resolves a usable inference token for an authenticated user. Subscribers
     /// mint a stateless JWT via /api/chat/token; everyone else falls back to an
     /// opaque key from /api/keys/chat. Returns nil only when no definitive answer
     /// was reached, so the caller can retry with a refreshed Clerk JWT.
-    private func fetchAuthenticatedSessionToken(jwt: String) async -> String? {
-        switch await fetchChatJWT(jwt: jwt) {
+    @MainActor private func fetchAuthenticatedSessionToken(jwt: String, generation: UUID, bypassRateLimit: Bool) async -> String? {
+        guard isCurrentRequest(generation) else { return nil }
+        let result = await chatTokenRequests.fetch(jwt: jwt, bypassCooldown: bypassRateLimit)
+        guard isCurrentRequest(generation) else { return nil }
+        switch result {
         case .token(let key, let expiresAt):
             storeToken(key, expiresAt: expiresAt
                 ?? Date().addingTimeInterval(Constants.API.sessionTokenExpiryBufferSeconds * 2))
             // Subscribers are not subject to the free-tier daily limit.
             self.rateLimitInfo = nil
             return key
-        case .rateLimited(let resetsAt):
+        case .rateLimited(let resetsAt, _):
             // Subscriber over the per-account hourly cap. Surface it through the
             // shared rate-limit channel so the UI can show an hourly-limit
             // indicator, and do not fall back to the opaque /api/keys/chat path,
@@ -1805,63 +1834,17 @@ class SessionTokenManager {
                 resetsAt: resetsAt ?? "",
                 kind: .hourly
             )
-            let snapshot = tokenSnapshot()
-            if let token = snapshot.token,
-               let expiresAt = snapshot.expiresAt,
-               expiresAt.timeIntervalSinceNow > 0 {
-                return token
-            }
-            return ""
+            return tokenDuringCooldown()
         case .unavailable:
-            return await fetchSessionKey(jwt: jwt)
-        }
-    }
-
-    /// Mints a stateless JWT inference token for a subscribed user via
-    /// /api/chat/token. Returns `.unavailable` on any non-rate-limit failure
-    /// (no subscription, endpoint disabled, network error) so the caller falls
-    /// back to the opaque /api/keys/chat path.
-    private func fetchChatJWT(jwt: String) async -> ChatJWTResult {
-        do {
-            var request = URLRequest(url: URL(string: chatTokenEndpoint)!)
-            request.httpMethod = "GET"
-            request.addValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
-
-            let (data, response) = try await URLSession.shared.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                return .unavailable
-            }
-
-            if httpResponse.statusCode == 200 {
-                guard let responseDict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let key = responseDict["key"] as? String,
-                      !key.isEmpty else {
-                    return .unavailable
-                }
-                var expiresAt: Date? = nil
-                if let expiresAtString = responseDict["expires_at"] as? String {
-                    expiresAt = ISO8601DateFormatter().date(from: expiresAtString)
-                }
-                return .token(key: key, expiresAt: expiresAt)
-            }
-
-            let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            let isHourlyLimit = httpResponse.statusCode == 429
-                || (body?["code"] as? String) == Constants.API.ErrorCode.hourlyLimitReached
-            if isHourlyLimit {
-                return .rateLimited(resetsAt: body?["resets_at"] as? String)
-            }
-
-            return .unavailable
-        } catch {
-            return .unavailable
+            return await fetchSessionKey(jwt: jwt, generation: generation)
+        case .cancelled:
+            return ""
         }
     }
 
     /// Saves the current remaining count and optimistically decrements by 1.
     /// Called just before sending a chat request so the UI updates immediately.
-    func snapshotAndDecrementRemaining() {
+    @MainActor func snapshotAndDecrementRemaining() {
         guard var rateLimit = rateLimitInfo else { return }
         remainingBeforeRequest = rateLimit.remaining
         rateLimit.remaining = max(0, rateLimit.remaining - 1)
@@ -1871,20 +1854,25 @@ class SessionTokenManager {
     /// Re-fetches the session token (and rate limit) from the server.
     /// Handles stale responses: if the server returns a remaining count >= the pre-request
     /// snapshot, the server hasn't yet accounted for our last request, so we use snapshot - 1.
-    func refreshRateLimit() {
+    @MainActor func refreshRateLimit() {
         guard rateLimitInfo != nil else { return }
+        guard !chatTokenRequests.isCoolingDown else { return }
         guard refreshTask == nil else { return }
 
+        let generation = sessionGeneration
         let snapshot = remainingBeforeRequest
         remainingBeforeRequest = nil
 
         refreshTask = Task {
-            defer { refreshTask = nil }
+            defer {
+                if generation == sessionGeneration { refreshTask = nil }
+            }
 
             #if DEBUG
             print("[SessionToken] refreshRateLimit: re-fetching token and rate limit")
             #endif
             _ = await fetchFreshSessionToken()
+            guard isCurrentRequest(generation) else { return }
 
             if let snapshot = snapshot,
                var rateLimit = rateLimitInfo,
@@ -1896,7 +1884,12 @@ class SessionTokenManager {
     }
 
     /// Clears the cached session token and rate limit info
-    func clearSessionToken() {
+    @MainActor func clearSessionToken() {
+        sessionGeneration = UUID()
+        chatTokenRequests.reset()
+        refreshTask?.cancel()
+        refreshTask = nil
+        remainingBeforeRequest = nil
         storeToken(nil, expiresAt: nil)
         rateLimitInfo = nil
     }
