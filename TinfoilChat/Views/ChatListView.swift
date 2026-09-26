@@ -147,6 +147,17 @@ struct ChatListView: View {
                         onOpenLibrary: { showPromptLibrary = true }
                     )
                     .transition(.opacity)
+
+                    if !authManager.isAuthenticated {
+                        Text("By using this chat, you agree to our [Terms of Service](\(Constants.Legal.termsOfServiceURL.absoluteString)) and [Privacy Policy](\(Constants.Legal.privacyPolicyURL.absoluteString)).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .tint(Color.adaptiveAccent)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal)
+                            .padding(.bottom)
+                    }
                 }
                 if authManager.isAuthenticated, let chatId = viewModel.currentChat?.id {
                     SafeguardFlagBanner(
