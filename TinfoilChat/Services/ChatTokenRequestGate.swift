@@ -39,19 +39,23 @@ final class ChatTokenRequestGate {
         self.sleep = sleep
     }
 
-    var isCoolingDown: Bool {
-        guard let cooldown else { return false }
+    var currentRateLimit: Result? {
+        guard let cooldown else { return nil }
         guard cooldown.retryAt > now() else {
             clearCooldown()
-            return false
+            return nil
         }
-        return true
+        return cooldown.result
+    }
+
+    var isCoolingDown: Bool {
+        currentRateLimit != nil
     }
 
     func fetch(jwt: String, bypassCooldown: Bool = false) async -> Result {
         guard !Task.isCancelled else { return .cancelled }
-        if !bypassCooldown, isCoolingDown, let cooldown {
-            return cooldown.result
+        if !bypassCooldown, let limit = currentRateLimit {
+            return limit
         }
         let requestGeneration = generation
         let task: Task<Result, Never>
@@ -68,7 +72,7 @@ final class ChatTokenRequestGate {
                 case .rateLimited(_, let retryAt):
                     scheduleReset(result: result, retryAt: retryAt)
                 case .unavailable:
-                    if isCoolingDown, let cooldown { return cooldown.result }
+                    if let limit = currentRateLimit { return limit }
                 case .cancelled:
                     break
                 }

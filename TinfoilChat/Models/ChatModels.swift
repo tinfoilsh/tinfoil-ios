@@ -1653,8 +1653,8 @@ class SessionTokenManager {
     /// - Returns: Session token string or empty string if unavailable
     @MainActor func fetchFreshSessionToken(bypassRateLimit: Bool = false) async -> String {
         guard !Task.isCancelled else { return "" }
-        if !bypassRateLimit, chatTokenRequests.isCoolingDown {
-            return tokenDuringCooldown()
+        if !bypassRateLimit, case .rateLimited(let resetsAt, _)? = chatTokenRequests.currentRateLimit {
+            return applyHourlyLimit(resetsAt: resetsAt)
         }
         let generation = sessionGeneration
         do {
@@ -1740,6 +1740,16 @@ class SessionTokenManager {
         return token
     }
 
+    @MainActor private func applyHourlyLimit(resetsAt: String?) -> String {
+        rateLimitInfo = RateLimitInfo(
+            maxRequests: 0,
+            remaining: 0,
+            resetsAt: resetsAt ?? "",
+            kind: .hourly
+        )
+        return tokenDuringCooldown()
+    }
+
     /// Exchanges a Clerk JWT for a session API key, or fetches an anonymous key when jwt is nil
     /// - Returns: The API key string, or nil on failure
     @MainActor private func fetchSessionKey(jwt: String?, generation: UUID) async -> String? {
@@ -1823,13 +1833,7 @@ class SessionTokenManager {
             // Reuse the cached token only while it is still valid so an in-flight
             // session is not dropped; once it has expired there is no usable
             // token to return.
-            self.rateLimitInfo = RateLimitInfo(
-                maxRequests: 0,
-                remaining: 0,
-                resetsAt: resetsAt ?? "",
-                kind: .hourly
-            )
-            return tokenDuringCooldown()
+            return applyHourlyLimit(resetsAt: resetsAt)
         case .unavailable:
             return await fetchSessionKey(jwt: jwt, generation: generation)
         case .cancelled:

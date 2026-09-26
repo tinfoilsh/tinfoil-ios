@@ -294,6 +294,29 @@ struct ChatTokenRequestGateTests {
     }
 
     @Test
+    func cancelledWaiterLeavesTheKnownLimitAvailableToTheNextSend() async throws {
+        let started = Signal()
+        let release = Signal()
+        var calls = 0
+        let gate = ChatTokenRequestGate(send: { _ in
+            calls += 1
+            started.signal()
+            await release.wait()
+            return try Self.limitedResponse()
+        }, now: { Self.start })
+        defer { gate.reset() }
+        let caller = Task { await gate.fetch(jwt: Self.bearer) }
+        await started.wait()
+        caller.cancel()
+        release.signal()
+        #expect(await caller.value == .cancelled)
+        let expected = ChatTokenRequestGate.Result.rateLimited(resetsAt: Self.reset, retryAt: Self.resetDate)
+        #expect(gate.currentRateLimit == expected)
+        #expect(await gate.fetch(jwt: Self.bearer) == expected)
+        #expect(calls == 1)
+    }
+
+    @Test
     func cancelledCallerDoesNotStartARequest() async throws {
         let release = Signal()
         var calls = 0
