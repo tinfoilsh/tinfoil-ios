@@ -125,6 +125,7 @@ struct MessageInputView: View {
     @ObservedObject private var recoveryPhaseTracker = ChatRecoveryPhaseTracker.shared
     @State private var textHeight: CGFloat = Layout.defaultHeight
     @State private var messageTextHasNonWhitespace = false
+    @State private var isCheckingRateLimit = false
     /// Reflects whether the editor has grown beyond a single line, so callers
     /// can hide content that would otherwise be pushed off-screen.
     var isInputExpanded: Binding<Bool>? = nil
@@ -476,7 +477,19 @@ struct MessageInputView: View {
     @ViewBuilder
     private func rateLimitLabel(isIntegrated: Bool) -> some View {
         if let rl = viewModel.rateLimit, rl.kind == .hourly {
-            Text("Hourly limit reached")
+            HStack {
+                Text("Hourly limit reached")
+                Button(isCheckingRateLimit ? Constants.RateLimit.checkingLabel : Constants.RateLimit.checkAgainLabel) {
+                    isCheckingRateLimit = true
+                    Task { @MainActor in
+                        defer { isCheckingRateLimit = false }
+                        _ = await SessionTokenManager.shared.fetchFreshSessionToken(bypassRateLimit: true)
+                    }
+                }
+                .buttonStyle(.plain)
+                .underline()
+                .disabled(isCheckingRateLimit)
+            }
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.orange)
                 .padding(.horizontal, 10)

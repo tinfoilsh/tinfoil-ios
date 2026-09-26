@@ -71,7 +71,10 @@ class AuthManager: ObservableObject {
     @Published var isLoading = true
     @Published var localUserData: [String: Any]? = nil {
         didSet {
-            if oldValue?[Self.userIdKey] as? String != localUserId { chatViewModel?.invalidateAccountPlayback() }
+            if oldValue?[Self.userIdKey] as? String != localUserId {
+                chatViewModel?.invalidateAccountPlayback()
+                SessionTokenManager.shared.clearSessionToken()
+            }
             synchronizeSafeguardsAccount()
         }
     }
@@ -143,11 +146,9 @@ class AuthManager: ObservableObject {
         hasActiveSubscription = isActive
         guard shouldRefreshCredentials else { return }
 
+        SessionTokenManager.shared.clearSessionToken()
         Task {
-            let token = await SessionTokenManager.shared.fetchFreshSessionToken()
-            if token.isEmpty {
-                SessionTokenManager.shared.clearSessionToken()
-            }
+            _ = await SessionTokenManager.shared.fetchFreshSessionToken()
         }
     }
 
@@ -193,6 +194,7 @@ class AuthManager: ObservableObject {
     }
 
     private func invalidateAccountLifecycle() {
+        SessionTokenManager.shared.clearSessionToken()
         chatViewModel?.invalidateAccountPlayback()
         accountLifecycleGeneration &+= 1
     }
