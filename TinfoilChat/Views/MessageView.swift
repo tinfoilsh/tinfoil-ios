@@ -1813,7 +1813,6 @@ struct ThoughtsSheetView: View {
     let thinkingChunks: [ThinkingChunk]
     let generationTimeSeconds: Double?
     let isDarkMode: Bool
-    @Environment(\.dismiss) private var dismiss
     /// Chunks rebuilt from `thinkingText` when the message was loaded from
     /// storage, where streaming chunks are not persisted. Chunked (and
     /// laid out lazily) so a very large thought never becomes one Text view
@@ -1850,11 +1849,6 @@ struct ThoughtsSheetView: View {
             }
             .navigationTitle(titleText)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
             .task {
                 guard thinkingChunks.isEmpty, reconstructedChunks == nil, !thinkingText.isEmpty else { return }
                 let text = thinkingText
