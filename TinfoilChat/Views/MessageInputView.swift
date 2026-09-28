@@ -71,8 +71,7 @@ enum MessageInputTrailingAction: Equatable {
         isEditingMessage: Bool = false
     ) -> Self {
         // Editing keeps the standard arrow visible alongside the dedicated
-        // microphone. The arrow commits the edit rather than sending a new
-        // message, and generation cannot replace it with a stop action.
+        // microphone. 
         if isEditingMessage { return .send }
         if showAudioButton && showsRecordingState { return .voice }
         if showStopAction { return .stop }
