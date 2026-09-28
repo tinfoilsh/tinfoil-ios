@@ -50,6 +50,22 @@ func shouldShowAudioInput(
     canUseAudioInput || isRecording || isTranscribing || isStartingRecording
 }
 
+func shouldDisableSeparateMicrophone(
+    canUseAudioInput: Bool,
+    canGenerateInCurrentChat: Bool,
+    canSendInCurrentContext: Bool,
+    isEditingMessage: Bool,
+    isRecording: Bool,
+    isTranscribing: Bool
+) -> Bool {
+    if isTranscribing { return true }
+    if isRecording { return false }
+    if isEditingMessage {
+        return !canUseAudioInput || !canGenerateInCurrentChat
+    }
+    return !canUseAudioInput || !canSendInCurrentContext
+}
+
 enum MessageInputTrailingAction: Equatable {
     case voice
     case send
@@ -272,15 +288,15 @@ struct MessageInputView: View {
     /// greys out while a recording is being transcribed.
     private var isTrailingActionDisabled: Bool {
         guard viewModel.canUseCurrentChatActions else { return true }
+        if isEditingMessage {
+            return !canSaveMessageEdit
+                || showsRecordingState
+                || isTranscribingAudio
+        }
         guard viewModel.canSendInCurrentContext || trailingAction == .stop else { return true }
         switch trailingAction {
         case .voice: return isTranscribingAudio
         case .send:
-            if isEditingMessage {
-                return !canSaveMessageEdit
-                    || showsRecordingState
-                    || isTranscribingAudio
-            }
             return !attachmentsAreReadyToSend(viewModel.pendingAttachments)
                 || showsRecordingState
                 || isTranscribingAudio
@@ -701,22 +717,7 @@ struct MessageInputView: View {
                 messageComposerContent
 
                 // Bottom row with action buttons
-                HStack(spacing: Constants.UI.composerActionSpacing) {
-                    if !isEditingMessage {
-                        attachButton
-                    }
-
-                    modelSelectorButton
-
-                    modelControlsSelector
-
-                    Spacer(minLength: 0)
-
-                    microphoneButton
-
-                    trailingActionButton
-                }
-                .padding(.vertical, 8)
+                composerActionRow
             }
             .clipShape(RoundedRectangle(cornerRadius: Layout.inputCornerRadius))
             .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: Layout.inputCornerRadius))
@@ -749,22 +750,7 @@ struct MessageInputView: View {
                 messageComposerContent
 
                 // Bottom row with action buttons
-                HStack(spacing: Constants.UI.composerActionSpacing) {
-                    if !isEditingMessage {
-                        attachButton
-                    }
-
-                    modelSelectorButton
-
-                    modelControlsSelector
-
-                    Spacer(minLength: 0)
-
-                    microphoneButton
-
-                    trailingActionButton
-                }
-                .padding(.vertical, 8)
+                composerActionRow
             }
             .background {
                 RoundedRectangle(cornerRadius: Layout.inputCornerRadius)
@@ -823,6 +809,25 @@ struct MessageInputView: View {
         }
         .padding(.horizontal, 12)
         .padding(.top, 10)
+    }
+
+    private var composerActionRow: some View {
+        HStack(spacing: Constants.UI.composerActionSpacing) {
+            if !isEditingMessage {
+                attachButton
+            }
+
+            modelSelectorButton
+
+            modelControlsSelector
+
+            Spacer(minLength: 0)
+
+            microphoneButton
+
+            trailingActionButton
+        }
+        .padding(.vertical, 8)
     }
 
     @ViewBuilder
@@ -925,7 +930,7 @@ struct MessageInputView: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
-                        Image(systemName: Constants.Audio.microphoneIconName)
+                        Image(systemName: showsRecordingState ? "stop.fill" : Constants.Audio.microphoneIconName)
                             .font(.system(size: Constants.Audio.recordingButtonIconPointSize))
                     }
                 }
@@ -936,11 +941,20 @@ struct MessageInputView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .disabled(!viewModel.canUseAudioInput || !viewModel.canSendInCurrentContext || isTranscribingAudio)
-            .accessibilityLabel("Voice input")
+            .foregroundStyle(showsRecordingState ? Color.red : Color.secondary)
+            .disabled(shouldDisableSeparateMicrophone(
+                canUseAudioInput: viewModel.canUseAudioInput,
+                canGenerateInCurrentChat: viewModel.canGenerateInCurrentChat,
+                canSendInCurrentContext: viewModel.canSendInCurrentContext,
+                isEditingMessage: isEditingMessage,
+                isRecording: viewModel.isRecording,
+                isTranscribing: isTranscribingAudio
+            ))
+            .accessibilityLabel(showsRecordingState ? "Stop recording" : "Voice input")
             .accessibilityValue(isTranscribingAudio ? "Transcribing" : "")
-            .accessibilityHint("Adds a recording to your message")
+            .accessibilityHint(
+                showsRecordingState ? "Stops recording and adds the transcription" : "Adds a recording to your message"
+            )
         }
     }
 

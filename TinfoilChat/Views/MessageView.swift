@@ -880,7 +880,7 @@ struct MessageView: View {
                                 // Regenerate button - only on the last eligible assistant message
                                 if canRegenerateAssistantResponse {
                                     Button {
-                                        viewModel.regenerateMessage(at: messageIndex - 1)
+                                        viewModel.regenerateLastResponse()
                                     } label: {
                                         Image(systemName: "arrow.clockwise")
                                             .font(.system(size: 16))

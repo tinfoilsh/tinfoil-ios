@@ -192,4 +192,48 @@ struct MessageInputContentTests {
             isEditingMessage: true
         ))
     }
+
+    @Test("an active recording can always be stopped")
+    func activeRecordingKeepsMicrophoneEnabled() {
+        #expect(!shouldDisableSeparateMicrophone(
+            canUseAudioInput: false,
+            canGenerateInCurrentChat: false,
+            canSendInCurrentContext: false,
+            isEditingMessage: true,
+            isRecording: true,
+            isTranscribing: false
+        ))
+    }
+
+    @Test("edit voice input follows chat generation access rather than new-message project access")
+    func editMicrophoneUsesEditAccess() {
+        #expect(!shouldDisableSeparateMicrophone(
+            canUseAudioInput: true,
+            canGenerateInCurrentChat: true,
+            canSendInCurrentContext: false,
+            isEditingMessage: true,
+            isRecording: false,
+            isTranscribing: false
+        ))
+        #expect(shouldDisableSeparateMicrophone(
+            canUseAudioInput: true,
+            canGenerateInCurrentChat: false,
+            canSendInCurrentContext: true,
+            isEditingMessage: true,
+            isRecording: false,
+            isTranscribing: false
+        ))
+    }
+
+    @Test("transcription disables the microphone until it finishes")
+    func transcriptionDisablesMicrophone() {
+        #expect(shouldDisableSeparateMicrophone(
+            canUseAudioInput: true,
+            canGenerateInCurrentChat: true,
+            canSendInCurrentContext: true,
+            isEditingMessage: true,
+            isRecording: false,
+            isTranscribing: true
+        ))
+    }
 }

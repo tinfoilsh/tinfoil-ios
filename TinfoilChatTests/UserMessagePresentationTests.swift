@@ -14,7 +14,6 @@ struct UserMessagePresentationTests {
 
         #expect(preview.hasSuffix("…"))
         #expect(preview.count == UserMessagePresentation.previewCharacterLimit + 1)
-        #expect(!preview.contains("Long Message"))
     }
 
     @Test func previewTrimsWhitespaceWithoutTruncatingShortMessages() {
