@@ -79,7 +79,6 @@ struct URLFetchBox: View {
 struct URLFetchSheetView: View {
     let urlFetches: [URLFetchState]
     let isDarkMode: Bool
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
@@ -92,11 +91,6 @@ struct URLFetchSheetView: View {
             .listStyle(.plain)
             .navigationTitle("Links")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
         }
     }
 }

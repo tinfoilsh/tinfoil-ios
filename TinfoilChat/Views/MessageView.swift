@@ -2329,7 +2329,6 @@ private struct SourcesButton: View {
 private struct SourcesSheetView: View {
     let sources: [WebSearchSource]
     let isDarkMode: Bool
-    @Environment(\.dismiss) private var dismiss
 
     private func getDomain(from urlString: String) -> String {
         guard let url = URL(string: urlString),
@@ -2395,13 +2394,6 @@ private struct SourcesSheetView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarBackground(isDarkMode ? Color.black : Color(UIColor.systemBackground), for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
         }
         .preferredColorScheme(isDarkMode ? .dark : .light)
     }
