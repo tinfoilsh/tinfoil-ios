@@ -158,4 +158,98 @@ struct MessageInputContentTests {
             showStopAction: false
         ) == .send)
     }
+
+    @Test("message editing keeps the save arrow while it is not recording", arguments: [
+        (false, false),
+        (true, false),
+        (true, true),
+    ])
+    func editModeKeepsSaveArrow(
+        showAudioButton: Bool,
+        showStopAction: Bool
+    ) {
+        #expect(MessageInputTrailingAction.resolve(
+            showAudioButton: showAudioButton,
+            showsRecordingState: false,
+            hasDraftContent: false,
+            showStopAction: showStopAction,
+            isEditingMessage: true
+        ) == .send)
+    }
+
+    @Test("recording replaces the edit arrow with the standard stop action")
+    func editRecordingUsesStandardStopAction() {
+        let action = MessageInputTrailingAction.resolve(
+            showAudioButton: true,
+            showsRecordingState: true,
+            hasDraftContent: true,
+            showStopAction: false,
+            isEditingMessage: true
+        )
+
+        #expect(action == .voice)
+        #expect(!action.showsSeparateMicrophone(
+            showAudioButton: true,
+            hasDraftContent: true,
+            isEditingMessage: true
+        ))
+    }
+
+    @Test("message editing keeps its dedicated microphone even with an empty draft")
+    func editModeKeepsMicrophone() {
+        #expect(MessageInputTrailingAction.send.showsSeparateMicrophone(
+            showAudioButton: true,
+            hasDraftContent: false,
+            isEditingMessage: true
+        ))
+        #expect(!MessageInputTrailingAction.send.showsSeparateMicrophone(
+            showAudioButton: false,
+            hasDraftContent: true,
+            isEditingMessage: true
+        ))
+    }
+
+    @Test("an active recording can always be stopped")
+    func activeRecordingKeepsMicrophoneEnabled() {
+        #expect(!shouldDisableSeparateMicrophone(
+            canUseAudioInput: false,
+            canGenerateInCurrentChat: false,
+            canSendInCurrentContext: false,
+            isEditingMessage: true,
+            isRecording: true,
+            isTranscribing: false
+        ))
+    }
+
+    @Test("edit voice input follows chat generation access rather than new-message project access")
+    func editMicrophoneUsesEditAccess() {
+        #expect(!shouldDisableSeparateMicrophone(
+            canUseAudioInput: true,
+            canGenerateInCurrentChat: true,
+            canSendInCurrentContext: false,
+            isEditingMessage: true,
+            isRecording: false,
+            isTranscribing: false
+        ))
+        #expect(shouldDisableSeparateMicrophone(
+            canUseAudioInput: true,
+            canGenerateInCurrentChat: false,
+            canSendInCurrentContext: true,
+            isEditingMessage: true,
+            isRecording: false,
+            isTranscribing: false
+        ))
+    }
+
+    @Test("transcription disables the microphone until it finishes")
+    func transcriptionDisablesMicrophone() {
+        #expect(shouldDisableSeparateMicrophone(
+            canUseAudioInput: true,
+            canGenerateInCurrentChat: true,
+            canSendInCurrentContext: true,
+            isEditingMessage: true,
+            isRecording: false,
+            isTranscribing: true
+        ))
+    }
 }

@@ -309,7 +309,6 @@ struct SourceRowView: View {
 struct WebSearchQueriesSheetView: View {
     let instances: [WebSearchInstance]
     let isDarkMode: Bool
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
@@ -323,11 +322,6 @@ struct WebSearchQueriesSheetView: View {
             .listStyle(.plain)
             .navigationTitle("Searches")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
         }
         .preferredColorScheme(isDarkMode ? .dark : .light)
     }
