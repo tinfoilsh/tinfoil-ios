@@ -55,16 +55,25 @@ enum MessageInputTrailingAction: Equatable {
     case send
     case stop
 
-    func showsSeparateMicrophone(showAudioButton: Bool, hasDraftContent: Bool) -> Bool {
-        showAudioButton && hasDraftContent && self != .voice
+    func showsSeparateMicrophone(
+        showAudioButton: Bool,
+        hasDraftContent: Bool,
+        isEditingMessage: Bool = false
+    ) -> Bool {
+        showAudioButton && (isEditingMessage || (hasDraftContent && self != .voice))
     }
 
     static func resolve(
         showAudioButton: Bool,
         showsRecordingState: Bool,
         hasDraftContent: Bool,
-        showStopAction: Bool
+        showStopAction: Bool,
+        isEditingMessage: Bool = false
     ) -> Self {
+        // Editing keeps the standard arrow visible alongside the dedicated
+        // microphone. The arrow commits the edit rather than sending a new
+        // message, and generation cannot replace it with a stop action.
+        if isEditingMessage { return .send }
         if showAudioButton && showsRecordingState { return .voice }
         if showStopAction { return .stop }
         if showAudioButton && !hasDraftContent { return .voice }
@@ -229,7 +238,8 @@ struct MessageInputView: View {
             showAudioButton: showAudioButton,
             showsRecordingState: showsRecordingState,
             hasDraftContent: hasDraftContent,
-            showStopAction: showStopAction
+            showStopAction: showStopAction,
+            isEditingMessage: isEditingMessage
         )
     }
 
@@ -252,7 +262,7 @@ struct MessageInputView: View {
     private var trailingActionAccessibilityLabel: String {
         switch trailingAction {
         case .voice: return voiceAccessibilityLabel
-        case .send: return "Send message"
+        case .send: return isEditingMessage ? "Save edit" : "Send message"
         case .stop: return "Stop generating"
         }
     }
@@ -267,6 +277,11 @@ struct MessageInputView: View {
         switch trailingAction {
         case .voice: return isTranscribingAudio
         case .send:
+            if isEditingMessage {
+                return !canSaveMessageEdit
+                    || showsRecordingState
+                    || isTranscribingAudio
+            }
             return !attachmentsAreReadyToSend(viewModel.pendingAttachments)
                 || showsRecordingState
                 || isTranscribingAudio
@@ -688,21 +703,19 @@ struct MessageInputView: View {
 
                 // Bottom row with action buttons
                 HStack(spacing: Constants.UI.composerActionSpacing) {
-                    if isEditingMessage {
-                        messageEditActions
-                    } else {
+                    if !isEditingMessage {
                         attachButton
-
-                        modelSelectorButton
-
-                        modelControlsSelector
-
-                        Spacer(minLength: 0)
-
-                        microphoneButton
-
-                        trailingActionButton
                     }
+
+                    modelSelectorButton
+
+                    modelControlsSelector
+
+                    Spacer(minLength: 0)
+
+                    microphoneButton
+
+                    trailingActionButton
                 }
                 .padding(.vertical, 8)
             }
@@ -738,21 +751,19 @@ struct MessageInputView: View {
 
                 // Bottom row with action buttons
                 HStack(spacing: Constants.UI.composerActionSpacing) {
-                    if isEditingMessage {
-                        messageEditActions
-                    } else {
+                    if !isEditingMessage {
                         attachButton
-
-                        modelSelectorButton
-
-                        modelControlsSelector
-
-                        Spacer(minLength: 0)
-
-                        microphoneButton
-
-                        trailingActionButton
                     }
+
+                    modelSelectorButton
+
+                    modelControlsSelector
+
+                    Spacer(minLength: 0)
+
+                    microphoneButton
+
+                    trailingActionButton
                 }
                 .padding(.vertical, 8)
             }
@@ -813,27 +824,6 @@ struct MessageInputView: View {
         }
         .padding(.horizontal, 12)
         .padding(.top, 10)
-    }
-
-    private var messageEditActions: some View {
-        HStack(spacing: 12) {
-            Spacer()
-
-            Button("Cancel", action: cancelMessageEdit)
-                .buttonStyle(.plain)
-                .accessibilityLabel("Cancel edit")
-                .accessibilityHint("Restores your previous draft")
-
-            Button("Save", action: saveMessageEdit)
-                .fontWeight(.semibold)
-                .buttonStyle(.plain)
-                .disabled(!canSaveMessageEdit)
-                .accessibilityLabel("Save edit")
-                .accessibilityHint("Replaces the message and regenerates later responses")
-        }
-        .padding(.leading, 12)
-        .padding(.trailing, 24)
-        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
@@ -925,7 +915,11 @@ struct MessageInputView: View {
 
     @ViewBuilder
     private var microphoneButton: some View {
-        if trailingAction.showsSeparateMicrophone(showAudioButton: showAudioButton, hasDraftContent: hasDraftContent) {
+        if trailingAction.showsSeparateMicrophone(
+            showAudioButton: showAudioButton,
+            hasDraftContent: hasDraftContent,
+            isEditingMessage: isEditingMessage
+        ) {
             Button(action: handleAudioButtonTap) {
                 Group {
                     if isTranscribingAudio {
@@ -1048,6 +1042,8 @@ struct MessageInputView: View {
         if isHoldToRecordActive { return }
         if trailingAction == .voice {
             handleAudioButtonTap()
+        } else if isEditingMessage {
+            saveMessageEdit()
         } else {
             sendOrCancelMessage()
         }

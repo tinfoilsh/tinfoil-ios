@@ -158,4 +158,38 @@ struct MessageInputContentTests {
             showStopAction: false
         ) == .send)
     }
+
+    @Test("message editing keeps the save arrow across composer states", arguments: [
+        (false, false, false),
+        (true, false, false),
+        (true, true, false),
+        (true, false, true),
+    ])
+    func editModeKeepsSaveArrow(
+        showAudioButton: Bool,
+        showsRecordingState: Bool,
+        showStopAction: Bool
+    ) {
+        #expect(MessageInputTrailingAction.resolve(
+            showAudioButton: showAudioButton,
+            showsRecordingState: showsRecordingState,
+            hasDraftContent: false,
+            showStopAction: showStopAction,
+            isEditingMessage: true
+        ) == .send)
+    }
+
+    @Test("message editing keeps its dedicated microphone even with an empty draft")
+    func editModeKeepsMicrophone() {
+        #expect(MessageInputTrailingAction.send.showsSeparateMicrophone(
+            showAudioButton: true,
+            hasDraftContent: false,
+            isEditingMessage: true
+        ))
+        #expect(!MessageInputTrailingAction.send.showsSeparateMicrophone(
+            showAudioButton: false,
+            hasDraftContent: true,
+            isEditingMessage: true
+        ))
+    }
 }

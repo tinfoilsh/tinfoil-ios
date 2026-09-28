@@ -66,6 +66,23 @@ func shouldShowStreamError(message: Message, pendingRecoveries: [PendingRecovery
     return !canRecover || !hasPendingRecovery
 }
 
+enum AssistantMessageActionPolicy {
+    static func canRegenerate(
+        isLastMessage: Bool,
+        canGenerateInCurrentChat: Bool,
+        isLoading: Bool,
+        messageIndex: Int,
+        isRateLimitError: Bool,
+        isHourlyLimitError: Bool
+    ) -> Bool {
+        isLastMessage
+            && canGenerateInCurrentChat
+            && !isLoading
+            && messageIndex > 0
+            && (!isRateLimitError || isHourlyLimitError)
+    }
+}
+
 private struct PendingResponseRecoveryView: View {
     let isDarkMode: Bool
     let phase: ChatRecoveryPhase
@@ -136,6 +153,8 @@ struct MessageView: View {
     @State private var showCopyFeedback = false
     @State private var cachedParsedContent: (thinkingText: String, remainderText: String, contentHash: Int)? = nil
     @State private var showLongMessageSheet = false
+    @State private var selectLongMessageOnPresentation = false
+    @State private var userTextSelectionRequest = 0
     @State private var showRawContentModal = false
     @State private var showSourcesSheet = false
     @State private var showShareSheet = false
@@ -176,25 +195,36 @@ struct MessageView: View {
         Task { await viewModel.forkChat(throughMessageIndex: messageIndex) }
     }
 
-    private var forkActionButton: some View {
-        Button(action: forkFromHere) {
-            Image(systemName: Constants.ChatFork.actionSystemImage)
-                .font(.system(size: 16))
-                .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
-                .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(PlainButtonStyle())
-        .accessibilityLabel(Constants.ChatFork.actionLabel)
-        .accessibleHitTarget()
-    }
-
     private var canShareAssistantMessage: Bool {
         isLastMessage && !viewModel.isLoading
     }
 
     private var showsAssistantMoreMenu: Bool {
         canShareAssistantMessage || viewModel.canForkMessage(at: messageIndex)
+    }
+
+    private var canRegenerateAssistantResponse: Bool {
+        AssistantMessageActionPolicy.canRegenerate(
+            isLastMessage: isLastMessage,
+            canGenerateInCurrentChat: viewModel.canGenerateInCurrentChat,
+            isLoading: viewModel.isLoading,
+            messageIndex: messageIndex,
+            isRateLimitError: message.isRateLimitError,
+            isHourlyLimitError: message.isHourlyLimitError
+        )
+    }
+
+    private var hasVisibleStreamError: Bool {
+        shouldShowStreamError(
+            message: message,
+            pendingRecoveries: recoveryContext.pendingRecoveries
+        )
+    }
+
+    private var showsAssistantActionSection: Bool {
+        !isRenderingStream
+            && (message.hasVisibleAssistantContent
+                || (hasVisibleStreamError && canRegenerateAssistantResponse))
     }
 
     /// Secondary actions for assistant messages live behind an ellipsis so the
@@ -703,11 +733,16 @@ struct MessageView: View {
                     }
                 }
                 
-                // Display long user messages as an attachment-style preview that expands on tap
+                // Very large user messages stay collapsed so transcript rows remain cheap,
+                // but retain the same visual treatment as an ordinary user bubble.
                 else if message.role == .user && message.shouldDisplayAsAttachment {
-                        LongMessageAttachmentView(message: message, isDarkMode: isDarkMode) {
-                            showLongMessageSheet = true
-                        }
+                    LongUserMessagePreview(
+                        content: message.content,
+                        isDarkMode: isDarkMode
+                    ) {
+                        selectLongMessageOnPresentation = false
+                        showLongMessageSheet = true
+                    }
                 }
 
                 else if !message.content.isEmpty || !message.toolCalls.isEmpty {
@@ -715,15 +750,7 @@ struct MessageView: View {
                         AdaptiveMarkdownText(
                             content: message.content,
                             isDarkMode: isDarkMode,
-                            onResend: canUseUserMessageActions ? {
-                                viewModel.regenerateMessage(at: messageIndex)
-                            } : nil,
-                            onCopyAll: {
-                                UIPasteboard.general.string = message.content
-                            },
-                            onEdit: canUseUserMessageActions ? {
-                                viewModel.beginMessageEdit(at: messageIndex)
-                            } : nil,
+                            selectionRequestID: userTextSelectionRequest,
                             bubbleContextMenuEnabled: canShowUserMessageMenu
                         )
                     } else if let segments = message.segments, !segments.isEmpty {
@@ -798,7 +825,7 @@ struct MessageView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                // Show error box with regenerate button if stream failed
+                // Show an error box if the stream failed; retry stays in the action row.
                 if shouldShowStreamError(message: message, pendingRecoveries: recoveryContext.pendingRecoveries) {
                     ErrorMessageView(
                         errorMessage: message.streamError!,
@@ -807,17 +834,13 @@ struct MessageView: View {
                         isRateLimitError: message.isRateLimitError,
                         isHourlyLimit: message.isHourlyLimitError,
                         isConnectionError: message.isConnectionError,
-                        onRegenerate: isLastMessage && viewModel.canGenerateInCurrentChat
-                            ? { viewModel.regenerateLastResponse() }
-                            : nil,
                         onUpgrade: (message.isRateLimitError && !message.isHourlyLimitError) ? { viewModel.showRateLimitPaywall = true } : nil
                     )
                     .padding(.top, message.content.isEmpty && message.thoughts == nil ? 0 : 8)
                 }
                 
                 // Add action buttons for assistant messages (only when not streaming)
-                if message.hasVisibleAssistantContent &&
-                   !isRenderingStream {
+                if showsAssistantActionSection {
                     VStack(alignment: .leading) {
                         MessageSecurityMetadataView(
                             modelDisplayName: message.modelDisplayName,
@@ -826,34 +849,36 @@ struct MessageView: View {
 
                         if !viewModel.isCurrentChatSafeguardFlagged {
                             HStack(spacing: 16) {
-                                Button {
-                                    showRawContentModal = true
-                                } label: {
-                                    Image(systemName: "doc.on.doc")
-                                        .font(.system(size: 16))
-                                        .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
-                                        .frame(width: 32, height: 32)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                                .accessibilityLabel("Copy")
-                                .accessibleHitTarget()
+                                if message.hasVisibleAssistantContent {
+                                    Button {
+                                        showRawContentModal = true
+                                    } label: {
+                                        Image(systemName: "doc.on.doc")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                                            .frame(width: 32, height: 32)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                    .accessibilityLabel("Copy")
+                                    .accessibleHitTarget()
 
-                                if !hasRecoveryDraft,
-                                   viewModel.canUseReadAloud,
-                                   SpeechTextProcessor.canRead(message),
-                                   let chatId = viewModel.currentChat?.id {
-                                    ReadAloudButton(
-                                        player: viewModel.speechPlayer,
-                                        owner: SpeechOwner(chatId: chatId, messageId: message.id),
-                                        isDarkMode: isDarkMode
-                                    ) {
-                                        try viewModel.toggleReadAloud(messageId: message.id)
+                                    if !hasRecoveryDraft,
+                                       viewModel.canUseReadAloud,
+                                       SpeechTextProcessor.canRead(message),
+                                       let chatId = viewModel.currentChat?.id {
+                                        ReadAloudButton(
+                                            player: viewModel.speechPlayer,
+                                            owner: SpeechOwner(chatId: chatId, messageId: message.id),
+                                            isDarkMode: isDarkMode
+                                        ) {
+                                            try viewModel.toggleReadAloud(messageId: message.id)
+                                        }
                                     }
                                 }
 
-                                // Regenerate button - only on the last assistant message
-                                if isLastMessage && viewModel.canGenerateInCurrentChat && !viewModel.isLoading && messageIndex > 0 {
+                                // Regenerate button - only on the last eligible assistant message
+                                if canRegenerateAssistantResponse {
                                     Button {
                                         viewModel.regenerateMessage(at: messageIndex - 1)
                                     } label: {
@@ -868,7 +893,7 @@ struct MessageView: View {
                                     .accessibleHitTarget()
                                 }
 
-                                if showsAssistantMoreMenu {
+                                if message.hasVisibleAssistantContent && showsAssistantMoreMenu {
                                     assistantMoreMenu
                                 }
 
@@ -889,8 +914,8 @@ struct MessageView: View {
                     }
                     .padding(.vertical, 8)
 
-                    // AI disclaimer - only on the last assistant message
-                    if isLastMessage {
+                    // AI disclaimer - only after a visible final assistant response
+                    if isLastMessage && message.hasVisibleAssistantContent {
                         Text("AI can make mistakes. Verify important information.")
                             .font(.caption2)
                             .foregroundColor(isDarkMode ? .white.opacity(0.35) : .black.opacity(0.35))
@@ -917,12 +942,15 @@ struct MessageView: View {
                         && canShowUserMessageMenu
                 ) { view in
                     view.contextMenu {
-                        if canUseUserMessageActions {
-                            Button {
-                                viewModel.regenerateMessage(at: messageIndex)
-                            } label: {
-                                Label("Resend", systemImage: "arrow.clockwise")
+                        Button {
+                            if message.shouldDisplayAsAttachment {
+                                selectLongMessageOnPresentation = true
+                                showLongMessageSheet = true
+                            } else {
+                                userTextSelectionRequest &+= 1
                             }
+                        } label: {
+                            Label("Select Text", systemImage: "selection.pin.in.out")
                         }
 
                         Button {
@@ -938,18 +966,18 @@ struct MessageView: View {
                                 Label("Edit", systemImage: "pencil")
                             }
                         }
+
+                        if viewModel.canForkMessage(at: messageIndex) {
+                            Button(action: forkFromHere) {
+                                Label(
+                                    "Fork",
+                                    systemImage: Constants.ChatFork.actionSystemImage
+                                )
+                            }
+                        }
                     }
                 }
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
-
-                // Fork action for user messages, trailing-aligned under the bubble
-                if message.role == .user && viewModel.canForkMessage(at: messageIndex) {
-                    HStack {
-                        Spacer()
-                        forkActionButton
-                    }
-                    .padding(.top, 2)
-                }
 
                 if showsPendingResponseRecovery {
                     PendingResponseRecoveryView(
@@ -967,9 +995,12 @@ struct MessageView: View {
         // calls, action buttons, text selection) individually accessible.
         .accessibilityElement(children: .contain)
         .accessibilityLabel(message.role == .user ? "You said" : "Assistant said")
-        .sheet(isPresented: $showLongMessageSheet) {
+        .sheet(isPresented: $showLongMessageSheet, onDismiss: {
+            selectLongMessageOnPresentation = false
+        }) {
             LongMessageDetailView(
-                message: message
+                message: message,
+                activateSelection: selectLongMessageOnPresentation
             )
             .presentationDetents([.medium, .large])
             .iPadSheetSizing()
@@ -1147,103 +1178,184 @@ struct MessageView: View {
     }
 }
 
-private struct LongMessageAttachmentView: View {
-    let message: Message
+enum UserMessagePresentation {
+    static let previewCharacterLimit = 360
+
+    static func preview(for content: String) -> String {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > previewCharacterLimit else { return trimmed }
+        return String(trimmed.prefix(previewCharacterLimit)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+    }
+
+    /// A deterministic initial selection is used because SwiftUI's context
+    /// menu does not expose the long-press location to its action closure.
+    static func firstSelectableRange(in text: String) -> NSRange? {
+        let value = text as NSString
+        let nonWhitespace = CharacterSet.whitespacesAndNewlines.inverted
+        let start = value.rangeOfCharacter(from: nonWhitespace)
+        guard start.location != NSNotFound else { return nil }
+        let remainder = NSRange(location: start.location, length: value.length - start.location)
+        let whitespace = value.rangeOfCharacter(from: .whitespacesAndNewlines, range: remainder)
+        let end = whitespace.location == NSNotFound ? value.length : whitespace.location
+        return NSRange(location: start.location, length: max(1, end - start.location))
+    }
+}
+
+private func userMessageAttributedText(content: String, isDarkMode: Bool) -> NSAttributedString {
+    var parsed = (try? AttributedString(
+        markdown: content,
+        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+    )) ?? AttributedString(content)
+    let runs = parsed.runs.map { ($0.range, $0.inlinePresentationIntent) }
+    let bodyFont = UIFont.preferredFont(forTextStyle: .body)
+    let paragraphStyle = NSMutableParagraphStyle()
+    paragraphStyle.lineSpacing = 2
+
+    parsed.uiKit.font = bodyFont
+    parsed.uiKit.foregroundColor = UIColor(Color.userMessageForeground(isDarkMode: isDarkMode))
+    parsed.uiKit.paragraphStyle = paragraphStyle
+
+    for (range, intent) in runs {
+        guard let intent else { continue }
+        if intent.contains(.code) {
+            parsed[range].uiKit.font = UIFont.monospacedSystemFont(
+                ofSize: bodyFont.pointSize,
+                weight: intent.contains(.stronglyEmphasized) ? .bold : .regular
+            )
+        } else {
+            var traits: UIFontDescriptor.SymbolicTraits = []
+            if intent.contains(.stronglyEmphasized) { traits.insert(.traitBold) }
+            if intent.contains(.emphasized) { traits.insert(.traitItalic) }
+            if !traits.isEmpty,
+               let descriptor = bodyFont.fontDescriptor.withSymbolicTraits(traits) {
+                parsed[range].uiKit.font = UIFont(descriptor: descriptor, size: bodyFont.pointSize)
+            }
+        }
+        if intent.contains(.strikethrough) {
+            parsed[range].uiKit.strikethroughStyle = .single
+        }
+    }
+    return NSAttributedString(parsed)
+}
+
+private struct LongUserMessagePreview: View {
+    let content: String
     let isDarkMode: Bool
     let openAction: () -> Void
 
-    private var wordCountText: String {
-        let words = message.content.split { $0.isWhitespace || $0.isNewline }
-        return "\(words.count) words"
-    }
-
-    private var previewText: String {
-        let trimmed = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        let preview = trimmed.prefix(180)
-        return preview + (trimmed.count > 180 ? "…" : "")
+    private var attributedPreview: AttributedString {
+        AttributedString(userMessageAttributedText(
+            content: UserMessagePresentation.preview(for: content),
+            isDarkMode: isDarkMode
+        ))
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "doc.text")
-                .font(.system(size: 22, weight: .medium))
-                .foregroundColor(Color.userMessageForeground(isDarkMode: isDarkMode).opacity(0.85))
-
+        Button(action: openAction) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Long Message")
-                    .font(.system(.callout, weight: .semibold))
-                    .foregroundColor(Color.userMessageForeground(isDarkMode: isDarkMode))
-
-                Text(wordCountText)
-                    .font(.caption)
-                    .foregroundColor(Color.userMessageForeground(isDarkMode: isDarkMode).opacity(0.6))
-
-                Text(previewText)
-                    .font(.footnote)
-                    .foregroundColor(Color.userMessageForeground(isDarkMode: isDarkMode).opacity(0.85))
-                    .lineLimit(3)
+                Text(attributedPreview)
+                    .lineLimit(5)
                     .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .mask {
+                        LinearGradient(
+                            stops: [
+                                .init(color: .black, location: 0),
+                                .init(color: .black, location: 0.78),
+                                .init(color: .clear, location: 1)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .allowsHitTesting(false)
+                    }
+
+                Text("Show more")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.userMessageForeground(isDarkMode: isDarkMode).opacity(0.65))
             }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(Color.userMessageForeground(isDarkMode: isDarkMode).opacity(0.5))
-                .accessibilityHidden(true)
+            .contentShape(Rectangle())
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: openAction)
-        .accessibilityAddTraits(.isButton)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Message preview. \(UserMessagePresentation.preview(for: content))")
         .accessibilityHint("Shows the full message")
     }
 }
 
 private struct LongMessageDetailView: View {
     let message: Message
+    let activateSelection: Bool
 
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
-    @State private var showSelectText = false
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                // Inline Textual selection installs a custom UITextInput per
-                // fragment, whose first-responder pasteboard warm-up has hung
-                // the main thread on very long messages. Above the cap users
-                // still get plain-text selection via the Select Text sheet.
-                MarkdownText(
-                    content: message.content,
-                    isDarkMode: colorScheme == .dark,
-                    textSelectionEnabled: message.content.count <= Constants.Rendering.maxInlineSelectionCharacters
-                )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(20)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        VStack(spacing: 0) {
+            Color.chatBackground(isDarkMode: colorScheme == .dark)
+                .frame(height: 20)
+
+            AttributedSelectableUserTextView(
+                content: message.content,
+                isDarkMode: colorScheme == .dark,
+                activateSelection: activateSelection
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 20)
             .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
-            .navigationTitle("Long Message")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Close") {
-                        dismiss()
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Select Text") {
-                        showSelectText = true
-                    }
-                }
-            }
-            .sheet(isPresented: $showSelectText) {
-                UserMessageSelectView(content: message.content)
-                    .presentationDetents([.medium, .large])
-                    .iPadSheetSizing()
-            }
+        }
+    }
+}
+
+private struct AttributedSelectableUserTextView: UIViewRepresentable {
+    let content: String
+    let isDarkMode: Bool
+    let activateSelection: Bool
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isScrollEnabled = true
+        textView.alwaysBounceVertical = true
+        textView.backgroundColor = .clear
+        textView.adjustsFontForContentSizeCategory = true
+        textView.textContainerInset = UIEdgeInsets(top: 20, left: 0, bottom: 20, right: 0)
+        textView.textContainer.lineFragmentPadding = 0
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context: Context) {
+        if context.coordinator.needsTextUpdate(content: content, isDarkMode: isDarkMode) {
+            textView.attributedText = userMessageAttributedText(
+                content: content,
+                isDarkMode: isDarkMode
+            )
+            textView.linkTextAttributes = [
+                .foregroundColor: UIColor(Color.userMessageForeground(isDarkMode: isDarkMode)),
+                .underlineStyle: NSUnderlineStyle.single.rawValue
+            ]
+        }
+        guard activateSelection, !context.coordinator.didActivateSelection else { return }
+        context.coordinator.didActivateSelection = true
+        // Sheet presentation and context-menu dismissal complete on separate
+        // UIKit transactions. Wait briefly so first-responder activation is
+        // not discarded while the sheet is still entering the window.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            textView.activateInitialTextSelection()
+        }
+    }
+
+    final class Coordinator {
+        var didActivateSelection = false
+        private var lastContent: String?
+        private var lastIsDarkMode: Bool?
+
+        func needsTextUpdate(content: String, isDarkMode: Bool) -> Bool {
+            guard lastContent != content || lastIsDarkMode != isDarkMode else { return false }
+            lastContent = content
+            lastIsDarkMode = isDarkMode
+            return true
         }
     }
 }
@@ -1274,30 +1386,6 @@ private struct SelectableTextView: UIViewRepresentable {
             uiView.text = text
         }
         uiView.textColor = colorScheme == .dark ? UIColor(white: 1.0, alpha: 0.92) : UIColor(white: 0.0, alpha: 0.92)
-    }
-}
-
-private struct UserMessageSelectView: View {
-    let content: String
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        NavigationStack {
-            SelectableTextView(text: content)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(20)
-                .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
-                .navigationTitle("Select Text")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("Close") {
-                            dismiss()
-                        }
-                    }
-                }
-        }
     }
 }
 
@@ -1524,26 +1612,20 @@ struct AdaptiveMarkdownText: View {
     let content: String
     let isDarkMode: Bool
     let horizontalPadding: CGFloat
-    let onResend: (() -> Void)?
-    let onCopyAll: () -> Void
-    let onEdit: (() -> Void)?
+    let selectionRequestID: Int
     let bubbleContextMenuEnabled: Bool
 
     init(
         content: String,
         isDarkMode: Bool,
         horizontalPadding: CGFloat = 0,
-        onResend: (() -> Void)? = nil,
-        onCopyAll: @escaping () -> Void = {},
-        onEdit: (() -> Void)? = nil,
+        selectionRequestID: Int = 0,
         bubbleContextMenuEnabled: Bool = true
     ) {
         self.content = content
         self.isDarkMode = isDarkMode
         self.horizontalPadding = horizontalPadding
-        self.onResend = onResend
-        self.onCopyAll = onCopyAll
-        self.onEdit = onEdit
+        self.selectionRequestID = selectionRequestID
         self.bubbleContextMenuEnabled = bubbleContextMenuEnabled
     }
 
@@ -1551,9 +1633,7 @@ struct AdaptiveMarkdownText: View {
         InlineSelectableUserText(
             content: content,
             isDarkMode: isDarkMode,
-            onResend: onResend,
-            onCopyAll: onCopyAll,
-            onEdit: onEdit,
+            selectionRequestID: selectionRequestID,
             bubbleContextMenuEnabled: bubbleContextMenuEnabled
         )
             .padding(.horizontal, horizontalPadding)
@@ -1566,17 +1646,11 @@ struct AdaptiveMarkdownText: View {
 private struct InlineSelectableUserText: UIViewRepresentable {
     let content: String
     let isDarkMode: Bool
-    let onResend: (() -> Void)?
-    let onCopyAll: () -> Void
-    let onEdit: (() -> Void)?
+    let selectionRequestID: Int
     let bubbleContextMenuEnabled: Bool
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(
-            onResend: onResend,
-            onCopyAll: onCopyAll,
-            onEdit: onEdit
-        )
+        Coordinator(selectionRequestID: selectionRequestID)
     }
 
     func makeUIView(context: Context) -> UITextView {
@@ -1598,10 +1672,8 @@ private struct InlineSelectableUserText: UIViewRepresentable {
     }
 
     func updateUIView(_ textView: UITextView, context: Context) {
-        context.coordinator.update(
-            onResend: onResend,
-            onCopyAll: onCopyAll,
-            onEdit: onEdit
+        let shouldActivateSelection = context.coordinator.update(
+            selectionRequestID: selectionRequestID
         )
         (textView as? InlineSelectableUITextView)?.bubbleContextMenuEnabled = bubbleContextMenuEnabled
         textView.linkTextAttributes = [
@@ -1612,6 +1684,13 @@ private struct InlineSelectableUserText: UIViewRepresentable {
         if !textView.attributedText.isEqual(to: attributedText) {
             textView.attributedText = attributedText
             textView.invalidateIntrinsicContentSize()
+        }
+        if shouldActivateSelection {
+            // Let SwiftUI dismiss its context menu before making the native
+            // text input first responder and revealing selection handles.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak textView] in
+                textView?.activateInitialTextSelection()
+            }
         }
     }
 
@@ -1637,108 +1716,29 @@ private struct InlineSelectableUserText: UIViewRepresentable {
     }
 
     private func makeAttributedText() -> NSAttributedString {
-        var parsed = (try? AttributedString(
-            markdown: content,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        )) ?? AttributedString(content)
-        let runs = parsed.runs.map { ($0.range, $0.inlinePresentationIntent) }
-        let bodyFont = UIFont.preferredFont(forTextStyle: .body)
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineSpacing = 2
-
-        parsed.uiKit.font = bodyFont
-        parsed.uiKit.foregroundColor = UIColor(Color.userMessageForeground(isDarkMode: isDarkMode))
-        parsed.uiKit.paragraphStyle = paragraphStyle
-
-        for (range, intent) in runs {
-            guard let intent else { continue }
-            parsed[range].uiKit.font = font(for: intent, bodyFont: bodyFont)
-            if intent.contains(.strikethrough) {
-                parsed[range].uiKit.strikethroughStyle = .single
-            }
-        }
-
-        return NSAttributedString(parsed)
-    }
-
-    private func font(
-        for intent: InlinePresentationIntent,
-        bodyFont: UIFont
-    ) -> UIFont {
-        if intent.contains(.code) {
-            return UIFont.monospacedSystemFont(
-                ofSize: bodyFont.pointSize,
-                weight: intent.contains(.stronglyEmphasized) ? .bold : .regular
-            )
-        }
-
-        var traits: UIFontDescriptor.SymbolicTraits = []
-        if intent.contains(.stronglyEmphasized) {
-            traits.insert(.traitBold)
-        }
-        if intent.contains(.emphasized) {
-            traits.insert(.traitItalic)
-        }
-        guard !traits.isEmpty,
-              let descriptor = bodyFont.fontDescriptor.withSymbolicTraits(traits) else {
-            return bodyFont
-        }
-        return UIFont(descriptor: descriptor, size: bodyFont.pointSize)
+        userMessageAttributedText(content: content, isDarkMode: isDarkMode)
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
-        private var onResend: (() -> Void)?
-        private var onCopyAll: () -> Void
-        private var onEdit: (() -> Void)?
+        private var selectionRequestID: Int
 
-        init(
-            onResend: (() -> Void)?,
-            onCopyAll: @escaping () -> Void,
-            onEdit: (() -> Void)?
-        ) {
-            self.onResend = onResend
-            self.onCopyAll = onCopyAll
-            self.onEdit = onEdit
+        init(selectionRequestID: Int) {
+            self.selectionRequestID = selectionRequestID
         }
 
-        func update(
-            onResend: (() -> Void)?,
-            onCopyAll: @escaping () -> Void,
-            onEdit: (() -> Void)?
-        ) {
-            self.onResend = onResend
-            self.onCopyAll = onCopyAll
-            self.onEdit = onEdit
+        func update(selectionRequestID: Int) -> Bool {
+            guard self.selectionRequestID != selectionRequestID else { return false }
+            self.selectionRequestID = selectionRequestID
+            return true
         }
+    }
+}
 
-        func textView(
-            _ textView: UITextView,
-            editMenuForTextIn range: NSRange,
-            suggestedActions: [UIMenuElement]
-        ) -> UIMenu? {
-            var actions = suggestedActions
-            actions.append(contentsOf: messageActions(copyTitle: "Copy All"))
-            return UIMenu(children: actions)
-        }
-
-        private func messageActions(copyTitle: String) -> [UIMenuElement] {
-            var actions: [UIMenuElement] = [
-                UIAction(title: copyTitle, image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
-                    self?.onCopyAll()
-                }
-            ]
-            if let onResend {
-                actions.append(UIAction(title: "Resend", image: UIImage(systemName: "arrow.clockwise")) { _ in
-                    onResend()
-                })
-            }
-            if let onEdit {
-                actions.append(UIAction(title: "Edit", image: UIImage(systemName: "pencil")) { _ in
-                    onEdit()
-                })
-            }
-            return actions
-        }
+private extension UITextView {
+    func activateInitialTextSelection() {
+        guard let range = UserMessagePresentation.firstSelectableRange(in: text) else { return }
+        selectedRange = range
+        becomeFirstResponder()
     }
 }
 
@@ -2151,7 +2151,6 @@ struct ErrorMessageView: View {
     var isRateLimitError: Bool = false
     var isHourlyLimit: Bool = false
     var isConnectionError: Bool = false
-    var onRegenerate: (() -> Void)? = nil
     var onUpgrade: (() -> Void)? = nil
 
     private var accentColor: Color {
@@ -2202,40 +2201,19 @@ struct ErrorMessageView: View {
                     .multilineTextAlignment(.leading)
             }
 
-            HStack(spacing: 8) {
-                if let onRegenerate = onRegenerate, !isRateLimitError || isHourlyLimit {
-                    Button(action: onRegenerate) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 12, weight: .medium))
-                            Text("Try again")
-                                .font(.subheadline.weight(.medium))
-                        }
+            if let onUpgrade = onUpgrade, isRateLimitError, !isHourlyLimit {
+                Button(action: onUpgrade) {
+                    Text("Upgrade to Premium")
+                        .font(.subheadline.weight(.medium))
                         .foregroundColor(.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
-                                .fill(accentColor)
+                                .fill(Color.accentPrimary)
                         )
-                    }
-                    .buttonStyle(PlainButtonStyle())
                 }
-
-                if let onUpgrade = onUpgrade, isRateLimitError, !isHourlyLimit {
-                    Button(action: onUpgrade) {
-                        Text("Upgrade to Premium")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.accentPrimary)
-                            )
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                }
+                .buttonStyle(PlainButtonStyle())
             }
         }
         .padding()
