@@ -76,7 +76,7 @@ enum MessageInputTrailingAction: Equatable {
         hasDraftContent: Bool,
         isEditingMessage: Bool = false
     ) -> Bool {
-        showAudioButton && (isEditingMessage || (hasDraftContent && self != .voice))
+        showAudioButton && self != .voice && (isEditingMessage || hasDraftContent)
     }
 
     static func resolve(
@@ -86,10 +86,8 @@ enum MessageInputTrailingAction: Equatable {
         showStopAction: Bool,
         isEditingMessage: Bool = false
     ) -> Self {
-        // Editing keeps the standard arrow visible alongside the dedicated
-        // microphone. 
-        if isEditingMessage { return .send }
         if showAudioButton && showsRecordingState { return .voice }
+        if isEditingMessage { return .send }
         if showStopAction { return .stop }
         if showAudioButton && !hasDraftContent { return .voice }
         return .send
@@ -287,11 +285,12 @@ struct MessageInputView: View {
     /// capturing or transcribing text that belongs in the draft; voice
     /// greys out while a recording is being transcribed.
     private var isTrailingActionDisabled: Bool {
+        if trailingAction == .voice && showsRecordingState {
+            return isTranscribingAudio
+        }
         guard viewModel.canUseCurrentChatActions else { return true }
-        if isEditingMessage {
-            return !canSaveMessageEdit
-                || showsRecordingState
-                || isTranscribingAudio
+        if isEditingMessage && trailingAction == .send {
+            return !canSaveMessageEdit || isTranscribingAudio
         }
         guard viewModel.canSendInCurrentContext || trailingAction == .stop else { return true }
         switch trailingAction {
