@@ -30,9 +30,10 @@ struct AttachmentRewriteTests {
         )
     }
 
-    @Test("rewrites matching client ids and leaves the rest untouched")
-    func rewritesMatchingAttachments() {
+    @Test("rewrites matching client ids and leaves the rest untouched", arguments: [false, true])
+    func rewritesMatchingAttachments(locallyModified: Bool) {
         var target = chat([image(id: "local-a"), image(id: "local-b"), image(id: "srv-c", encryptionKey: "kc")])
+        target.locallyModified = locallyModified
         let before = target.updatedAt
 
         let changed = EncryptedFileStorage.applyAttachmentRewrites(
@@ -50,7 +51,7 @@ struct AttachmentRewriteTests {
         #expect(atts[2].id == "srv-c")
         #expect(atts[2].encryptionKey == "kc")
         #expect(target.updatedAt == before, "recording a rewrite is not a user edit")
-        #expect(target.locallyModified, "sync bookkeeping is left for finalize")
+        #expect(target.locallyModified == locallyModified, "sync bookkeeping is left for finalize")
     }
 
     @Test("reports no change when nothing matches")

@@ -169,7 +169,26 @@ actor ChatRecoverySync {
                 try Task.checkCancellation()
                 let result = try await CloudStorageService.shared.uploadChat(
                     StoredChat(from: candidate, syncVersion: remote.syncVersion),
-                    idempotencyKey: UUID().uuidString.lowercased()
+                    idempotencyKey: UUID().uuidString.lowercased(),
+                    onAttachmentUploaded: { rewrite in
+                        try Task.checkCancellation()
+                        guard await Clerk.shared.user?.id == userId else {
+                            throw CancellationError()
+                        }
+                        try await EncryptedFileStorage.cloud.recordAttachmentRewrites(
+                            chatId: chatId,
+                            userId: userId,
+                            rewrites: [(
+                                clientId: rewrite.clientId,
+                                serverId: rewrite.serverId,
+                                encryptionKey: rewrite.encryptionKey
+                            )]
+                        )
+                        try Task.checkCancellation()
+                        guard await Clerk.shared.user?.id == userId else {
+                            throw CancellationError()
+                        }
+                    }
                 )
                 applyAttachmentRewrites(result.rewrites, to: &candidate)
                 guard let syncVersion = result.syncVersion
