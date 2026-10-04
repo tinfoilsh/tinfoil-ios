@@ -64,6 +64,37 @@ struct AttachmentRewriteTests {
         #expect(target.messages[0].attachments[0].id == "local-a")
     }
 
+    @Test("forgets server identity only for attachments it can re-upload")
+    func forgetsOnlyReuploadable() {
+        var target = chat([
+            image(id: "srv-full", encryptionKey: "k-full"),
+            Attachment(
+                id: "srv-thumb-only",
+                type: .image,
+                fileName: "thumb.png",
+                mimeType: "image/png",
+                base64: nil,
+                thumbnailBase64: "dGh1bWI=",
+                fileSize: 3,
+                encryptionKey: "k-thumb",
+                processingState: .completed
+            ),
+            image(id: "srv-untouched", encryptionKey: "k-other"),
+        ])
+
+        let reset = EncryptedFileStorage.forgetServerAttachments(
+            ["srv-full", "srv-thumb-only"],
+            in: &target
+        )
+
+        #expect(reset == ["srv-full"])
+        let byId = Dictionary(uniqueKeysWithValues: target.messages[0].attachments.map { ($0.id, $0) })
+        #expect(byId["srv-full"]?.encryptionKey == nil)
+        #expect(byId["srv-full"]?.base64 == "AQID")
+        #expect(byId["srv-thumb-only"]?.encryptionKey == "k-thumb")
+        #expect(byId["srv-untouched"]?.encryptionKey == "k-other")
+    }
+
     @Test("tolerates duplicate client ids from the server, first wins")
     func duplicateClientIds() {
         var target = chat([image(id: "local-a")])

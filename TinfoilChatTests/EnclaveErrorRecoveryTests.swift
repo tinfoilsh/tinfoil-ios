@@ -40,6 +40,11 @@ let codedErrorExpectations: [CodedErrorExpectation] = [
     .init(code: .notFound, status: 404, action: .surfaceNotFound, kind: .userDecision),
     .init(code: .preconditionRequired, status: 428, action: .abort(reason: .preconditionRequired), kind: .terminal),
     .init(code: .syncProtocolUpgradeRequired, status: 426, action: .blockAllSync(reason: .upgradeRequired), kind: .terminal),
+    .init(code: .payloadTooLarge, status: 413, action: .abort(reason: .payloadTooLarge), kind: .terminal),
+    // Bare code with no ids: nothing to re-upload, so it aborts. The
+    // populated case is covered by missingAttachmentCarriesIds.
+    .init(code: .missingAttachment, status: 409, action: .abort(reason: .unknown), kind: .retryableRefresh),
+    .init(code: .attachmentPurgeInProgress, status: 409, action: .retry(reason: .transient5xx), kind: .retryableTransient),
 ]
 
 @Suite("EnclaveErrorRecovery dispatch table")
@@ -55,6 +60,27 @@ struct EnclaveErrorRecoveryTests {
         #expect(decision.action == row.action)
         #expect(decision.classification.kind == row.kind)
         #expect(decision.classification.code == row.code)
+    }
+
+    @Test func missingAttachmentCarriesIds() {
+        let decision = EnclaveErrorRecovery.decide(
+            SyncEnclaveError(
+                message: "missing",
+                status: 409,
+                code: "MISSING_ATTACHMENT",
+                details: ["missing_attachments": AnyCodable(["att-a", "att-b", 42])]
+            )
+        )
+        #expect(decision.action == .reuploadAttachmentsAndRetry(attachmentIds: ["att-a", "att-b"]))
+        #expect(decision.classification.kind == .retryableRefresh)
+    }
+
+    @Test func status413WithoutCodeMapsToPayloadTooLarge() {
+        let decision = EnclaveErrorRecovery.decide(
+            SyncEnclaveError(message: "too large", status: 413)
+        )
+        #expect(decision.action == .abort(reason: .payloadTooLarge))
+        #expect(decision.classification.kind == .terminal)
     }
 
     @Test func dispatchTableCoversEveryWireCode() {

@@ -836,6 +836,21 @@ class CloudSyncService: ObservableObject {
                 }
                 return
             } catch let error as SyncEnclaveError
+                where EnclaveErrorRecovery.decide(error).action.isReuploadAttachments {
+                // Callers of this one-shot path await the outcome, so
+                // heal in place: forget the dead server keys and let the
+                // loop re-read the chat and upload again under a new key.
+                guard case .reuploadAttachmentsAndRetry(let attachmentIds) =
+                        EnclaveErrorRecovery.decide(error).action else { throw error }
+                try await forgetPurgedAttachmentsOrFail(
+                    chatId: chatId,
+                    userId: userId,
+                    generation: generation,
+                    attachmentIds: attachmentIds,
+                    error: error
+                )
+                continue
+            } catch let error as SyncEnclaveError
                 where EnclaveErrorRecovery.isVersionConflict(error) {
                 guard let remote = try await cloudStorage.downloadChat(chatId),
                       let remoteChat = await convertStoredChat(remote)
@@ -1176,6 +1191,20 @@ class CloudSyncService: ObservableObject {
         switch decision.action {
         case .retry:
             throw error
+        case .reuploadAttachmentsAndRetry(let attachmentIds):
+            try await forgetPurgedAttachmentsOrFail(
+                chatId: chatId,
+                userId: userId,
+                generation: generation,
+                attachmentIds: attachmentIds,
+                error: error
+            )
+            // Re-enqueue as a new logical write; the coalescer mints a
+            // fresh idempotency key and the upload re-sends the bytes.
+            // Awaited so the enqueue lands before the current worker
+            // resolves its waiters.
+            await backupChat(chatId, allowWhileStreaming: allowWhileStreaming)
+            return false
         case .refreshCurrentKeyAndRetry:
             // Surface the stale key and leave the chat locallyModified
             // for a later sync pass after key recovery.
@@ -1231,6 +1260,36 @@ class CloudSyncService: ObservableObject {
             return false
         }
     }
+
+    /// Drop the server identity of the named attachments so the next
+    /// upload re-sends their bytes. If any cannot be re-sent from this
+    /// device (an image held only as a thumbnail) the chat is reported
+    /// as failed and the original error rethrown.
+    private func forgetPurgedAttachmentsOrFail(
+        chatId: String,
+        userId: String,
+        generation: Int,
+        attachmentIds: [String],
+        error: Error
+    ) async throws {
+        guard generation == accountGeneration else { throw CancellationError() }
+        let reset = try await EncryptedFileStorage.cloud.forgetServerAttachments(
+            chatId: chatId,
+            userId: userId,
+            attachmentIds: attachmentIds
+        )
+        guard generation == accountGeneration else { throw CancellationError() }
+        if reset.count < attachmentIds.count {
+            SyncHealthStore.shared.reportChatSyncFailed(
+                chatId,
+                message: Self.purgedAttachmentsMessage
+            )
+            throw error
+        }
+    }
+
+    static let purgedAttachmentsMessage =
+        "Some attachments in this chat are no longer available in the cloud"
 
     /// Last-write-wins conflict resolution, arbitrated by content
     /// modification time so the winner is the same on every device.
