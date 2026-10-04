@@ -557,21 +557,6 @@ actor EncryptedFileStorage {
         return didChange
     }
 
-    private func loadChatUnlocked(chatId: String, userId: String) async throws -> Chat? {
-        let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
-        let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
-        let hasEncryptedFile = fileManager.fileExists(atPath: encPath.path)
-        guard hasEncryptedFile || fileManager.fileExists(atPath: rawPath.path),
-              var chat = try await loadChatFromFile(
-                  hasEncryptedFile ? encPath : rawPath,
-                  isRaw: !hasEncryptedFile
-              ) else {
-            return nil
-        }
-        await overlaySyncSidecar(&chat, userId: userId)
-        return chat
-    }
-
     func finalizeUploadIfFresh(
         chatId: String,
         userId: String,
@@ -1461,14 +1446,17 @@ actor EncryptedFileStorage {
     /// lock, for callers that already hold the lock.
     private func loadChatUnlocked(chatId: String, userId: String) async throws -> Chat? {
         let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
-        if fileManager.fileExists(atPath: encPath.path) {
-            return try await loadChatFromFile(encPath, isRaw: false)
-        }
         let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
-        if fileManager.fileExists(atPath: rawPath.path) {
-            return try await loadChatFromFile(rawPath, isRaw: true)
+        let hasEncryptedFile = fileManager.fileExists(atPath: encPath.path)
+        guard hasEncryptedFile || fileManager.fileExists(atPath: rawPath.path),
+              var chat = try await loadChatFromFile(
+                  hasEncryptedFile ? encPath : rawPath,
+                  isRaw: !hasEncryptedFile
+              ) else {
+            return nil
         }
-        return nil
+        await overlaySyncSidecar(&chat, userId: userId)
+        return chat
     }
 
     private func loadChatFromFile(_ fileURL: URL, isRaw: Bool) async throws -> Chat? {
