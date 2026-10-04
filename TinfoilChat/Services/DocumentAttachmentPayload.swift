@@ -28,12 +28,17 @@ struct DocumentPage: Codable, Equatable, Sendable {
     }
 
     var isValid: Bool { page >= 0 && (!isScanned || !image.isEmpty) }
+
+    var imageDataURL: String {
+        "data:\(Constants.Attachments.scannedDocumentPageMimeType);base64,\(image)"
+    }
 }
 
-enum DocumentAttachmentError: LocalizedError {
+enum DocumentAttachmentError: LocalizedError, Equatable {
     case invalidPayload
     case unavailable
     case syncDisabled
+    case visionModelRequired
 
     var errorDescription: String? {
         switch self {
@@ -43,6 +48,8 @@ enum DocumentAttachmentError: LocalizedError {
             return "Document content could not be loaded. Please retry before continuing."
         case .syncDisabled:
             return "Document content is not on this device. Enable cloud sync to download it, then retry."
+        case .visionModelRequired:
+            return "This scanned document has no extracted text. Select an image-capable model to read it."
         }
     }
 }
@@ -141,12 +148,17 @@ struct DocumentAttachmentPayload: Codable, Equatable, Sendable {
     }
 
     static func promptText(_ attachment: Attachment) -> String? {
-        if let text = attachment.textContent, !text.isEmpty { return text }
+        if let text = attachment.textContent, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return text }
         guard let pages = attachment.pages else { return attachment.textContent }
         return pages.map(\.text).joined(separator: "\n\n")
     }
 
     static func scannedPages(_ attachment: Attachment) -> [DocumentPage] {
         attachment.pages?.filter(\.isScanned) ?? []
+    }
+
+    static func requiresVision(_ attachment: Attachment) -> Bool {
+        attachment.type == .document && !scannedPages(attachment).isEmpty
+            && (promptText(attachment)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
     }
 }

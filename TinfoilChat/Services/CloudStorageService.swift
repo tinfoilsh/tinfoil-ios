@@ -211,7 +211,7 @@ class CloudStorageService: ObservableObject {
         for msgIdx in chat.messages.indices {
             for attIdx in chat.messages[msgIdx].attachments.indices {
                 let att = chat.messages[msgIdx].attachments[attIdx]
-                guard att.encryptionKey == nil else { continue }
+                guard att.encryptionKey?.isEmpty != false else { continue }
                 let raw: Data
                 switch att.type {
                 case .image:
@@ -263,7 +263,7 @@ class CloudStorageService: ObservableObject {
                 }
                 if offloadDocuments,
                    messages[msgIdx].attachments[attIdx].type == .document,
-                   messages[msgIdx].attachments[attIdx].encryptionKey != nil {
+                   messages[msgIdx].attachments[attIdx].encryptionKey?.isEmpty == false {
                     messages[msgIdx].attachments[attIdx].textContent = nil
                     messages[msgIdx].attachments[attIdx].pages = nil
                 }

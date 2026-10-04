@@ -3171,11 +3171,8 @@ class ChatViewModel: ObservableObject {
                 try Task.checkCancellation()
                 guard currentUserId == userId, generation == favoriteStorageGeneration else { throw CancellationError() }
             }
-            if currentChat?.id == chatId {
-                currentChat?.messages = DocumentAttachmentPayload.merging(hydrated, into: currentChat!.messages)
-            }
-            if let index = chats.firstIndex(where: { $0.id == chatId }) {
-                chats[index].messages = DocumentAttachmentPayload.merging(hydrated, into: chats[index].messages)
+            updateHydratedMessages(for: chatId) { messages in
+                DocumentAttachmentPayload.merging(hydrated, into: messages)
             }
         }
         guard AttachmentPayloadMerge.containsUnfetchedSyncedImages(messages) else {
@@ -3201,13 +3198,18 @@ class ChatViewModel: ObservableObject {
     /// This avoids replacing the entire messages array, preventing a stale snapshot from
     /// overwriting messages that may have been updated by sync while images were loading.
     private func applyLoadedImages(_ images: [String: String], toChatId chatId: String) {
-        if currentChat?.id == chatId {
-            var updated = currentChat!
-            updated.messages = AttachmentPayloadMerge.applyingImageBytes(images, to: updated.messages)
+        updateHydratedMessages(for: chatId) { messages in
+            AttachmentPayloadMerge.applyingImageBytes(images, to: messages)
+        }
+    }
+
+    private func updateHydratedMessages(for chatId: String, merge: ([Message]) -> [Message]) {
+        if var updated = currentChat, updated.id == chatId {
+            updated.messages = merge(updated.messages)
             currentChat = updated
         }
         if let idx = chats.firstIndex(where: { $0.id == chatId }) {
-            chats[idx].messages = AttachmentPayloadMerge.applyingImageBytes(images, to: chats[idx].messages)
+            chats[idx].messages = merge(chats[idx].messages)
         }
     }
 
@@ -4538,7 +4540,7 @@ class ChatViewModel: ObservableObject {
                 }
 
                 // Use ChatQueryBuilder to create query with model-specific system prompt handling
-                let chatQuery = ChatQueryBuilder.buildQuery(
+                let chatQuery = try ChatQueryBuilder.buildQuery(
                     modelId: modelId,
                     systemPrompt: systemPrompt,
                     rules: processedRules,
@@ -5856,7 +5858,7 @@ class ChatViewModel: ObservableObject {
                 schema: .jsonSchema(widget.schema),
                 strict: false
             ))
-            let query = ChatQueryBuilder.buildQuery(
+            let query = try ChatQueryBuilder.buildQuery(
                 modelId: representativeModel.modelName,
                 systemPrompt: GenUIRetryPrompt.system,
                 rules: "",

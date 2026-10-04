@@ -277,7 +277,7 @@ struct ChatQueryBuilderReasoningTests {
 
     @Test @MainActor
     func extraBodyMakesItIntoEncodedChatQuery() throws {
-        let query = ChatQueryBuilder.buildQuery(
+        let query = try ChatQueryBuilder.buildQuery(
             modelId: "deepseek-v4-pro",
             systemPrompt: "you are al",
             rules: "",
@@ -298,7 +298,7 @@ struct ChatQueryBuilderReasoningTests {
 
     @Test @MainActor
     func piiCheckCoexistsWithWebSearchAndReasoning() throws {
-        let query = ChatQueryBuilder.buildQuery(
+        let query = try ChatQueryBuilder.buildQuery(
             modelId: "gpt-oss-120b",
             systemPrompt: "",
             rules: "",
@@ -321,7 +321,7 @@ struct ChatQueryBuilderReasoningTests {
 
     @Test @MainActor
     func piiCheckCoexistsWithAutoModelOptions() throws {
-        let query = ChatQueryBuilder.buildQuery(
+        let query = try ChatQueryBuilder.buildQuery(
             modelId: "gpt-oss-120b",
             systemPrompt: "",
             rules: "",
@@ -345,7 +345,7 @@ struct ChatQueryBuilderReasoningTests {
     @Test @MainActor
     func autoSendsIntelligenceLevelInsteadOfReasoningParams() throws {
         let representative = model(id: "gpt-oss-120b", reasoningConfig: gptOssConfig())
-        let query = ChatQueryBuilder.buildQuery(
+        let query = try ChatQueryBuilder.buildQuery(
             modelId: representative.modelName,
             systemPrompt: "",
             rules: "",
@@ -370,7 +370,7 @@ struct ChatQueryBuilderReasoningTests {
 
     @Test @MainActor
     func emptyPromptDoesNotEmitSystemMessage() throws {
-        let query = ChatQueryBuilder.buildQuery(
+        let query = try ChatQueryBuilder.buildQuery(
             modelId: "gpt-oss-120b",
             systemPrompt: "",
             rules: "",
@@ -396,7 +396,7 @@ struct ChatQueryBuilderReasoningTests {
             ("deepseek-v4-flash", nil),
             ("gpt-oss-120b", [gptOss, deepseek]),
         ] as [(String, [ModelType]?)] {
-            let query = ChatQueryBuilder.buildQuery(
+            let query = try ChatQueryBuilder.buildQuery(
                 modelId: modelId,
                 systemPrompt: "be helpful",
                 rules: "",
@@ -423,7 +423,7 @@ struct ChatQueryBuilderReasoningTests {
         assistant.toolCalls = [
             GenUIToolCall(id: "call_1", name: "render_chart", arguments: "{\"value\":1}")
         ]
-        let query = ChatQueryBuilder.buildQuery(
+        let query = try ChatQueryBuilder.buildQuery(
             modelId: "kimi-k3",
             systemPrompt: "",
             rules: "",
@@ -444,7 +444,7 @@ struct ChatQueryBuilderReasoningTests {
 
     @Test @MainActor
     func reasoningOnlyAssistantIsKeptWhenHistoryIsRequired() throws {
-        let query = ChatQueryBuilder.buildQuery(
+        let query = try ChatQueryBuilder.buildQuery(
             modelId: "kimi-k3",
             systemPrompt: "",
             rules: "",
@@ -464,7 +464,7 @@ struct ChatQueryBuilderReasoningTests {
 
     @Test @MainActor
     func reasoningIsOmittedForNonToolCallAssistantUnderToolCallOnlyPolicy() throws {
-        let query = ChatQueryBuilder.buildQuery(
+        let query = try ChatQueryBuilder.buildQuery(
             modelId: "gpt-oss-120b",
             systemPrompt: "",
             rules: "",
@@ -486,7 +486,7 @@ struct ChatQueryBuilderReasoningTests {
         toolCallAssistant.toolCalls = [
             GenUIToolCall(id: "call_1", name: "render_chart", arguments: "{}")
         ]
-        let query = ChatQueryBuilder.buildQuery(
+        let query = try ChatQueryBuilder.buildQuery(
             modelId: "gpt-oss-120b",
             systemPrompt: "",
             rules: "",
@@ -506,7 +506,7 @@ struct ChatQueryBuilderReasoningTests {
 
     @Test @MainActor
     func autoPreservesReasoningWhenAnyCandidateRequiresIt() throws {
-        let query = ChatQueryBuilder.buildQuery(
+        let query = try ChatQueryBuilder.buildQuery(
             modelId: "glm-5-2",
             systemPrompt: "",
             rules: "",

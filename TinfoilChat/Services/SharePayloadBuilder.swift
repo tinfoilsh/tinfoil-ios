@@ -91,7 +91,7 @@ enum SharePayloadBuilder {
     private static func buildMessage(_ message: Message) -> ShareableChatData.ShareableMessage {
         let documentContent = message.attachments.compactMap { attachment -> String? in
             guard attachment.type == .document,
-                  attachment.encryptionKey == nil,
+                  attachment.encryptionKey?.isEmpty != false,
                   let textContent = DocumentAttachmentPayload.promptText(attachment),
                   !textContent.isEmpty else { return nil }
             return "Document title: \(attachment.fileName)\nDocument contents:\n\(textContent)"
@@ -109,8 +109,8 @@ enum SharePayloadBuilder {
                 mimeType: $0.mimeType,
                 thumbnailBase64: $0.thumbnailBase64,
                 encryptionKey: $0.encryptionKey,
-                textContent: $0.type == .document && $0.encryptionKey != nil ? nil : $0.textContent,
-                pages: $0.type == .document && $0.encryptionKey != nil ? nil : $0.pages,
+                textContent: $0.type == .document && $0.encryptionKey?.isEmpty == false ? nil : $0.textContent,
+                pages: $0.type == .document && $0.encryptionKey?.isEmpty == false ? nil : $0.pages,
                 description: $0.description
             )
         }

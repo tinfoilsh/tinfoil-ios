@@ -133,6 +133,29 @@ struct DocumentAttachmentPayloadTests {
         #expect(beforeCutover[0].attachments[0].textContent == "content")
     }
 
+    @Test func emptyKeysKeepContentUntilAnUploadSuppliesAUsableKey() async throws {
+        let original = message(document(text: "retained content", key: ""))
+        var wire = [original]
+        CloudStorageService.stripAttachmentPayloads(&wire, offloadDocuments: true)
+        #expect(wire[0].attachments[0].textContent == "retained content")
+        let shared = SharePayloadBuilder.build(messages: [original], chatTitle: "Chat", chatCreatedAt: nil)
+        #expect(shared.messages[0].attachments?.first?.textContent == "retained content")
+        #expect(shared.messages[0].documentContent?.contains("retained content") == true)
+
+        let chat = Chat(id: "chat", title: "Document", messages: [original], modelType: ChatForkTests.model)
+        var stored = StoredChat(from: chat, syncVersion: 1)
+        let recorder = UploadRecorder()
+        let rewrites = try await CloudStorageService.uploadAttachments(
+            &stored, offloadDocuments: true,
+            onAttachmentUploaded: { await recorder.persist($0) },
+            put: { try await recorder.put($0) }
+        )
+        #expect(rewrites.count == 1)
+        #expect(stored.messages[0].attachments[0].encryptionKey == "key")
+        CloudStorageService.stripAttachmentPayloads(&stored.messages, offloadDocuments: true)
+        #expect(stored.messages[0].attachments[0].textContent == nil)
+    }
+
     @Test func hydratesMissingContentWithoutFetchingInlineDocuments() async throws {
         let source = [message(document()), message(document(text: "local", key: nil))]
         var fetches = 0
@@ -181,7 +204,7 @@ struct DocumentAttachmentPayloadTests {
     @MainActor
     @Test func scannedPagesAndPageTextReachThePrompt() throws {
         let attachment = document(pages: [DocumentPage(page: 1, text: "Page text", image: "AQID", isScanned: true)])
-        let query = ChatQueryBuilder.buildQuery(modelId: "gpt-oss-120b", systemPrompt: "", rules: "",
+        let query = try ChatQueryBuilder.buildQuery(modelId: "gpt-oss-120b", systemPrompt: "", rules: "",
                                               conversationMessages: [message(attachment)], isMultimodal: true,
                                               genUIEnabled: false)
         let json = String(decoding: try JSONEncoder().encode(query), as: UTF8.self)
@@ -189,6 +212,46 @@ struct DocumentAttachmentPayloadTests {
         #expect(json.contains("AQID"))
         #expect(json.contains("image_url"))
         #expect(TokenEstimation.estimateMessageTokens(message(attachment)) > TokenEstimation.estimateTokenCount("Summarize"))
+    }
+
+    @MainActor
+    @Test func textOnlyModelsRejectScannedDocumentsWithoutOCR() {
+        let attachment = document(pages: [DocumentPage(page: 1, text: " \n", image: "AQID", isScanned: true)])
+        #expect(throws: DocumentAttachmentError.visionModelRequired) {
+            try ChatQueryBuilder.buildQuery(
+                modelId: "gpt-oss-120b", systemPrompt: "", rules: "",
+                conversationMessages: [message(attachment)], isMultimodal: false, genUIEnabled: false
+            )
+        }
+    }
+
+    @MainActor
+    @Test func textOnlyModelsReceiveAvailableOCRText() throws {
+        let attachment = document(text: " \n", pages: [DocumentPage(page: 1, text: "Extracted OCR", image: "AQID", isScanned: true)])
+        let query = try ChatQueryBuilder.buildQuery(
+            modelId: "gpt-oss-120b", systemPrompt: "", rules: "",
+            conversationMessages: [message(attachment)], isMultimodal: false, genUIEnabled: false
+        )
+        let json = String(decoding: try JSONEncoder().encode(query), as: UTF8.self)
+        #expect(json.contains("Extracted OCR"))
+        #expect(!json.contains("image_url"))
+    }
+
+    @MainActor
+    @Test func regularImagesAndScannedPagesUseTheSameImagePartFormat() throws {
+        let attachment = document(pages: [DocumentPage(page: 1, text: "", image: "AQID", isScanned: true)])
+        let image = Attachment(type: .image, fileName: "photo.jpg", mimeType: "image/jpeg", base64: "BAUG")
+        let query = try ChatQueryBuilder.buildQuery(
+            modelId: "gpt-oss-120b", systemPrompt: "", rules: "",
+            conversationMessages: [Message(role: .user, content: "Compare", attachments: [image, attachment])],
+            isMultimodal: true, genUIEnabled: false
+        )
+        let json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(query)) as? [String: Any])
+        let messages = try #require(json["messages"] as? [[String: Any]])
+        let parts = try #require(messages[0]["content"] as? [[String: Any]])
+        let imageParts = parts.compactMap { $0["image_url"] as? [String: Any] }
+        #expect(imageParts.compactMap { $0["url"] as? String } == ["data:image/jpeg;base64,BAUG", "data:image/png;base64,AQID"])
+        #expect(imageParts.compactMap { $0["detail"] as? String } == ["auto", "auto"])
     }
 
     @Test func sharesKeepDocumentReferencesWithoutDuplicatingPayload() throws {

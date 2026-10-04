@@ -63,7 +63,7 @@ struct GenUIConfigTests {
         #expect(hint.contains("render_stat_cards"))
         #expect(!hint.contains("render_timeline"))
 
-        let query = ChatQueryBuilder.buildQuery(
+        let query = try ChatQueryBuilder.buildQuery(
             modelId: "gpt-oss-120b",
             systemPrompt: "Base prompt",
             rules: "",
@@ -80,7 +80,7 @@ struct GenUIConfigTests {
         let service = makeService(state: state)
         try await service.refresh()
         let registry = GenUIRegistry(configService: service)
-        let query = ChatQueryBuilder.buildQuery(
+        let query = try ChatQueryBuilder.buildQuery(
             modelId: "gpt-oss-120b",
             systemPrompt: "Base prompt",
             rules: "",

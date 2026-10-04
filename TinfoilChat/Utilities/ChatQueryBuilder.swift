@@ -75,7 +75,7 @@ struct ChatQueryBuilder {
         autoIntelligence: AutoIntelligence = .default,
         includeTimeReminder: Bool = false,
         responseFormat: ChatQuery.ResponseFormat? = nil
-    ) -> ChatQuery {
+    ) throws -> ChatQuery {
 
         var messages: [ChatQuery.ChatCompletionMessageParam] = []
 
@@ -117,6 +117,9 @@ struct ChatQueryBuilder {
                 let documentAttachments = msg.attachments.filter { $0.type == .document }
                 let imageAttachments = msg.attachments.filter { $0.type == .image }
                 let scannedPages = documentAttachments.flatMap(DocumentAttachmentPayload.scannedPages)
+                if !isMultimodal, documentAttachments.contains(where: DocumentAttachmentPayload.requiresVision) {
+                    throw DocumentAttachmentError.visionModelRequired
+                }
 
                 // Prepend document content as context when present
                 if !documentAttachments.isEmpty {
@@ -135,20 +138,17 @@ struct ChatQueryBuilder {
                 if isMultimodal, !imageAttachments.isEmpty || !scannedPages.isEmpty {
                     var parts: [ChatQuery.ChatCompletionMessageParam.UserMessageParam.Content.ContentPart] = []
                     parts.append(.text(.init(text: userContent)))
-                    for attachment in imageAttachments {
+                    let imageURLs = imageAttachments.compactMap { attachment -> String? in
                         guard let base64 = attachment.base64,
-                              let mimeType = attachment.mimeType else { continue }
+                              let mimeType = attachment.mimeType else { return nil }
+                        return "data:\(mimeType);base64,\(base64)"
+                    } + scannedPages.map(\.imageDataURL)
+                    for url in imageURLs {
                         let imageUrl = ChatQuery.ChatCompletionMessageParam.ContentPartImageParam.ImageURL(
-                            url: "data:\(mimeType);base64,\(base64)",
+                            url: url,
                             detail: .auto
                         )
                         parts.append(.image(.init(imageUrl: imageUrl)))
-                    }
-                    for page in scannedPages {
-                        let imageURL = ChatQuery.ChatCompletionMessageParam.ContentPartImageParam.ImageURL(
-                            url: "data:image/png;base64,\(page.image)", detail: .auto
-                        )
-                        parts.append(.image(.init(imageUrl: imageURL)))
                     }
                     messages.append(.user(.init(content: .contentParts(parts))))
                 } else if !imageAttachments.isEmpty {

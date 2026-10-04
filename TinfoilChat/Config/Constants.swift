@@ -816,6 +816,7 @@ enum Constants {
         static let supportedDocumentExtensions = SharedImportConfiguration.supportedDocumentExtensions
         static let supportedImageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic"]
         static let defaultImageMimeType = "image/jpeg"
+        static let scannedDocumentPageMimeType = "image/png"
     }
 
     enum ProjectListCache {
