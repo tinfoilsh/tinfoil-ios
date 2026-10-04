@@ -507,6 +507,7 @@ enum Constants {
 
     enum Sync {
         static let protocolVersion = 2
+        static let documentAttachmentsProtocolVersion = 3
         static let maxConcurrentChatUploads = 2
         static let chatSyncIntervalSeconds: TimeInterval = 20.0
         static let profileSyncIntervalSeconds: TimeInterval = 60.0  // 1 minute

@@ -144,6 +144,9 @@ actor ChatRecoverySync {
                         from: local.messages
                     )
                 }
+                if let local {
+                    candidate.messages = DocumentAttachmentPayload.merging(local.messages, into: candidate.messages)
+                }
                 try apply(mutation, to: &candidate, authoritativeRemote: remoteChat)
                 candidate.syncVersion = remote.syncVersion
                 try stampEdit(&candidate, observedRemote: remoteChat)

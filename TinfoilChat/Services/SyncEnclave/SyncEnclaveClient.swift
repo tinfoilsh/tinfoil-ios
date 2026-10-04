@@ -156,7 +156,7 @@ actor SyncEnclaveClient {
 
         var headers: [String: String] = [
             "Accept": "application/json",
-            SyncHeaders.protocolVersion: String(Constants.Sync.protocolVersion)
+            SyncHeaders.protocolVersion: String(await AppConfig.shared.syncProtocolVersion)
         ]
         let bodyData: Data?
         if let body = body {
@@ -207,7 +207,7 @@ actor SyncEnclaveClient {
 
         var headers: [String: String] = [
             "Accept": "application/json",
-            SyncHeaders.protocolVersion: String(Constants.Sync.protocolVersion)
+            SyncHeaders.protocolVersion: String(await AppConfig.shared.syncProtocolVersion)
         ]
         return try await withAttestedClient { client in
             let requestGeneration = tokenGeneration

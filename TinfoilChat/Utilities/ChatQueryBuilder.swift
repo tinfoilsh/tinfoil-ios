@@ -116,12 +116,13 @@ struct ChatQueryBuilder {
                 // Derive document content and image data from attachments
                 let documentAttachments = msg.attachments.filter { $0.type == .document }
                 let imageAttachments = msg.attachments.filter { $0.type == .image }
+                let scannedPages = documentAttachments.flatMap(DocumentAttachmentPayload.scannedPages)
 
                 // Prepend document content as context when present
                 if !documentAttachments.isEmpty {
                     let docContent = documentAttachments
                         .compactMap { attachment -> String? in
-                            guard let text = attachment.textContent, !text.isEmpty else { return nil }
+                            guard let text = DocumentAttachmentPayload.promptText(attachment), !text.isEmpty else { return nil }
                             return "Document title: \(attachment.fileName)\nDocument contents:\n\(text)"
                         }
                         .joined(separator: "\n\n")
@@ -131,7 +132,7 @@ struct ChatQueryBuilder {
                 }
 
                 // Use multimodal content parts when model supports it and message has images
-                if isMultimodal, !imageAttachments.isEmpty {
+                if isMultimodal, !imageAttachments.isEmpty || !scannedPages.isEmpty {
                     var parts: [ChatQuery.ChatCompletionMessageParam.UserMessageParam.Content.ContentPart] = []
                     parts.append(.text(.init(text: userContent)))
                     for attachment in imageAttachments {
@@ -142,6 +143,12 @@ struct ChatQueryBuilder {
                             detail: .auto
                         )
                         parts.append(.image(.init(imageUrl: imageUrl)))
+                    }
+                    for page in scannedPages {
+                        let imageURL = ChatQuery.ChatCompletionMessageParam.ContentPartImageParam.ImageURL(
+                            url: "data:image/png;base64,\(page.image)", detail: .auto
+                        )
+                        parts.append(.image(.init(imageUrl: imageURL)))
                     }
                     messages.append(.user(.init(content: .contentParts(parts))))
                 } else if !imageAttachments.isEmpty {

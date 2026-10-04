@@ -177,6 +177,15 @@ struct AppModelConfig: Codable {
 struct RemoteConfig: Codable {
     let chatConfig: ChatConfig
     let minSupportedVersion: String
+    let syncProtocolVersion: Int?
+
+    var effectiveSyncProtocolVersion: Int {
+        min(syncProtocolVersion ?? Constants.Sync.protocolVersion, Constants.Sync.documentAttachmentsProtocolVersion)
+    }
+
+    var documentAttachmentsEnabled: Bool {
+        effectiveSyncProtocolVersion == Constants.Sync.documentAttachmentsProtocolVersion
+    }
 
     struct ChatConfig: Codable {
         let systemPrompt: String
@@ -531,6 +540,14 @@ class AppConfig: ObservableObject {
     
     var minSupportedVersion: String {
         loadedConfig.minSupportedVersion
+    }
+
+    var syncProtocolVersion: Int {
+        config?.effectiveSyncProtocolVersion ?? Constants.Sync.protocolVersion
+    }
+
+    var documentAttachmentsEnabled: Bool {
+        config?.documentAttachmentsEnabled == true
     }
     
     /// Current app version from bundle
