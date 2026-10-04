@@ -421,7 +421,8 @@ actor EncryptedFileStorage {
         }
         EditClockStore.observe(chat.clock)
         var chatToSave = chat
-        if existing != nil, AttachmentPayloadMerge.containsBytelessImages(chatToSave.messages) {
+        if existing != nil, AttachmentPayloadMerge.containsBytelessImages(chatToSave.messages)
+            || DocumentAttachmentPayload.containsOffloadedDocuments(chatToSave.messages) {
             // Best effort: an unreadable local file must not block the
             // remote copy from replacing it, but cancellation still aborts
             // the apply.
@@ -438,6 +439,7 @@ actor EncryptedFileStorage {
                     into: chatToSave.messages,
                     from: current.messages
                 )
+                chatToSave.messages = DocumentAttachmentPayload.merging(current.messages, into: chatToSave.messages)
             }
         }
         try await performSaveChat(
@@ -466,6 +468,16 @@ actor EncryptedFileStorage {
             return
         }
         guard Self.applyAttachmentRewrites(rewrites, to: &chat) else { return }
+        try await performSaveChat(chat, userId: userId)
+    }
+
+    func recordDocumentPayloads(chatId: String, userId: String, hydrated: [Message]) async throws {
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+        try Task.checkCancellation()
+        guard var chat = try await loadChatUnlocked(chatId: chatId, userId: userId),
+              DocumentAttachmentPayload.containsOffloadedDocuments(chat.messages) else { return }
+        chat.messages = DocumentAttachmentPayload.merging(hydrated, into: chat.messages)
         try await performSaveChat(chat, userId: userId)
     }
 
@@ -506,7 +518,8 @@ actor EncryptedFileStorage {
                 case .image:
                     canReupload = attachment.base64.flatMap { Data(base64Encoded: $0) } != nil
                 case .document:
-                    canReupload = false
+                    canReupload = DocumentAttachmentPayload.hasInlineContent(attachment)
+                        && (try? DocumentAttachmentPayload.encode(attachment)) != nil
                 }
                 guard canReupload else { continue }
                 chat.messages[messageIndex].attachments[attachmentIndex].encryptionKey = nil

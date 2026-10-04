@@ -75,7 +75,7 @@ struct ChatQueryBuilder {
         autoIntelligence: AutoIntelligence = .default,
         includeTimeReminder: Bool = false,
         responseFormat: ChatQuery.ResponseFormat? = nil
-    ) -> ChatQuery {
+    ) throws -> ChatQuery {
 
         var messages: [ChatQuery.ChatCompletionMessageParam] = []
 
@@ -116,12 +116,16 @@ struct ChatQueryBuilder {
                 // Derive document content and image data from attachments
                 let documentAttachments = msg.attachments.filter { $0.type == .document }
                 let imageAttachments = msg.attachments.filter { $0.type == .image }
+                let scannedPages = documentAttachments.flatMap(DocumentAttachmentPayload.scannedPages)
+                if !isMultimodal, documentAttachments.contains(where: DocumentAttachmentPayload.requiresVision) {
+                    throw DocumentAttachmentError.visionModelRequired
+                }
 
                 // Prepend document content as context when present
                 if !documentAttachments.isEmpty {
                     let docContent = documentAttachments
                         .compactMap { attachment -> String? in
-                            guard let text = attachment.textContent, !text.isEmpty else { return nil }
+                            guard let text = DocumentAttachmentPayload.promptText(attachment), !text.isEmpty else { return nil }
                             return "Document title: \(attachment.fileName)\nDocument contents:\n\(text)"
                         }
                         .joined(separator: "\n\n")
@@ -131,14 +135,17 @@ struct ChatQueryBuilder {
                 }
 
                 // Use multimodal content parts when model supports it and message has images
-                if isMultimodal, !imageAttachments.isEmpty {
+                if isMultimodal, !imageAttachments.isEmpty || !scannedPages.isEmpty {
                     var parts: [ChatQuery.ChatCompletionMessageParam.UserMessageParam.Content.ContentPart] = []
                     parts.append(.text(.init(text: userContent)))
-                    for attachment in imageAttachments {
+                    let imageURLs = imageAttachments.compactMap { attachment -> String? in
                         guard let base64 = attachment.base64,
-                              let mimeType = attachment.mimeType else { continue }
+                              let mimeType = attachment.mimeType else { return nil }
+                        return "data:\(mimeType);base64,\(base64)"
+                    } + scannedPages.map(\.imageDataURL)
+                    for url in imageURLs {
                         let imageUrl = ChatQuery.ChatCompletionMessageParam.ContentPartImageParam.ImageURL(
-                            url: "data:\(mimeType);base64,\(base64)",
+                            url: url,
                             detail: .auto
                         )
                         parts.append(.image(.init(imageUrl: imageUrl)))

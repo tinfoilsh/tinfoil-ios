@@ -340,7 +340,7 @@ struct GenUIRetryTests {
             strict: false
         ))
 
-        let query = ChatQueryBuilder.buildQuery(
+        let query = try ChatQueryBuilder.buildQuery(
             modelId: "gpt-oss-120b",
             systemPrompt: "Repair the widget.",
             rules: "",

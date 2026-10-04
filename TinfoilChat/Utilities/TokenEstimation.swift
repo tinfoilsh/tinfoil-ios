@@ -63,7 +63,7 @@ enum TokenEstimation {
             tokens += estimateTokenCount(toolCall.arguments)
         }
         for attachment in message.attachments {
-            tokens += estimateTokenCount(attachment.textContent)
+            tokens += estimateTokenCount(DocumentAttachmentPayload.promptText(attachment))
             tokens += estimateTokenCount(attachment.description)
         }
         return tokens

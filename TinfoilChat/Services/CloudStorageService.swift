@@ -121,11 +121,13 @@ class CloudStorageService: ObservableObject {
         onAttachmentUploaded: AttachmentUploadedHandler
     ) async throws -> UploadChatResult {
         var chatToUpload = chat
-        let rewrites = try await encryptAndUploadAttachments(
+        let offloadDocuments = await AppConfig.shared.documentAttachmentsEnabled
+        let rewrites = try await Self.uploadAttachments(
             &chatToUpload,
+            offloadDocuments: offloadDocuments,
             onAttachmentUploaded: onAttachmentUploaded
         )
-        stripBase64FromMessages(&chatToUpload.messages)
+        Self.stripAttachmentPayloads(&chatToUpload.messages, offloadDocuments: offloadDocuments)
 
         let includesProjectIntent = ProjectMetadataUploadPolicy.shouldInclude(
             syncVersion: chatToUpload.syncVersion,
@@ -199,19 +201,26 @@ class CloudStorageService: ObservableObject {
         return formatter
     }()
 
-    private func encryptAndUploadAttachments(
+    static func uploadAttachments(
         _ chat: inout StoredChat,
-        onAttachmentUploaded: AttachmentUploadedHandler
+        offloadDocuments: Bool,
+        onAttachmentUploaded: AttachmentUploadedHandler,
+        put: (EnclaveAttachmentPutRequest) async throws -> EnclaveAttachmentPutResponse = SyncEnclaveAPI.attachmentPut
     ) async throws -> [AttachmentRewrite] {
         var rewrites: [AttachmentRewrite] = []
         for msgIdx in chat.messages.indices {
             for attIdx in chat.messages[msgIdx].attachments.indices {
                 let att = chat.messages[msgIdx].attachments[attIdx]
-                guard att.type == .image,
-                      let base64 = att.base64,
-                      att.encryptionKey == nil,
-                      let raw = Data(base64Encoded: base64) else {
-                    continue
+                guard att.encryptionKey?.isEmpty != false else { continue }
+                let raw: Data
+                switch att.type {
+                case .image:
+                    guard let base64 = att.base64,
+                          let bytes = Data(base64Encoded: base64) else { continue }
+                    raw = bytes
+                case .document:
+                    guard offloadDocuments else { continue }
+                    raw = try DocumentAttachmentPayload.encode(att)
                 }
                 let attIdemKey = Self.attachmentIdempotencyKey(
                     chatId: chat.id,
@@ -222,7 +231,7 @@ class CloudStorageService: ObservableObject {
                 // and a fresh per-attachment AES-256 key. The chat
                 // envelope (sealed under the user's CEK) is what
                 // keeps the per-attachment keys confidential at rest.
-                let result = try await SyncEnclaveAPI.attachmentPut(
+                let result = try await put(
                     EnclaveAttachmentPutRequest(
                         chatId: chat.id,
                         plaintext: raw.base64EncodedString(),
@@ -246,11 +255,17 @@ class CloudStorageService: ObservableObject {
         return rewrites
     }
 
-    private func stripBase64FromMessages(_ messages: inout [Message]) {
+    static func stripAttachmentPayloads(_ messages: inout [Message], offloadDocuments: Bool) {
         for msgIdx in messages.indices {
             for attIdx in messages[msgIdx].attachments.indices {
                 if messages[msgIdx].attachments[attIdx].type == .image {
                     messages[msgIdx].attachments[attIdx].base64 = nil
+                }
+                if offloadDocuments,
+                   messages[msgIdx].attachments[attIdx].type == .document,
+                   messages[msgIdx].attachments[attIdx].encryptionKey?.isEmpty == false {
+                    messages[msgIdx].attachments[attIdx].textContent = nil
+                    messages[msgIdx].attachments[attIdx].pages = nil
                 }
             }
         }
@@ -433,6 +448,27 @@ class CloudStorageService: ObservableObject {
     }
 
     // MARK: - Attachments
+
+    @MainActor
+    func hydrateDocuments(in messages: [Message]) async throws -> [Message] {
+        let userId = Clerk.shared.user?.id
+        return try await DocumentAttachmentPayload.hydrate(messages) { attachment in
+            try Task.checkCancellation()
+            guard SettingsManager.shared.isCloudSyncEnabled else {
+                throw DocumentAttachmentError.syncDisabled
+            }
+            guard let userId, Clerk.shared.user?.id == userId else { throw CancellationError() }
+            let bytes = try await SyncEnclaveAPI.attachmentGet(
+                EnclaveAttachmentGetRequest(id: attachment.id, attKey: attachment.encryptionKey!)
+            )
+            try Task.checkCancellation()
+            guard Clerk.shared.user?.id == userId else { throw CancellationError() }
+            guard SettingsManager.shared.isCloudSyncEnabled else {
+                throw DocumentAttachmentError.syncDisabled
+            }
+            return bytes
+        }
+    }
 
     struct ImageDownloadRequest: Sendable {
         let attachmentId: String

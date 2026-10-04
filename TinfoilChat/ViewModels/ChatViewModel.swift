@@ -3103,27 +3103,26 @@ class ChatViewModel: ObservableObject {
         }
 
         // Lazy-load full-res images for v1 synced chats
-        if AttachmentPayloadMerge.containsUnfetchedSyncedImages(chatToSelect.messages) {
+        if AttachmentPayloadMerge.containsUnfetchedSyncedImages(chatToSelect.messages)
+            || DocumentAttachmentPayload.containsOffloadedDocuments(chatToSelect.messages) {
             let chatId = chatToSelect.id
             selectedChatImageTask = Task { [weak self] in
                 let performanceToken = PerformanceInstrumentation.shared.begin(
                     .selectedChatImageHydration
                 )
                 defer { PerformanceInstrumentation.shared.end(performanceToken) }
-                let loadedImages: [String: String]
                 do {
-                    loadedImages = try await CloudStorageService.shared.loadImages(
-                        in: chatToSelect.messages
+                    _ = try await self?.hydratingSyncedAttachments(
+                        in: chatToSelect.messages,
+                        chatId: chatId
                     )
                 } catch is CancellationError {
                     return
                 } catch {
+                    guard self?.currentChat?.id == chatId else { return }
+                    self?.chatHydrationError = error.localizedDescription
                     return
                 }
-                guard !loadedImages.isEmpty, self?.currentChat?.id == chatId else { return }
-                // Merge loaded base64 data into the current messages by attachment ID,
-                // rather than replacing the whole array with a stale snapshot.
-                self?.applyLoadedImages(loadedImages, toChatId: chatId)
             }
         }
     }
@@ -3154,12 +3153,30 @@ class ChatViewModel: ObservableObject {
     /// chat's state so later sends do not download them again. Download
     /// failures leave the affected attachments unchanged; cancellation
     /// propagates so the caller's cleanup runs.
-    private func hydratingSyncedImages(
+    /// Document content is required: failures abort rather than omitting it.
+    private func hydratingSyncedAttachments(
         in messages: [Message],
         chatId: String
     ) async throws -> [Message] {
+        let userId = currentUserId
+        let generation = favoriteStorageGeneration
+        let hydrated = try await CloudStorageService.shared.hydrateDocuments(in: messages)
+        try Task.checkCancellation()
+        guard currentUserId == userId, generation == favoriteStorageGeneration else { throw CancellationError() }
+        if DocumentAttachmentPayload.containsOffloadedDocuments(messages) {
+            if let userId {
+                try await EncryptedFileStorage.cloud.recordDocumentPayloads(
+                    chatId: chatId, userId: userId, hydrated: hydrated
+                )
+                try Task.checkCancellation()
+                guard currentUserId == userId, generation == favoriteStorageGeneration else { throw CancellationError() }
+            }
+            updateHydratedMessages(for: chatId) { messages in
+                DocumentAttachmentPayload.merging(hydrated, into: messages)
+            }
+        }
         guard AttachmentPayloadMerge.containsUnfetchedSyncedImages(messages) else {
-            return messages
+            return hydrated
         }
         let loadedImages: [String: String]
         do {
@@ -3167,24 +3184,32 @@ class ChatViewModel: ObservableObject {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            return messages
+            return hydrated
         }
-        guard !loadedImages.isEmpty else { return messages }
+        guard currentUserId == userId, generation == favoriteStorageGeneration else { throw CancellationError() }
+        guard !loadedImages.isEmpty else { return hydrated }
+        // Merge loaded base64 data into the current messages by attachment ID,
+        // rather than replacing the whole array with a stale snapshot.
         applyLoadedImages(loadedImages, toChatId: chatId)
-        return AttachmentPayloadMerge.applyingImageBytes(loadedImages, to: messages)
+        return AttachmentPayloadMerge.applyingImageBytes(loadedImages, to: hydrated)
     }
 
     /// Merge fetched image base64 data into the current messages of a chat by attachment ID.
     /// This avoids replacing the entire messages array, preventing a stale snapshot from
     /// overwriting messages that may have been updated by sync while images were loading.
     private func applyLoadedImages(_ images: [String: String], toChatId chatId: String) {
-        if currentChat?.id == chatId {
-            var updated = currentChat!
-            updated.messages = AttachmentPayloadMerge.applyingImageBytes(images, to: updated.messages)
+        updateHydratedMessages(for: chatId) { messages in
+            AttachmentPayloadMerge.applyingImageBytes(images, to: messages)
+        }
+    }
+
+    private func updateHydratedMessages(for chatId: String, merge: ([Message]) -> [Message]) {
+        if var updated = currentChat, updated.id == chatId {
+            updated.messages = merge(updated.messages)
             currentChat = updated
         }
         if let idx = chats.firstIndex(where: { $0.id == chatId }) {
-            chats[idx].messages = AttachmentPayloadMerge.applyingImageBytes(images, to: chats[idx].messages)
+            chats[idx].messages = merge(chats[idx].messages)
         }
     }
 
@@ -3664,10 +3689,11 @@ class ChatViewModel: ObservableObject {
                 // Image bytes are fetched with the source's attachment keys,
                 // which the fork copy sheds, so hydrate before re-forking.
                 var hydratedSource = source
-                hydratedSource.messages = try await hydratingSyncedImages(
+                hydratedSource.messages = try await hydratingSyncedAttachments(
                     in: Array(source.messages.prefix(index + 1)),
                     chatId: source.id
                 )
+                guard currentUserId == userId else { throw CancellationError() }
                 var local = try hydratedSource.forked(throughMessageIndex: index, id: forkId)
                 local.isLocalOnly = true
                 try await chatLoadingService.saveChat(local, userId: userId, storage: .local)
@@ -4434,7 +4460,7 @@ class ChatViewModel: ObservableObject {
                 // Synced images may be present only as thumbnails until the
                 // bucket copy is fetched; a request built without their bytes
                 // would reach a vision model as a text-only prompt.
-                let conversationMessages = try await self.hydratingSyncedImages(
+                let conversationMessages = try await self.hydratingSyncedAttachments(
                     in: streamChat.messages,
                     chatId: streamChatId
                 )
@@ -4444,7 +4470,9 @@ class ChatViewModel: ObservableObject {
                 // Auto candidates: multimodal when the turn carries images, and
                 // tool-calling when web search or GenUI tools may be used.
                 let turnHasImages = conversationMessages.contains { message in
-                    message.attachments.contains { $0.type == .image }
+                    message.attachments.contains {
+                        $0.type == .image || !DocumentAttachmentPayload.scannedPages($0).isEmpty
+                    }
                 }
                 let webSearchEnabled = streamWebSearchEnabled
                 let modelSelection = AppConfig.shared.resolveModelSelection(
@@ -4512,7 +4540,7 @@ class ChatViewModel: ObservableObject {
                 }
 
                 // Use ChatQueryBuilder to create query with model-specific system prompt handling
-                let chatQuery = ChatQueryBuilder.buildQuery(
+                let chatQuery = try ChatQueryBuilder.buildQuery(
                     modelId: modelId,
                     systemPrompt: systemPrompt,
                     rules: processedRules,
@@ -5804,7 +5832,7 @@ class ChatViewModel: ObservableObject {
             let history = GenUIRetryContext.sanitizedHistory(
                 Array(sourceChat.messages.prefix(messageIndex + 1))
             )
-            let conversation = history + [
+            let conversation = try await hydratingSyncedAttachments(in: history, chatId: sourceChat.id) + [
                 Message(
                     role: .user,
                     content: GenUIRetryPrompt.user(
@@ -5814,7 +5842,9 @@ class ChatViewModel: ObservableObject {
                 )
             ]
             let turnHasImages = conversation.contains { message in
-                message.attachments.contains { $0.type == .image }
+                message.attachments.contains {
+                    $0.type == .image || !DocumentAttachmentPayload.scannedPages($0).isEmpty
+                }
             }
             let modelSelection = AppConfig.shared.resolveModelSelection(
                 sourceChat.modelType,
@@ -5828,7 +5858,7 @@ class ChatViewModel: ObservableObject {
                 schema: .jsonSchema(widget.schema),
                 strict: false
             ))
-            let query = ChatQueryBuilder.buildQuery(
+            let query = try ChatQueryBuilder.buildQuery(
                 modelId: representativeModel.modelName,
                 systemPrompt: GenUIRetryPrompt.system,
                 rules: "",

@@ -31,6 +31,7 @@ struct Attachment: Identifiable, Equatable {
     var base64: String?
     var thumbnailBase64: String?
     var textContent: String?
+    var pages: [DocumentPage]?
     var description: String?
     var fileSize: Int64
     var sharedImportRequestID: UUID?
@@ -51,6 +52,7 @@ struct Attachment: Identifiable, Equatable {
         base64: String? = nil,
         thumbnailBase64: String? = nil,
         textContent: String? = nil,
+        pages: [DocumentPage]? = nil,
         description: String? = nil,
         fileSize: Int64 = 0,
         sharedImportRequestID: UUID? = nil,
@@ -64,6 +66,7 @@ struct Attachment: Identifiable, Equatable {
         self.base64 = base64
         self.thumbnailBase64 = thumbnailBase64
         self.textContent = textContent
+        self.pages = pages
         self.description = description
         self.fileSize = fileSize
         self.sharedImportRequestID = sharedImportRequestID
@@ -77,7 +80,7 @@ struct Attachment: Identifiable, Equatable {
 extension Attachment: Codable {
     enum CodingKeys: String, CodingKey {
         case id, type, fileName, mimeType, base64, thumbnailBase64
-        case textContent, description, fileSize
+        case textContent, pages, description, fileSize
         case encryptionKey
         // Oldest chats serialized the per-attachment key under `key`.
         // Decode reads both; encode always writes `encryptionKey`.
@@ -93,6 +96,7 @@ extension Attachment: Codable {
         base64 = try container.decodeIfPresent(String.self, forKey: .base64)
         thumbnailBase64 = try container.decodeIfPresent(String.self, forKey: .thumbnailBase64)
         textContent = try container.decodeIfPresent(String.self, forKey: .textContent)
+        pages = try container.decodeIfPresent([DocumentPage].self, forKey: .pages)
         description = try container.decodeIfPresent(String.self, forKey: .description)
         fileSize = try container.decodeIfPresent(Int64.self, forKey: .fileSize) ?? 0
         // sharedImportRequestID is transient share-inbox bookkeeping —
@@ -114,6 +118,7 @@ extension Attachment: Codable {
         try container.encodeIfPresent(base64, forKey: .base64)
         try container.encodeIfPresent(thumbnailBase64, forKey: .thumbnailBase64)
         try container.encodeIfPresent(textContent, forKey: .textContent)
+        try container.encodeIfPresent(pages, forKey: .pages)
         try container.encodeIfPresent(description, forKey: .description)
         if fileSize > 0 {
             try container.encode(fileSize, forKey: .fileSize)

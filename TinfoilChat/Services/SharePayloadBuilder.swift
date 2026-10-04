@@ -43,6 +43,7 @@ struct ShareableChatData: Codable, Equatable {
         let thumbnailBase64: String?
         let encryptionKey: String?
         let textContent: String?
+        let pages: [DocumentPage]?
         let description: String?
     }
 
@@ -90,7 +91,8 @@ enum SharePayloadBuilder {
     private static func buildMessage(_ message: Message) -> ShareableChatData.ShareableMessage {
         let documentContent = message.attachments.compactMap { attachment -> String? in
             guard attachment.type == .document,
-                  let textContent = attachment.textContent,
+                  attachment.encryptionKey?.isEmpty != false,
+                  let textContent = DocumentAttachmentPayload.promptText(attachment),
                   !textContent.isEmpty else { return nil }
             return "Document title: \(attachment.fileName)\nDocument contents:\n\(textContent)"
         }
@@ -107,7 +109,8 @@ enum SharePayloadBuilder {
                 mimeType: $0.mimeType,
                 thumbnailBase64: $0.thumbnailBase64,
                 encryptionKey: $0.encryptionKey,
-                textContent: $0.textContent,
+                textContent: $0.type == .document && $0.encryptionKey?.isEmpty == false ? nil : $0.textContent,
+                pages: $0.type == .document && $0.encryptionKey?.isEmpty == false ? nil : $0.pages,
                 description: $0.description
             )
         }

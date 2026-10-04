@@ -127,8 +127,8 @@ struct AttachmentRewriteTests {
         #expect(target.messages[0].attachments[1].encryptionKey == nil)
     }
 
-    @Test("does not claim to re-upload documents when only image uploads are supported")
-    func preservesKeysForDocuments() {
+    @Test("can re-upload a purged document when its payload is local")
+    func forgetsKeysForDocumentsWithLocalContent() {
         let document = Attachment(
             id: "srv-document",
             type: .document,
@@ -142,8 +142,8 @@ struct AttachmentRewriteTests {
 
         let reset = EncryptedFileStorage.forgetServerAttachments([document.id], in: &target)
 
-        #expect(reset.isEmpty)
-        #expect(target.messages[0].attachments[0].encryptionKey == "k-document")
+        #expect(reset == [document.id])
+        #expect(target.messages[0].attachments[0].encryptionKey == nil)
         #expect(target.messages[0].attachments[0].textContent == "Document text")
     }
 }
