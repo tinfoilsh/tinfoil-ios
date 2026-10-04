@@ -65,6 +65,37 @@ struct AttachmentRewriteTests {
         #expect(target.messages[0].attachments[0].id == "local-a")
     }
 
+    @Test("forgets server identity only for attachments it can re-upload")
+    func forgetsOnlyReuploadable() {
+        var target = chat([
+            image(id: "srv-full", encryptionKey: "k-full"),
+            Attachment(
+                id: "srv-thumb-only",
+                type: .image,
+                fileName: "thumb.png",
+                mimeType: "image/png",
+                base64: nil,
+                thumbnailBase64: "dGh1bWI=",
+                fileSize: 3,
+                encryptionKey: "k-thumb",
+                processingState: .completed
+            ),
+            image(id: "srv-untouched", encryptionKey: "k-other"),
+        ])
+
+        let reset = EncryptedFileStorage.forgetServerAttachments(
+            ["srv-full", "srv-thumb-only"],
+            in: &target
+        )
+
+        #expect(reset == ["srv-full"])
+        let byId = Dictionary(uniqueKeysWithValues: target.messages[0].attachments.map { ($0.id, $0) })
+        #expect(byId["srv-full"]?.encryptionKey == nil)
+        #expect(byId["srv-full"]?.base64 == "AQID")
+        #expect(byId["srv-thumb-only"]?.encryptionKey == "k-thumb")
+        #expect(byId["srv-untouched"]?.encryptionKey == "k-other")
+    }
+
     @Test("tolerates duplicate client ids from the server, first wins")
     func duplicateClientIds() {
         var target = chat([image(id: "local-a")])
@@ -77,5 +108,42 @@ struct AttachmentRewriteTests {
         )
         #expect(target.messages[0].attachments[0].id == "srv-first")
         #expect(target.messages[0].attachments[0].encryptionKey == "k1")
+    }
+
+    @Test("does not forget server keys when image bytes cannot be decoded", arguments: ["not base64!", "AQ"])
+    func preservesKeysForInvalidImageBytes(base64: String) {
+        var attachment = image(id: "srv-invalid", encryptionKey: "k-invalid")
+        attachment.base64 = base64
+        var target = chat([attachment, image(id: "srv-valid", encryptionKey: "k-valid")])
+
+        let reset = EncryptedFileStorage.forgetServerAttachments(
+            ["srv-invalid", "srv-valid"],
+            in: &target
+        )
+
+        #expect(reset == ["srv-valid"])
+        #expect(target.messages[0].attachments[0].encryptionKey == "k-invalid")
+        #expect(target.messages[0].attachments[0].base64 == base64)
+        #expect(target.messages[0].attachments[1].encryptionKey == nil)
+    }
+
+    @Test("does not claim to re-upload documents when only image uploads are supported")
+    func preservesKeysForDocuments() {
+        let document = Attachment(
+            id: "srv-document",
+            type: .document,
+            fileName: "document.txt",
+            mimeType: "text/plain",
+            textContent: "Document text",
+            encryptionKey: "k-document",
+            processingState: .completed
+        )
+        var target = chat([document])
+
+        let reset = EncryptedFileStorage.forgetServerAttachments([document.id], in: &target)
+
+        #expect(reset.isEmpty)
+        #expect(target.messages[0].attachments[0].encryptionKey == "k-document")
+        #expect(target.messages[0].attachments[0].textContent == "Document text")
     }
 }

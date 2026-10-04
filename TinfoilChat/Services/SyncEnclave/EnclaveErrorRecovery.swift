@@ -28,8 +28,8 @@ enum EnclaveErrorKind {
     /// NOT_FOUND. Server cannot decide; surface to the user.
     case userDecision
     /// FORBIDDEN / IDEMPOTENCY_CONFLICT / UNKNOWN_KEY /
-    /// ATTESTATION_FAILED / PRECONDITION_REQUIRED / unmapped errors.
-    /// Stop trying.
+    /// ATTESTATION_FAILED / PRECONDITION_REQUIRED / PAYLOAD_TOO_LARGE /
+    /// unmapped errors. Stop trying.
     case terminal
 }
 
@@ -53,6 +53,9 @@ enum EnclaveErrorCode: String, CaseIterable {
     case notFound                  = "NOT_FOUND"
     case preconditionRequired      = "PRECONDITION_REQUIRED"
     case syncProtocolUpgradeRequired = "SYNC_PROTOCOL_UPGRADE_REQUIRED"
+    case payloadTooLarge           = "PAYLOAD_TOO_LARGE"
+    case missingAttachment         = "MISSING_ATTACHMENT"
+    case attachmentPurgeInProgress = "ATTACHMENT_PURGE_IN_PROGRESS"
 }
 
 struct EnclaveErrorClassification: Equatable {
@@ -60,6 +63,9 @@ struct EnclaveErrorClassification: Equatable {
     let code: EnclaveErrorCode?
     let status: Int?
     let message: String
+    /// MISSING_ATTACHMENT only: the attachment ids the server no
+    /// longer holds, from the error's `missing_attachments` detail.
+    var missingAttachmentIds: [String] = []
 }
 
 enum RecoveryAction: Equatable {
@@ -72,6 +78,12 @@ enum RecoveryAction: Equatable {
     case triggerRecoveryWizard(reason: WizardReason)
     case blockAllSync(reason: BlockReason)
     case abort(reason: AbortReason)
+    /// The server purged attachment blobs this chat still references
+    /// (another device dropped them, the grace window passed, this
+    /// device re-added them from an older copy). The bytes are still
+    /// local: forget their server ids/keys so the next logical write
+    /// re-sends them, then retry as a NEW logical write.
+    case reuploadAttachmentsAndRetry(attachmentIds: [String])
 
     enum RetryReason: String, Equatable {
         case network        = "NETWORK"
@@ -93,6 +105,7 @@ enum RecoveryAction: Equatable {
         case idempotencyConflict  = "IDEMPOTENCY_CONFLICT"
         case forbidden            = "FORBIDDEN"
         case preconditionRequired = "PRECONDITION_REQUIRED"
+        case payloadTooLarge      = "PAYLOAD_TOO_LARGE"
         case unknown              = "UNKNOWN"
         case authenticationRequired = "AUTHENTICATION_REQUIRED"
     }
@@ -161,11 +174,22 @@ enum EnclaveErrorRecovery {
             switch code {
             case .staleKey, .legacyBlobNotMigrated:
                 return EnclaveErrorClassification(kind: .retryableRefresh, code: code, status: status, message: message)
+            case .missingAttachment:
+                return EnclaveErrorClassification(
+                    kind: .retryableRefresh,
+                    code: code,
+                    status: status,
+                    message: message,
+                    missingAttachmentIds: Self.missingAttachmentIds(err.details)
+                )
             case .syncConflict, .staleBlob, .existingDataUnderOtherKey, .notFound:
                 return EnclaveErrorClassification(kind: .userDecision, code: code, status: status, message: message)
-            case .idempotencyConflict, .unknownKey, .forbidden, .attestationFailed, .preconditionRequired, .authActionRequired, .syncProtocolUpgradeRequired:
+            case .idempotencyConflict, .unknownKey, .forbidden, .attestationFailed, .preconditionRequired, .authActionRequired, .syncProtocolUpgradeRequired, .payloadTooLarge:
                 return EnclaveErrorClassification(kind: .terminal, code: code, status: status, message: message)
-            case .auth, .network:
+            case .auth, .network, .attachmentPurgeInProgress:
+                // ATTACHMENT_PURGE_IN_PROGRESS: another enclave holds a
+                // short lease on this id's previous blob; the same upload
+                // succeeds once it settles.
                 return EnclaveErrorClassification(kind: .retryableTransient, code: code, status: status, message: message)
             }
         }
@@ -189,11 +213,26 @@ enum EnclaveErrorRecovery {
                 // is updated; retrying can never heal it.
                 return EnclaveErrorClassification(kind: .terminal, code: .syncProtocolUpgradeRequired, status: status, message: message)
             }
+            if status == 413 {
+                return EnclaveErrorClassification(kind: .terminal, code: .payloadTooLarge, status: status, message: message)
+            }
         }
         return EnclaveErrorClassification(kind: .terminal, code: nil, status: status, message: message)
     }
 
+    private static func missingAttachmentIds(_ details: [String: AnyCodable]?) -> [String] {
+        guard let raw = details?["missing_attachments"]?.value as? [Any] else { return [] }
+        return raw.compactMap { $0 as? String }
+    }
+
     private static func actionFor(_ c: EnclaveErrorClassification) -> RecoveryAction {
+        if c.code == .missingAttachment {
+            // Without ids there is nothing to re-upload and a retry
+            // would just reproduce the same rejection.
+            return c.missingAttachmentIds.isEmpty
+                ? .abort(reason: .unknown)
+                : .reuploadAttachmentsAndRetry(attachmentIds: c.missingAttachmentIds)
+        }
         if let code = c.code {
             return action(for: code)
         }
@@ -244,6 +283,16 @@ enum EnclaveErrorRecovery {
             // structural client bug, not server state — retrying the
             // same request can never heal it.
             return .abort(reason: .preconditionRequired)
+        case .payloadTooLarge:
+            // The content itself is over the enclave's plaintext cap;
+            // retrying the same bytes can never succeed.
+            return .abort(reason: .payloadTooLarge)
+        case .attachmentPurgeInProgress:
+            return .retry(reason: .transient5xx)
+        case .missingAttachment:
+            // Dispatched in actionFor with the ids from the
+            // classification; unreachable here.
+            return .abort(reason: .unknown)
         }
     }
 

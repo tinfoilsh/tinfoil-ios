@@ -59,7 +59,7 @@ enum DeleteIntentPlanner {
             return true
         case .abort(let reason):
             return reason == .authenticationRequired || reason == .forbidden
-        case .surfaceConflict, .surfaceNotFound:
+        case .surfaceConflict, .surfaceNotFound, .reuploadAttachmentsAndRetry:
             return false
         }
     }

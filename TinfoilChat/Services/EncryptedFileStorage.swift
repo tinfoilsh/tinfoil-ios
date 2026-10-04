@@ -469,6 +469,53 @@ actor EncryptedFileStorage {
         try await performSaveChat(chat, userId: userId)
     }
 
+    /// Forget the server identity of attachments whose blobs the server
+    /// no longer holds, so the next upload re-sends their bytes. Only
+    /// attachments whose bytes are still on this device are reset: an
+    /// image known only by its thumbnail cannot be re-uploaded, and
+    /// keeping its stale key makes that visible to the caller. Returns
+    /// the ids that were reset. Sync bookkeeping is untouched; the chat
+    /// is already dirty because the push that revealed the gap failed.
+    func forgetServerAttachments(
+        chatId: String,
+        userId: String,
+        attachmentIds: [String]
+    ) async throws -> [String] {
+        guard !attachmentIds.isEmpty else { return [] }
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+        guard var chat = try await loadChatUnlocked(chatId: chatId, userId: userId) else {
+            return []
+        }
+        let reset = Self.forgetServerAttachments(attachmentIds, in: &chat)
+        if !reset.isEmpty {
+            try await performSaveChat(chat, userId: userId)
+        }
+        return reset
+    }
+
+    static func forgetServerAttachments(_ attachmentIds: [String], in chat: inout Chat) -> [String] {
+        let wanted = Set(attachmentIds)
+        var reset: [String] = []
+        for messageIndex in chat.messages.indices {
+            for attachmentIndex in chat.messages[messageIndex].attachments.indices {
+                let attachment = chat.messages[messageIndex].attachments[attachmentIndex]
+                guard wanted.contains(attachment.id) else { continue }
+                let canReupload: Bool
+                switch attachment.type {
+                case .image:
+                    canReupload = attachment.base64.flatMap { Data(base64Encoded: $0) } != nil
+                case .document:
+                    canReupload = false
+                }
+                guard canReupload else { continue }
+                chat.messages[messageIndex].attachments[attachmentIndex].encryptionKey = nil
+                reset.append(attachment.id)
+            }
+        }
+        return reset
+    }
+
     /// Rewrite attachments by client id. Returns whether anything changed.
     /// Rewrites come from a server response, so duplicate client ids are
     /// tolerated (first wins) rather than trapping.
