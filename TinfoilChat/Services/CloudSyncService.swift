@@ -796,7 +796,15 @@ class CloudSyncService: ObservableObject {
                 try await ensureChatUploadIsAllowed(chatId: chat.id, userId: userId)
                 let result = try await cloudStorage.uploadChat(
                     uploadChat,
-                    idempotencyKey: newSyncEnclaveIdempotencyKey()
+                    idempotencyKey: newSyncEnclaveIdempotencyKey(),
+                    onAttachmentUploaded: { [weak self] rewrite in
+                        try await self?.persistAttachmentRewrite(
+                            rewrite,
+                            chatId: chat.id,
+                            userId: userId,
+                            generation: generation
+                        )
+                    }
                 )
                 guard generation == accountGeneration else {
                     throw SyncEnclaveError(message: "account changed during cloud backup")
@@ -2575,7 +2583,15 @@ class CloudSyncService: ObservableObject {
         try await ensureChatUploadIsAllowed(chatId: chat.id, userId: account.userId)
         let result = try await cloudStorage.uploadChat(
             chat,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            onAttachmentUploaded: { [weak self] rewrite in
+                try await self?.persistAttachmentRewrite(
+                    rewrite,
+                    chatId: chat.id,
+                    userId: account.userId,
+                    generation: account.generation
+                )
+            }
         )
         guard await isCurrentUploadAccount(account) else {
             throw CancellationError()
@@ -2604,6 +2620,29 @@ class CloudSyncService: ObservableObject {
         if fullySynced {
             SyncHealthStore.shared.reportChatSynced(chat.id)
         }
+    }
+
+    /// Write one enclave-minted attachment id/key to the local row the
+    /// moment the bytes are stored, before the chat push. A push that
+    /// fails afterwards no longer causes the next upload to re-send
+    /// these bytes.
+    private func persistAttachmentRewrite(
+        _ rewrite: CloudStorageService.AttachmentRewrite,
+        chatId: String,
+        userId: String,
+        generation: Int
+    ) async throws {
+        guard generation == accountGeneration else { throw CancellationError() }
+        try await EncryptedFileStorage.cloud.recordAttachmentRewrites(
+            chatId: chatId,
+            userId: userId,
+            rewrites: [(
+                clientId: rewrite.clientId,
+                serverId: rewrite.serverId,
+                encryptionKey: rewrite.encryptionKey
+            )]
+        )
+        guard generation == accountGeneration else { throw CancellationError() }
     }
 
     private func stampClockVersionForUpload(_ chat: StoredChat) -> StoredChat {

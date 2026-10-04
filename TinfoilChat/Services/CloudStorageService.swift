@@ -110,13 +110,21 @@ class CloudStorageService: ObservableObject {
     /// (client-minted id → enclave-minted id + per-attachment key) so
     /// the caller can persist them against the freshest local copy
     /// without mutating the chat object passed in.
+    /// Invoked once per attachment, right after the enclave has stored
+    /// its bytes and before the next attachment or the chat push.
+    typealias AttachmentUploadedHandler = @Sendable (AttachmentRewrite) async throws -> Void
+
     @discardableResult
     func uploadChat(
         _ chat: StoredChat,
-        idempotencyKey: String
+        idempotencyKey: String,
+        onAttachmentUploaded: AttachmentUploadedHandler? = nil
     ) async throws -> UploadChatResult {
         var chatToUpload = chat
-        let rewrites = try await encryptAndUploadAttachments(&chatToUpload)
+        let rewrites = try await encryptAndUploadAttachments(
+            &chatToUpload,
+            onAttachmentUploaded: onAttachmentUploaded
+        )
         stripBase64FromMessages(&chatToUpload.messages)
 
         let includesProjectIntent = ProjectMetadataUploadPolicy.shouldInclude(
@@ -192,7 +200,8 @@ class CloudStorageService: ObservableObject {
     }()
 
     private func encryptAndUploadAttachments(
-        _ chat: inout StoredChat
+        _ chat: inout StoredChat,
+        onAttachmentUploaded: AttachmentUploadedHandler?
     ) async throws -> [AttachmentRewrite] {
         var rewrites: [AttachmentRewrite] = []
         for msgIdx in chat.messages.indices {
@@ -220,13 +229,16 @@ class CloudStorageService: ObservableObject {
                         idempotencyKey: attIdemKey
                     )
                 )
-                rewrites.append(
-                    AttachmentRewrite(
-                        clientId: att.id,
-                        serverId: result.id,
-                        encryptionKey: result.attKey
-                    )
+                let rewrite = AttachmentRewrite(
+                    clientId: att.id,
+                    serverId: result.id,
+                    encryptionKey: result.attKey
                 )
+                // Persist before moving on so a failure on a later
+                // attachment, or on the push itself, does not forget
+                // this one. The next upload then skips it.
+                try await onAttachmentUploaded?(rewrite)
+                rewrites.append(rewrite)
                 chat.messages[msgIdx].attachments[attIdx].id = result.id
                 chat.messages[msgIdx].attachments[attIdx].encryptionKey = result.attKey
             }

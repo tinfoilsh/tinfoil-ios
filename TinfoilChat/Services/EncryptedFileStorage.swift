@@ -448,6 +448,70 @@ actor EncryptedFileStorage {
         return .applied
     }
 
+    /// Persist enclave-minted attachment ids and keys as soon as the
+    /// bytes are stored, before the chat push that follows. Only the
+    /// attachment references change: `updatedAt`, sync metadata and the
+    /// edit clock are untouched, so `finalizeUploadIfFresh` still sees
+    /// the row as unedited. A push that then fails leaves the next
+    /// upload seeing these attachments as already uploaded.
+    func recordAttachmentRewrites(
+        chatId: String,
+        userId: String,
+        rewrites: [(clientId: String, serverId: String, encryptionKey: String)]
+    ) async throws {
+        guard !rewrites.isEmpty else { return }
+        await acquireWriteLock()
+        defer { releaseWriteLock() }
+        guard var chat = try await loadChatUnlocked(chatId: chatId, userId: userId) else {
+            return
+        }
+        guard Self.applyAttachmentRewrites(rewrites, to: &chat) else { return }
+        try await performSaveChat(chat, userId: userId)
+    }
+
+    /// Rewrite attachments by client id. Returns whether anything changed.
+    /// Rewrites come from a server response, so duplicate client ids are
+    /// tolerated (first wins) rather than trapping.
+    @discardableResult
+    static func applyAttachmentRewrites(
+        _ rewrites: [(clientId: String, serverId: String, encryptionKey: String)],
+        to chat: inout Chat
+    ) -> Bool {
+        let rewritesByClientId = Dictionary(
+            rewrites.map {
+                ($0.clientId, (serverId: $0.serverId, encryptionKey: $0.encryptionKey))
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var didChange = false
+        for messageIndex in chat.messages.indices {
+            for attachmentIndex in chat.messages[messageIndex].attachments.indices {
+                let clientId = chat.messages[messageIndex].attachments[attachmentIndex].id
+                guard let rewrite = rewritesByClientId[clientId] else { continue }
+                chat.messages[messageIndex].attachments[attachmentIndex].id = rewrite.serverId
+                chat.messages[messageIndex].attachments[attachmentIndex].encryptionKey =
+                    rewrite.encryptionKey
+                didChange = true
+            }
+        }
+        return didChange
+    }
+
+    private func loadChatUnlocked(chatId: String, userId: String) async throws -> Chat? {
+        let encPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: false)
+        let rawPath = try chatFilePath(chatId: chatId, userId: userId, isCorrupted: true)
+        let hasEncryptedFile = fileManager.fileExists(atPath: encPath.path)
+        guard hasEncryptedFile || fileManager.fileExists(atPath: rawPath.path),
+              var chat = try await loadChatFromFile(
+                  hasEncryptedFile ? encPath : rawPath,
+                  isRaw: !hasEncryptedFile
+              ) else {
+            return nil
+        }
+        await overlaySyncSidecar(&chat, userId: userId)
+        return chat
+    }
+
     func finalizeUploadIfFresh(
         chatId: String,
         userId: String,
@@ -499,26 +563,10 @@ actor EncryptedFileStorage {
             }
             await overlaySyncSidecar(&chat, userId: userId)
 
-            // The rewrites come from a server response, so tolerate
-            // duplicate client ids instead of trapping on them.
-            let rewritesByClientId = Dictionary(
-                attachmentRewrites.map {
-                    ($0.clientId, (serverId: $0.serverId, encryptionKey: $0.encryptionKey))
-                },
-                uniquingKeysWith: { first, _ in first }
-            )
-            var didChangeChat = false
-            for messageIndex in chat.messages.indices {
-                for attachmentIndex in chat.messages[messageIndex].attachments.indices {
-                    let clientId = chat.messages[messageIndex].attachments[attachmentIndex].id
-                    guard let rewrite = rewritesByClientId[clientId] else { continue }
-                    chat.messages[messageIndex].attachments[attachmentIndex].id =
-                        rewrite.serverId
-                    chat.messages[messageIndex].attachments[attachmentIndex].encryptionKey =
-                        rewrite.encryptionKey
-                    didChangeChat = true
-                }
-            }
+            // Usually a no-op: the rewrites were already recorded as
+            // each attachment landed. This covers callers that did not
+            // persist them incrementally.
+            var didChangeChat = Self.applyAttachmentRewrites(attachmentRewrites, to: &chat)
             let finalizedProjectFlag = ProjectMetadataUploadPolicy.flagAfterUpload(
                 current: chat.projectLocallyModified,
                 editedDuringUpload: editedDuringUpload
