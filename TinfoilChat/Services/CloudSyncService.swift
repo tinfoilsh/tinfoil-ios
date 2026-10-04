@@ -835,23 +835,21 @@ class CloudSyncService: ObservableObject {
                     SyncHealthStore.shared.reportChatSynced(chat.id)
                 }
                 return
-            } catch let error as SyncEnclaveError
-                where EnclaveErrorRecovery.decide(error).action.isReuploadAttachments {
-                // Callers of this one-shot path await the outcome, so
-                // heal in place: forget the dead server keys and let the
-                // loop re-read the chat and upload again under a new key.
-                guard case .reuploadAttachmentsAndRetry(let attachmentIds) =
-                        EnclaveErrorRecovery.decide(error).action else { throw error }
-                try await forgetPurgedAttachmentsOrFail(
-                    chatId: chatId,
-                    userId: userId,
-                    generation: generation,
-                    attachmentIds: attachmentIds,
-                    error: error
-                )
-                continue
-            } catch let error as SyncEnclaveError
-                where EnclaveErrorRecovery.isVersionConflict(error) {
+            } catch let error as SyncEnclaveError {
+                let decision = EnclaveErrorRecovery.decide(error)
+                if case .reuploadAttachmentsAndRetry(let attachmentIds) = decision.action {
+                    // Callers of this one-shot path await the outcome, so
+                    // heal in place: forget the dead server keys and let the
+                    // loop re-read the chat and upload again under a new key.
+                    guard try await forgetPurgedAttachments(
+                        chatId: chatId,
+                        userId: userId,
+                        generation: generation,
+                        attachmentIds: attachmentIds
+                    ) else { throw error }
+                    continue
+                }
+                guard EnclaveErrorRecovery.isVersionConflict(error) else { throw error }
                 guard let remote = try await cloudStorage.downloadChat(chatId),
                       let remoteChat = await convertStoredChat(remote)
                 else {
@@ -1192,13 +1190,12 @@ class CloudSyncService: ObservableObject {
         case .retry:
             throw error
         case .reuploadAttachmentsAndRetry(let attachmentIds):
-            try await forgetPurgedAttachmentsOrFail(
+            guard try await forgetPurgedAttachments(
                 chatId: chatId,
                 userId: userId,
                 generation: generation,
-                attachmentIds: attachmentIds,
-                error: error
-            )
+                attachmentIds: attachmentIds
+            ) else { return false }
             // Re-enqueue as a new logical write; the coalescer mints a
             // fresh idempotency key and the upload re-sends the bytes.
             // Awaited so the enqueue lands before the current worker
@@ -1264,14 +1261,13 @@ class CloudSyncService: ObservableObject {
     /// Drop the server identity of the named attachments so the next
     /// upload re-sends their bytes. If any cannot be re-sent from this
     /// device (an image held only as a thumbnail) the chat is reported
-    /// as failed and the original error rethrown.
-    private func forgetPurgedAttachmentsOrFail(
+    /// as failed and recovery returns false.
+    private func forgetPurgedAttachments(
         chatId: String,
         userId: String,
         generation: Int,
-        attachmentIds: [String],
-        error: Error
-    ) async throws {
+        attachmentIds: [String]
+    ) async throws -> Bool {
         guard generation == accountGeneration else { throw CancellationError() }
         let reset = try await EncryptedFileStorage.cloud.forgetServerAttachments(
             chatId: chatId,
@@ -1279,13 +1275,14 @@ class CloudSyncService: ObservableObject {
             attachmentIds: attachmentIds
         )
         guard generation == accountGeneration else { throw CancellationError() }
-        if reset.count < attachmentIds.count {
+        guard Set(reset).isSuperset(of: attachmentIds) else {
             SyncHealthStore.shared.reportChatSyncFailed(
                 chatId,
                 message: Self.purgedAttachmentsMessage
             )
-            throw error
+            return false
         }
+        return true
     }
 
     static let purgedAttachmentsMessage =

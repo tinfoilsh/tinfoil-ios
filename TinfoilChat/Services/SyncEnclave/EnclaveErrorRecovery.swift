@@ -111,13 +111,6 @@ enum RecoveryAction: Equatable {
     }
 }
 
-extension RecoveryAction {
-    var isReuploadAttachments: Bool {
-        if case .reuploadAttachmentsAndRetry = self { return true }
-        return false
-    }
-}
-
 struct RecoveryDecision: Equatable {
     let action: RecoveryAction
     let classification: EnclaveErrorClassification

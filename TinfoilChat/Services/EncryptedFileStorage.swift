@@ -504,9 +504,9 @@ actor EncryptedFileStorage {
                 let canReupload: Bool
                 switch attachment.type {
                 case .image:
-                    canReupload = attachment.base64 != nil
+                    canReupload = attachment.base64.flatMap { Data(base64Encoded: $0) } != nil
                 case .document:
-                    canReupload = attachment.textContent != nil
+                    canReupload = false
                 }
                 guard canReupload else { continue }
                 chat.messages[messageIndex].attachments[attachmentIndex].encryptionKey = nil
