@@ -4,7 +4,7 @@
 //
 //  Fetches OpenGraph metadata and favicons
 //  for a URL from the `opengraph-metadata.tinfoil.sh` enclave through an
-//  attested `SecureClient`. Mirrors the webapp's `metadata-client.ts` so
+//  attested `EnclaveHandle`. Mirrors the webapp's `metadata-client.ts` so
 //  the iOS link-preview widget surfaces the same rich card as the web build.
 //
 //  In-flight requests for the same URL are deduplicated so multiple
@@ -56,39 +56,22 @@ actor LinkMetadataService {
     private var faviconCacheOrder: [String] = []
     private var faviconInFlight: [String: Task<Data, Error>] = [:]
 
-    private var client: SecureClient?
-    private var verificationTask: Task<SecureClient, Error>?
+    private var handle: EnclaveHandle?
 
     private init() {}
 
-    private func getClient() async throws -> SecureClient {
-        if let client = client {
-            return client
+    /// The metadata enclave's handle, which verifies on first use and again
+    /// whenever its attestation expires
+    private func enclaveHandle() throws -> EnclaveHandle {
+        if let handle {
+            return handle
         }
-
-        if let existingTask = verificationTask {
-            return try await existingTask.value
-        }
-
-        let task = Task<SecureClient, Error> {
-            let newClient = SecureClient(
-                githubRepo: Constants.Metadata.configRepo,
-                enclaveURL: Constants.Metadata.enclaveURL
-            )
-            _ = try await newClient.verify()
-            return newClient
-        }
-        verificationTask = task
-
-        do {
-            let verifiedClient = try await task.value
-            client = verifiedClient
-            verificationTask = nil
-            return verifiedClient
-        } catch {
-            verificationTask = nil
-            throw error
-        }
+        let created = try EnclaveHandle.enclave(
+            at: Constants.Metadata.enclaveURL,
+            repo: Constants.Metadata.configRepo
+        )
+        handle = created
+        return created
     }
 
     func metadata(for url: String) async throws -> LinkMetadata {
@@ -147,10 +130,10 @@ actor LinkMetadataService {
     }
 
     private func fetch(url: String) async throws -> LinkMetadata {
-        let client = try await getClient()
+        let enclave = try enclaveHandle()
         let body = try JSONEncoder().encode(MetadataRequest(url: url))
 
-        let response = try await client.post(
+        let (data, response) = try await enclave.post(
             url: "\(Constants.Metadata.enclaveURL)/metadata",
             headers: ["Content-Type": "application/json"],
             body: body
@@ -161,7 +144,7 @@ actor LinkMetadataService {
         }
 
         do {
-            let decoded = try JSONDecoder().decode(MetadataResponse.self, from: response.body)
+            let decoded = try JSONDecoder().decode(MetadataResponse.self, from: data)
             return LinkMetadata(
                 url: decoded.url,
                 title: decoded.title,
@@ -176,9 +159,9 @@ actor LinkMetadataService {
     }
 
     private func fetchFavicon(url: String) async throws -> Data {
-        let client = try await getClient()
+        let enclave = try enclaveHandle()
         let body = try JSONEncoder().encode(MetadataRequest(url: url))
-        let response = try await client.post(
+        let (data, response) = try await enclave.post(
             url: "\(Constants.Metadata.enclaveURL)/favicon",
             headers: ["Content-Type": "application/json"],
             body: body
@@ -188,7 +171,7 @@ actor LinkMetadataService {
             throw LinkMetadataError.badStatus(response.statusCode)
         }
         do {
-            return try JSONDecoder().decode(FaviconResponse.self, from: response.body).favicon_bytes
+            return try JSONDecoder().decode(FaviconResponse.self, from: data).favicon_bytes
         } catch {
             throw LinkMetadataError.decodingFailed
         }

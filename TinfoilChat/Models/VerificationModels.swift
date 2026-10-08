@@ -7,7 +7,6 @@
 
 
 import Foundation
-import TinfoilAI
 
 /// UI-specific verification status enum
 enum VerifierStatus {
@@ -16,19 +15,3 @@ enum VerifierStatus {
     case success
     case error
 }
-
-/// Extension to convert from VerificationStepState.Status to UI status
-extension VerificationStepState.Status {
-    var uiStatus: VerifierStatus {
-        switch self {
-        case .pending:
-            return .pending
-        case .success:
-            return .success
-        case .failed:
-            return .error
-        case .skipped:
-            return .pending
-        }
-    }
-} 

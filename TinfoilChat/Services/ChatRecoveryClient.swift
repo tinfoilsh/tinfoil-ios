@@ -96,7 +96,10 @@ enum ChatRecoveryKeyConfiguration {
 actor ChatRecoveryClient {
     static let shared = ChatRecoveryClient()
 
-    private var verifiedEndpoint: (enclaveURL: String, publicKey: Data)?
+    /// Verifies the router requests are sealed to. Dropped when its
+    /// verification fails or the router rejects its key, so the next request
+    /// discovers and verifies a router afresh.
+    private var handle: EnclaveHandle?
     private var endpointGeneration: UInt64 = 0
 
     /// Session for the live completion stream. The shared session's 60s
@@ -177,9 +180,8 @@ actor ChatRecoveryClient {
                     diagnostic.append(chunk)
                 }
                 if ChatRecoveryKeyConfiguration.isMismatch(response: response.response, body: diagnostic) {
-                    if verifiedEndpoint?.enclaveURL == endpoint.enclaveURL,
-                       verifiedEndpoint?.publicKey == endpoint.publicKey {
-                        verifiedEndpoint = nil
+                    if handle === endpoint.handle {
+                        handle = nil
                         endpointGeneration &+= 1
                     }
                     return try await start(
@@ -305,25 +307,32 @@ actor ChatRecoveryClient {
         }
     }
 
-    private func endpoint() async throws -> (enclaveURL: String, publicKey: Data) {
-        if let verifiedEndpoint {
-            return verifiedEndpoint
-        }
+    /// The router to seal requests to, verified again once its attestation
+    /// stops authorizing new requests, and the handle that verified it
+    private func endpoint() async throws -> (enclaveURL: String, publicKey: Data, handle: EnclaveHandle) {
         let generation = endpointGeneration
-        let verifier = SecureClient()
-        let groundTruth = try await verifier.verify()
+        let handle = try self.handle ?? EnclaveHandle()
+        self.handle = handle
+        let verification: Verification
+        do {
+            verification = try await handle.verifyIfNeeded()
+        } catch {
+            // The handle stays with the router it first picked, which may be
+            // gone, so drop it and let the next request discover another.
+            if !(error is CancellationError), self.handle === handle {
+                self.handle = nil
+            }
+            throw error
+        }
         try Task.checkCancellation()
-        guard let url = verifier.verifiedEnclaveURL,
-              let keyHex = groundTruth.hpkePublicKey,
+        guard generation == endpointGeneration else { return try await self.endpoint() }
+        guard let keyHex = verification.hpkePublicKey,
               let publicKey = Data(lowercaseHex: keyHex),
               publicKey.count == Constants.ChatRecovery.cekBytes
         else {
             throw ChatRecoveryClientError.unavailable
         }
-        let endpoint = (enclaveURL: url, publicKey: publicKey)
-        guard generation == endpointGeneration else { return try await self.endpoint() }
-        verifiedEndpoint = endpoint
-        return endpoint
+        return (enclaveURL: "https://\(verification.enclaveHost)", publicKey: publicKey, handle: handle)
     }
 
     private func promptCacheSecret(userId: String) throws -> String {
