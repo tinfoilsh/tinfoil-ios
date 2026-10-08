@@ -11,7 +11,6 @@ import Foundation
 /// UI-specific verification status enum
 enum VerifierStatus {
     case pending
-    case loading
     case success
     case error
 }

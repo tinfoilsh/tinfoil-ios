@@ -383,6 +383,9 @@ class ChatViewModel: ObservableObject {
     @Published var verification = VerificationInfo()
     /// What the chat enclave's latest successful verification proved
     @Published var enclaveVerification: Verification? = nil
+    /// Identifies the latest client setup, so verification results from a
+    /// replaced client's handle are ignored
+    private var clientSetupID = UUID()
     
     // Cloud sync properties
     @Published var isSyncing: Bool = false
@@ -1732,6 +1735,8 @@ class ChatViewModel: ObservableObject {
         isClientInitializing = true
         verification.error = nil
         verification.isVerifying = true
+        let setupID = UUID()
+        clientSetupID = setupID
 
         client = nil  // Just nil out the old client
 
@@ -1750,7 +1755,7 @@ class ChatViewModel: ObservableObject {
                 let handle = try EnclaveHandle(
                     onVerificationResult: { [weak self] result in
                         DispatchQueue.main.async {
-                            guard let self = self else { return }
+                            guard let self = self, self.clientSetupID == setupID else { return }
 
                             self.verification.isVerifying = false
                             switch result {

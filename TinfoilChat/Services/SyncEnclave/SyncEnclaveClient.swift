@@ -91,6 +91,8 @@ actor SyncEnclaveClient {
     private let configRepo: String
     typealias TransportFactory = @Sendable (_ enclaveURL: String, _ configRepo: String) throws -> any EnclaveTransport
     private let makeTransport: TransportFactory
+    typealias ProtocolVersion = @Sendable () async -> Int
+    private let protocolVersion: ProtocolVersion
     private var transport: (any EnclaveTransport)?
     private var transportGeneration = 0
     /// Returns nil only when there is no session to mint a token for.
@@ -106,11 +108,13 @@ actor SyncEnclaveClient {
     init(
         enclaveURL: String = Constants.SyncEnclave.url,
         configRepo: String = Constants.SyncEnclave.configRepo,
-        makeTransport: @escaping TransportFactory = { try EnclaveHandle.enclave(at: $0, repo: $1) }
+        makeTransport: @escaping TransportFactory = { try EnclaveHandle.enclave(at: $0, repo: $1) },
+        protocolVersion: @escaping ProtocolVersion = { await AppConfig.shared.syncProtocolVersion }
     ) {
         self.enclaveURL = enclaveURL
         self.configRepo = configRepo
         self.makeTransport = makeTransport
+        self.protocolVersion = protocolVersion
     }
 
     /// Inject the function used to retrieve the user's bearer token.
@@ -167,7 +171,7 @@ actor SyncEnclaveClient {
 
         var headers: [String: String] = [
             "Accept": "application/json",
-            SyncHeaders.protocolVersion: String(await AppConfig.shared.syncProtocolVersion)
+            SyncHeaders.protocolVersion: String(await protocolVersion())
         ]
         let bodyData: Data?
         if let body = body {
@@ -185,6 +189,9 @@ actor SyncEnclaveClient {
             )
         }
 
+        // Verify before taking the token, so a session that ends while the
+        // enclave is being verified never has its token sent.
+        try await ready()
         let token = try await requireToken(
             forceRefresh: false,
             generation: requestGeneration
@@ -216,9 +223,10 @@ actor SyncEnclaveClient {
 
         var headers: [String: String] = [
             "Accept": "application/json",
-            SyncHeaders.protocolVersion: String(await AppConfig.shared.syncProtocolVersion)
+            SyncHeaders.protocolVersion: String(await protocolVersion())
         ]
         let requestGeneration = tokenGeneration
+        try await ready()
         let token = try await requireToken(
             forceRefresh: false,
             generation: requestGeneration
@@ -254,7 +262,9 @@ actor SyncEnclaveClient {
         try Task.checkCancellation()
         let transport = try currentTransport()
         do {
-            return try await request(transport)
+            let response = try await request(transport)
+            try Task.checkCancellation()
+            return response
         } catch is CancellationError {
             throw CancellationError()
         } catch let error as TinfoilError {

@@ -311,7 +311,7 @@ actor ChatRecoveryClient {
     /// stops authorizing new requests, and the handle that verified it
     private func endpoint() async throws -> (enclaveURL: String, publicKey: Data, handle: EnclaveHandle) {
         let generation = endpointGeneration
-        let handle = try self.handle ?? EnclaveHandle()
+        let handle = try self.handle ?? Self.makeHandle()
         self.handle = handle
         let verification: Verification
         do {
@@ -326,13 +326,31 @@ actor ChatRecoveryClient {
         }
         try Task.checkCancellation()
         guard generation == endpointGeneration else { return try await self.endpoint() }
+        guard let publicKey = Self.publicKey(from: verification) else {
+            throw ChatRecoveryClientError.unavailable
+        }
+        return (enclaveURL: "https://\(verification.enclaveHost)", publicKey: publicKey, handle: handle)
+    }
+
+    /// A handle that rejects routers without a usable key while verifying,
+    /// so it never keeps one and discovery moves on to the next router
+    private static func makeHandle() throws -> EnclaveHandle {
+        try EnclaveHandle(onEnclaveVerified: { verification in
+            guard Self.publicKey(from: verification) != nil else {
+                throw ChatRecoveryClientError.unavailable
+            }
+        })
+    }
+
+    /// The X25519 key requests are sealed to, if the router endorses a usable one
+    private static func publicKey(from verification: Verification) -> Data? {
         guard let keyHex = verification.hpkePublicKey,
               let publicKey = Data(lowercaseHex: keyHex),
               publicKey.count == Constants.ChatRecovery.cekBytes
         else {
-            throw ChatRecoveryClientError.unavailable
+            return nil
         }
-        return (enclaveURL: "https://\(verification.enclaveHost)", publicKey: publicKey, handle: handle)
+        return publicKey
     }
 
     private func promptCacheSecret(userId: String) throws -> String {

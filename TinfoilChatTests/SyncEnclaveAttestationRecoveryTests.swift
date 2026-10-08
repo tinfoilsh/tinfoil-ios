@@ -8,9 +8,9 @@ private enum AttestationRecoveryFixture {
     static let configRepo = "owner/repo"
     static let healthURL = "https://example.com/v1/health"
 
-    /// Verification failures as the SDK reports them, and what sync does
-    /// about each: fetches a retry can heal are retried, everything else
-    /// blocks sync as a failed attestation.
+    /// Verification failures as the SDK reports them, paired with the
+    /// recovery sync takes. Attestation fetch failures that a retry can heal
+    /// are retried; everything else blocks sync as a failed attestation.
     static let verificationFailures: [(TinfoilError, RecoveryAction)] = [
         (.fetchError("offline", urlError: URLError(.notConnectedToInternet)), .retry(reason: .network)),
         (.fetchError("timed out", urlError: URLError(.timedOut)), .retry(reason: .network)),
@@ -62,13 +62,20 @@ private actor FakeEnclave: EnclaveTransport {
 
     private let verificationGate: Gate?
     private let verificationError: Error?
+    private let requestGate: Gate?
     private let requestError: Error?
     private(set) var verificationCount = 0
     private(set) var requestCount = 0
 
-    init(verificationGate: Gate? = nil, verificationError: Error? = nil, requestError: Error? = nil) {
+    init(
+        verificationGate: Gate? = nil,
+        verificationError: Error? = nil,
+        requestGate: Gate? = nil,
+        requestError: Error? = nil
+    ) {
         self.verificationGate = verificationGate
         self.verificationError = verificationError
+        self.requestGate = requestGate
         self.requestError = requestError
     }
 
@@ -85,6 +92,10 @@ private actor FakeEnclave: EnclaveTransport {
 
     func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         requestCount += 1
+        if let requestGate {
+            await requestGate.started.open()
+            await requestGate.release.wait()
+        }
         if let requestError {
             throw requestError
         }
@@ -122,13 +133,46 @@ private final class FakeEnclaves: @unchecked Sendable {
     }
 }
 
+/// An empty JSON object, for requests whose response body is not inspected
+private struct EmptyResponse: Decodable {}
+
+/// Runs `operation`, expecting it to fail with an error that sync recovers
+/// from with `expected`
+private func expectRecoveryAction(
+    _ expected: RecoveryAction,
+    sourceLocation: SourceLocation = #_sourceLocation,
+    _ operation: () async throws -> Void
+) async {
+    do {
+        try await operation()
+        Issue.record("Expected the operation to fail", sourceLocation: sourceLocation)
+    } catch {
+        #expect(EnclaveErrorRecovery.decide(error).action == expected, sourceLocation: sourceLocation)
+    }
+}
+
+/// Awaits `task`, expecting it to have been canceled
+private func expectCancellation<Success>(
+    _ task: Task<Success, Error>,
+    sourceLocation: SourceLocation = #_sourceLocation
+) async {
+    do {
+        _ = try await task.value
+        Issue.record("Expected CancellationError", sourceLocation: sourceLocation)
+    } catch is CancellationError {
+    } catch {
+        Issue.record("Expected CancellationError, got \(error)", sourceLocation: sourceLocation)
+    }
+}
+
 @Suite("Sync enclave attestation recovery", .timeLimit(.minutes(1)))
 struct SyncEnclaveAttestationRecoveryTests {
     private func makeClient(_ enclaves: FakeEnclaves) -> SyncEnclaveClient {
         SyncEnclaveClient(
             enclaveURL: AttestationRecoveryFixture.enclaveURL,
             configRepo: AttestationRecoveryFixture.configRepo,
-            makeTransport: { _, _ in enclaves.make() }
+            makeTransport: { _, _ in enclaves.make() },
+            protocolVersion: { 1 }
         )
     }
 
@@ -136,11 +180,8 @@ struct SyncEnclaveAttestationRecoveryTests {
     func verificationFailureRecovery(failure: TinfoilError, expected: RecoveryAction) async throws {
         let enclaves = FakeEnclaves { _ in FakeEnclave(verificationError: failure) }
         let client = makeClient(enclaves)
-        do {
+        await expectRecoveryAction(expected) {
             try await client.ready()
-            Issue.record("Expected verification to fail")
-        } catch {
-            #expect(EnclaveErrorRecovery.decide(error).action == expected)
         }
     }
 
@@ -148,13 +189,10 @@ struct SyncEnclaveAttestationRecoveryTests {
     func requestFailureRecovery(failure: any Error, expected: RecoveryAction) async throws {
         let enclaves = FakeEnclaves { _ in FakeEnclave(requestError: failure) }
         let client = makeClient(enclaves)
-        do {
+        await expectRecoveryAction(expected) {
             _ = try await client.withTransport {
                 try await $0.get(url: AttestationRecoveryFixture.healthURL)
             }
-            Issue.record("Expected the request to fail")
-        } catch {
-            #expect(EnclaveErrorRecovery.decide(error).action == expected)
         }
     }
 
@@ -178,11 +216,8 @@ struct SyncEnclaveAttestationRecoveryTests {
         }
         let client = makeClient(enclaves)
         for _ in 0..<2 {
-            do {
+            await expectRecoveryAction(.blockAllSync(reason: .attestationFailed)) {
                 try await client.ready()
-                Issue.record("Expected verification to fail")
-            } catch {
-                #expect(EnclaveErrorRecovery.decide(error).action == .blockAllSync(reason: .attestationFailed))
             }
         }
         let made = enclaves.all
@@ -231,13 +266,7 @@ struct SyncEnclaveAttestationRecoveryTests {
         await client.reset()
         try await client.ready()
         await release.open()
-        do {
-            try await old.value
-            Issue.record("Expected old verification to be canceled")
-        } catch is CancellationError {
-        } catch {
-            Issue.record("Expected CancellationError, got \(error)")
-        }
+        await expectCancellation(old)
 
         _ = try await client.withTransport {
             try await $0.get(url: AttestationRecoveryFixture.healthURL)
@@ -248,5 +277,78 @@ struct SyncEnclaveAttestationRecoveryTests {
             #expect(await made[0].requestCount == 0)
             #expect(await made[1].requestCount == 1)
         }
+    }
+
+    /// The token is taken only after the enclave verifies, so a session that
+    /// ends or changes during verification never has its token sent.
+    @Test(arguments: [false, true])
+    func sessionChangeDuringVerificationSendsNothing(reset: Bool) async throws {
+        let started = AttestationRecoveryGate()
+        let release = AttestationRecoveryGate()
+        let enclaves = FakeEnclaves { number in
+            number == 1 ? FakeEnclave(verificationGate: (started, release)) : FakeEnclave()
+        }
+        let client = makeClient(enclaves)
+        await client.setTokenGetter { _ in "old-session-token" }
+        let request = Task { () -> EmptyResponse in
+            try await client.get(path: "/v1/health")
+        }
+        await started.wait()
+        if reset {
+            await client.reset()
+        } else {
+            await client.setTokenGetter { _ in "new-session-token" }
+        }
+        await release.open()
+        await expectCancellation(request)
+
+        for enclave in enclaves.all {
+            #expect(await enclave.requestCount == 0)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func sessionChangeDuringAuthenticatedRequestCancelsIt(reset: Bool) async throws {
+        let started = AttestationRecoveryGate()
+        let release = AttestationRecoveryGate()
+        let enclaves = FakeEnclaves { _ in FakeEnclave(requestGate: (started, release)) }
+        let client = makeClient(enclaves)
+        await client.setTokenGetter { _ in "old-session-token" }
+        let request = Task { () -> EmptyResponse in
+            try await client.get(path: "/v1/health")
+        }
+        await started.wait()
+        if reset {
+            await client.reset()
+        } else {
+            await client.setTokenGetter { _ in "new-session-token" }
+        }
+        await release.open()
+        await expectCancellation(request)
+
+        let made = enclaves.all
+        #expect(made.count == 1)
+        if let enclave = made.first {
+            #expect(await enclave.requestCount == 1)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func publicRequestsSurviveSessionChanges(reset: Bool) async throws {
+        let started = AttestationRecoveryGate()
+        let release = AttestationRecoveryGate()
+        let enclaves = FakeEnclaves { _ in FakeEnclave(requestGate: (started, release)) }
+        let client = makeClient(enclaves)
+        let request = Task { () -> EmptyResponse in
+            try await client.post(path: "/v1/shares/open", skipAuth: true)
+        }
+        await started.wait()
+        if reset {
+            await client.reset()
+        } else {
+            await client.setTokenGetter { _ in "new-session-token" }
+        }
+        await release.open()
+        _ = try await request.value
     }
 }

@@ -322,7 +322,6 @@ struct VerifierView: View {
     private func statusAccessibilityText(_ status: VerifierStatus) -> String {
         switch status {
         case .pending: return "pending"
-        case .loading: return "verifying"
         case .success: return "verified"
         case .error: return "failed"
         }
@@ -341,14 +340,6 @@ struct VerifierView: View {
                 .font(.system(size: 18))
                 .foregroundColor(.red)
                 .background(Circle().fill(isDarkMode ? Color.backgroundPrimary : .white).padding(2))
-        case .loading:
-            ZStack {
-                Circle()
-                    .fill(isDarkMode ? Color.backgroundPrimary : .white)
-                    .frame(width: 20, height: 20)
-                ProgressView()
-                    .scaleEffect(0.6)
-            }
         case .pending:
             Circle()
                 .fill(Color.gray.opacity(0.3))
@@ -679,14 +670,6 @@ private struct FingerprintCard: View {
                     .font(.system(size: 11, weight: .bold))
             }
             .foregroundColor(.red)
-        case .loading:
-            HStack(spacing: 4) {
-                Text("Verifying")
-                    .font(.system(size: 13, weight: .medium))
-                ProgressView()
-                    .scaleEffect(0.6)
-            }
-            .foregroundColor(.secondary)
         case .pending:
             HStack(spacing: 4) {
                 Text("Pending")
