@@ -6,12 +6,37 @@ import TinfoilAI
 private enum AttestationRecoveryFixture {
     static let enclaveURL = "https://example.com"
     static let configRepo = "owner/repo"
-    static let body = Data(#"{"idempotency_key":"same-write","content":"hello"}"#.utf8)
-    static let mismatch = NSError(
-        domain: "go",
-        code: 1,
-        userInfo: [NSLocalizedDescriptionKey: "Post \"https://example.com/v1/push\": certificate fingerprint mismatch"]
-    )
+    static let healthURL = "https://example.com/v1/health"
+
+    /// Verification failures as the SDK reports them, paired with the
+    /// recovery sync takes. Attestation fetch failures that a retry can heal
+    /// are retried; everything else blocks sync as a failed attestation.
+    static let verificationFailures: [(TinfoilError, RecoveryAction)] = [
+        (.fetchError("offline", urlError: URLError(.notConnectedToInternet)), .retry(reason: .network)),
+        (.fetchError("timed out", urlError: URLError(.timedOut)), .retry(reason: .network)),
+        (.fetchError("unavailable", status: 503), .retry(reason: .network)),
+        (.fetchError("not found", status: 404), .blockAllSync(reason: .attestationFailed)),
+        (.fetchError("response too large"), .blockAllSync(reason: .attestationFailed)),
+        (
+            .fetchError("untrusted", urlError: URLError(.serverCertificateUntrusted)),
+            .blockAllSync(reason: .attestationFailed)
+        ),
+        (.attestationError("measurement mismatch"), .blockAllSync(reason: .attestationFailed)),
+    ]
+
+    /// Request failures as `EnclaveHandle.data(for:)` surfaces them
+    static let requestFailures: [(any Error, RecoveryAction)] = [
+        // The enclave's key still failed the pin after the SDK re-verified.
+        (TinfoilError.attestationError("key does not match the attestation"), .blockAllSync(reason: .attestationFailed)),
+        // Verifying on first use, before the request, failed to fetch.
+        (
+            TinfoilError.fetchError("offline", urlError: URLError(.notConnectedToInternet)),
+            .retry(reason: .network)
+        ),
+        (URLError(.networkConnectionLost), .retry(reason: .network)),
+        // A certificate the system rejects is persistent, not a network blip.
+        (URLError(.serverCertificateUntrusted), .abort(reason: .unknown)),
+    ]
 }
 
 private actor AttestationRecoveryGate {
@@ -30,364 +55,300 @@ private actor AttestationRecoveryGate {
     }
 }
 
-private actor AttestationRecoveryProbe {
-    let verificationStarted = AttestationRecoveryGate()
-    let releaseVerification = AttestationRecoveryGate()
-    private var clients: [SecureClient] = []
-    private var requests: [(client: Int, body: Data)] = []
-    private let blockedVerification: Int?
-    private let failedVerifications: Set<Int>
-    private let verificationError: Error
+/// Stands in for the SDK's `EnclaveHandle`: verification and requests block
+/// or fail as a test arranges.
+private actor FakeEnclave: EnclaveTransport {
+    typealias Gate = (started: AttestationRecoveryGate, release: AttestationRecoveryGate)
+
+    private let verificationGate: Gate?
+    private let verificationError: Error?
+    private let requestGate: Gate?
+    private let requestError: Error?
+    private(set) var verificationCount = 0
+    private(set) var requestCount = 0
 
     init(
-        blockedVerification: Int? = nil,
-        failedVerifications: Set<Int> = [],
-        verificationError: Error = VerificationError.verificationFailed("measurement mismatch")
+        verificationGate: Gate? = nil,
+        verificationError: Error? = nil,
+        requestGate: Gate? = nil,
+        requestError: Error? = nil
     ) {
-        self.blockedVerification = blockedVerification
-        self.failedVerifications = failedVerifications
+        self.verificationGate = verificationGate
         self.verificationError = verificationError
+        self.requestGate = requestGate
+        self.requestError = requestError
     }
 
-    func verify(_ client: SecureClient) async throws {
-        clients.append(client)
-        let attempt = clients.count
-        if attempt == blockedVerification {
-            await verificationStarted.open()
-            await releaseVerification.wait()
+    func prepare() async throws {
+        verificationCount += 1
+        if let verificationGate {
+            await verificationGate.started.open()
+            await verificationGate.release.wait()
         }
-        if failedVerifications.contains(attempt) {
+        if let verificationError {
             throw verificationError
         }
     }
 
-    func recordRequest(_ client: SecureClient, body: Data = Data()) -> Int {
-        let number = clients.firstIndex(where: { $0 === client }).map { $0 + 1 } ?? 0
-        requests.append((number, body))
-        return number
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        requestCount += 1
+        if let requestGate {
+            await requestGate.started.open()
+            await requestGate.release.wait()
+        }
+        if let requestError {
+            throw requestError
+        }
+        guard let url = request.url,
+              let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
+        else {
+            throw URLError(.badURL)
+        }
+        return (Data(), response)
+    }
+}
+
+/// Records every transport the client creates, numbered from 1
+private final class FakeEnclaves: @unchecked Sendable {
+    private let lock = NSLock()
+    private var made: [FakeEnclave] = []
+    private let configure: @Sendable (_ number: Int) -> FakeEnclave
+
+    init(_ configure: @escaping @Sendable (_ number: Int) -> FakeEnclave = { _ in FakeEnclave() }) {
+        self.configure = configure
     }
 
-    func verificationCount() -> Int { clients.count }
-    func requestClients() -> [Int] { requests.map(\.client) }
-    func requestBodies() -> [Data] { requests.map(\.body) }
+    func make() -> FakeEnclave {
+        lock.lock()
+        defer { lock.unlock() }
+        let enclave = configure(made.count + 1)
+        made.append(enclave)
+        return enclave
+    }
+
+    var all: [FakeEnclave] {
+        lock.lock()
+        defer { lock.unlock() }
+        return made
+    }
+}
+
+/// An empty JSON object, for requests whose response body is not inspected
+private struct EmptyResponse: Decodable {}
+
+/// Runs `operation`, expecting it to fail with an error that sync recovers
+/// from with `expected`
+private func expectRecoveryAction(
+    _ expected: RecoveryAction,
+    sourceLocation: SourceLocation = #_sourceLocation,
+    _ operation: () async throws -> Void
+) async {
+    do {
+        try await operation()
+        Issue.record("Expected the operation to fail", sourceLocation: sourceLocation)
+    } catch {
+        #expect(EnclaveErrorRecovery.decide(error).action == expected, sourceLocation: sourceLocation)
+    }
+}
+
+/// Awaits `task`, expecting it to have been canceled
+private func expectCancellation<Success>(
+    _ task: Task<Success, Error>,
+    sourceLocation: SourceLocation = #_sourceLocation
+) async {
+    do {
+        _ = try await task.value
+        Issue.record("Expected CancellationError", sourceLocation: sourceLocation)
+    } catch is CancellationError {
+    } catch {
+        Issue.record("Expected CancellationError, got \(error)", sourceLocation: sourceLocation)
+    }
 }
 
 @Suite("Sync enclave attestation recovery", .timeLimit(.minutes(1)))
 struct SyncEnclaveAttestationRecoveryTests {
-    private func makeClient(_ probe: AttestationRecoveryProbe) -> SyncEnclaveClient {
+    private func makeClient(_ enclaves: FakeEnclaves) -> SyncEnclaveClient {
         SyncEnclaveClient(
             enclaveURL: AttestationRecoveryFixture.enclaveURL,
             configRepo: AttestationRecoveryFixture.configRepo,
-            verifyClient: { try await probe.verify($0) }
+            makeTransport: { _, _ in enclaves.make() },
+            protocolVersion: { 1 }
         )
     }
 
-    @Test func certificateRotationReplaysSamePayloadAndKeepsAuthentication() async throws {
-        let probe = AttestationRecoveryProbe()
-        let client = makeClient(probe)
-        await client.setTokenGetter { _ in "session-token" }
-        let result = try await client.withAttestedClient { transport in
-            let number = await probe.recordRequest(transport, body: AttestationRecoveryFixture.body)
-            if number == 1 { throw AttestationRecoveryFixture.mismatch }
-            return "synced"
+    @Test(arguments: AttestationRecoveryFixture.verificationFailures)
+    func verificationFailureRecovery(failure: TinfoilError, expected: RecoveryAction) async throws {
+        let enclaves = FakeEnclaves { _ in FakeEnclave(verificationError: failure) }
+        let client = makeClient(enclaves)
+        await expectRecoveryAction(expected) {
+            try await client.ready()
         }
-
-        #expect(result == "synced")
-        #expect(await probe.requestClients() == [1, 2])
-        #expect(await probe.requestBodies() == [AttestationRecoveryFixture.body, AttestationRecoveryFixture.body])
-        #expect(try await client.requireToken(forceRefresh: false) == "session-token")
-        let cached = try await client.withAttestedClient { await probe.recordRequest($0) }
-        #expect(cached == 2)
-        #expect(await probe.verificationCount() == 2)
     }
 
-    @Test func persistentMismatchStopsAfterOneReplayAndDiscardsRejectedClient() async throws {
-        let probe = AttestationRecoveryProbe()
-        let client = makeClient(probe)
+    @Test(arguments: AttestationRecoveryFixture.requestFailures)
+    func requestFailureRecovery(failure: any Error, expected: RecoveryAction) async throws {
+        let enclaves = FakeEnclaves { _ in FakeEnclave(requestError: failure) }
+        let client = makeClient(enclaves)
+        await expectRecoveryAction(expected) {
+            _ = try await client.withTransport {
+                try await $0.get(url: AttestationRecoveryFixture.healthURL)
+            }
+        }
+    }
+
+    @Test func cancellationIsNotWrapped() async throws {
+        let enclaves = FakeEnclaves { _ in FakeEnclave(requestError: CancellationError()) }
+        let client = makeClient(enclaves)
         do {
-            try await client.withAttestedClient { transport in
-                _ = await probe.recordRequest(transport)
-                throw AttestationRecoveryFixture.mismatch
+            _ = try await client.withTransport {
+                try await $0.get(url: AttestationRecoveryFixture.healthURL)
             }
-            Issue.record("Expected a certificate mismatch")
+            Issue.record("Expected cancellation")
+        } catch is CancellationError {
         } catch {
-            #expect(EnclaveErrorRecovery.decide(error).action == .blockAllSync(reason: .attestationFailed))
+            Issue.record("Expected CancellationError, got \(error)")
         }
-        #expect(await probe.requestClients() == [1, 2])
-        #expect(await probe.verificationCount() == 2)
-
-        let recovered = try await client.withAttestedClient { await probe.recordRequest($0) }
-        #expect(recovered == 3)
     }
 
-    @Test(arguments: [false, true])
-    func failedReattestationNeverReplaysAndNextSyncCanRecover(networkFailure: Bool) async throws {
-        let verificationError: Error = networkFailure
-            ? URLError(.timedOut)
-            : VerificationError.verificationFailed("measurement mismatch")
-        let probe = AttestationRecoveryProbe(
-            failedVerifications: [2],
-            verificationError: verificationError
-        )
-        let client = makeClient(probe)
-        do {
-            try await client.withAttestedClient { transport in
-                _ = await probe.recordRequest(transport)
-                throw AttestationRecoveryFixture.mismatch
-            }
-            Issue.record("Expected verification to block the request")
-        } catch {
-            let expected: RecoveryAction = networkFailure
-                ? .retry(reason: .network)
-                : .blockAllSync(reason: .attestationFailed)
-            #expect(EnclaveErrorRecovery.decide(error).action == expected)
+    @Test func failedVerificationIsNotCached() async throws {
+        let enclaves = FakeEnclaves { _ in
+            FakeEnclave(verificationError: TinfoilError.attestationError("measurement mismatch"))
         }
-        #expect(await probe.requestClients() == [1])
-        #expect(await probe.verificationCount() == 2)
-
-        let recovered = try await client.withAttestedClient { await probe.recordRequest($0) }
-        #expect(recovered == 3)
+        let client = makeClient(enclaves)
+        for _ in 0..<2 {
+            await expectRecoveryAction(.blockAllSync(reason: .attestationFailed)) {
+                try await client.ready()
+            }
+        }
+        let made = enclaves.all
+        #expect(made.count == 1)
+        if let enclave = made.first {
+            #expect(await enclave.verificationCount == 2)
+        }
     }
 
-    @Test func failedInitialVerificationDoesNotSendRequestOrPoisonCache() async throws {
-        let probe = AttestationRecoveryProbe(failedVerifications: [1])
-        let client = makeClient(probe)
-        do {
-            _ = try await client.withAttestedClient { await probe.recordRequest($0) }
-            Issue.record("Expected verification failure")
-        } catch {
-            #expect(EnclaveErrorRecovery.decide(error).action == .blockAllSync(reason: .attestationFailed))
+    @Test func transportIsReusedUntilReset() async throws {
+        let enclaves = FakeEnclaves()
+        let client = makeClient(enclaves)
+        for _ in 0..<2 {
+            _ = try await client.withTransport {
+                try await $0.get(url: AttestationRecoveryFixture.healthURL)
+            }
         }
-        #expect(await probe.requestClients().isEmpty)
-        let recovered = try await client.withAttestedClient { await probe.recordRequest($0) }
-        #expect(recovered == 2)
-    }
+        #expect(enclaves.all.count == 1)
 
-    @Test func concurrentMismatchesShareFreshVerification() async throws {
-        let probe = AttestationRecoveryProbe(blockedVerification: 2)
-        let client = makeClient(probe)
-        let firstRequestStarted = AttestationRecoveryGate()
-        let secondRequestStarted = AttestationRecoveryGate()
-        let first = Task {
-            try await client.withAttestedClient { transport in
-                let number = await probe.recordRequest(transport)
-                if number == 1 {
-                    await firstRequestStarted.open()
-                    await secondRequestStarted.wait()
-                    throw AttestationRecoveryFixture.mismatch
-                }
-                return number
-            }
+        await client.reset()
+        _ = try await client.withTransport {
+            try await $0.get(url: AttestationRecoveryFixture.healthURL)
         }
-        await firstRequestStarted.wait()
-        let second = Task {
-            try await client.withAttestedClient { transport in
-                let number = await probe.recordRequest(transport)
-                if number == 1 {
-                    await secondRequestStarted.open()
-                    throw AttestationRecoveryFixture.mismatch
-                }
-                return number
-            }
+        let made = enclaves.all
+        #expect(made.count == 2)
+        if made.count == 2 {
+            #expect(await made[0].requestCount == 2)
+            #expect(await made[1].requestCount == 1)
         }
-        await probe.verificationStarted.wait()
-        await probe.releaseVerification.open()
-        let firstResult = try await first.value
-        let secondResult = try await second.value
-        #expect(firstResult == 2)
-        #expect(secondResult == 2)
-        #expect(await probe.verificationCount() == 2)
-        #expect(await probe.requestClients().sorted() == [1, 1, 2, 2])
-    }
-
-    @Test func lateMismatchDoesNotEvictFreshClient() async throws {
-        let probe = AttestationRecoveryProbe()
-        let client = makeClient(probe)
-        let requestStarted = AttestationRecoveryGate()
-        let releaseRequest = AttestationRecoveryGate()
-        let late = Task {
-            try await client.withAttestedClient { transport in
-                let number = await probe.recordRequest(transport)
-                if number == 1 {
-                    await requestStarted.open()
-                    await releaseRequest.wait()
-                    throw AttestationRecoveryFixture.mismatch
-                }
-                return number
-            }
-        }
-        await requestStarted.wait()
-        let first = try await client.withAttestedClient { transport in
-            let number = await probe.recordRequest(transport)
-            if number == 1 { throw AttestationRecoveryFixture.mismatch }
-            return number
-        }
-        await releaseRequest.open()
-        let lateResult = try await late.value
-        #expect(first == 2)
-        #expect(lateResult == 2)
-        #expect(await probe.verificationCount() == 2)
     }
 
     @Test(arguments: [false, true])
     func resetFencesOldVerificationCompletion(fails: Bool) async throws {
-        let probe = AttestationRecoveryProbe(
-            blockedVerification: 1,
-            failedVerifications: fails ? [1] : []
-        )
-        let client = makeClient(probe)
+        let started = AttestationRecoveryGate()
+        let release = AttestationRecoveryGate()
+        let enclaves = FakeEnclaves { number in
+            guard number == 1 else { return FakeEnclave() }
+            return FakeEnclave(
+                verificationGate: (started, release),
+                verificationError: fails ? TinfoilError.attestationError("measurement mismatch") : nil
+            )
+        }
+        let client = makeClient(enclaves)
         let old = Task { try await client.ready() }
-        await probe.verificationStarted.wait()
+        await started.wait()
         await client.reset()
         try await client.ready()
-        await probe.releaseVerification.open()
-        do {
-            try await old.value
-            Issue.record("Expected old verification to be canceled")
-        } catch is CancellationError {
-        } catch {
-            Issue.record("Expected CancellationError, got \(error)")
+        await release.open()
+        await expectCancellation(old)
+
+        _ = try await client.withTransport {
+            try await $0.get(url: AttestationRecoveryFixture.healthURL)
         }
-        let current = try await client.withAttestedClient { await probe.recordRequest($0) }
-        #expect(current == 2)
-        #expect(await probe.verificationCount() == 2)
+        let made = enclaves.all
+        #expect(made.count == 2)
+        if made.count == 2 {
+            #expect(await made[0].requestCount == 0)
+            #expect(await made[1].requestCount == 1)
+        }
+    }
+
+    /// The token is taken only after the enclave verifies, so a session that
+    /// ends or changes during verification never has its token sent.
+    @Test(arguments: [false, true])
+    func sessionChangeDuringVerificationSendsNothing(reset: Bool) async throws {
+        let started = AttestationRecoveryGate()
+        let release = AttestationRecoveryGate()
+        let enclaves = FakeEnclaves { number in
+            number == 1 ? FakeEnclave(verificationGate: (started, release)) : FakeEnclave()
+        }
+        let client = makeClient(enclaves)
+        await client.setTokenGetter { _ in "old-session-token" }
+        let request = Task { () -> EmptyResponse in
+            try await client.get(path: "/v1/health")
+        }
+        await started.wait()
+        if reset {
+            await client.reset()
+        } else {
+            await client.setTokenGetter { _ in "new-session-token" }
+        }
+        await release.open()
+        await expectCancellation(request)
+
+        for enclave in enclaves.all {
+            #expect(await enclave.requestCount == 0)
+        }
     }
 
     @Test(arguments: [false, true])
-    func sessionChangeDuringAuthenticatedRequestPreventsReplay(reset: Bool) async throws {
-        let probe = AttestationRecoveryProbe()
-        let client = makeClient(probe)
-        let requestStarted = AttestationRecoveryGate()
-        let releaseRequest = AttestationRecoveryGate()
-        let old = Task {
-            try await client.withAttestedClient { transport in
-                _ = await probe.recordRequest(transport)
-                await requestStarted.open()
-                await releaseRequest.wait()
-                throw AttestationRecoveryFixture.mismatch
-            }
+    func sessionChangeDuringAuthenticatedRequestCancelsIt(reset: Bool) async throws {
+        let started = AttestationRecoveryGate()
+        let release = AttestationRecoveryGate()
+        let enclaves = FakeEnclaves { _ in FakeEnclave(requestGate: (started, release)) }
+        let client = makeClient(enclaves)
+        await client.setTokenGetter { _ in "old-session-token" }
+        let request = Task { () -> EmptyResponse in
+            try await client.get(path: "/v1/health")
         }
-        await requestStarted.wait()
+        await started.wait()
         if reset {
             await client.reset()
         } else {
             await client.setTokenGetter { _ in "new-session-token" }
         }
-        try await client.ready()
-        await releaseRequest.open()
-        do {
-            try await old.value
-            Issue.record("Expected old request to be canceled")
-        } catch is CancellationError {
-        } catch {
-            Issue.record("Expected CancellationError, got \(error)")
+        await release.open()
+        await expectCancellation(request)
+
+        let made = enclaves.all
+        #expect(made.count == 1)
+        if let enclave = made.first {
+            #expect(await enclave.requestCount == 1)
         }
-        #expect(await probe.requestClients() == [1])
-        #expect(await probe.verificationCount() == (reset ? 2 : 1))
     }
 
-    @Test(arguments: [false, true], [false, true])
-    func publicRequestsSurviveSessionChanges(reset: Bool, certificateRotated: Bool) async throws {
-        let probe = AttestationRecoveryProbe()
-        let client = makeClient(probe)
-        let requestStarted = AttestationRecoveryGate()
-        let releaseRequest = AttestationRecoveryGate()
-        let request = Task {
-            try await client.withAttestedClient(skipAuth: true) { transport in
-                let number = await probe.recordRequest(transport)
-                if number == 1 {
-                    await requestStarted.open()
-                    await releaseRequest.wait()
-                    if certificateRotated { throw AttestationRecoveryFixture.mismatch }
-                }
-                return number
-            }
+    @Test(arguments: [false, true])
+    func publicRequestsSurviveSessionChanges(reset: Bool) async throws {
+        let started = AttestationRecoveryGate()
+        let release = AttestationRecoveryGate()
+        let enclaves = FakeEnclaves { _ in FakeEnclave(requestGate: (started, release)) }
+        let client = makeClient(enclaves)
+        let request = Task { () -> EmptyResponse in
+            try await client.post(path: "/v1/shares/open", skipAuth: true)
         }
-        await requestStarted.wait()
+        await started.wait()
         if reset {
             await client.reset()
         } else {
             await client.setTokenGetter { _ in "new-session-token" }
         }
-        await releaseRequest.open()
-        let result = try await request.value
-        #expect(result == (certificateRotated ? 2 : 1))
-        #expect(await probe.requestClients() == (certificateRotated ? [1, 2] : [1]))
-        #expect(await probe.verificationCount() == (certificateRotated ? 2 : 1))
-    }
-
-    @Test func cancelingWaiterDoesNotCancelSharedVerification() async throws {
-        let probe = AttestationRecoveryProbe(blockedVerification: 1)
-        let client = makeClient(probe)
-        let canceled = Task { try await client.ready() }
-        await probe.verificationStarted.wait()
-        let other = Task { try await client.ready() }
-        canceled.cancel()
-        await probe.releaseVerification.open()
-        do {
-            try await canceled.value
-            Issue.record("Expected canceled waiter to fail")
-        } catch is CancellationError {
-        } catch {
-            Issue.record("Expected CancellationError, got \(error)")
-        }
-        try await other.value
-        #expect(await probe.verificationCount() == 1)
-    }
-
-    @Test func unrelatedErrorsDoNotRefreshOrReplay() async throws {
-        let errors: [Error] = [
-            URLError(.timedOut),
-            URLError(.secureConnectionFailed),
-            CancellationError(),
-            VerificationError.notVerified,
-            SyncEnclaveError(message: Constants.SyncEnclave.certificateMismatchMessage, status: 500),
-            SyncEnclaveError.authenticationActionRequired
-        ]
-        for error in errors {
-            let probe = AttestationRecoveryProbe()
-            let client = makeClient(probe)
-            do {
-                try await client.withAttestedClient { transport in
-                    _ = await probe.recordRequest(transport)
-                    throw error
-                }
-                Issue.record("Expected the request to fail")
-            } catch {
-                #expect(!SyncEnclaveClient.isCertificateMismatch(error))
-            }
-            #expect(await probe.requestClients() == [1])
-            #expect(await probe.verificationCount() == 1)
-        }
-    }
-
-    @Test func mismatchRecognitionIsNarrow() {
-        #expect(SyncEnclaveClient.isCertificateMismatch(AttestationRecoveryFixture.mismatch))
-        #expect(!SyncEnclaveClient.isCertificateMismatch(NSError(
-            domain: NSURLErrorDomain,
-            code: NSURLErrorSecureConnectionFailed,
-            userInfo: [NSLocalizedDescriptionKey: "certificate fingerprint mismatch"]
-        )))
-        #expect(!SyncEnclaveClient.isCertificateMismatch(NSError(
-            domain: "go", code: 2,
-            userInfo: [NSLocalizedDescriptionKey: "certificate fingerprint mismatch"]
-        )))
-        for message in [
-            "certificate fingerprint mismatch",
-            "Get \"https://example.com/v1/health\": certificate fingerprint mismatch"
-        ] {
-            #expect(SyncEnclaveClient.isCertificateMismatch(NSError(
-                domain: "go", code: 1, userInfo: [NSLocalizedDescriptionKey: message]
-            )))
-        }
-        for message in [
-            "certificate expired",
-            "certificate fingerprint mismatch while decoding response",
-            "no certificate fingerprint mismatch"
-        ] {
-            #expect(!SyncEnclaveClient.isCertificateMismatch(NSError(
-                domain: "go", code: 1, userInfo: [NSLocalizedDescriptionKey: message]
-            )))
-        }
+        await release.open()
+        _ = try await request.value
     }
 }

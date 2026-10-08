@@ -381,7 +381,11 @@ class ChatViewModel: ObservableObject {
         var error: String? = nil
     }
     @Published var verification = VerificationInfo()
-    @Published var verificationDocument: VerificationDocument? = nil
+    /// What the chat enclave's latest successful verification proved
+    @Published var enclaveVerification: Verification? = nil
+    /// Identifies the latest client setup, so verification results from a
+    /// replaced client's handle are ignored
+    private var clientSetupID = UUID()
     
     // Cloud sync properties
     @Published var isSyncing: Bool = false
@@ -1731,6 +1735,8 @@ class ChatViewModel: ObservableObject {
         isClientInitializing = true
         verification.error = nil
         verification.isVerifying = true
+        let setupID = UUID()
+        clientSetupID = setupID
 
         client = nil  // Just nil out the old client
 
@@ -1743,48 +1749,53 @@ class ChatViewModel: ObservableObject {
                 // attested client or re-running enclave verification.
                 _ = await AppConfig.shared.getSessionToken()
 
+                // Reports every verification of the chat enclave: the one
+                // during create, and each re-verification the client runs
+                // when the attestation expires or the enclave rotates its key.
+                let handle = try EnclaveHandle(
+                    onVerificationResult: { [weak self] result in
+                        DispatchQueue.main.async {
+                            guard let self = self, self.clientSetupID == setupID else { return }
+
+                            self.verification.isVerifying = false
+                            switch result {
+                            case .success(let verified):
+                                self.enclaveVerification = verified
+                                self.verification.isVerified = true
+                                self.verification.error = nil
+                            case .failure(let error):
+                                self.enclaveVerification = nil
+                                self.verification.isVerified = false
+                                self.verification.error = error.localizedDescription
+                            }
+                        }
+                    }
+                )
+
                 client = try await TinfoilAI.create(
                     apiKeyProvider: { SessionTokenManager.shared.currentToken },
+                    handle: handle,
                     // Opt into the router's inline progress markers so
                     // live web search and URL-fetch status drives the
                     // same WebSearchState / URLFetchState UI the app
                     // already renders, without requiring a separate
                     // auxiliary stream.
-                    tinfoilEvents: [.webSearch],
-                    onVerification: { [weak self] verificationDoc in
-                        DispatchQueue.main.async {
-                            guard let self = self else { return }
-
-                            self.verificationDocument = verificationDoc
-                            self.verification.isVerifying = false
-
-                            if let doc = verificationDoc {
-                                self.verification.isVerified = doc.securityVerified
-                                if !doc.securityVerified {
-                                    self.verification.error = doc.getFirstError() ?? "Verification failed"
-                                } else {
-                                    self.verification.error = nil
-                                }
-                            } else {
-                                self.verification.isVerified = false
-                                self.verification.error = "No verification document received"
-                            }
-                        }
-                    }
+                    tinfoilEvents: [.webSearch]
                 )
 
                 await MainActor.run {
                     self.isClientInitializing = false
                 }
             } catch {
+                // create can also fail after a successful verification, as
+                // when the enclave offers no usable encryption key, so the
+                // enclave is never shown as verified without a client.
                 await MainActor.run {
                     self.verification.isVerifying = false
                     self.isClientInitializing = false
-
-                    if self.verificationDocument == nil {
-                        self.verification.isVerified = false
-                        self.verification.error = error.localizedDescription
-                    }
+                    self.enclaveVerification = nil
+                    self.verification.isVerified = false
+                    self.verification.error = error.localizedDescription
                 }
             }
         }
