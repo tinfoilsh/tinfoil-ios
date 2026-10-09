@@ -330,7 +330,7 @@ struct WebSearchQueriesSheetView: View {
 /// Flat row for a single search inside the grouped queries sheet: the
 /// query stands as the heading with its sources listed directly beneath
 /// (when attributed). Mirrors the webapp's grouped-search expansion.
-private struct WebSearchQueryRow: View {
+struct WebSearchQueryRow: View {
     let instance: WebSearchInstance
     let isDarkMode: Bool
 

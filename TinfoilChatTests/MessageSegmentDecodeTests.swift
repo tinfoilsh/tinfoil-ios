@@ -215,7 +215,7 @@ struct MessageSegmentDecodeTests {
         let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
         let segments = try #require(message.segments)
         #expect(segments.count == 5)
-        if case .thinking(let content, _, let duration) = segments[0] {
+        if case .thinking(let content, _, let duration, _, _) = segments[0] {
             #expect(content == "Reasoning...")
             #expect(duration == 1.5)
         } else {

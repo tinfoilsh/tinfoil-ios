@@ -163,9 +163,10 @@ struct MessageView: View {
     @State private var activeWebSearchGroup: IdentifiedGroup<WebSearchInstance>? = nil
     @State private var activeURLFetchGroup: IdentifiedGroup<URLFetchState>? = nil
     @State private var activeSearchInstanceSources: IdentifiedGroup<WebSearchSource>? = nil
+    @State private var activeWorkRun: IdentifiedGroup<WorkStep>? = nil
 
     private var isAnyMessageSheetPresented: Bool {
-        showLongMessageSheet || showRawContentModal || showSourcesSheet || showShareSheet || showThoughtsSheet || showURLFetchSheet || activeWebSearchGroup != nil || activeURLFetchGroup != nil || activeSearchInstanceSources != nil
+        showLongMessageSheet || showRawContentModal || showSourcesSheet || showShareSheet || showThoughtsSheet || showURLFetchSheet || activeWebSearchGroup != nil || activeURLFetchGroup != nil || activeSearchInstanceSources != nil || activeWorkRun != nil
     }
 
     private var inlineAssistantTextSelectionEnabled: Bool {
@@ -284,13 +285,16 @@ struct MessageView: View {
 
     /// Runs of adjacent segments collapsed for inline rendering. Adjacent
     /// searches/fetches are merged into one row so long tool-call chains
-    /// don't stack N full-height pills in the chat.
+    /// don't stack N full-height pills in the chat, and a run of two or
+    /// more trace rows (thinking, searches, fetches) collapses further
+    /// into a single `.work` row summarizing the whole run.
     enum InlineSegmentRun {
         case text(String, isTrailing: Bool)
         case thinking(content: String, isThinking: Bool, duration: Double?)
         case webSearches([WebSearchInstance])
         case urlFetches([URLFetchState])
         case toolCall(GenUIToolCall)
+        case work(WorkRun)
     }
 
     struct IdentifiedInlineSegmentRun: Identifiable {
@@ -308,92 +312,95 @@ struct MessageView: View {
         }()
 
         var runs: [IdentifiedInlineSegmentRun] = []
+        // Trace steps accumulated since the last visible text / tool call.
+        var work: [WorkStep] = []
+        var workStartIndex: Int?
         var searchBuffer: [WebSearchInstance] = []
-        var searchBufferStartIndex: Int?
-        var searchThinking: (content: String, isThinking: Bool, duration: Double?, index: Int)?
         var fetchBuffer: [URLFetchState] = []
-        var fetchBufferStartIndex: Int?
 
         func flushSearches() {
-            if let firstId = searchBuffer.first?.id,
-               let startIndex = searchBufferStartIndex {
-                runs.append(IdentifiedInlineSegmentRun(
-                    id: "websearches:\(startIndex):\(firstId)",
-                    run: .webSearches(searchBuffer)
-                ))
-                searchBuffer.removeAll()
-                searchBufferStartIndex = nil
-            }
-            if let thinking = searchThinking {
-                runs.append(IdentifiedInlineSegmentRun(
-                    id: "thinking:\(thinking.index)",
-                    run: .thinking(content: thinking.content, isThinking: thinking.isThinking, duration: thinking.duration)
-                ))
-                searchThinking = nil
-            }
+            guard !searchBuffer.isEmpty else { return }
+            work.append(.webSearches(searchBuffer))
+            searchBuffer.removeAll()
         }
         func flushFetches() {
-            if let firstId = fetchBuffer.first?.id,
-               let startIndex = fetchBufferStartIndex {
-                runs.append(IdentifiedInlineSegmentRun(
-                    id: "urlfetches:\(startIndex):\(firstId)",
-                    run: .urlFetches(fetchBuffer)
-                ))
-                fetchBuffer.removeAll()
-                fetchBufferStartIndex = nil
+            guard !fetchBuffer.isEmpty else { return }
+            work.append(.urlFetches(fetchBuffer))
+            fetchBuffer.removeAll()
+        }
+        func flushWork() {
+            flushSearches()
+            flushFetches()
+            defer {
+                work.removeAll()
+                workStartIndex = nil
             }
+            guard let startIndex = workStartIndex, let first = work.first else { return }
+            if work.count > 1 {
+                runs.append(IdentifiedInlineSegmentRun(
+                    id: "work:\(startIndex):\(first.id)",
+                    run: .work(WorkRun(steps: work))
+                ))
+                return
+            }
+            switch first {
+            case .thinking(let content, let isThinking, let duration, _, _):
+                runs.append(IdentifiedInlineSegmentRun(
+                    id: "thinking:\(startIndex)",
+                    run: .thinking(content: content, isThinking: isThinking, duration: duration)
+                ))
+            case .webSearches(let group):
+                runs.append(IdentifiedInlineSegmentRun(
+                    id: "websearches:\(startIndex):\(group.first?.id ?? "")",
+                    run: .webSearches(group)
+                ))
+            case .urlFetches(let group):
+                runs.append(IdentifiedInlineSegmentRun(
+                    id: "urlfetches:\(startIndex):\(group.first?.id ?? "")",
+                    run: .urlFetches(group)
+                ))
+            }
+        }
+        func noteWorkStart(_ index: Int) {
+            if workStartIndex == nil { workStartIndex = index }
         }
 
         for (index, segment) in segments.enumerated() {
             switch segment {
             case .text(let text):
                 guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-                flushSearches()
-                flushFetches()
+                flushWork()
                 runs.append(IdentifiedInlineSegmentRun(
                     id: "text:\(index)",
                     run: .text(text, isTrailing: index == lastTextIndex)
                 ))
-            case .thinking(let content, let isThinking, let duration):
-                if !searchBuffer.isEmpty {
-                    if let previous = searchThinking {
-                        let durations = [previous.duration, duration].compactMap { $0 }
-                        searchThinking = (
-                            content: [previous.content, content].filter { !$0.isEmpty }.joined(separator: "\n\n"),
-                            isThinking: previous.isThinking || isThinking,
-                            duration: durations.isEmpty ? nil : durations.reduce(0, +),
-                            index: previous.index
-                        )
-                    } else {
-                        searchThinking = (content, isThinking, duration, index)
-                    }
-                    continue
-                }
+            case .thinking(let content, let isThinking, let duration, let startedAt, let endedAt):
+                // A closed, empty thought renders nothing and must not split a run.
+                guard isThinking || !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                 flushSearches()
                 flushFetches()
-                runs.append(IdentifiedInlineSegmentRun(
-                    id: "thinking:\(index)",
-                    run: .thinking(content: content, isThinking: isThinking, duration: duration)
+                noteWorkStart(index)
+                work.append(.thinking(
+                    content: content,
+                    isThinking: isThinking,
+                    duration: duration,
+                    startedAt: startedAt,
+                    endedAt: endedAt
                 ))
             case .webSearch(let searchId):
                 flushFetches()
                 if let instance = message.webSearches?.first(where: { $0.id == searchId }) {
-                    if searchBuffer.isEmpty {
-                        searchBufferStartIndex = index
-                    }
+                    noteWorkStart(index)
                     searchBuffer.append(instance)
                 }
             case .urlFetch(let fetchId):
                 flushSearches()
                 if let fetch = message.urlFetches.first(where: { $0.id == fetchId }) {
-                    if fetchBuffer.isEmpty {
-                        fetchBufferStartIndex = index
-                    }
+                    noteWorkStart(index)
                     fetchBuffer.append(fetch)
                 }
             case .toolCall(let toolCallId):
-                flushSearches()
-                flushFetches()
+                flushWork()
                 if let toolCall = message.toolCalls.first(where: { $0.id == toolCallId }) {
                     runs.append(IdentifiedInlineSegmentRun(
                         id: "toolcall:\(index):\(toolCall.id)",
@@ -402,8 +409,7 @@ struct MessageView: View {
                 }
             }
         }
-        flushSearches()
-        flushFetches()
+        flushWork()
         return runs
     }
 
@@ -504,6 +510,16 @@ struct MessageView: View {
                     )
                 case .toolCall(let toolCall):
                     genUIToolCallView(toolCall)
+                case .work(let run):
+                    let isActive = isRenderingStream && identifiedRun.id == runs.last?.id
+                    WorkBox(
+                        run: run,
+                        isActive: isActive,
+                        isDarkMode: isDarkMode,
+                        thinkingSummary: isLoading && isLastMessage ? viewModel.thinkingSummary : nil,
+                        webSearchSummary: isLoading && isLastMessage ? viewModel.webSearchSummary : nil,
+                        onTap: { activeWorkRun = IdentifiedGroup(items: run.steps) }
+                    )
                 }
             }
         }
@@ -1049,6 +1065,12 @@ struct MessageView: View {
         }
         .sheet(item: $activeSearchInstanceSources) { group in
             SourcesSheetView(sources: group.items, isDarkMode: isDarkMode)
+                .presentationDetents([.medium, .large])
+                .iPadSheetSizing()
+                .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
+        }
+        .sheet(item: $activeWorkRun) { group in
+            WorkStepsSheetView(run: WorkRun(steps: group.items), isDarkMode: isDarkMode)
                 .presentationDetents([.medium, .large])
                 .iPadSheetSizing()
                 .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))

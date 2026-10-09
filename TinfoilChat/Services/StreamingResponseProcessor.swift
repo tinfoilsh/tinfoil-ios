@@ -175,14 +175,33 @@ final class StreamingResponseProcessor: @unchecked Sendable {
         segments.append(.urlFetch(fetchId: fetchId))
     }
 
+    /// Inserts or replaces a search instance. Wall-clock stamps are owned
+    /// here: the first upsert records `startedAt` and the first terminal
+    /// status records `endedAt`, so callers can rebuild the instance from
+    /// event payloads without carrying the stamps themselves.
     func upsertWebSearch(_ instance: WebSearchInstance) {
+        var stamped = instance
         if let idx = webSearches.firstIndex(where: { $0.id == instance.id }) {
-            webSearches[idx] = instance
+            stamped.startedAt = stamped.startedAt ?? webSearches[idx].startedAt
+            stamped.endedAt = stamped.endedAt ?? webSearches[idx].endedAt
+            if stamped.status != .searching, stamped.endedAt == nil {
+                stamped.endedAt = Self.epochMilliseconds()
+            }
+            webSearches[idx] = stamped
         } else {
             closeThinkingRoundForToolBoundary()
-            webSearches.append(instance)
-            segments.append(.webSearch(searchId: instance.id))
+            let now = Self.epochMilliseconds()
+            stamped.startedAt = stamped.startedAt ?? now
+            if stamped.status != .searching, stamped.endedAt == nil {
+                stamped.endedAt = now
+            }
+            webSearches.append(stamped)
+            segments.append(.webSearch(searchId: stamped.id))
         }
+    }
+
+    static func epochMilliseconds(_ date: Date = Date()) -> Double {
+        (date.timeIntervalSince1970 * 1000).rounded()
     }
 
     func findSearchInstance(matching eventId: String?) -> WebSearchInstance? {
@@ -318,13 +337,13 @@ final class StreamingResponseProcessor: @unchecked Sendable {
                 let promotedStatus: WebSearchStatus = lastSearch.status == .searching
                     ? .completed
                     : lastSearch.status
-                webSearches[idx] = WebSearchInstance(
-                    id: lastSearch.id,
-                    query: lastSearch.query,
-                    status: promotedStatus,
-                    sources: mergedSources(for: lastSearch),
-                    reason: lastSearch.reason
-                )
+                var promoted = lastSearch
+                promoted.status = promotedStatus
+                promoted.sources = mergedSources(for: lastSearch)
+                if promotedStatus != .searching, promoted.endedAt == nil {
+                    promoted.endedAt = Self.epochMilliseconds()
+                }
+                webSearches[idx] = promoted
             }
         }
 
@@ -496,13 +515,13 @@ final class StreamingResponseProcessor: @unchecked Sendable {
             let finalStatus: WebSearchStatus = lastSearch.status == .searching
                 ? .completed
                 : lastSearch.status
-            webSearches[idx] = WebSearchInstance(
-                id: lastSearch.id,
-                query: lastSearch.query,
-                status: finalStatus,
-                sources: mergedSources(for: lastSearch),
-                reason: lastSearch.reason
-            )
+            var finalized = lastSearch
+            finalized.status = finalStatus
+            finalized.sources = mergedSources(for: lastSearch)
+            if finalStatus != .searching, finalized.endedAt == nil {
+                finalized.endedAt = Self.epochMilliseconds()
+            }
+            webSearches[idx] = finalized
         }
     }
 
@@ -546,23 +565,34 @@ final class StreamingResponseProcessor: @unchecked Sendable {
 
     /// Opens a new ordered `.thinking` segment for a thinking round.
     private func openThinkingSegment(initialContent: String) {
-        segments.append(.thinking(content: initialContent, isThinking: true, duration: nil))
+        segments.append(.thinking(
+            content: initialContent,
+            isThinking: true,
+            duration: nil,
+            startedAt: Self.epochMilliseconds(thinkStartTime ?? Date())
+        ))
         currentThinkingSegmentIndex = segments.count - 1
     }
 
     private func updateOpenThinkingSegment(appending reasoning: String) {
         guard let idx = currentThinkingSegmentIndex,
-              case .thinking(let existing, _, _) = segments[idx] else { return }
-        segments[idx] = .thinking(content: existing + reasoning, isThinking: true, duration: nil)
+              case .thinking(let existing, _, _, let startedAt, _) = segments[idx] else { return }
+        segments[idx] = .thinking(content: existing + reasoning, isThinking: true, duration: nil, startedAt: startedAt)
     }
 
     private func closeThinkingSegment(duration: TimeInterval?) {
         guard let idx = currentThinkingSegmentIndex,
-              case .thinking(let existing, _, _) = segments[idx] else {
+              case .thinking(let existing, _, _, let startedAt, _) = segments[idx] else {
             currentThinkingSegmentIndex = nil
             return
         }
-        segments[idx] = .thinking(content: existing, isThinking: false, duration: duration)
+        segments[idx] = .thinking(
+            content: existing,
+            isThinking: false,
+            duration: duration,
+            startedAt: startedAt,
+            endedAt: Self.epochMilliseconds()
+        )
         currentThinkingSegmentIndex = nil
     }
 
@@ -570,11 +600,13 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     /// segment so it doesn't open a phantom thought box.
     private func appendThinkingSegmentTail(_ reasoning: String) {
         for idx in segments.indices.reversed() {
-            if case .thinking(let existing, let isThinking, let duration) = segments[idx] {
+            if case .thinking(let existing, let isThinking, let duration, let startedAt, let endedAt) = segments[idx] {
                 segments[idx] = .thinking(
                     content: existing + reasoning,
                     isThinking: isThinking,
-                    duration: duration
+                    duration: duration,
+                    startedAt: startedAt,
+                    endedAt: endedAt
                 )
                 return
             }
