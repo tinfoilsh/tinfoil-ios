@@ -4693,11 +4693,12 @@ class ChatViewModel: ObservableObject {
                           let lastIndex = chat.messages.indices.last else { return }
                     if event.action?.type == "open_page", let url = event.action?.url {
                         let fetchId = event.itemId ?? url
+                        let now = StreamingResponseProcessor.epochMilliseconds()
                         switch event.status {
                         case .inProgress, .searching:
                             if !chat.messages[lastIndex].urlFetches.contains(where: { $0.id == fetchId }) {
                                 chat.messages[lastIndex].urlFetches.append(
-                                    URLFetchState(id: fetchId, url: url, status: .fetching)
+                                    URLFetchState(id: fetchId, url: url, status: .fetching, startedAt: now)
                                 )
                                 processor.appendURLFetchSegment(fetchId)
                             }
@@ -4705,14 +4706,17 @@ class ChatViewModel: ObservableObject {
                             if let idx = chat.messages[lastIndex].urlFetches.firstIndex(where: { $0.id == fetchId }) {
                                 chat.messages[lastIndex].urlFetches[idx].status = .completed
                                 chat.messages[lastIndex].urlFetches[idx].sources = event.fetchSources(for: url)
+                                chat.messages[lastIndex].urlFetches[idx].endedAt = now
                             }
                         case .failed:
                             if let idx = chat.messages[lastIndex].urlFetches.firstIndex(where: { $0.id == fetchId }) {
                                 chat.messages[lastIndex].urlFetches[idx].status = .failed
+                                chat.messages[lastIndex].urlFetches[idx].endedAt = now
                             }
                         case .blocked:
                             if let idx = chat.messages[lastIndex].urlFetches.firstIndex(where: { $0.id == fetchId }) {
                                 chat.messages[lastIndex].urlFetches[idx].status = .blocked
+                                chat.messages[lastIndex].urlFetches[idx].endedAt = now
                             }
                         }
                         chat.messages[lastIndex].segments = processor.currentSegments

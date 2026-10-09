@@ -96,7 +96,7 @@ struct URLFetchSheetView: View {
 }
 
 /// A single row in the URL fetch sheet
-private struct URLFetchSheetRow: View {
+struct URLFetchSheetRow: View {
     let fetch: URLFetchState
     let isDarkMode: Bool
 

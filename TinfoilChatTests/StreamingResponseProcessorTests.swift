@@ -262,7 +262,7 @@ struct StreamingThinkingSegmentTests {
         let snapshot = processor.snapshot()
         #expect(snapshot.isThinking == false)
         #expect(snapshot.segments.count == 2)
-        guard case .thinking(let thought, let isThinking, let duration) = snapshot.segments[0] else {
+        guard case .thinking(let thought, let isThinking, let duration, _, _) = snapshot.segments[0] else {
             Issue.record("Expected a thinking segment first, got \(snapshot.segments)")
             return
         }
@@ -305,7 +305,7 @@ struct StreamingThinkingSegmentTests {
         snapshot = processor.snapshot()
         #expect(snapshot.isThinking == false)
         #expect(snapshot.segments.count == 2)
-        guard case .thinking(_, let isThinking, let duration) = snapshot.segments[0] else {
+        guard case .thinking(_, let isThinking, let duration, _, _) = snapshot.segments[0] else {
             Issue.record("Expected a thinking segment first, got \(snapshot.segments)")
             return
         }
@@ -329,9 +329,9 @@ struct StreamingThinkingSegmentTests {
 
         let snapshot = processor.snapshot()
         #expect(snapshot.segments.count == 4)
-        guard case .thinking(let first, false, .some) = snapshot.segments[0],
+        guard case .thinking(let first, false, .some, _, _) = snapshot.segments[0],
               case .webSearch(let searchId) = snapshot.segments[1],
-              case .thinking(let second, false, .some) = snapshot.segments[2],
+              case .thinking(let second, false, .some, _, _) = snapshot.segments[2],
               case .text(let text) = snapshot.segments[3] else {
             Issue.record("Unexpected segment shape: \(snapshot.segments)")
             return
@@ -358,7 +358,7 @@ struct StreamingThinkingSegmentTests {
         let snapshot = processor.snapshot()
         #expect(snapshot.isThinking == false)
         #expect(snapshot.segments.count == 2)
-        guard case .thinking(_, false, .some) = snapshot.segments[0] else {
+        guard case .thinking(_, false, .some, _, _) = snapshot.segments[0] else {
             Issue.record("Expected a closed thinking segment first, got \(snapshot.segments)")
             return
         }
@@ -379,7 +379,7 @@ struct StreamingThinkingSegmentTests {
         let snapshot = processor.snapshot()
         #expect(snapshot.isThinking == false)
         #expect(snapshot.segments.count == 1)
-        guard case .thinking(let thought, false, .some) = snapshot.segments[0] else {
+        guard case .thinking(let thought, false, .some, _, _) = snapshot.segments[0] else {
             Issue.record("Expected a closed thinking segment, got \(snapshot.segments)")
             return
         }
@@ -398,12 +398,51 @@ struct StreamingThinkingSegmentTests {
 
         let snapshot = processor.snapshot()
         #expect(snapshot.segments.count == 2)
-        guard case .thinking(let thought, false, _) = snapshot.segments[0] else {
+        guard case .thinking(let thought, false, _, _, _) = snapshot.segments[0] else {
             Issue.record("Expected a thinking segment first, got \(snapshot.segments)")
             return
         }
         #expect(thought == "Thought start and tail.")
         #expect(snapshot.segments[1] == .text("Answer."))
+    }
+
+    @Test("trace segments carry wall-clock stamps the work row can span")
+    func traceSegmentsCarryStamps() throws {
+        let processor = StreamingResponseProcessor(
+            isWebSearchEnabled: true,
+            hapticEnabled: false
+        )
+        let before = StreamingResponseProcessor.epochMilliseconds()
+        _ = processor.process(processor.parse(try reasoningChunk("Need to search.")))
+        processor.upsertWebSearch(
+            WebSearchInstance(id: "ws-0", query: "q", status: .searching, sources: nil, reason: nil)
+        )
+        var snapshot = processor.snapshot()
+        guard case .thinking(_, false, _, let thinkStart, let thinkEnd) = snapshot.segments[0] else {
+            Issue.record("Expected a closed thinking segment first, got \(snapshot.segments)")
+            return
+        }
+        let thinkingStartedAt = try #require(thinkStart)
+        let thinkingEndedAt = try #require(thinkEnd)
+        #expect(thinkingStartedAt >= before)
+        #expect(thinkingEndedAt >= thinkingStartedAt)
+
+        let searching = try #require(snapshot.webSearches.first)
+        let searchStartedAt = try #require(searching.startedAt)
+        #expect(searchStartedAt >= thinkingStartedAt)
+        #expect(searching.endedAt == nil)
+
+        // The completion payload is rebuilt from the event without stamps;
+        // the processor must carry the start over and add the end.
+        processor.upsertWebSearch(
+            WebSearchInstance(id: "ws-0", query: "q", status: .completed, sources: [], reason: nil)
+        )
+        snapshot = processor.snapshot()
+        let completed = try #require(snapshot.webSearches.first)
+        #expect(completed.startedAt == searchStartedAt)
+        let searchEndedAt = try #require(completed.endedAt)
+        #expect(searchEndedAt >= searchStartedAt)
+        #expect(searchEndedAt <= StreamingResponseProcessor.epochMilliseconds())
     }
 
     private func reasoningChunk(_ reasoning: String) throws -> ChatStreamResult {

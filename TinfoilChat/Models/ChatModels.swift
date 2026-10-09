@@ -537,12 +537,24 @@ struct URLFetchState: Codable, Equatable, Identifiable {
     let url: String
     var status: URLFetchStatus
     var sources: [WebSearchSource]?
+    /// Wall-clock stamps (epoch ms) recorded while streaming; see `WorkRun`.
+    var startedAt: Double?
+    var endedAt: Double?
 
-    init(id: String = UUID().uuidString.lowercased(), url: String, status: URLFetchStatus = .fetching, sources: [WebSearchSource]? = nil) {
+    init(
+        id: String = UUID().uuidString.lowercased(),
+        url: String,
+        status: URLFetchStatus = .fetching,
+        sources: [WebSearchSource]? = nil,
+        startedAt: Double? = nil,
+        endedAt: Double? = nil
+    ) {
         self.id = id
         self.url = url
         self.status = status
         self.sources = sources
+        self.startedAt = startedAt
+        self.endedAt = endedAt
     }
 }
 
@@ -553,13 +565,19 @@ struct WebSearchInstance: Codable, Equatable, Identifiable {
     var status: WebSearchStatus
     var sources: [WebSearchSource]?
     var reason: String?
+    /// Wall-clock stamps (epoch ms) recorded while streaming; see `WorkRun`.
+    var startedAt: Double? = nil
+    var endedAt: Double? = nil
 }
 
 /// An ordered segment of assistant content. Preserves the exact order in which
 /// text and inline events (thinking, web search, URL fetch, tool call) streamed.
 enum MessageSegment: Codable, Equatable {
     case text(String)
-    case thinking(content: String, isThinking: Bool, duration: Double?)
+    /// `startedAt`/`endedAt` are wall-clock epoch ms stamped while
+    /// streaming so a run of trace segments can be summarized as
+    /// "Worked for Ns"; absent on legacy messages.
+    case thinking(content: String, isThinking: Bool, duration: Double?, startedAt: Double? = nil, endedAt: Double? = nil)
     case webSearch(searchId: String)
     case urlFetch(fetchId: String)
     case toolCall(toolCallId: String)
@@ -570,6 +588,8 @@ enum MessageSegment: Codable, Equatable {
         case content
         case isThinking
         case duration
+        case startedAt
+        case endedAt
         case searchId
         case fetchId
         case toolCallId
@@ -586,7 +606,9 @@ enum MessageSegment: Codable, Equatable {
             let content = try container.decodeIfPresent(String.self, forKey: .content) ?? ""
             let isThinking = try container.decodeIfPresent(Bool.self, forKey: .isThinking) ?? false
             let duration = try container.decodeIfPresent(Double.self, forKey: .duration)
-            self = .thinking(content: content, isThinking: isThinking, duration: duration)
+            let startedAt = try container.decodeIfPresent(Double.self, forKey: .startedAt)
+            let endedAt = try container.decodeIfPresent(Double.self, forKey: .endedAt)
+            self = .thinking(content: content, isThinking: isThinking, duration: duration, startedAt: startedAt, endedAt: endedAt)
         case "web_search":
             let searchId = try container.decode(String.self, forKey: .searchId)
             self = .webSearch(searchId: searchId)
@@ -611,11 +633,13 @@ enum MessageSegment: Codable, Equatable {
         case .text(let text):
             try container.encode("text", forKey: .type)
             try container.encode(text, forKey: .text)
-        case .thinking(let content, let isThinking, let duration):
+        case .thinking(let content, let isThinking, let duration, let startedAt, let endedAt):
             try container.encode("thinking", forKey: .type)
             try container.encode(content, forKey: .content)
             try container.encode(isThinking, forKey: .isThinking)
             try container.encodeIfPresent(duration, forKey: .duration)
+            try container.encodeIfPresent(startedAt, forKey: .startedAt)
+            try container.encodeIfPresent(endedAt, forKey: .endedAt)
         case .webSearch(let searchId):
             try container.encode("web_search", forKey: .type)
             try container.encode(searchId, forKey: .searchId)
@@ -861,7 +885,7 @@ struct Message: Identifiable, Codable, Equatable {
     var reasoningContentForHistory: String? {
         if let segments {
             let reasoning = segments.reduce(into: "") { result, segment in
-                if case .thinking(let content, _, _) = segment {
+                if case .thinking(let content, _, _, _, _) = segment {
                     result += content
                 }
             }
@@ -1100,7 +1124,13 @@ struct Message: Identifiable, Codable, Equatable {
                 let content = object["content"]?.stringValue ?? ""
                 let isThinking = (object["isThinking"]?.boolValue) ?? false
                 let duration = object["duration"]?.numberValue
-                segments.append(.thinking(content: content, isThinking: isThinking, duration: duration))
+                segments.append(.thinking(
+                    content: content,
+                    isThinking: isThinking,
+                    duration: duration,
+                    startedAt: object["startedAt"]?.numberValue,
+                    endedAt: object["endedAt"]?.numberValue
+                ))
 
             case "content":
                 let text = object["content"]?.stringValue ?? ""
@@ -1121,20 +1151,34 @@ struct Message: Identifiable, Codable, Equatable {
                     query: query,
                     status: status,
                     sources: sources,
-                    reason: reason
+                    reason: reason,
+                    startedAt: object["startedAt"]?.numberValue,
+                    endedAt: object["endedAt"]?.numberValue
                 )
                 searches.append(instance)
                 segments.append(.webSearch(searchId: id))
 
             case "url_fetches":
                 guard let array = object["fetches"]?.arrayValue else { continue }
+                // The webapp stamps the merged block, not each fetch; copying
+                // the block's span onto every fetch preserves the run's
+                // min-start / max-end for `WorkRun`.
+                let blockStartedAt = object["startedAt"]?.numberValue
+                let blockEndedAt = object["endedAt"]?.numberValue
                 for value in array {
                     guard let item = value.objectValue,
                           let id = item["id"]?.stringValue,
                           let url = item["url"]?.stringValue else { continue }
                     let statusRaw = item["status"]?.stringValue ?? "completed"
                     let status = URLFetchStatus(rawValue: statusRaw) ?? .completed
-                    let fetch = URLFetchState(id: id, url: url, status: status, sources: item["sources"]?.arrayValue?.compactMap(WebSearchSource.fromTimeline))
+                    let fetch = URLFetchState(
+                        id: id,
+                        url: url,
+                        status: status,
+                        sources: item["sources"]?.arrayValue?.compactMap(WebSearchSource.fromTimeline),
+                        startedAt: item["startedAt"]?.numberValue ?? blockStartedAt,
+                        endedAt: item["endedAt"]?.numberValue ?? blockEndedAt
+                    )
                     fetches.append(fetch)
                     segments.append(.urlFetch(fetchId: id))
                 }
@@ -1264,15 +1308,25 @@ struct Message: Identifiable, Codable, Equatable {
             blocks.append(.object(thinkingBlock))
         }
         var pendingFetches: [JSONValue] = []
+        var pendingFetchStartedAt: Double?
+        var pendingFetchEndedAt: Double?
+        var pendingFetchesSettled = true
 
         func flushFetches() {
             guard !pendingFetches.isEmpty else { return }
-            blocks.append(.object([
+            var block: [String: JSONValue] = [
                 "type": .string("url_fetches"),
                 "id": .string("url-fetches-\(blocks.count)"),
                 "fetches": .array(pendingFetches),
-            ]))
+            ]
+            // The webapp stamps the merged block: first start, last end.
+            if let pendingFetchStartedAt { block["startedAt"] = .number(pendingFetchStartedAt) }
+            if pendingFetchesSettled, let pendingFetchEndedAt { block["endedAt"] = .number(pendingFetchEndedAt) }
+            blocks.append(.object(block))
             pendingFetches = []
+            pendingFetchStartedAt = nil
+            pendingFetchEndedAt = nil
+            pendingFetchesSettled = true
         }
 
         func resolutionFields(for toolCallId: String) -> [String: JSONValue] {
@@ -1299,6 +1353,14 @@ struct Message: Identifiable, Codable, Equatable {
                     fetchFields["sources"] = .array(sources.map(\.timelineValue))
                 }
                 pendingFetches.append(.object(fetchFields))
+                if let startedAt = fetch.startedAt {
+                    pendingFetchStartedAt = min(pendingFetchStartedAt ?? startedAt, startedAt)
+                }
+                if let endedAt = fetch.endedAt {
+                    pendingFetchEndedAt = max(pendingFetchEndedAt ?? endedAt, endedAt)
+                } else {
+                    pendingFetchesSettled = false
+                }
                 continue
             }
 
@@ -1311,7 +1373,7 @@ struct Message: Identifiable, Codable, Equatable {
                     "id": .string("content-\(blocks.count)"),
                     "content": .string(text),
                 ]))
-            case .thinking(let content, let isThinking, let duration):
+            case .thinking(let content, let isThinking, let duration, let startedAt, let endedAt):
                 var block: [String: JSONValue] = [
                     "type": .string("thinking"),
                     "id": .string("thinking-\(blocks.count)"),
@@ -1319,6 +1381,8 @@ struct Message: Identifiable, Codable, Equatable {
                     "isThinking": .bool(isThinking),
                 ]
                 if let duration { block["duration"] = .number(duration) }
+                if let startedAt { block["startedAt"] = .number(startedAt) }
+                if let endedAt { block["endedAt"] = .number(endedAt) }
                 blocks.append(.object(block))
             case .webSearch(let searchId):
                 var state: [String: JSONValue] = [:]
@@ -1332,11 +1396,14 @@ struct Message: Identifiable, Codable, Equatable {
                 } else {
                     state["status"] = .string(WebSearchStatus.completed.rawValue)
                 }
-                blocks.append(.object([
+                var block: [String: JSONValue] = [
                     "type": .string("web_search"),
                     "id": .string(searchId),
                     "state": .object(state),
-                ]))
+                ]
+                if let startedAt = searchById[searchId]?.startedAt { block["startedAt"] = .number(startedAt) }
+                if let endedAt = searchById[searchId]?.endedAt { block["endedAt"] = .number(endedAt) }
+                blocks.append(.object(block))
             case .toolCall(let toolCallId):
                 guard let tool = toolById[toolCallId] else { continue }
                 var block: [String: JSONValue] = [

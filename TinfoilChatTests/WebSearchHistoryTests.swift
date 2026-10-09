@@ -73,6 +73,52 @@ struct WebSearchHistoryTests {
         #expect(fetchOutput.contains(excerpt))
     }
 
+    @Test func carriesTraceStampsAcrossWebTimelineRoundTrip() throws {
+        var original = message()
+        original.webSearches = [WebSearchInstance(id: "search", query: "q", status: .completed, sources: [], reason: nil, startedAt: 4_000, endedAt: 9_000)]
+        original.urlFetches = [
+            URLFetchState(id: "fetch-a", url: url, status: .completed, startedAt: 9_000, endedAt: 12_000),
+            URLFetchState(id: "fetch-b", url: url + "/b", status: .completed, startedAt: 9_500, endedAt: 15_000),
+        ]
+        original.segments = [
+            .thinking(content: "Plan", isThinking: false, duration: 2.5, startedAt: 1_000, endedAt: 3_500),
+            .webSearch(searchId: "search"),
+            .urlFetch(fetchId: "fetch-a"),
+            .urlFetch(fetchId: "fetch-b"),
+            .text("Answer."),
+        ]
+        let timeline = try #require(original.buildSyncTimeline())
+        #expect(timeline[0].objectValue?["startedAt"]?.numberValue == 1_000)
+        #expect(timeline[0].objectValue?["endedAt"]?.numberValue == 3_500)
+        #expect(timeline[1].objectValue?["startedAt"]?.numberValue == 4_000)
+        #expect(timeline[1].objectValue?["endedAt"]?.numberValue == 9_000)
+        // Merged fetch block spans first start to last end, like the webapp.
+        #expect(timeline[2].objectValue?["type"]?.stringValue == "url_fetches")
+        #expect(timeline[2].objectValue?["startedAt"]?.numberValue == 9_000)
+        #expect(timeline[2].objectValue?["endedAt"]?.numberValue == 15_000)
+
+        let webMessage: [String: Any] = ["role": "assistant", "content": "Answer.", "timestamp": "2026-09-01T00:00:00Z", "timeline": try JSONSerialization.jsonObject(with: JSONEncoder().encode(timeline))]
+        let restored = try JSONDecoder().decode(Message.self, from: JSONSerialization.data(withJSONObject: webMessage))
+        guard case .thinking(_, _, let duration, let startedAt, let endedAt) = try #require(restored.segments?.first) else {
+            Issue.record("Expected a thinking segment first, got \(String(describing: restored.segments))")
+            return
+        }
+        #expect(duration == 2.5)
+        #expect(startedAt == 1_000)
+        #expect(endedAt == 3_500)
+        #expect(restored.webSearches?.first?.startedAt == 4_000)
+        #expect(restored.webSearches?.first?.endedAt == 9_000)
+        #expect(restored.urlFetches.map(\.startedAt) == [9_000, 9_000])
+        #expect(restored.urlFetches.map(\.endedAt) == [15_000, 15_000])
+
+        let run = WorkRun(steps: [
+            .thinking(content: "Plan", isThinking: false, duration: duration, startedAt: startedAt, endedAt: endedAt),
+            .webSearches(restored.webSearches ?? []),
+            .urlFetches(restored.urlFetches),
+        ])
+        #expect(run.durationSeconds == 14)
+    }
+
     @Test func excludesUnsupportedEvidenceAndPreservesFullHistory() throws {
         var original = message()
         for status in [WebSearchStatus.searching, .failed, .blocked] {
