@@ -60,12 +60,12 @@ struct AuthenticationErrorTests {
 
     // MARK: - Unit tests: APIErrorResponse
 
-    @Test("Detects APIErrorResponse with invalid_api_key code as auth error")
-    func detectsAPIErrorResponseInvalidKey() {
+    @Test("Detects missing and invalid API keys as auth errors", arguments: ["invalid_api_key", "missing_api_key"])
+    func detectsAPIErrorResponseAuthenticationFailure(code: String) {
         let error = Self.makeAPIErrorResponse(
-            message: "Session token has expired.",
+            message: "Authentication required.",
             type: "invalid_request_error",
-            code: "invalid_api_key"
+            code: code
         )
         #expect(ChatViewModel.isAuthenticationError(error) == true)
     }

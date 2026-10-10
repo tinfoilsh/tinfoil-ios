@@ -8,7 +8,6 @@
 import Foundation
 import AVFoundation
 import UIKit
-import TinfoilAI
 import OpenAI
 
 /// Service for managing audio recording and transcription
@@ -25,7 +24,7 @@ class AudioRecordingService: NSObject, ObservableObject {
     private var recordingURL: URL?
     private var didDisableIdleTimer: Bool = false
 
-    private override init() {
+    override init() {
         super.init()
     }
 
@@ -129,14 +128,21 @@ class AudioRecordingService: NSObject, ObservableObject {
 
     // MARK: - Transcription
 
-    /// Transcribe the recorded audio file using the TinfoilAI SDK
-    func transcribe(fileURL: URL, client: TinfoilAI, model: String) async throws -> String {
+    /// Owns the recording until the request and its optional authentication retry finish.
+    func transcribe(
+        fileURL: URL,
+        model: String,
+        prepareRequest: (_ forceRefresh: Bool) async throws -> Void,
+        request: (AudioTranscriptionQuery) async throws -> AudioTranscriptionResult,
+        isAuthenticationError: (Error) -> Bool
+    ) async throws -> String {
         isTranscribing = true
         defer {
             isTranscribing = false
-            cleanupRecordingFile()
+            cleanupRecordingFile(at: fileURL)
         }
 
+        try Task.checkCancellation()
         let audioData = try await Task.detached {
             try Data(contentsOf: fileURL)
         }.value
@@ -152,7 +158,23 @@ class AudioRecordingService: NSObject, ObservableObject {
             responseFormat: .json
         )
 
-        let result = try await client.audioTranscriptions(query: query)
+        func send(forceRefresh: Bool) async throws -> AudioTranscriptionResult {
+            try Task.checkCancellation()
+            try await prepareRequest(forceRefresh)
+            try Task.checkCancellation()
+            return try await request(query)
+        }
+
+        let result: AudioTranscriptionResult
+        do {
+            result = try await send(forceRefresh: false)
+        } catch {
+            try Task.checkCancellation()
+            guard isAuthenticationError(error) else { throw error }
+            // Reuse the same audio bytes; cleanup runs only after both attempts.
+            result = try await send(forceRefresh: true)
+        }
+        try Task.checkCancellation()
 
         let transcription = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -173,8 +195,15 @@ class AudioRecordingService: NSObject, ObservableObject {
 
     private func cleanupRecordingFile() {
         guard let url = recordingURL else { return }
+        cleanupRecordingFile(at: url)
+    }
+
+    private func cleanupRecordingFile(at url: URL) {
         try? FileManager.default.removeItem(at: url)
-        recordingURL = nil
+        // A completed transcription must not discard a newer recording.
+        if recordingURL == url {
+            recordingURL = nil
+        }
     }
 
     private func disableIdleTimer() {
@@ -203,6 +232,7 @@ enum AudioRecordingError: LocalizedError {
     case recordingFailed
     case emptyRecording
     case emptyTranscription
+    case sessionUnavailable
     case transcriptionFailed(String)
 
     var errorDescription: String? {
@@ -215,6 +245,8 @@ enum AudioRecordingError: LocalizedError {
             return "Recording is empty"
         case .emptyTranscription:
             return "Transcription returned empty"
+        case .sessionUnavailable:
+            return "Could not connect to your Tinfoil session. Please try again."
         case .transcriptionFailed(let message):
             return "Transcription failed: \(message)"
         }
