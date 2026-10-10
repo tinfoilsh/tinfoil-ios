@@ -5526,7 +5526,7 @@ class ChatViewModel: ObservableObject {
             return true
         }
         if let apiError = error as? APIErrorResponse,
-           apiError.error.code != Constants.API.ErrorCode.invalidAPIKey {
+           !Self.isAuthenticationError(apiError) {
             return true
         }
         return false
@@ -5547,7 +5547,8 @@ class ChatViewModel: ObservableObject {
         // Non-streaming path: the SDK decodes the response body into APIErrorResponse
         // which contains the error code from our controlplane/shim
         if let apiError = error as? APIErrorResponse,
-           apiError.error.code == Constants.API.ErrorCode.invalidAPIKey {
+           apiError.error.code == Constants.API.ErrorCode.invalidAPIKey
+            || apiError.error.code == Constants.API.ErrorCode.missingAPIKey {
             return true
         }
 
@@ -8376,9 +8377,10 @@ extension ChatViewModel {
 
         isRecording = false
 
-        guard let fileURL = AudioRecordingService.shared.stopRecording(),
-              let audioModel = AppConfig.shared.audioModel,
+        guard let fileURL = AudioRecordingService.shared.stopRecording() else { return nil }
+        guard let audioModel = AppConfig.shared.audioModel,
               let client = client else {
+            AudioRecordingService.shared.cancelRecording()
             return nil
         }
 
@@ -8388,33 +8390,27 @@ extension ChatViewModel {
         do {
             let transcription = try await AudioRecordingService.shared.transcribe(
                 fileURL: fileURL,
-                client: client,
-                model: audioModel.modelName
+                model: audioModel.modelName,
+                prepareRequest: { forceRefresh in
+                    guard isCurrentTranscription() else { throw CancellationError() }
+                    // The SDK's synchronous provider only returns the cached token.
+                    // Await a usable token before dispatch, including on the retry.
+                    try await SessionTokenManager.shared.acquireTokenForSend(forceRefresh: forceRefresh)
+                    guard isCurrentTranscription() else { throw CancellationError() }
+                    guard !SessionTokenManager.shared.currentToken.isEmpty else {
+                        throw AudioRecordingError.sessionUnavailable
+                    }
+                },
+                request: { query in
+                    guard isCurrentTranscription() else { throw CancellationError() }
+                    return try await client.audioTranscriptions(query: query)
+                },
+                isAuthenticationError: { Self.isAuthenticationError($0) }
             )
             guard isCurrentTranscription() else { return nil }
             return transcription
         } catch {
             guard isCurrentTranscription() else { return nil }
-            // Retry once with a fresh token if the error is an auth failure
-            if ChatViewModel.isAuthenticationError(error) {
-                await refreshSessionTokenForRetry()
-                guard isCurrentTranscription() else { return nil }
-                if let retryClient = self.client {
-                    do {
-                        let transcription = try await AudioRecordingService.shared.transcribe(
-                            fileURL: fileURL,
-                            client: retryClient,
-                            model: audioModel.modelName
-                        )
-                        guard isCurrentTranscription() else { return nil }
-                        return transcription
-                    } catch {
-                        guard isCurrentTranscription() else { return nil }
-                        audioError = error.localizedDescription
-                        return nil
-                    }
-                }
-            }
             audioError = error.localizedDescription
             return nil
         }
