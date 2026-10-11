@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import AVFoundation
 import PhotosUI
+import VisionKit
 import RevenueCat
 import RevenueCatUI
 
@@ -336,9 +337,11 @@ struct MessageInputView: View {
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var pendingPickerAction: PickerAction?
     @State private var showCameraPermissionAlert = false
+    @State private var pendingDocumentScan: Result<VNDocumentCameraScan, Error>?
+    @State private var documentScanContext: (chatId: String?, accountId: String?)?
 
     private enum PickerAction {
-        case camera, photos, files
+        case camera, scan, photos, files
     }
 
     // Binding to show audio error alert
@@ -400,7 +403,7 @@ struct MessageInputView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("To take photos, please enable camera access in Settings.")
+                Text("To take photos or scan documents, please enable camera access in Settings.")
             }
             .alert("Transcription Error", isPresented: showAudioError) {
                 Button("OK", role: .cancel) {}
@@ -449,11 +452,18 @@ struct MessageInputView: View {
                 }
                 .ignoresSafeArea()
             }
+            .fullScreenCover(isPresented: $viewModel.showDocumentScanner, onDismiss: processDocumentScan) {
+                DocumentScannerView { result in
+                    pendingDocumentScan = result
+                }
+                .ignoresSafeArea()
+            }
             .sheet(isPresented: $viewModel.showAddSheet, onDismiss: {
                 guard let action = pendingPickerAction else { return }
                 pendingPickerAction = nil
                 switch action {
-                case .camera: requestCameraAccess()
+                case .camera: requestCameraAccess(for: .camera)
+                case .scan: requestCameraAccess(for: .scan)
                 case .photos: viewModel.showPhotoPicker = true
                 case .files: viewModel.showDocumentPicker = true
                 }
@@ -464,6 +474,10 @@ struct MessageInputView: View {
                     contextUsage: showContextIndicator ? contextUsage : nil,
                     onCamera: {
                         pendingPickerAction = .camera
+                        viewModel.showAddSheet = false
+                    },
+                    onScan: {
+                        pendingPickerAction = .scan
                         viewModel.showAddSheet = false
                     },
                     onPhotos: {
@@ -1191,15 +1205,32 @@ struct MessageInputView: View {
         }
     }
 
-    private func requestCameraAccess() {
+    private func processDocumentScan() {
+        defer {
+            pendingDocumentScan = nil
+            documentScanContext = nil
+        }
+        guard let result = pendingDocumentScan,
+              let context = documentScanContext,
+              context.chatId == viewModel.currentChat?.id,
+              context.accountId == authManager.localUserId else { return }
+        switch result {
+        case .success(let scan):
+            viewModel.addScannedDocument(scan)
+        case .failure(let error):
+            viewModel.attachmentError = "Could not scan the document: \(error.localizedDescription)"
+        }
+    }
+
+    private func requestCameraAccess(for action: PickerAction) {
         switch cameraPermissionAction(for: AVCaptureDevice.authorizationStatus(for: .video)) {
         case .presentCamera:
-            viewModel.showCamera = true
+            presentCamera(for: action)
         case .requestAccess:
             AVCaptureDevice.requestAccess(for: .video) { granted in
                 DispatchQueue.main.async {
                     if granted {
-                        viewModel.showCamera = true
+                        presentCamera(for: action)
                     } else {
                         showCameraPermissionAlert = true
                     }
@@ -1207,6 +1238,22 @@ struct MessageInputView: View {
             }
         case .showSettingsAlert:
             showCameraPermissionAlert = true
+        }
+    }
+
+    private func presentCamera(for action: PickerAction) {
+        guard viewModel.canUseCurrentChatActions, viewModel.currentModel.isMultimodal else { return }
+        switch action {
+        case .camera:
+            guard UIImagePickerController.isSourceTypeAvailable(.camera) else { return }
+            viewModel.showCamera = true
+        case .scan:
+            guard VNDocumentCameraViewController.isSupported else { return }
+            pendingDocumentScan = nil
+            documentScanContext = (viewModel.currentChat?.id, authManager.localUserId)
+            viewModel.showDocumentScanner = true
+        case .photos, .files:
+            break
         }
     }
 
@@ -1534,6 +1581,7 @@ struct AddToSheetView: View {
     let isDarkMode: Bool
     let contextUsage: ContextUsage?
     let onCamera: () -> Void
+    let onScan: () -> Void
     let onPhotos: () -> Void
     let onFiles: () -> Void
     @Environment(\.dismiss) private var dismiss
@@ -1562,6 +1610,12 @@ struct AddToSheetView: View {
                             attachmentButton(icon: "camera", label: "Camera") {
                                 onCamera()
                             }
+                        }
+                        if VNDocumentCameraViewController.isSupported {
+                            attachmentButton(icon: "doc.viewfinder", label: "Scan") {
+                                onScan()
+                            }
+                            .accessibilityLabel("Scan documents")
                         }
                         attachmentButton(icon: "photo.on.rectangle", label: "Photos") {
                             onPhotos()
