@@ -11,6 +11,7 @@ import SwiftUI
 @preconcurrency import TinfoilAI
 import OpenAI
 import AVFoundation
+import VisionKit
 
 enum ChatStorageTab: String, Sendable, Hashable {
     case cloud
@@ -304,6 +305,7 @@ class ChatViewModel: ObservableObject {
     @Published var showDocumentPicker: Bool = false
     @Published var showPhotoPicker: Bool = false
     @Published var showCamera: Bool = false
+    @Published var showDocumentScanner: Bool = false
     @Published var showMessageSheet: Bool = false
     @Published var showSidebarSettings: Bool = false
     @Published var showCloudSyncOnboarding: Bool = false
@@ -4142,12 +4144,60 @@ class ChatViewModel: ObservableObject {
         )
     }
 
+    func addScannedDocument(_ scan: VNDocumentCameraScan) {
+        guard canUseCurrentChatActions, scan.pageCount > 0 else { return }
+        guard currentModel.isMultimodal else {
+            attachmentError = DocumentPickerBatchAdmission.Error.imageModelUnsupported.localizedDescription
+            return
+        }
+
+        let source = DocumentScanImageSource(scan: scan)
+        let generation = attachmentErrorPublicationFence.beginBatch(count: scan.pageCount)
+        attachmentError = nil
+
+        // Reserve every attachment in page order before starting asynchronous work.
+        for index in 0..<scan.pageCount {
+            addImageAttachment(
+                fileName: "Scan Page \(index + 1).jpg",
+                errorPublicationGeneration: generation,
+                onProcessingFailure: { [weak self] failure in
+                    guard let self,
+                          let failures = attachmentErrorPublicationFence.recordBatchFailure(
+                              failure,
+                              at: index,
+                              generation: generation
+                          ) else { return }
+                    attachmentError = ManagedFileBatchErrorMessage.attachments(failures)
+                },
+                loadData: { try await source.imageData(at: index) }
+            )
+        }
+    }
+
     func addImageAttachment(
         data: Data,
         fileName: String,
         sharedImportRequestID: UUID? = nil,
         errorPublicationGeneration: Int? = nil,
         onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil
+    ) {
+        addImageAttachment(
+            fileName: fileName,
+            fileSize: Int64(data.count),
+            sharedImportRequestID: sharedImportRequestID,
+            errorPublicationGeneration: errorPublicationGeneration,
+            onProcessingFailure: onProcessingFailure,
+            loadData: { data }
+        )
+    }
+
+    private func addImageAttachment(
+        fileName: String,
+        fileSize: Int64 = 0,
+        sharedImportRequestID: UUID? = nil,
+        errorPublicationGeneration: Int? = nil,
+        onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil,
+        loadData: @escaping () async throws -> Data
     ) {
         let startsNewErrorPublication = errorPublicationGeneration == nil
         let errorPublicationGeneration = errorPublicationGeneration
@@ -4161,7 +4211,7 @@ class ChatViewModel: ObservableObject {
             id: attachmentId,
             type: .image,
             fileName: fileName,
-            fileSize: Int64(data.count),
+            fileSize: fileSize,
             sharedImportRequestID: sharedImportRequestID,
             processingState: .processing
         )
@@ -4170,6 +4220,8 @@ class ChatViewModel: ObservableObject {
         attachmentProcessingStore.start(id: attachmentId) { [weak self] publication in
             guard let self else { return }
             do {
+                let data = try await loadData()
+                try Task.checkCancellation()
                 let processed = try await ImageProcessingService.shared.processImage(data: data)
                 try Task.checkCancellation()
                 guard publication.isCurrent else { return }
