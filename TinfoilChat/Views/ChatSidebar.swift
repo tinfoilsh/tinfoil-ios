@@ -513,6 +513,7 @@ struct ChatSidebar: View {
                                 projectId: chat.projectId,
                                 isLocalOnly: chat.isLocalOnly
                             )
+                            closeAfterOpeningChat()
                             return
                         }
                         guard let fullChat = resolveSidebarSearchChat(
@@ -522,8 +523,9 @@ struct ChatSidebar: View {
                         ) else { return }
                         viewModel.openSearchResult(fullChat)
                     } else {
-                        viewModel.selectChat(id: chat.id, isLocalOnly: chat.isLocalOnly)
+                        guard viewModel.selectChat(id: chat.id, isLocalOnly: chat.isLocalOnly) else { return }
                     }
+                    closeAfterOpeningChat()
                 },
                 onEdit: {
                     if editingChatId == chat.id {
@@ -681,7 +683,10 @@ struct ChatSidebar: View {
             isPinned: true,
             showPinnedIndicator: false,
             projectColor: chat.projectId.flatMap { projectColors[$0] },
-            onSelect: { viewModel.openSearchResult(chat) },
+            onSelect: {
+                viewModel.openSearchResult(chat)
+                closeAfterOpeningChat()
+            },
             onEdit: {
                 if editingChatId == chat.id {
                     let editedChatId = chat.id
@@ -1128,6 +1133,14 @@ struct ChatSidebar: View {
                 isTabSwitching = false
             }
         }
+    }
+
+    /// On iPhone the sidebar covers the conversation, so opening a chat
+    /// closes it, as opening a project already does. The iPad sidebar sits
+    /// beside the conversation and stays open.
+    private func closeAfterOpeningChat() {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { return }
+        withAnimation { isOpen = false }
     }
 
     private func startEditing(_ chat: ChatListSummary) {

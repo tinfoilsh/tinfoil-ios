@@ -150,6 +150,57 @@ struct SpeechPlayerTests {
     }
 
     @Test(.timeLimit(.minutes(1)))
+    func stopIfActiveSilencesPlayingNarration() async throws {
+        let output = SilentSpeechOutput()
+        let player = SpeechPlayer(output: output)
+        var scheduled = output.scheduled.makeAsyncIterator()
+        try player.read(owner: owner, content: "Answer.", service: ShortSpeechService())
+        _ = await scheduled.next()
+        #expect(player.snapshot.status == .playing)
+        var stopped = false
+        output.onStop = { stopped = true }
+
+        #expect(player.stopIfActive())
+        #expect(stopped)
+        #expect(player.snapshot == SpeechPlayer.Snapshot(owner: nil, status: .idle))
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func stopIfActiveCancelsNarrationStillPreparing() async throws {
+        let service = WaitingSpeechService()
+        let player = SpeechPlayer(output: SilentSpeechOutput())
+        var started = service.started.makeAsyncIterator()
+        var canceled = service.canceled.makeAsyncIterator()
+        try player.read(owner: owner, content: "Answer.", service: service)
+        _ = await started.next()
+        #expect(player.snapshot.status == .loading)
+
+        #expect(player.stopIfActive())
+        _ = await canceled.next()
+        #expect(player.snapshot == SpeechPlayer.Snapshot(owner: nil, status: .idle))
+    }
+
+    @Test
+    func stopIfActiveLeavesIdleAndFailedPlayersUntouched() throws {
+        let output = SilentSpeechOutput()
+        let player = SpeechPlayer(output: output)
+        var stopCount = 0
+        output.onStop = { stopCount += 1 }
+        #expect(!player.stopIfActive())
+        #expect(stopCount == 0)
+
+        output.preparationError = .audioBusy
+        try player.read(owner: owner, content: "Answer.", service: WaitingSpeechService())
+        #expect(player.snapshot == SpeechPlayer.Snapshot(owner: owner, status: .failed(.audioBusy)))
+        let stopsBeforeShortcut = stopCount
+
+        #expect(!player.stopIfActive())
+        #expect(stopCount == stopsBeforeShortcut)
+        #expect(player.snapshot == SpeechPlayer.Snapshot(owner: owner, status: .failed(.audioBusy)))
+        #expect(player.pendingFailure(for: owner) == .audioBusy)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
     func releasingThePlayerDoesNotLeaveGenerationAlive() async throws {
         let service = WaitingSpeechService()
         let output = SilentSpeechOutput()

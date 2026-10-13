@@ -73,6 +73,11 @@ struct ChatContainer: View {
         NavigationView {
             mainContent
                 .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
+                // VoiceOver's Magic Tap (two-finger double tap) stops Read Aloud
+                // wherever focus is. The message list handles it for its rows.
+                .accessibilityAction(.magicTap) {
+                    _ = viewModel.speechPlayer.stopIfActive()
+                }
         }
         .onChange(of: isAnySheetPresented) { _, presented in
             if presented && isSidebarOpen {
@@ -193,6 +198,9 @@ struct ChatContainer: View {
                 // iPhone: Overlay layout
                 ZStack {
                     mainSurface
+                        // The open sidebar covers the chat, so VoiceOver should
+                        // only reach the sidebar and the navigation bar.
+                        .accessibilityHidden(isSidebarOpen)
                     sidebarLayer
                 }
             }
@@ -380,6 +388,17 @@ struct ChatContainer: View {
                 // Snap any stray offset back to zero when we finish closing
                 dragOffset = 0
             }
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                // The overlay swaps which content VoiceOver can reach. After
+                // closing, focus starts over at the menu button instead of
+                // staying on a sidebar row that is now hidden.
+                DispatchQueue.main.async {
+                    UIAccessibility.post(
+                        notification: isOpen ? .layoutChanged : .screenChanged,
+                        argument: nil
+                    )
+                }
+            }
         }
     }
     
@@ -418,6 +437,7 @@ struct ChatContainer: View {
                         isSidebarOpen = false
                     }
                 }
+                .accessibilityHidden(true)
             
             // Sidebar with slide transition
             HStack(spacing: 0) {
@@ -431,6 +451,10 @@ struct ChatContainer: View {
                     .offset(x: isSidebarOpen ?
                             (0 + dragOffset) : // When open, allow dragging left
                             (-(sidebarWidth + 1) + dragOffset)) // When closed, hide completely (extra 1pt for border)
+                    // Moving the closed sidebar off screen does not remove it
+                    // from VoiceOver, which would otherwise read its sections
+                    // in the middle of the chat.
+                    .accessibilityHidden(!isSidebarOpen)
                 Spacer()
             }
         }
@@ -447,6 +471,12 @@ struct ChatContainer: View {
             onSubscribe: { showPremiumModal = true },
             onRequestSignIn: showAuthenticationView
         )
+        // VoiceOver's escape gesture (two-finger scrub) closes the menu.
+        .accessibilityAction(.escape) {
+            withAnimation {
+                isSidebarOpen = false
+            }
+        }
     }
 
     private var isShowingProjectLanding: Bool {

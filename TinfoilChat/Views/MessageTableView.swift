@@ -34,7 +34,10 @@ struct MessageTableView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UITableView {
-        let tableView = UITableView(frame: .zero, style: .plain)
+        let tableView = MessageListTableView(frame: .zero, style: .plain)
+        tableView.onMagicTap = { [weak coordinator = context.coordinator] in
+            coordinator?.parent.viewModel.speechPlayer.stopIfActive() ?? false
+        }
         tableView.backgroundColor = .clear
         tableView.separatorStyle = .none
         tableView.delegate = context.coordinator
@@ -535,6 +538,10 @@ struct MessageTableView: UIViewRepresentable {
 
             let cell = tableView.dequeueReusableCell(withIdentifier: cellIdentifier) ?? UITableViewCell(style: .default, reuseIdentifier: cellIdentifier)
             cell.selectionStyle = .none
+            // The hosted SwiftUI message exposes its own elements. If the cell
+            // also became an element, VoiceOver and braille displays would
+            // present the message once as the row and again as its contents.
+            cell.isAccessibilityElement = false
             cell.backgroundColor = .clear
             cell.clipsToBounds = false
             cell.contentView.clipsToBounds = false
@@ -914,8 +921,45 @@ struct MessageTableView: UIViewRepresentable {
                 tableView.scrollToRow(at: indexPath, at: .middle, animated: false)
                 tableView.layoutIfNeeded()
                 guard let cell = tableView.cellForRow(at: indexPath) else { return nil }
-                return UIAccessibilityCustomRotorItemResult(targetElement: cell, targetRange: nil)
+                // Land on the message's first element rather than the row:
+                // focusing the row reads the whole message as one block, and
+                // the next swipe then reads the same text again.
+                let target = Self.firstAccessibilityElement(in: cell) ?? cell
+                return UIAccessibilityCustomRotorItemResult(targetElement: target, targetRange: nil)
             }
+        }
+
+        /// Depth-first search for the first element VoiceOver can focus,
+        /// walking both SwiftUI accessibility containers and UIKit subviews.
+        private static func firstAccessibilityElement(in object: NSObject) -> NSObject? {
+            if let view = object as? UIView, view.isHidden || view.accessibilityElementsHidden {
+                return nil
+            }
+            if object.isAccessibilityElement {
+                return object
+            }
+            if let elements = object.accessibilityElements {
+                for case let element as NSObject in elements {
+                    if let found = firstAccessibilityElement(in: element) { return found }
+                }
+                return nil
+            }
+            let count = object.accessibilityElementCount()
+            if count != NSNotFound, count > 0 {
+                for index in 0..<count {
+                    if let element = object.accessibilityElement(at: index) as? NSObject,
+                       let found = firstAccessibilityElement(in: element) {
+                        return found
+                    }
+                }
+                return nil
+            }
+            if let view = object as? UIView {
+                for subview in view.subviews {
+                    if let found = firstAccessibilityElement(in: subview) { return found }
+                }
+            }
+            return nil
         }
 
         /// Resolves the table row that owns the currently focused accessibility
@@ -958,6 +1002,18 @@ struct MessageTableView: UIViewRepresentable {
                 }
             }
         }
+    }
+}
+
+/// VoiceOver sends Magic Tap up the responder chain from the focused
+/// element. SwiftUI accessibility actions on the chat screen never see
+/// gestures from the SwiftUI hosted inside these cells, so the table
+/// answers for its rows, such as a Read Aloud button that was just pressed.
+final class MessageListTableView: UITableView {
+    var onMagicTap: (@MainActor () -> Bool)?
+
+    override func accessibilityPerformMagicTap() -> Bool {
+        onMagicTap?() ?? false
     }
 }
 
