@@ -116,6 +116,9 @@ enum Constants {
         static let messagesRotorName = "Messages"
 
         static let scrollToLatestMessage = "Scroll to latest message"
+
+        /// Label of the divider above the first message still in context.
+        static let archivedMessagesSeparator = "Older messages above are archived"
     }
 
     enum Rendering {

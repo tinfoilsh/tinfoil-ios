@@ -936,7 +936,12 @@ struct MessageTableView: UIViewRepresentable {
                 return nil
             }
             if object.isAccessibilityElement {
-                return object
+                // The archive divider heads its row but is not the message.
+                // Landing on it would also make the next flick skip the
+                // message, since the rotor advances from the focused row.
+                let isArchiveDivider = object.accessibilityLabel
+                    == Constants.Accessibility.archivedMessagesSeparator
+                return isArchiveDivider ? nil : object
             }
             if let elements = object.accessibilityElements {
                 for case let element as NSObject in elements {
@@ -1006,9 +1011,9 @@ struct MessageTableView: UIViewRepresentable {
 }
 
 /// VoiceOver sends Magic Tap up the responder chain from the focused
-/// element. SwiftUI accessibility actions on the chat screen never see
-/// gestures from the SwiftUI hosted inside these cells, so the table
-/// answers for its rows, such as a Read Aloud button that was just pressed.
+/// element, so the table answers for its rows, such as a Read Aloud button
+/// that was just pressed. Unlike a SwiftUI magic tap action, this can return
+/// false when nothing is playing so Magic Tap still pauses other apps' media.
 final class MessageListTableView: UITableView {
     var onMagicTap: (@MainActor () -> Bool)?
 
@@ -1163,7 +1168,7 @@ struct ObservableMessageCell: View {
                 .padding(.vertical, 16)
                 .padding(.horizontal, 24)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Older messages above are archived")
+                .accessibilityLabel(Constants.Accessibility.archivedMessagesSeparator)
             }
 
             ZStack(alignment: .topLeading) {

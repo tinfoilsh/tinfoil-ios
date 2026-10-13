@@ -73,11 +73,6 @@ struct ChatContainer: View {
         NavigationView {
             mainContent
                 .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
-                // VoiceOver's Magic Tap (two-finger double tap) stops Read Aloud
-                // wherever focus is. The message list handles it for its rows.
-                .accessibilityAction(.magicTap) {
-                    _ = viewModel.speechPlayer.stopIfActive()
-                }
         }
         .onChange(of: isAnySheetPresented) { _, presented in
             if presented && isSidebarOpen {
