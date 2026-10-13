@@ -83,6 +83,21 @@ final class SpeechPlayer: ObservableObject {
         update(owner: nil, status: .idle)
     }
 
+    /// Stops narration that is preparing or playing, for app-wide shortcuts
+    /// such as VoiceOver's Magic Tap that are not tied to a message. Returns
+    /// false when nothing is audible so the gesture can fall through, and
+    /// leaves a pending failure in place for its message's button to report.
+    @discardableResult
+    func stopIfActive() -> Bool {
+        switch snapshot.status {
+        case .loading, .playing:
+            stop()
+            return true
+        case .idle, .failed:
+            return false
+        }
+    }
+
     func pendingFailure(for owner: SpeechOwner) -> SpeechError? {
         guard snapshot.owner == owner, !failureAcknowledged,
               case .failed(let error) = snapshot.status else { return nil }
