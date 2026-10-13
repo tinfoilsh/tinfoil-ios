@@ -65,6 +65,19 @@ enum WireCodes {
     static let syncProtocolUpgradeRequired = EnclaveErrorCode.syncProtocolUpgradeRequired.rawValue
 }
 
+/// Attachment ids the enclave mints: 18 random bytes, hex encoded. A chat
+/// push reports the id of every attachment carrying a server key, and the
+/// controlplane rejects the push when any of them has another shape; see
+/// controlplane handlers/sync_blob_handler.go (isAttachmentID).
+enum EnclaveAttachmentIds {
+    static func isEnclaveMinted(_ id: String) -> Bool {
+        id.utf8.count == 36 && id.utf8.allSatisfy { byte in
+            (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(byte)
+                || (UInt8(ascii: "a")...UInt8(ascii: "f")).contains(byte)
+        }
+    }
+}
+
 /// Client-assigned pull item codes. These never appear on the wire;
 /// they let a locally detected problem with an `ok=true` item flow
 /// through the same per-row classification as enclave-reported codes.
