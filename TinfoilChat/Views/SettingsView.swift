@@ -924,6 +924,10 @@ struct SettingsView: View {
             }
         } header: {
             Text("Legal")
+        } footer: {
+            Text("Version \(AppConfig.shared.currentAppVersion)")
+                .font(.caption)
+                .textSelection(.enabled)
         }
         .listRowBackground(Color.cardSurface(for: colorScheme))
     }
