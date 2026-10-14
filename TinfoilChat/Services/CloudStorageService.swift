@@ -205,23 +205,18 @@ class CloudStorageService: ObservableObject {
         _ chat: inout StoredChat,
         offloadDocuments: Bool,
         onAttachmentUploaded: AttachmentUploadedHandler,
-        put: (EnclaveAttachmentPutRequest) async throws -> EnclaveAttachmentPutResponse = SyncEnclaveAPI.attachmentPut
+        put: (EnclaveAttachmentPutRequest) async throws -> EnclaveAttachmentPutResponse = SyncEnclaveAPI.attachmentPut,
+        get: (EnclaveAttachmentGetRequest) async throws -> Data = SyncEnclaveAPI.attachmentGet
     ) async throws -> [AttachmentRewrite] {
         var rewrites: [AttachmentRewrite] = []
         for msgIdx in chat.messages.indices {
             for attIdx in chat.messages[msgIdx].attachments.indices {
                 let att = chat.messages[msgIdx].attachments[attIdx]
-                guard att.encryptionKey?.isEmpty != false else { continue }
-                let raw: Data
-                switch att.type {
-                case .image:
-                    guard let base64 = att.base64,
-                          let bytes = Data(base64Encoded: base64) else { continue }
-                    raw = bytes
-                case .document:
-                    guard offloadDocuments else { continue }
-                    raw = try DocumentAttachmentPayload.encode(att)
-                }
+                guard let raw = try await uploadPayload(
+                    for: att,
+                    offloadDocuments: offloadDocuments,
+                    get: get
+                ) else { continue }
                 let attIdemKey = Self.attachmentIdempotencyKey(
                     chatId: chat.id,
                     clientId: att.id,
@@ -253,6 +248,52 @@ class CloudStorageService: ObservableObject {
             }
         }
         return rewrites
+    }
+
+    /// Bytes to store before the chat push, or nil when the attachment
+    /// needs no upload. Content never uploaded comes from this device. An
+    /// attachment stored before the enclave minted ids keeps a server key
+    /// under an id the controlplane rejects on push, so it is stored again
+    /// under an enclave id, read locally when this device still holds it.
+    private static func uploadPayload(
+        for att: Attachment,
+        offloadDocuments: Bool,
+        get: (EnclaveAttachmentGetRequest) async throws -> Data
+    ) async throws -> Data? {
+        guard let serverKey = att.encryptionKey, !serverKey.isEmpty else {
+            switch att.type {
+            case .image:
+                return att.base64.flatMap { Data(base64Encoded: $0) }
+            case .document:
+                guard offloadDocuments else { return nil }
+                return try DocumentAttachmentPayload.encode(att)
+            }
+        }
+        if EnclaveAttachmentIds.isEnclaveMinted(att.id) { return nil }
+        if att.type == .image, let bytes = att.base64.flatMap({ Data(base64Encoded: $0) }) {
+            return bytes
+        }
+        if DocumentAttachmentPayload.hasInlineContent(att) {
+            return try DocumentAttachmentPayload.encode(att)
+        }
+        return try await readStoredAttachment(
+            EnclaveAttachmentGetRequest(id: att.id, attKey: serverKey),
+            get: get
+        )
+    }
+
+    /// A blob the server no longer holds is not a deleted chat, so the
+    /// enclave's not-found answer becomes `attachmentUnavailable` instead
+    /// of reaching upload recovery as NOT_FOUND.
+    private static func readStoredAttachment(
+        _ request: EnclaveAttachmentGetRequest,
+        get: (EnclaveAttachmentGetRequest) async throws -> Data
+    ) async throws -> Data {
+        do {
+            return try await get(request)
+        } catch let error as SyncEnclaveError where error.status == 404 || error.code == WireCodes.notFound {
+            throw CloudStorageError.attachmentUnavailable
+        }
     }
 
     static func stripAttachmentPayloads(_ messages: inout [Message], offloadDocuments: Bool) {
@@ -748,6 +789,7 @@ enum CloudStorageError: LocalizedError {
     case missingDecryptionKey
     case invalidChatPayload
     case paginationCursorStalled
+    case attachmentUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -763,6 +805,8 @@ enum CloudStorageError: LocalizedError {
             return "The cloud chat data is invalid"
         case .paginationCursorStalled:
             return "The cloud chat list did not advance"
+        case .attachmentUnavailable:
+            return "An attachment in this chat is no longer available in the cloud"
         }
     }
 }
