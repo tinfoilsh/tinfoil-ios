@@ -87,16 +87,16 @@ struct ReasoningEffortSelector: View {
     private var toggleOnlyMenu: some View {
         Menu {
             Section {
-                Button {
-                    thinkingEnabled = true
-                } label: {
-                    Label("On", systemImage: thinkingEnabled ? "checkmark" : "")
-                }
-                Button {
-                    thinkingEnabled = false
-                } label: {
-                    Label("Off", systemImage: thinkingEnabled ? "" : "checkmark")
-                }
+                // Toggles rather than buttons with a checkmark icon: icon
+                // rows drop taps that are not instantaneous.
+                Toggle("On", isOn: Binding(
+                    get: { thinkingEnabled },
+                    set: { _ in thinkingEnabled = true }
+                ))
+                Toggle("Off", isOn: Binding(
+                    get: { !thinkingEnabled },
+                    set: { _ in thinkingEnabled = false }
+                ))
             } header: {
                 Text("Thinking — turn reasoning on or off")
             }
@@ -111,24 +111,27 @@ struct ReasoningEffortSelector: View {
     private var effortMenu: some View {
         Menu {
             Section {
+                // Toggles rather than buttons with a checkmark icon: icon
+                // rows drop taps that are not instantaneous.
                 ForEach(EffortOption.allCases) { option in
-                    Button {
-                        if supportsToggle && !thinkingEnabled {
-                            thinkingEnabled = true
+                    Toggle(option.displayLabel, isOn: Binding(
+                        get: {
+                            (!supportsToggle || thinkingEnabled)
+                                && EffortOption(reasoningEffort) == option
+                        },
+                        set: { _ in
+                            if supportsToggle && !thinkingEnabled {
+                                thinkingEnabled = true
+                            }
+                            reasoningEffort = option.asReasoningEffort
                         }
-                        reasoningEffort = option.asReasoningEffort
-                    } label: {
-                        let isActive = (!supportsToggle || thinkingEnabled)
-                            && EffortOption(reasoningEffort) == option
-                        Label(option.displayLabel, systemImage: isActive ? "checkmark" : "")
-                    }
+                    ))
                 }
                 if supportsToggle {
-                    Button {
-                        thinkingEnabled = false
-                    } label: {
-                        Label("Off", systemImage: thinkingEnabled ? "" : "checkmark")
-                    }
+                    Toggle("Off", isOn: Binding(
+                        get: { !thinkingEnabled },
+                        set: { _ in thinkingEnabled = false }
+                    ))
                 }
             } header: {
                 Text("Thinking — choose how much the model reasons")
