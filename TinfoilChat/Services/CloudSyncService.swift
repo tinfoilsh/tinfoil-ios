@@ -2379,11 +2379,127 @@ class CloudSyncService: ObservableObject {
     }
 
     func smartSync(projectId: String?) async -> SyncResult {
-        await syncAllChats()
+        let generation = accountGeneration
+        let result = await syncAllChats()
+        guard let projectId, generation == accountGeneration else { return result }
+        let projectResult = await pullMissingProjectChats(projectId: projectId)
+        return SyncResult(
+            uploaded: result.uploaded,
+            downloaded: result.downloaded + projectResult.downloaded,
+            deleted: result.deleted,
+            errors: result.errors + projectResult.errors
+        )
     }
 
     func syncProjectChats(_ projectId: String) async -> SyncResult {
-        await syncAllChats()
+        await smartSync(projectId: projectId)
+    }
+
+    /// Revision sync only hydrates the most recent chats a device has never
+    /// stored, so a project's older chats stay missing after a fresh install
+    /// or local wipe until they change again. Pull every chat the server
+    /// lists under the project that has no local row; rows that already
+    /// exist locally are left to revision sync.
+    private func pullMissingProjectChats(projectId: String) async -> SyncResult {
+        guard !uploadsSuspended, !isSyncing else { return SyncResult() }
+        if case .actionRequired(.upgradeRequired, _) = SyncHealthStore.shared.gate {
+            return SyncResult()
+        }
+        guard CEKEncoding.pullKeysIfAvailable() != nil else { return SyncResult() }
+        let generation = accountGeneration
+        isSyncing = true
+        defer {
+            if generation == accountGeneration {
+                isSyncing = false
+            }
+        }
+        guard await cloudStorage.isAuthenticated(),
+              let userId = await getCurrentUserId(),
+              generation == accountGeneration else { return SyncResult() }
+
+        do {
+            var listed: [RemoteChat] = []
+            var visitedTokens: Set<String> = []
+            var continuationToken: String?
+            repeat {
+                if let continuationToken {
+                    guard visitedTokens.insert(continuationToken).inserted else {
+                        throw CloudStorageError.paginationCursorStalled
+                    }
+                }
+                let page = try await cloudStorage.listProjectChats(
+                    projectId: projectId,
+                    continuationToken: continuationToken
+                )
+                guard generation == accountGeneration else { return SyncResult() }
+                listed.append(contentsOf: page.chats)
+                continuationToken = page.hasMore == true && page.nextContinuationToken?.isEmpty == false
+                    ? page.nextContinuationToken
+                    : nil
+            } while continuationToken != nil
+
+            let remoteById = Dictionary(
+                listed.map { ($0.id, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            let local = try await EncryptedFileStorage.cloud.loadIndex(userId: userId)
+            let deleteIntents = try await EncryptedFileStorage.cloud.loadDeleteIntents(
+                userId: userId
+            )
+            let remoteDeleteIds = Set(
+                try await EncryptedFileStorage.cloud.loadRemoteDeleteTombstones(userId: userId).keys
+            )
+            // While tombstone recovery is pending every cloud save is
+            // refused; the next snapshot reconcile restores these rows.
+            let requiresTombstoneRecovery = try await EncryptedFileStorage.cloud
+                .requiresRemoteDeleteRecovery(userId: userId)
+            guard !requiresTombstoneRecovery, generation == accountGeneration else {
+                return SyncResult()
+            }
+            let pullIds = ProjectChatBackfill.missingChatIds(
+                listedIds: listed.map(\.id).filter { !deletedChatsTracker.isDeleted($0) },
+                local: local,
+                pendingDeleteIds: Set(deleteIntents.map(\.chatId)),
+                remoteDeleteIds: remoteDeleteIds
+            )
+            guard !pullIds.isEmpty else { return SyncResult() }
+
+            let pulled = try await cloudStorage.pullChats(pullIds)
+            guard generation == accountGeneration else { return SyncResult() }
+            var downloaded = 0
+            for result in pulled {
+                guard generation == accountGeneration else { return SyncResult() }
+                guard let remoteChat = remoteById[result.id] else { continue }
+                switch result {
+                case .ok(let chat):
+                    var stored = applyRemoteMetadata(remoteChat, to: chat)
+                    stored.syncedAt = Date()
+                    stored.locallyModified = false
+                    let applied = await applyRemoteChatToStorage(
+                        stored,
+                        generation: generation,
+                        userId: userId,
+                        expectedLocalUpdatedAt: nil
+                    )
+                    if applied, generation == accountGeneration {
+                        SyncHealthStore.shared.reportChatSynced(stored.id)
+                        downloaded += 1
+                    }
+                case .unavailable(_, let code):
+                    // The row vanished between list and pull; the next
+                    // revision sync carries the matching delete.
+                    if code == WireCodes.notFound { continue }
+                    // No encrypted placeholder: it would carry no project
+                    // and its local row would stop later backfills.
+                    reportUnavailableChat(id: result.id, code: code)
+                }
+            }
+            guard generation == accountGeneration else { return SyncResult() }
+            return SyncResult(downloaded: downloaded)
+        } catch {
+            guard generation == accountGeneration else { return SyncResult() }
+            return SyncResult(errors: ["Project sync failed: \(error.localizedDescription)"])
+        }
     }
 
     /// Clear cached sync status (call on logout / account switch).

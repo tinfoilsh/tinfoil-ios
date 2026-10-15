@@ -244,6 +244,32 @@ enum SnapshotReconciliation {
     }
 }
 
+enum ProjectChatBackfill {
+    /// Ids listed under a project on the server that this device has never
+    /// stored, in listing order without duplicates. Rows already in the
+    /// local index (including dirty ones) stay with revision sync, and ids
+    /// with a staged local delete or an observed remote delete are skipped
+    /// so the backfill cannot resurrect a chat that is being deleted.
+    static func missingChatIds(
+        listedIds: [String],
+        local: [ChatIndexEntry],
+        pendingDeleteIds: Set<String>,
+        remoteDeleteIds: Set<String>
+    ) -> [String] {
+        let localIds = Set(local.map(\.id))
+        var seen = Set<String>()
+        return listedIds.filter { id in
+            guard seen.insert(id).inserted,
+                  !localIds.contains(id),
+                  !remoteDeleteIds.contains(id) else { return false }
+            return DeleteIntentPlanner.shouldApplyRemoteUpsert(
+                chatId: id,
+                pendingDeleteIds: pendingDeleteIds
+            )
+        }
+    }
+}
+
 enum ChatContentIntegrity {
     static func missingIds(
         indexIds: [String],
