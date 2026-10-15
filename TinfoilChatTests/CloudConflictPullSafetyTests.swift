@@ -43,6 +43,20 @@ struct CloudConflictPullSafetyTests {
         }
     }
 
+    @Test func chatWithoutUpdatedAtDecodesWithItsCreationTime() throws {
+        let json = #"{"id":"imported","title":"Imported","messages":[{"role":"user","content":"hi","timestamp":"2024-01-01T00:00:00.000Z"}],"createdAt":"2024-01-02T03:04:05.000Z","isLocalOnly":false}"#
+        let item = EnclavePullItem(
+            id: "imported", ok: true, plaintext: Data(json.utf8).base64EncodedString(), keyId: nil, etag: "4",
+            needsRewrap: nil, projectIdSet: nil, projectId: nil, code: nil, reason: nil
+        )
+        let decoded = try CloudStorageService.decodeDownloadedChat(item, expectedChatId: "imported")
+        let chat = try #require(decoded)
+        #expect(chat.createdAt == Date(timeIntervalSince1970: 1_704_164_645))
+        #expect(chat.updatedAt == chat.createdAt)
+        #expect(chat.messages.map(\.content) == ["hi"])
+        #expect(chat.syncVersion == 4)
+    }
+
     @Test func mismatchedResponseIdentityIsRejected() {
         let item = EnclavePullItem(
             id: "other-chat", ok: false, plaintext: nil, keyId: nil, etag: nil,
