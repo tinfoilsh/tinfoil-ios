@@ -460,6 +460,38 @@ struct RevisionSyncTests {
     }
 
     @MainActor
+    @Test func projectBackfillPullsOnlyListedChatsMissingLocally() {
+        var synced = ChatSearchServiceTests.makeChat(id: "synced", title: "Synced")
+        synced.syncedAt = Date()
+        synced.syncVersion = 2
+        synced.locallyModified = false
+        var dirty = ChatSearchServiceTests.makeChat(id: "dirty", title: "Dirty")
+        dirty.syncedAt = Date()
+        dirty.syncVersion = 2
+        dirty.locallyModified = true
+        var placeholder = ChatSearchServiceTests.makeChat(id: "placeholder", title: "Encrypted")
+        placeholder.decryptionFailed = true
+
+        let selected = ProjectChatBackfill.missingChatIds(
+            listedIds: [
+                "missing-old", "synced", "dirty", "placeholder", "pending-delete",
+                "remote-deleted", "missing-new", "missing-old",
+            ],
+            local: [synced, dirty, placeholder].map { ChatIndexEntry(from: $0) },
+            pendingDeleteIds: ["pending-delete"],
+            remoteDeleteIds: ["remote-deleted"]
+        )
+
+        #expect(selected == ["missing-old", "missing-new"])
+        #expect(ProjectChatBackfill.missingChatIds(
+            listedIds: [],
+            local: [],
+            pendingDeleteIds: [],
+            remoteDeleteIds: []
+        ).isEmpty)
+    }
+
+    @MainActor
     @Test func snapshotRepairsMissingContentEvenWhenIndexMetadataIsClean() {
         var clean = ChatSearchServiceTests.makeChat(id: "missing-file", title: "Missing")
         clean.syncedAt = Date()
