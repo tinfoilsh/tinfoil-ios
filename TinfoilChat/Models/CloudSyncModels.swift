@@ -338,7 +338,7 @@ struct StoredChat: Codable {
         isoFormatterNoFraction.formatOptions = [.withInternetDateTime]
         
         let createdAtString = try container.decode(String.self, forKey: .createdAt)
-        let updatedAtString = try container.decode(String.self, forKey: .updatedAt)
+        let updatedAtString = try container.decodeIfPresent(String.self, forKey: .updatedAt)
         
         // Try parsing with fractional seconds first, then without, before falling back
         if let date = isoFormatter.date(from: createdAtString) {
@@ -349,12 +349,19 @@ struct StoredChat: Codable {
             createdAt = Date()
         }
         
-        if let date = isoFormatter.date(from: updatedAtString) {
-            updatedAt = date
-        } else if let date = isoFormatterNoFraction.date(from: updatedAtString) {
-            updatedAt = date
+        if let updatedAtString {
+            if let date = isoFormatter.date(from: updatedAtString) {
+                updatedAt = date
+            } else if let date = isoFormatterNoFraction.date(from: updatedAtString) {
+                updatedAt = date
+            } else {
+                updatedAt = Date()
+            }
         } else {
-            updatedAt = Date()
+            // Chats imported before the importer wrote `updatedAt` carry only
+            // `createdAt`. Sync paths replace this with the server row's
+            // timestamp, and an old value keeps a local edit winning a conflict.
+            updatedAt = createdAt
         }
         
         // modelType is not synced - it's a local UI preference
