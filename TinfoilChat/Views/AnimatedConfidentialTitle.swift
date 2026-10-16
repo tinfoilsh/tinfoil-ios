@@ -18,7 +18,7 @@ struct AnimatedConfidentialTitle: View {
     @ObservedObject private var settings = SettingsManager.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     
-    private let fullText = "Private Chat"
+    private let fullText = "Tinfoil Chat"
     private let typingSpeed = 0.05 // seconds per character
     private let hapticGenerator = UIImpactFeedbackGenerator(style: .light)
     
