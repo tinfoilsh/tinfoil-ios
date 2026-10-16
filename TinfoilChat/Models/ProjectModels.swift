@@ -104,7 +104,6 @@ extension ProjectData {
 struct ProjectChat: Codable, Identifiable, Equatable {
     let id: String
     let projectId: String
-    let messageCount: Int?
     let syncVersion: Int?
     let size: Int?
     let formatVersion: Int?

@@ -487,7 +487,6 @@ struct RemoteChat: Codable {
     let createdAt: String
     let updatedAt: String
     let title: String?  // Optional - encrypted chats don't have readable titles
-    let messageCount: Int?  // Optional - might not be present
     let syncVersion: Int?  // Optional - for version tracking
     let size: Int?  // Optional - file size
     let content: String?  // Plaintext envelope-v2 chat content (optional in list)
