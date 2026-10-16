@@ -137,9 +137,7 @@ class CloudStorageService: ObservableObject {
         let plaintext = try Self.encodeChatPlaintext(chatToUpload)
         let keyB64 = try CEKEncoding.requirePrimaryKeyB64()
 
-        var metadata: [String: AnyCodable] = [
-            "messageCount": AnyCodable(chatToUpload.messages.count)
-        ]
+        var metadata: [String: AnyCodable] = [:]
         if includesProjectIntent {
             if let projectId = chatToUpload.projectId {
                 metadata["projectId"] = AnyCodable(projectId)
@@ -738,7 +736,6 @@ class CloudStorageService: ObservableObject {
             createdAt: createdAtFromReverseId(update.id),
             updatedAt: update.updatedAt,
             title: nil,
-            messageCount: nil,
             syncVersion: etagToSyncVersion(update.etag) ?? 1,
             size: nil,
             content: nil,

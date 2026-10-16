@@ -23,7 +23,6 @@ enum SyncHeaders {
     static let ifMatch = "If-Match"
     static let eTag = "ETag"
     static let operationHash = "X-Operation-Hash"
-    static let messageCount = "X-Message-Count"
     static let projectID = "X-Project-Id"
     static let projectIDSet = "X-Project-Id-Set"
 }
