@@ -5,8 +5,8 @@
 //  iOS rendering of the webapp's `render_artifact_preview` widget. The
 //  webapp version slides a full preview pane over the chat; the iOS
 //  version surfaces a tappable summary card that opens a sheet with the
-//  artifact contents (URL via in-app browser, HTML/markdown via plain
-//  text view).
+//  artifact contents (URL in the browser, HTML in a sandboxed web view
+//  with its source one tap away, markdown as text).
 
 import OpenAI
 import SwiftUI
@@ -163,33 +163,92 @@ private struct ArtifactDetailSheet: View {
     let isDarkMode: Bool
 
     @Environment(\.dismiss) private var dismiss
+    @State private var showsSource = false
+    @State private var isPreviewUnavailable = false
+
+    private var canPreviewHTML: Bool {
+        args.source.type == .html && !isPreviewUnavailable
+    }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    if let description = args.description, !description.isEmpty {
-                        Text(description)
-                            .font(.subheadline)
-                            .foregroundColor(GenUIStyle.mutedText(isDarkMode))
-                    }
-                    Divider()
-                    contentBody
-                    if let footer = args.footer, !footer.isEmpty {
-                        Divider()
-                        Text(footer)
-                            .font(.caption)
-                            .foregroundColor(GenUIStyle.mutedText(isDarkMode))
+            Group {
+                if canPreviewHTML, !showsSource, let html = args.source.html {
+                    htmlPreview(html)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            descriptionText
+                            Divider()
+                            contentBody
+                            if hasFooter {
+                                Divider()
+                                footerText
+                            }
+                        }
+                        .padding()
                     }
                 }
-                .padding()
             }
             .navigationTitle(args.title ?? "Artifact")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                if canPreviewHTML {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button(showsSource ? "Preview" : "Source") { showsSource.toggle() }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
+            }
+        }
+    }
+
+    private var hasDescription: Bool {
+        !(args.description ?? "").isEmpty
+    }
+
+    private var hasFooter: Bool {
+        !(args.footer ?? "").isEmpty
+    }
+
+    @ViewBuilder
+    private var descriptionText: some View {
+        if let description = args.description, !description.isEmpty {
+            Text(description)
+                .font(.subheadline)
+                .foregroundColor(GenUIStyle.mutedText(isDarkMode))
+        }
+    }
+
+    @ViewBuilder
+    private var footerText: some View {
+        if let footer = args.footer, !footer.isEmpty {
+            Text(footer)
+                .font(.caption)
+                .foregroundColor(GenUIStyle.mutedText(isDarkMode))
+        }
+    }
+
+    /// The web view scrolls the artifact itself, so the description and
+    /// footer sit outside it rather than in a surrounding scroll view.
+    private func htmlPreview(_ html: String) -> some View {
+        VStack(spacing: 0) {
+            if hasDescription {
+                descriptionText
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                Divider()
+            }
+            ArtifactHTMLView(html: html) {
+                isPreviewUnavailable = true
+            }
+            if hasFooter {
+                Divider()
+                footerText
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
             }
         }
     }
@@ -210,6 +269,11 @@ private struct ArtifactDetailSheet: View {
                 }
             }
         case .html:
+            if isPreviewUnavailable {
+                Text("Preview unavailable")
+                    .font(.caption)
+                    .foregroundColor(GenUIStyle.mutedText(isDarkMode))
+            }
             if let html = args.source.html {
                 Text(html)
                     .font(.system(.caption, design: .monospaced))
