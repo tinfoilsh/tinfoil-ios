@@ -845,6 +845,19 @@ enum Constants {
         static let textFontSize: CGFloat = 2.5
         static let textPadding: CGFloat = 3
     }
+
+    /// Model-authored HTML artifacts rendered in a sandboxed web view.
+    enum Artifacts {
+        /// Origin the artifact document runs under. The reserved `.invalid`
+        /// top-level domain never resolves, so the page gets working storage
+        /// on a throwaway origin without any request reaching a real host.
+        static let baseURL = URL(string: "https://artifact.invalid/")!
+        static let contentRuleListIdentifier = "tinfoil-artifact-sandbox"
+        /// Resource types an artifact may load over HTTPS, matching the
+        /// webapp sandbox's img-src, font-src, and media-src. Every other
+        /// load is blocked.
+        static let remoteResourceTypes = ["image", "font", "media"]
+    }
 }
 
 // MARK: - Storage Keys Migration
