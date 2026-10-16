@@ -6,7 +6,7 @@
 //  webapp version slides a full preview pane over the chat; the iOS
 //  version surfaces a tappable summary card that opens a sheet with the
 //  artifact contents (URL in the browser, HTML in a sandboxed web view
-//  with its source one tap away, markdown as text).
+//  with its source one tap away, markdown rendered like a chat message).
 
 import OpenAI
 import SwiftUI
@@ -258,15 +258,8 @@ private struct ArtifactDetailSheet: View {
         switch args.source.type {
         case .markdown:
             if let markdown = args.source.markdown {
-                if let attributed = try? AttributedString(markdown: markdown) {
-                    Text(attributed)
-                        .font(.body)
-                        .foregroundColor(GenUIStyle.primaryText(isDarkMode))
-                } else {
-                    Text(markdown)
-                        .font(.body)
-                        .foregroundColor(GenUIStyle.primaryText(isDarkMode))
-                }
+                LaTeXMarkdownView(content: markdown, isDarkMode: isDarkMode)
+                    .markdownStyleHost(isDarkMode: isDarkMode)
             }
         case .html:
             if isPreviewUnavailable {
