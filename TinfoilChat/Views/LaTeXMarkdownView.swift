@@ -1067,15 +1067,77 @@ enum TableAlignment: Sendable {
 enum MarkdownTableLayout {
     static func columnWidth(
         intrinsicWidth: CGFloat,
-        availableWidth: CGFloat?,
-        columnCount: Int
+        availableWidth: CGFloat?
     ) -> CGFloat {
         guard let availableWidth, availableWidth.isFinite, availableWidth > 0 else {
             return intrinsicWidth
         }
-        let dividerWidth = CGFloat(max(columnCount - 1, 0)) * Constants.UI.tableColumnDividerWidth
-        let availableContentWidth = max(availableWidth - dividerWidth, 0)
-        return min(intrinsicWidth, availableContentWidth * Constants.UI.tableMaximumColumnWidthRatio)
+        return min(intrinsicWidth, availableWidth * Constants.UI.tableMaximumColumnWidthRatio)
+    }
+}
+
+/// Places table cells, given in row-major order, on a grid. Each column is as
+/// wide as its widest cell's rendered single-line width, up to the
+/// responsive cap, and each row is as tall as its tallest cell at those
+/// widths. Measuring the rendered cells keeps the columns in step with the
+/// text's actual font, Dynamic Type size, and inline markdown.
+struct MarkdownTableGrid: Layout {
+    let columnCount: Int
+    let availableWidth: CGFloat?
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let tracks = measureTracks(subviews)
+        return CGSize(
+            width: tracks.columnWidths.reduce(0, +),
+            height: tracks.rowHeights.reduce(0, +)
+        )
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let tracks = measureTracks(subviews)
+        var y = bounds.minY
+        for row in tracks.rowHeights.indices {
+            var x = bounds.minX
+            for column in tracks.columnWidths.indices {
+                let index = row * columnCount + column
+                guard index < subviews.count else { return }
+                subviews[index].place(
+                    at: CGPoint(x: x, y: y),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(
+                        width: tracks.columnWidths[column],
+                        height: tracks.rowHeights[row]
+                    )
+                )
+                x += tracks.columnWidths[column]
+            }
+            y += tracks.rowHeights[row]
+        }
+    }
+
+    private func measureTracks(_ subviews: Subviews) -> (columnWidths: [CGFloat], rowHeights: [CGFloat]) {
+        guard columnCount > 0 else { return ([], []) }
+
+        var columnWidths = Array(repeating: CGFloat.zero, count: columnCount)
+        for (index, subview) in subviews.enumerated() {
+            let column = index % columnCount
+            columnWidths[column] = max(columnWidths[column], subview.sizeThatFits(.unspecified).width)
+        }
+        columnWidths = columnWidths.map {
+            MarkdownTableLayout.columnWidth(intrinsicWidth: $0, availableWidth: availableWidth)
+        }
+
+        let rowCount = (subviews.count + columnCount - 1) / columnCount
+        var rowHeights = Array(repeating: CGFloat.zero, count: rowCount)
+        for (index, subview) in subviews.enumerated() {
+            let row = index / columnCount
+            let size = subview.sizeThatFits(
+                ProposedViewSize(width: columnWidths[index % columnCount], height: nil)
+            )
+            rowHeights[row] = max(rowHeights[row], size.height)
+        }
+
+        return (columnWidths, rowHeights)
     }
 }
 
@@ -1083,14 +1145,12 @@ private struct MarkdownTableView: View {
     let table: ParsedTable
     let isDarkMode: Bool
     let textSelectionEnabled: Bool
-    let intrinsicColumnWidths: [Int: CGFloat]
     @State private var availableWidth: CGFloat?
 
     init(table: ParsedTable, isDarkMode: Bool, textSelectionEnabled: Bool = true) {
         self.table = table
         self.isDarkMode = isDarkMode
         self.textSelectionEnabled = textSelectionEnabled
-        self.intrinsicColumnWidths = Self.measureColumnWidths(for: table)
     }
 
     private var borderColor: SwiftUI.Color {
@@ -1106,19 +1166,10 @@ private struct MarkdownTableView: View {
     }
 
     var body: some View {
-        let columnCount = intrinsicColumnWidths.count
-        let columnWidths = intrinsicColumnWidths.mapValues {
-            MarkdownTableLayout.columnWidth(
-                intrinsicWidth: $0,
-                availableWidth: availableWidth,
-                columnCount: columnCount
-            )
-        }
-
         ViewThatFits(in: .horizontal) {
-            tableContainer(columnWidths: columnWidths)
+            tableContainer
             ScrollView(.horizontal, showsIndicators: true) {
-                tableContainer(columnWidths: columnWidths)
+                tableContainer
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1130,63 +1181,30 @@ private struct MarkdownTableView: View {
         .padding(.vertical, 8)
     }
 
-    /// Measure column widths using text measurement instead of rendering a hidden table.
-    private static func measureColumnWidths(for table: ParsedTable) -> [Int: CGFloat] {
-        let font = UIFont.systemFont(ofSize: Constants.UI.tableFontSize)
-        let boldFont = UIFont.boldSystemFont(ofSize: Constants.UI.tableFontSize)
-        let horizontalPadding = Constants.UI.tableCellHorizontalPadding * 2
-        var widths: [Int: CGFloat] = [:]
+    private var tableContainer: some View {
+        let hasHeader = !table.headers.isEmpty
+        let rows = hasHeader ? [table.headers] + table.rows : table.rows
+        let columnCount = rows.first?.count ?? 0
 
-        for (index, header) in table.headers.enumerated() {
-            let size = (header as NSString).size(withAttributes: [.font: boldFont])
-            widths[index] = size.width + horizontalPadding
-        }
+        return MarkdownTableGrid(columnCount: columnCount, availableWidth: availableWidth) {
+            ForEach(rows.indices, id: \.self) { rowIndex in
+                let isHeader = hasHeader && rowIndex == 0
+                let bodyRowIndex = hasHeader ? rowIndex - 1 : rowIndex
 
-        for row in table.rows {
-            for (index, cell) in row.enumerated() {
-                let size = (cell as NSString).size(withAttributes: [.font: font])
-                let width = size.width + horizontalPadding
-                widths[index] = max(widths[index] ?? 0, width)
-            }
-        }
-
-        return widths
-    }
-
-    private func tableContainer(columnWidths: [Int: CGFloat]) -> some View {
-        VStack(spacing: 0) {
-            if !table.headers.isEmpty {
-                MarkdownTableRowView(
-                    cells: table.headers,
-                    alignments: table.alignments,
-                    isHeader: true,
-                    isDarkMode: isDarkMode,
-                    borderColor: borderColor,
-                    background: headerBackground,
-                    columnWidths: columnWidths,
-                    textSelectionEnabled: textSelectionEnabled
-                )
-                Rectangle()
-                    .fill(borderColor)
-                    .frame(height: 1)
-            }
-
-            ForEach(table.rows.indices, id: \.self) { index in
-                MarkdownTableRowView(
-                    cells: table.rows[index],
-                    alignments: table.alignments,
-                    isHeader: false,
-                    isDarkMode: isDarkMode,
-                    borderColor: borderColor,
-                    background: index.isMultiple(of: 2) ? alternatingRowBackground : SwiftUI.Color.clear,
-                    columnWidths: columnWidths,
-                    textSelectionEnabled: textSelectionEnabled
-                )
-
-                if index < table.rows.count - 1 {
-                    Rectangle()
-                        .fill(borderColor)
-                        .frame(height: 1)
+                ForEach(rows[rowIndex].indices, id: \.self) { columnIndex in
+                    MarkdownTableCell(
+                        content: rows[rowIndex][columnIndex],
+                        alignment: table.alignments.indices.contains(columnIndex) ? table.alignments[columnIndex] : .leading,
+                        isHeader: isHeader,
+                        isDarkMode: isDarkMode,
+                        background: isHeader
+                            ? headerBackground
+                            : (bodyRowIndex.isMultiple(of: 2) ? alternatingRowBackground : SwiftUI.Color.clear),
+                        borderColor: borderColor,
+                        showsTrailingDivider: columnIndex < columnCount - 1,
+                        showsBottomDivider: rowIndex < rows.count - 1,
+                        textSelectionEnabled: textSelectionEnabled
+                    )
                 }
             }
         }
@@ -1198,50 +1216,19 @@ private struct MarkdownTableView: View {
     }
 }
 
-private struct MarkdownTableRowView: View {
-    let cells: [String]
-    let alignments: [TableAlignment]
-    let isHeader: Bool
-    let isDarkMode: Bool
-    let borderColor: SwiftUI.Color
-    let background: SwiftUI.Color
-    let columnWidths: [Int: CGFloat]
-    let textSelectionEnabled: Bool
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            ForEach(cells.indices, id: \.self) { index in
-                MarkdownTableCell(
-                    content: cells[index],
-                    alignment: alignments.indices.contains(index) ? alignments[index] : .leading,
-                    isHeader: isHeader,
-                    isDarkMode: isDarkMode,
-                    columnWidth: columnWidths[index],
-                    background: background,
-                    textSelectionEnabled: textSelectionEnabled
-                )
-
-                if index < cells.count - 1 {
-                    Rectangle()
-                        .fill(borderColor)
-                        .frame(width: Constants.UI.tableColumnDividerWidth)
-                }
-            }
-        }
-    }
-}
-
 private struct MarkdownTableCell: View {
     let content: String
     let alignment: TableAlignment
     let isHeader: Bool
     let isDarkMode: Bool
-    let columnWidth: CGFloat?
     let background: SwiftUI.Color
+    let borderColor: SwiftUI.Color
+    let showsTrailingDivider: Bool
+    let showsBottomDivider: Bool
     let textSelectionEnabled: Bool
 
     var body: some View {
-        let cellContent = LaTeXMarkdownView(
+        LaTeXMarkdownView(
             content: content.isEmpty ? " " : content,
             isDarkMode: isDarkMode,
             horizontalPadding: 0,
@@ -1251,15 +1238,29 @@ private struct MarkdownTableCell: View {
         .padding(.vertical, isHeader ? 6 : 5)
         .padding(.horizontal, Constants.UI.tableCellHorizontalPadding)
         .fixedSize(horizontal: false, vertical: true)
-
-        if let width = columnWidth {
-            cellContent
-                .frame(width: width, alignment: alignment.viewAlignment)
-                .background(background)
-        } else {
-            cellContent
-                .frame(maxWidth: .infinity, alignment: alignment.viewAlignment)
-                .background(background)
+        .frame(
+            maxWidth: .infinity,
+            maxHeight: .infinity,
+            alignment: Alignment(horizontal: alignment.viewAlignment.horizontal, vertical: .top)
+        )
+        .background(background)
+        // Dividers sit inside the cell so they span the full row height and
+        // column width the grid assigns; the bottom one stops short of the
+        // trailing one so the translucent lines never overlap.
+        .overlay(alignment: .trailing) {
+            if showsTrailingDivider {
+                Rectangle()
+                    .fill(borderColor)
+                    .frame(width: Constants.UI.tableDividerThickness)
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if showsBottomDivider {
+                Rectangle()
+                    .fill(borderColor)
+                    .frame(height: Constants.UI.tableDividerThickness)
+                    .padding(.trailing, showsTrailingDivider ? Constants.UI.tableDividerThickness : 0)
+            }
         }
     }
 }

@@ -52,9 +52,8 @@ enum Constants {
         static let scrollToBottomButtonSize: CGFloat = 27
         static let scrollToBottomIconSize: CGFloat = 16
         static let tableMaximumColumnWidthRatio: CGFloat = 0.5
-        static let tableFontSize: CGFloat = 16
         static let tableCellHorizontalPadding: CGFloat = 12
-        static let tableColumnDividerWidth: CGFloat = 1
+        static let tableDividerThickness: CGFloat = 1
         static let streamingIndicatorSize: CGFloat = 10
         static let streamingIndicatorCornerRadius: CGFloat = 3
         static let streamingIndicatorIconColumnWidth: CGFloat = 16
