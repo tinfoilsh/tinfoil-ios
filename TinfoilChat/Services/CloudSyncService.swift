@@ -1129,6 +1129,14 @@ class CloudSyncService: ObservableObject {
             return nil
         }
 
+        // A chat without local edits already matches the server copy.
+        // Pushing it again would only advance the server revision and make
+        // every other device download it again. Required (recovery)
+        // uploads still go through.
+        if !chat.locallyModified && !allowWhileStreaming {
+            return nil
+        }
+
         // Double-check streaming status right before upload
         if streamingTracker.isStreaming(chatId) && !allowWhileStreaming {
             return nil

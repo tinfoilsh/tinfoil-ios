@@ -57,6 +57,16 @@ struct CloudConflictPullSafetyTests {
         #expect(chat.syncVersion == 4)
     }
 
+    @Test func downloadedChatIgnoresTheWritersEditFlag() throws {
+        let json = #"{"id":"remote","title":"Remote","messages":[{"role":"user","content":"hi","timestamp":"2024-01-01T00:00:00.000Z"}],"createdAt":"2024-01-01T00:00:00.000Z","updatedAt":"2024-01-01T00:00:00.000Z","locallyModified":true}"#
+        let item = EnclavePullItem(
+            id: "remote", ok: true, plaintext: Data(json.utf8).base64EncodedString(), keyId: nil, etag: "2",
+            needsRewrap: nil, projectIdSet: nil, projectId: nil, code: nil, reason: nil
+        )
+        let chat = try #require(try CloudStorageService.decodeDownloadedChat(item, expectedChatId: "remote"))
+        #expect(!chat.locallyModified)
+    }
+
     @Test func mismatchedResponseIdentityIsRejected() {
         let item = EnclavePullItem(
             id: "other-chat", ok: false, plaintext: nil, keyId: nil, etag: nil,

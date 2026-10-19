@@ -1478,12 +1478,6 @@ class ChatViewModel: ObservableObject {
                         }
 
                     }
-                    // Also backup current chat if it has changes
-                    if let currentChat = await MainActor.run(body: { self.currentChat }),
-                       !currentChat.messages.isEmpty,
-                       !currentChat.hasActiveStream {
-                        await self.cloudSync.backupChat(currentChat.id)
-                    }
 
                     // Sync profile settings periodically
                     await ProfileManager.shared.syncFromCloud()

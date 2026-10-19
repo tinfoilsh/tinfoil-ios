@@ -379,7 +379,10 @@ struct StoredChat: Codable {
             syncedAt = nil
         }
         
-        locallyModified = try container.decodeIfPresent(Bool.self, forKey: .locallyModified) ?? false
+        // Edit state is device-local. A decoded chat is the server's copy,
+        // so it has no local edits whatever its writer recorded; trusting
+        // the writer's flag would queue an unchanged chat for re-upload.
+        locallyModified = false
         decryptionFailed = try container.decodeIfPresent(Bool.self, forKey: .decryptionFailed)
         dataCorrupted = try container.decodeIfPresent(Bool.self, forKey: .dataCorrupted)
         formatVersion = try container.decodeIfPresent(Int.self, forKey: .formatVersion)
