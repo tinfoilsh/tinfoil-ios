@@ -254,7 +254,7 @@ struct ProjectPage: View {
 
     private func timestampText(for chat: ChatListSummary) -> Text {
         let created = relativeTimeString(from: chat.createdAt)
-        let updated = relativeTimeString(from: chat.updatedAt)
+        let updated = relativeTimeString(from: chat.activityAt)
         let createdText = Text(created)
             .foregroundColor(Color(UIColor.secondaryLabel))
         guard updated != created else { return createdText }

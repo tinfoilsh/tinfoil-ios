@@ -336,12 +336,34 @@ struct EnclaveRevisionSnapshotItem: Decodable, Equatable {
     let keyId: String?
     let projectId: String?
     let updatedAt: String
+    /// The chat's list-ordering time: its last conversation activity, or
+    /// `updatedAt` when none was recorded. Absent from older servers.
+    var activityAt: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, etag
         case keyId = "key_id"
         case projectId = "project_id"
         case updatedAt = "updated_at"
+        case activityAt = "activity_at"
+    }
+
+    private static let fractionalSecondsFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private static let wholeSecondsFormatter = ISO8601DateFormatter()
+
+    /// When this chat sorts in the newest-first list, or nil if the server
+    /// sent no parseable time.
+    var listOrderDate: Date? {
+        activityAt.flatMap(Self.parseDate) ?? Self.parseDate(updatedAt)
+    }
+
+    private static func parseDate(_ value: String) -> Date? {
+        fractionalSecondsFormatter.date(from: value)
+            ?? wholeSecondsFormatter.date(from: value)
     }
 }
 

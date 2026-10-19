@@ -92,6 +92,19 @@ struct Chat: Identifiable, Codable {
         return titleState == .placeholder
     }
 
+    /// Last conversation activity: the later of the creation time and the
+    /// newest message. Every client orders the chat list by it, and the
+    /// sync enclave derives the same value so the server pages chats in
+    /// that order. Renames, settings changes, moves, and re-uploads never
+    /// change it.
+    var activityAt: Date {
+        Self.lastActivity(createdAt: createdAt, messages: messages)
+    }
+
+    static func lastActivity(createdAt: Date, messages: [Message]) -> Date {
+        messages.reduce(createdAt) { max($0, $1.timestamp) }
+    }
+
     /// List refreshes must retain the draft identity used by recording and transcription.
     func blankDraftForListRefresh(isLocalOnly: Bool, userId: String?) -> Chat? {
         guard isBlankChat,

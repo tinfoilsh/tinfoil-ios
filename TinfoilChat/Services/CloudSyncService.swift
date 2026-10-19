@@ -1129,6 +1129,14 @@ class CloudSyncService: ObservableObject {
             return nil
         }
 
+        // A chat without local edits already matches the server copy.
+        // Pushing it again would only advance the server revision and make
+        // every other device download it again. Required (recovery)
+        // uploads still go through.
+        if !chat.locallyModified && !allowWhileStreaming {
+            return nil
+        }
+
         // Double-check streaming status right before upload
         if streamingTracker.isStreaming(chatId) && !allowWhileStreaming {
             return nil
@@ -1551,7 +1559,10 @@ class CloudSyncService: ObservableObject {
 
             // Sort by latest activity (newest first), matching the server's
             // direction=desc list-status pagination.
-            downloadedChats.sort { $0.updatedAt > $1.updatedAt }
+            downloadedChats = downloadedChats
+                .map { (chat: $0, activityAt: Chat.lastActivity(createdAt: $0.createdAt, messages: $0.messages)) }
+                .sorted { ChatSummaryState.isListedBefore($0.activityAt, $0.chat.id, $1.activityAt, $1.chat.id) }
+                .map { $0.chat }
 
             return PaginatedChatsResult(
                 chats: downloadedChats,
@@ -1627,7 +1638,10 @@ class CloudSyncService: ObservableObject {
         
         // Sort by latest activity (newest first), matching the server's
         // direction=desc list-status pagination.
-        let sortedChats = allChats.sorted { $0.updatedAt > $1.updatedAt }
+        let sortedChats = allChats
+            .map { (chat: $0, activityAt: $0.activityAt) }
+            .sorted { ChatSummaryState.isListedBefore($0.activityAt, $0.chat.id, $1.activityAt, $1.chat.id) }
+            .map { $0.chat }
         
         // Parse continuation token as offset
         let offset = Int(continuationToken ?? "0") ?? 0

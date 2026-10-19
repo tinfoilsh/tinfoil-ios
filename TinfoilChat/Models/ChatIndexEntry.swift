@@ -14,6 +14,10 @@ struct ChatIndexEntry: Codable, Identifiable, Equatable {
     var titleState: Chat.TitleState
     var createdAt: Date
     var updatedAt: Date
+    /// `Chat.activityAt`, kept here so the list can be ordered without
+    /// loading messages. Deliberately non-optional: an index written
+    /// before it existed fails to decode and is rebuilt from the chats.
+    var activityAt: Date
     var modelType: ModelType?
     var messageCount: Int
     var decryptionFailed: Bool
@@ -57,6 +61,7 @@ struct ChatIndexEntry: Codable, Identifiable, Equatable {
         self.titleState = chat.titleState
         self.createdAt = chat.createdAt
         self.updatedAt = chat.updatedAt
+        self.activityAt = chat.activityAt
         self.modelType = chat.modelType
         self.messageCount = chat.messages.count
         self.decryptionFailed = chat.decryptionFailed

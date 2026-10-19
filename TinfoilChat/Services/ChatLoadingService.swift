@@ -356,12 +356,6 @@ enum ChatPaginationCoordinator {
     }
 }
 
-enum AnonymousChatMigrationPolicy {
-    static func hasChatsRemaining(allSucceeded: Bool) -> Bool {
-        !allSucceeded
-    }
-}
-
 enum ChatDeleteSelectionResolution: Equatable {
     case unchanged
     case restore
@@ -489,6 +483,16 @@ enum ChatProjectDetachment {
 }
 
 enum ChatSummaryState {
+    /// Chat list order: newest activity first, with the id as the
+    /// tie-breaker, matching the server's newest-first chat list.
+    static func isListedBefore(
+        _ lhsActivity: Date, _ lhsId: String,
+        _ rhsActivity: Date, _ rhsId: String
+    ) -> Bool {
+        if lhsActivity != rhsActivity { return lhsActivity > rhsActivity }
+        return lhsId > rhsId
+    }
+
     static func page(
         from entries: [ChatIndexEntry],
         excluding excludedIds: Set<String> = [],
@@ -498,7 +502,7 @@ enum ChatSummaryState {
         let sorted = entries
             .filter { !excludedIds.contains($0.id) }
             .filter { filter?($0) ?? true }
-            .sorted { $0.updatedAt > $1.updatedAt }
+            .sorted { isListedBefore($0.activityAt, $0.id, $1.activityAt, $1.id) }
         let pageEntries = limit.map { Array(sorted.prefix($0)) } ?? sorted
         return (pageEntries.map(ChatListSummary.init(from:)), sorted.count)
     }
@@ -545,7 +549,7 @@ enum ChatSummaryState {
     ) -> (summaries: [ChatListSummary], totalRootEntries: Int, firstPageIds: Set<String>) {
         let root = entries
             .filter(\.isCloudDisplayable)
-            .sorted { $0.updatedAt > $1.updatedAt }
+            .sorted { isListedBefore($0.activityAt, $0.id, $1.activityAt, $1.id) }
         let firstPageIds = Set(root.prefix(firstPageLimit).map(\.id))
         let retainedRootIds = firstPageIds.union(loadedRootIds)
         let rootSummaries = root
@@ -573,7 +577,7 @@ enum ChatSummaryState {
     private static func sorted(_ summaries: [ChatListSummary]) -> [ChatListSummary] {
         summaries.sorted {
             if $0.isBlankChat != $1.isBlankChat { return $0.isBlankChat }
-            return $0.updatedAt > $1.updatedAt
+            return isListedBefore($0.activityAt, $0.id, $1.activityAt, $1.id)
         }
     }
 }
