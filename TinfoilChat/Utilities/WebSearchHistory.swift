@@ -21,7 +21,7 @@ enum WebSearchHistory {
                   let arguments = json(["urls": [url]]) else { return }
             actions.append(Action(name: Constants.WebSearchHistory.fetchTool, arguments: arguments, sources: sources.filter { $0.url == url }))
         }
-        let timeline = message.buildSyncTimeline() ?? []
+        let timeline = Message.displayTimeline(message.buildSyncTimeline() ?? [])
         let hasWebTimeline = timeline.contains {
             let type = $0.objectValue?["type"]?.stringValue
             return type == "web_search" || type == "url_fetches"

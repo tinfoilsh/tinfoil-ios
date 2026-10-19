@@ -14,6 +14,57 @@ import Testing
 
 struct MessageSegmentDecodeTests {
 
+    @Test @MainActor
+    func harnessSearchesRenderNativelyAndKeepTheirResultsOnSync() throws {
+        let message = try HarnessMessageFixture.decode()
+        let segments = try #require(message.segments)
+        #expect(segments == [
+            .text("Before search."),
+            .webSearch(searchId: "ios-search"),
+            .webSearch(searchId: "search-call"),
+            .urlFetch(fetchId: "fetch-call"),
+            .toolCall(toolCallId: "widget-call"),
+            .text("The sample has 73 participants."),
+        ])
+        #expect(message.webSearches?.map(\.query) == ["earlier search", "sample size"])
+        #expect(message.webSearches?.last?.sources?.first?.snippet == "73 participants")
+        #expect(message.urlFetches.first?.sources?.first?.snippet == "The study included 73 participants.")
+        #expect(message.toolCalls.map(\.name) == ["render_link_preview"])
+        #expect(!message.hasUnsupportedGenUI)
+        #expect(message.timestamp == Date(timeIntervalSince1970: 1_792_368_000))
+
+        let originalTools = message.timeline?.filter { $0.objectValue?["type"]?.stringValue == "tool_call" }
+        var roundTripped = message
+        for _ in 0..<2 {
+            roundTripped = try JSONDecoder().decode(Message.self, from: JSONEncoder().encode(roundTripped))
+            #expect(roundTripped.segments == segments)
+            #expect(roundTripped.timeline?.filter { $0.objectValue?["type"]?.stringValue == "tool_call" } == originalTools)
+            #expect(roundTripped.toolCalls.map(\.name) == ["render_link_preview"])
+        }
+    }
+
+    @Test func unfinishedAndFailedHarnessSearchesStayFailed() throws {
+        let results: [JSONValue?] = [nil, .null, .object(["error": .string("Search unavailable")])]
+        for result in results {
+            var block: [String: JSONValue] = [
+                "type": .string("tool_call"), "id": .string("search"),
+                "toolCallId": .string("search"), "name": .string("web_search"),
+                "arguments": .string(#"{"query":"sample size"}"#),
+            ]
+            block["result"] = result
+            let wire: JSONValue = .object([
+                "id": .string("failed"), "role": .string("assistant"), "content": .string(""),
+                "timeline": .array([.object(block)]),
+            ])
+            let message = try JSONDecoder().decode(Message.self, from: JSONEncoder().encode(wire))
+            #expect(message.webSearches?.first?.status == .failed)
+            #expect(message.webSearches?.first?.query == "sample size")
+            #expect(message.toolCalls.isEmpty)
+            #expect(WebSearchHistory.messages(for: message, messageIndex: 0).isEmpty)
+            #expect(message.buildSyncTimeline() == [.object(block)])
+        }
+    }
+
     @Test func decodesMessageWithMixOfKnownAndUnknownSegments() throws {
         let json = """
         {
@@ -340,4 +391,48 @@ struct MessageSegmentDecodeTests {
         let expectedDate = Date(timeIntervalSince1970: TimeInterval(resolvedAtMillis) / 1000)
         #expect(abs(resolution.resolvedAt.timeIntervalSince(expectedDate)) < 0.001)
     }
+}
+
+enum HarnessMessageFixture {
+    static func decode() throws -> Message {
+        try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+    }
+
+    static let json = #"""
+    {
+      "id": "harness-reply",
+      "role": "assistant",
+      "content": "Before search.The sample has 73 participants.",
+      "createdAt": "2026-10-19T00:00:00Z",
+      "modelDisplayName": "GPT-OSS 120B",
+      "timeline": [
+        {"type":"content","id":"intro","content":"Before search."},
+        {
+          "type":"web_search","id":"ios-search",
+          "state":{"query":"earlier search","status":"completed","sources":[
+            {"url":"https://example.com/earlier","title":"Earlier study","snippet":"70 participants"}
+          ]}
+        },
+        {
+          "type":"tool_call","id":"search-block","toolCallId":"search-call","name":"web_search",
+          "arguments":"{\"query\":\"sample size\"}","complete":true,
+          "result":{"query":"sample size","results":[
+            {"url":"https://example.com/paper","title":"Paper","snippet":"73 participants"}
+          ],"pii":{"redacted":false}},
+          "metadata":{"source":"websearch"},"progress":["Searching"]
+        },
+        {
+          "type":"tool_call","id":"fetch-block","toolCallId":"fetch-call","name":"web_fetch",
+          "arguments":"{\"url\":\"https://example.com/paper\"}","complete":true,
+          "result":{"url":"https://example.com/paper","title":"Paper","text":"The study included 73 participants."}
+        },
+        {
+          "type":"tool_call","id":"widget-block","toolCallId":"widget-call","name":"render_link_preview",
+          "arguments":"{\"url\":\"https://example.com/paper\",\"title\":\"Paper\"}","complete":true,
+          "result":{"executed":true},"resolvedAt":1792368000000,"resolution":{"text":"Paper"}
+        },
+        {"type":"content","id":"answer","content":"The sample has 73 participants."}
+      ]
+    }
+    """#
 }
