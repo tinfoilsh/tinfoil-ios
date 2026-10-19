@@ -204,11 +204,14 @@ enum SnapshotReconciliation {
         for entry in local where localById[entry.id] == nil {
             localById[entry.id] = entry
         }
+        // The first page of the list is the most recently active chats,
+        // so those are the missing ones worth downloading up front.
         let recentMissingIds = Set(remote
             .filter { localById[$0.id] == nil }
-            .sorted { $0.updatedAt > $1.updatedAt }
+            .map { (item: $0, order: $0.listOrderDate ?? .distantPast) }
+            .sorted { ChatSummaryState.isListedBefore($0.order, $0.item.id, $1.order, $1.item.id) }
             .prefix(recentLimit)
-            .map(\.id))
+            .map { $0.item.id })
         return changedRemoteItems(
             local: local,
             remote: remote,

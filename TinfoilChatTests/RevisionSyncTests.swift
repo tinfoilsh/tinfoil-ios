@@ -199,6 +199,37 @@ struct RevisionSyncTests {
         #expect(Set(selected.map(\.id)) == ["chat-4", "chat-5"])
     }
 
+    @Test func snapshotHydratesMostRecentlyActiveMissingChats() {
+        // Write times rise with the index while activity falls, as when old
+        // chats are imported or re-uploaded after newer conversations. The
+        // last row predates activity tracking and falls back to its write
+        // time, which mixes fractional and whole-second formats.
+        let remote = (1...4).map { index in
+            EnclaveRevisionSnapshotItem(
+                id: "chat-\(index)",
+                etag: "1",
+                keyId: "key",
+                projectId: nil,
+                updatedAt: "2026-08-0\(index)T00:00:00.000Z",
+                activityAt: "2026-07-0\(5 - index)T00:00:00.123456Z"
+            )
+        } + [
+            EnclaveRevisionSnapshotItem(
+                id: "chat-legacy",
+                etag: "1",
+                keyId: "key",
+                projectId: nil,
+                updatedAt: "2026-07-03T12:00:00Z"
+            ),
+        ]
+        let selected = SnapshotReconciliation.contentItems(
+            local: [],
+            remote: remote,
+            recentLimit: 2
+        )
+        #expect(Set(selected.map(\.id)) == ["chat-1", "chat-legacy"])
+    }
+
     @Test func contentIntegrityRetainsMissingIndexedIdsForRepair() {
         let availableIds: Set<String> = ["present"]
 
