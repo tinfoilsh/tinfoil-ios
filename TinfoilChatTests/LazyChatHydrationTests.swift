@@ -418,15 +418,6 @@ struct LazyChatHydrationTests {
     }
 
     @Test
-    func anonymousMigrationFailureRemainsPendingUntilLaterSuccess() {
-        var hasChatsRemaining = AnonymousChatMigrationPolicy.hasChatsRemaining(allSucceeded: false)
-        #expect(hasChatsRemaining)
-
-        hasChatsRemaining = AnonymousChatMigrationPolicy.hasChatsRemaining(allSucceeded: true)
-        #expect(!hasChatsRemaining)
-    }
-
-    @Test
     func deleteFailureRestoresSelectedConversation() {
         #expect(ChatDeleteSelectionResolution.resolve(
             deletionOwnedSelection: true,

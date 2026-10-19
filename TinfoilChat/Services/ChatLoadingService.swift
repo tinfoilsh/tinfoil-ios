@@ -356,12 +356,6 @@ enum ChatPaginationCoordinator {
     }
 }
 
-enum AnonymousChatMigrationPolicy {
-    static func hasChatsRemaining(allSucceeded: Bool) -> Bool {
-        !allSucceeded
-    }
-}
-
 enum ChatDeleteSelectionResolution: Equatable {
     case unchanged
     case restore

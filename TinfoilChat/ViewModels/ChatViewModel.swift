@@ -430,7 +430,10 @@ class ChatViewModel: ObservableObject {
     @Published private(set) var isAccountTeardownInProgress = false
     private var acceptsChatSaves = true
     private var hasPerformedInitialSync: Bool = false  // Track if initial sync has been done
-    private var hasAnonymousChatsToSync: Bool = false  // Track if we have anonymous chats to sync
+    // Cloud chats migrated from the anonymous session at sign-in that the
+    // re-encryption pass has not finished yet.
+    private var anonymousChatIdsToSync: Set<String> = []
+    private var hasAnonymousChatsToSync: Bool { !anonymousChatIdsToSync.isEmpty }
     private var isRetryingAnonymousChatReencryption = false
     
     // Pagination properties
@@ -6617,7 +6620,7 @@ class ChatViewModel: ObservableObject {
         accountOperationFence.invalidate()
         isSignInInProgress = false
         needsSignInWhenPresentationReady = false
-        hasAnonymousChatsToSync = false
+        anonymousChatIdsToSync = []
         return canceledTask
     }
 
@@ -6977,13 +6980,16 @@ class ChatViewModel: ObservableObject {
         }
         guard isCurrentSignIn(token, userId: userId) else { return false }
 
+        // Only the migrated chats need this pass; re-marking the account's
+        // other cloud chats would re-upload every one of them. Migrated
+        // chats deleted since sign-in drop out.
         let chatIds = ChatSummaryState.orderedUniqueIds(
             indexedIds: cloudIndex.map(\.id),
             materializedIds: chats
                 .filter { !$0.isLocalOnly && $0.userId == userId }
                 .map(\.id)
-        )
-        var allSucceeded = true
+        ).filter { anonymousChatIdsToSync.contains($0) }
+        anonymousChatIdsToSync = Set(chatIds)
         for chatId in chatIds {
             guard isCurrentSignIn(token, userId: userId) else { return false }
             let succeeded = await retryAnonymousChatReencryption(
@@ -6992,16 +6998,13 @@ class ChatViewModel: ObservableObject {
                 token: token
             )
             guard isCurrentSignIn(token, userId: userId) else { return false }
-            if !succeeded {
-                allSucceeded = false
+            if succeeded {
+                anonymousChatIdsToSync.remove(chatId)
             }
         }
 
         guard isCurrentSignIn(token, userId: userId) else { return false }
-        hasAnonymousChatsToSync = AnonymousChatMigrationPolicy.hasChatsRemaining(
-            allSucceeded: allSucceeded
-        )
-        return allSucceeded
+        return !hasAnonymousChatsToSync
     }
 
     private func retryAnonymousChatReencryption(
@@ -7108,7 +7111,7 @@ class ChatViewModel: ObservableObject {
         }
 
         if activeSignInToken?.userId != userId {
-            hasAnonymousChatsToSync = false
+            anonymousChatIdsToSync = []
         }
         isProjectAccountActive = true
         let previousSignInTask = signInTask
@@ -7165,7 +7168,9 @@ class ChatViewModel: ObservableObject {
             // These saves are already locallyModified with syncVersion zero, so normal sync
             // keeps retrying them independently of the re-encryption pass tracked here.
             guard isCurrentSignIn(token, userId: userId) else { return }
-            hasAnonymousChatsToSync = true
+            anonymousChatIdsToSync.formUnion(
+                anonymousChats.filter { !$0.isLocalOnly }.map(\.id)
+            )
         }
 
         // Start auto-sync timer now that user is authenticated
