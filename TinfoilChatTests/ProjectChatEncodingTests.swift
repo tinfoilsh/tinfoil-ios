@@ -27,6 +27,52 @@ private let testModel = ModelType(
 
 struct ProjectChatEncodingTests {
     @Test @MainActor
+    func harnessChatSurvivesAnIOSReplyAndSync() throws {
+        let json = """
+        {
+          "id":"shared-chat","title":"Research","titleState":"manual",
+          "createdAt":"2026-10-19T00:00:00Z","updatedAt":"2026-10-19T00:00:00Z",
+          "projectId":"project-1","presetId":"user:shared-preset","webSearchEnabled":true,
+          "clock":12,"writer":"harness","clockVersion":7,
+          "messages":[
+            {
+              "id":"question","role":"user","content":"Read these files",
+              "createdAt":"2026-10-19T00:00:00Z",
+              "attachments":[
+                {"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","type":"image","fileName":"photo.png","mimeType":"image/png","encryptionKey":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","thumbnailBase64":"dGh1bWI="},
+                {"id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","type":"document","fileName":"paper.pdf","encryptionKey":"AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=","pageCount":2}
+              ]
+            },
+            \(HarnessMessageFixture.json)
+          ]
+        }
+        """
+        var stored = try JSONDecoder().decode(StoredChat.self, from: Data(json.utf8))
+        stored.modelType = testModel
+        var chat = try #require(stored.toChat())
+        chat.messages.append(Message(role: .assistant, content: "Follow-up from iOS."))
+        let uploaded = try JSONDecoder().decode(StoredChat.self, from: JSONEncoder().encode(StoredChat(from: chat, syncVersion: 7)))
+        #expect(uploaded.id == "shared-chat")
+        #expect(uploaded.messages.map(\.content) == [
+            "Read these files", "Before search.The sample has 73 participants.", "Follow-up from iOS.",
+        ])
+        #expect(uploaded.projectId == "project-1")
+        #expect(uploaded.promptPresetId == "user:shared-preset")
+        #expect(uploaded.messages[0].attachments.map(\.encryptionKey) == [
+            "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=", "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=",
+        ])
+        #expect(uploaded.messages[0].attachments.map(\.id) == [
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        ])
+        #expect(uploaded.messages[0].timestamp == Date(timeIntervalSince1970: 1_792_368_000))
+        let originalTools = stored.messages[1].timeline?.filter { $0.objectValue?["type"]?.stringValue == "tool_call" }
+        #expect(uploaded.messages[1].timeline?.filter { $0.objectValue?["type"]?.stringValue == "tool_call" } == originalTools)
+        #expect(uploaded.clock == 12)
+        #expect(uploaded.writer == "harness")
+        #expect(uploaded.clockVersion == 7)
+    }
+
+    @Test @MainActor
     func chatCreatePreservesProjectId() {
         let chat = Chat.create(
             id: "chat-1",
