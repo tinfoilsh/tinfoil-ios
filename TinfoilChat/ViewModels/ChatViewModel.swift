@@ -809,7 +809,7 @@ class ChatViewModel: ObservableObject {
         guard let projectId = activeProject?.id else { return [] }
         return cloudSidebarSummaries
             .filter { $0.projectId == projectId && !$0.isTemporary && !$0.isBlankChat && !$0.decryptionFailed }
-            .sorted { $0.updatedAt > $1.updatedAt }
+            .sorted { ChatSummaryState.isListedBefore($0.activityAt, $0.id, $1.activityAt, $1.id) }
     }
 
     func isChatPinned(_ chatId: String) -> Bool {
@@ -7757,7 +7757,7 @@ class ChatViewModel: ObservableObject {
         replaceChat(refreshed)
         chats.sort { left, right in
             if left.isBlankChat != right.isBlankChat { return left.isBlankChat }
-            return left.updatedAt > right.updatedAt
+            return ChatSummaryState.isListedBefore(left.activityAt, left.id, right.activityAt, right.id)
         }
         currentChat = refreshed
     }

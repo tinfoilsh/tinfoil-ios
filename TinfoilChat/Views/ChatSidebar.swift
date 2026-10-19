@@ -166,11 +166,12 @@ struct ChatSidebar: View {
         }
     }
 
-    /// Empty when the updated time would read the same as the created
-    /// time, so rows don't repeat "14m ago · Updated 14m ago".
+    /// The last activity time, which the list is ordered by. Empty when it
+    /// would read the same as the created time, so rows don't repeat
+    /// "14m ago · Updated 14m ago".
     private func updatedTimeString(for chat: ChatListSummary) -> String {
         let created = relativeTimeString(from: chat.createdAt)
-        let updated = relativeTimeString(from: chat.updatedAt)
+        let updated = relativeTimeString(from: chat.activityAt)
         guard updated != created else { return "" }
         return "Updated \(updated.lowercased())"
     }

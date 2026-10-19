@@ -1551,7 +1551,7 @@ class CloudSyncService: ObservableObject {
 
             // Sort by latest activity (newest first), matching the server's
             // direction=desc list-status pagination.
-            downloadedChats.sort { $0.updatedAt > $1.updatedAt }
+            downloadedChats.sort { ChatSummaryState.isListedBefore($0.activityAt, $0.id, $1.activityAt, $1.id) }
 
             return PaginatedChatsResult(
                 chats: downloadedChats,
@@ -1627,7 +1627,7 @@ class CloudSyncService: ObservableObject {
         
         // Sort by latest activity (newest first), matching the server's
         // direction=desc list-status pagination.
-        let sortedChats = allChats.sorted { $0.updatedAt > $1.updatedAt }
+        let sortedChats = allChats.sorted { ChatSummaryState.isListedBefore($0.activityAt, $0.id, $1.activityAt, $1.id) }
         
         // Parse continuation token as offset
         let offset = Int(continuationToken ?? "0") ?? 0

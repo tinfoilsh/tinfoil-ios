@@ -779,14 +779,40 @@ struct LazyChatHydrationTests {
 
         #expect(page.totalEntries == entries.filter(\.isCloudDisplayable).count)
         #expect(page.summaries.count == 20)
-        #expect(page.summaries.map(\.updatedAt) == page.summaries.map(\.updatedAt).sorted(by: >))
+        #expect(page.summaries.map(\.activityAt) == page.summaries.map(\.activityAt).sorted(by: >))
+    }
+
+    @Test
+    func summariesFollowLastActivityRatherThanWriteTime() {
+        var renamed = makeChat(id: "renamed", updatedAt: Date(timeIntervalSince1970: 100))
+        renamed.updatedAt = Date(timeIntervalSince1970: 900)
+        let active = makeChat(id: "active", updatedAt: Date(timeIntervalSince1970: 500))
+        var forked = makeChat(id: "forked", updatedAt: Date(timeIntervalSince1970: 50))
+        forked.createdAt = Date(timeIntervalSince1970: 700)
+
+        let page = ChatSummaryState.page(
+            from: [renamed, active, forked].map(ChatIndexEntry.init(from:))
+        )
+        #expect(page.summaries.map(\.id) == ["forked", "active", "renamed"])
+
+        var replied = renamed
+        replied.messages.append(Message(
+            role: .user,
+            content: "follow-up",
+            timestamp: Date(timeIntervalSince1970: 800)
+        ))
+        let summaries = ChatSummaryState.upserting(
+            ChatListSummary(from: replied),
+            into: page.summaries
+        )
+        #expect(summaries.map(\.id) == ["renamed", "forked", "active"])
     }
 
     private func makeChat(id: String, updatedAt: Date) -> Chat {
         var chat = Chat(
             id: id,
             title: id,
-            messages: [Message(role: .user, content: id)],
+            messages: [Message(role: .user, content: id, timestamp: updatedAt)],
             createdAt: updatedAt,
             modelType: ChatSearchServiceTests.testModel,
             updatedAt: updatedAt

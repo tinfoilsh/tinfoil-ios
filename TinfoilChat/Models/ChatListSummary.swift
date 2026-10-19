@@ -10,6 +10,7 @@ struct ChatListSummary: Identifiable, Equatable, Sendable {
     let title: String
     let createdAt: Date
     let updatedAt: Date
+    let activityAt: Date
     var projectId: String?
     let isLocalOnly: Bool
     let decryptionFailed: Bool
@@ -23,6 +24,7 @@ struct ChatListSummary: Identifiable, Equatable, Sendable {
         title = chat.title
         createdAt = chat.createdAt
         updatedAt = chat.updatedAt
+        activityAt = chat.activityAt
         projectId = chat.projectId
         isLocalOnly = chat.isLocalOnly
         decryptionFailed = chat.decryptionFailed
@@ -37,6 +39,7 @@ struct ChatListSummary: Identifiable, Equatable, Sendable {
         title = entry.title
         createdAt = entry.createdAt
         updatedAt = entry.updatedAt
+        activityAt = entry.activityAt
         projectId = entry.projectId
         isLocalOnly = entry.isLocalOnly
         decryptionFailed = entry.decryptionFailed
