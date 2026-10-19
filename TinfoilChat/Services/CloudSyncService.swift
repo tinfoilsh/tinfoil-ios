@@ -1559,7 +1559,10 @@ class CloudSyncService: ObservableObject {
 
             // Sort by latest activity (newest first), matching the server's
             // direction=desc list-status pagination.
-            downloadedChats.sort { ChatSummaryState.isListedBefore($0.activityAt, $0.id, $1.activityAt, $1.id) }
+            downloadedChats = downloadedChats
+                .map { (chat: $0, activityAt: Chat.lastActivity(createdAt: $0.createdAt, messages: $0.messages)) }
+                .sorted { ChatSummaryState.isListedBefore($0.activityAt, $0.chat.id, $1.activityAt, $1.chat.id) }
+                .map { $0.chat }
 
             return PaginatedChatsResult(
                 chats: downloadedChats,
@@ -1635,7 +1638,10 @@ class CloudSyncService: ObservableObject {
         
         // Sort by latest activity (newest first), matching the server's
         // direction=desc list-status pagination.
-        let sortedChats = allChats.sorted { ChatSummaryState.isListedBefore($0.activityAt, $0.id, $1.activityAt, $1.id) }
+        let sortedChats = allChats
+            .map { (chat: $0, activityAt: $0.activityAt) }
+            .sorted { ChatSummaryState.isListedBefore($0.activityAt, $0.chat.id, $1.activityAt, $1.chat.id) }
+            .map { $0.chat }
         
         // Parse continuation token as offset
         let offset = Int(continuationToken ?? "0") ?? 0

@@ -98,6 +98,10 @@ struct Chat: Identifiable, Codable {
     /// that order. Renames, settings changes, moves, and re-uploads never
     /// change it.
     var activityAt: Date {
+        Self.lastActivity(createdAt: createdAt, messages: messages)
+    }
+
+    static func lastActivity(createdAt: Date, messages: [Message]) -> Date {
         messages.reduce(createdAt) { max($0, $1.timestamp) }
     }
 
