@@ -358,9 +358,12 @@ struct EnclaveRevisionSnapshotItem: Decodable, Equatable {
     /// When this chat sorts in the newest-first list, or nil if the server
     /// sent no parseable time.
     var listOrderDate: Date? {
-        let value = activityAt ?? updatedAt
-        return Self.fractionalSecondsFormatter.date(from: value)
-            ?? Self.wholeSecondsFormatter.date(from: value)
+        activityAt.flatMap(Self.parseDate) ?? Self.parseDate(updatedAt)
+    }
+
+    private static func parseDate(_ value: String) -> Date? {
+        fractionalSecondsFormatter.date(from: value)
+            ?? wholeSecondsFormatter.date(from: value)
     }
 }
 
