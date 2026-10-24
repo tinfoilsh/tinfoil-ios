@@ -52,12 +52,15 @@ struct VerifierView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                if let doc = chatViewModel.verificationDocument {
+                if chatViewModel.isVerified, let verified = chatViewModel.enclaveVerification {
                     VStack(spacing: 16) {
-                        statusBanner(for: doc)
-                        drawerList(for: doc)
+                        statusBanner(for: verified)
+                        drawerList(for: verified)
                     }
                     .padding(.bottom, 32)
+                } else if !chatViewModel.isVerifying, let error = chatViewModel.verificationError {
+                    failureState(error)
+                        .padding(.bottom, 32)
                 } else {
                     loadingState
                 }
@@ -82,10 +85,10 @@ struct VerifierView: View {
         }
     }
 
-    // MARK: - Loading State
+    // MARK: - Loading and Failure States
 
     private var loadingState: some View {
-        VStack(spacing: 16) {
+        placeholderState(status: .pending) {
             HStack(spacing: 10) {
                 ProgressView()
                     .scaleEffect(0.9)
@@ -94,17 +97,42 @@ struct VerifierView: View {
                     .foregroundColor(.primary)
                 Spacer()
             }
-            .padding(18)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(isDarkMode ? Color(.systemGray6).opacity(0.5) : Color(.systemGray6))
-            )
+        }
+    }
+
+    /// The SDK reports a failed verification as a single error, not per
+    /// step, so every section shows as failed with nothing to expand.
+    private func failureState(_ error: String) -> some View {
+        placeholderState(status: .error) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Verification failed")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.red)
+                Text(error)
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func placeholderState<Banner: View>(
+        status: VerifierStatus,
+        @ViewBuilder banner: () -> Banner
+    ) -> some View {
+        VStack(spacing: 16) {
+            banner()
+                .padding(18)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(isDarkMode ? Color(.systemGray6).opacity(0.5) : Color(.systemGray6))
+                )
 
             VStack(spacing: 0) {
                 ForEach(VerificationSection.allCases) { section in
                     drawerHeader(
                         section: section,
-                        status: .pending,
+                        status: status,
                         isExpanded: false,
                         isEnabled: false,
                         action: {}
@@ -123,90 +151,68 @@ struct VerifierView: View {
 
     // MARK: - Status Banner
 
-    private func statusBanner(for doc: VerificationDocument) -> some View {
+    private func statusBanner(for verification: Verification) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            if doc.securityVerified {
-                Text("Your data is encrypted end-to-end to a server running inside a secure hardware enclave.")
-                    .font(.system(size: 15))
-                    .foregroundColor(verificationAccent)
+            Text("Your data is encrypted end-to-end to a server running inside a secure hardware enclave.")
+                .font(.system(size: 15))
+                .foregroundColor(verificationAccent)
 
-                HStack(spacing: 6) {
-                    let isSEV = doc.enclaveMeasurement.measurement.type.lowercased().contains("sev")
-                    let isTDX = doc.enclaveMeasurement.measurement.type.lowercased().contains("tdx")
+            HStack(spacing: 6) {
+                let isSEV = verification.isSEV
+                let isTDX = verification.isTDX
 
-                    Text("Hardware attested by")
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
+                Text("Hardware attested by")
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
 
-                    if isSEV {
-                        Image("amd-icon")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(height: 12)
-                    }
-
-                    if isTDX {
-                        Image("intel-icon")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(height: 12)
-                    }
-
-                    if isSEV || isTDX {
-                        Text("and")
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
-                    }
-
-                    Image("nvidia-icon")
+                if isSEV {
+                    Image("amd-icon")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(height: 12)
                 }
-            } else if let error = doc.getFirstError() {
-                Text("Verification failed")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.red)
-                Text(error)
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-            } else {
-                HStack(spacing: 10) {
-                    ProgressView()
-                        .scaleEffect(0.9)
-                    Text("Verifying secure enclave...")
-                        .font(.subheadline)
-                        .foregroundColor(.primary)
+
+                if isTDX {
+                    Image("intel-icon")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 12)
                 }
+
+                if isSEV || isTDX {
+                    Text("and")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                }
+
+                Image("nvidia-icon")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 12)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(doc.securityVerified
-                      ? verificationAccent.opacity(isDarkMode ? 0.1 : 0.08)
-                      : (isDarkMode ? Color(.systemGray6).opacity(0.5) : Color(.systemGray6)))
+                .fill(verificationAccent.opacity(isDarkMode ? 0.1 : 0.08))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(doc.securityVerified
-                        ? verificationAccent.opacity(0.3)
-                        : Color.clear,
-                        lineWidth: 1)
+                .stroke(verificationAccent.opacity(0.3), lineWidth: 1)
         )
     }
 
     // MARK: - Verification Drawers
 
-    private func drawerList(for doc: VerificationDocument) -> some View {
+    private func drawerList(for verification: Verification) -> some View {
         VStack(spacing: 0) {
             ForEach(VerificationSection.allCases) { section in
                 let isExpanded = expandedSections.contains(section)
 
                 drawerHeader(
                     section: section,
-                    status: sectionStatus(section, doc: doc),
+                    status: .success,
                     isExpanded: isExpanded,
                     action: { toggle(section) }
                 )
@@ -218,7 +224,7 @@ struct VerifierView: View {
 
                             VStack(alignment: .leading, spacing: Constants.UI.VerificationCenter.drawerContentSpacing) {
                                 sectionHeader(for: section)
-                                sectionContent(for: doc, section: section)
+                                sectionContent(for: verification, section: section)
                             }
                             .padding(.horizontal, Constants.UI.VerificationCenter.drawerContentHorizontalPadding)
                             .padding(.top, Constants.UI.VerificationCenter.drawerContentSpacing)
@@ -316,7 +322,6 @@ struct VerifierView: View {
     private func statusAccessibilityText(_ status: VerifierStatus) -> String {
         switch status {
         case .pending: return "pending"
-        case .loading: return "verifying"
         case .success: return "verified"
         case .error: return "failed"
         }
@@ -335,32 +340,10 @@ struct VerifierView: View {
                 .font(.system(size: 18))
                 .foregroundColor(.red)
                 .background(Circle().fill(isDarkMode ? Color.backgroundPrimary : .white).padding(2))
-        case .loading:
-            ZStack {
-                Circle()
-                    .fill(isDarkMode ? Color.backgroundPrimary : .white)
-                    .frame(width: 20, height: 20)
-                ProgressView()
-                    .scaleEffect(0.6)
-            }
         case .pending:
             Circle()
                 .fill(Color.gray.opacity(0.3))
                 .frame(width: 18, height: 18)
-        }
-    }
-
-    private func sectionStatus(_ section: VerificationSection, doc: VerificationDocument) -> VerifierStatus {
-        switch section {
-        case .encryption:
-            if let verifyHPKE = doc.steps.verifyHPKEKey {
-                return verifyHPKE.status.uiStatus
-            }
-            return doc.securityVerified ? .success : .loading
-        case .code:
-            return doc.steps.verifyCode.status.uiStatus
-        case .runtime:
-            return doc.steps.verifyEnclave.status.uiStatus
         }
     }
 
@@ -377,24 +360,24 @@ struct VerifierView: View {
     }
 
     @ViewBuilder
-    private func sectionContent(for doc: VerificationDocument, section: VerificationSection) -> some View {
+    private func sectionContent(for verification: Verification, section: VerificationSection) -> some View {
         switch section {
         case .encryption:
             EncryptionSectionCards(
-                document: doc,
-                status: sectionStatus(section, doc: doc),
+                verification: verification,
+                status: .success,
                 isDarkMode: isDarkMode
             )
         case .code:
             CodeSectionCards(
-                document: doc,
-                status: sectionStatus(section, doc: doc),
+                verification: verification,
+                status: .success,
                 isDarkMode: isDarkMode
             )
         case .runtime:
             RuntimeSectionCards(
-                document: doc,
-                status: sectionStatus(section, doc: doc),
+                verification: verification,
+                status: .success,
                 isDarkMode: isDarkMode
             )
         }
@@ -445,7 +428,7 @@ private struct RuntimeSectionHeader: View {
 // MARK: - Section Cards
 
 private struct EncryptionSectionCards: View {
-    let document: VerificationDocument
+    let verification: Verification
     let status: VerifierStatus
     let isDarkMode: Bool
 
@@ -454,7 +437,7 @@ private struct EncryptionSectionCards: View {
             FingerprintCard(
                 icon: "key.fill",
                 label: "Your unique encryption key",
-                value: document.hpkePublicKey,
+                value: verification.hpkePublicKey ?? "",
                 successBadgeText: "Attested",
                 status: status,
                 isDarkMode: isDarkMode
@@ -478,7 +461,7 @@ private struct EncryptionSectionCards: View {
                     Text("Full HPKE Public Key")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
-                    Text(document.hpkePublicKey)
+                    Text(verification.hpkePublicKey ?? "Not available")
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(.primary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -490,7 +473,7 @@ private struct EncryptionSectionCards: View {
 }
 
 private struct CodeSectionCards: View {
-    let document: VerificationDocument
+    let verification: Verification
     let status: VerifierStatus
     let isDarkMode: Bool
 
@@ -498,23 +481,20 @@ private struct CodeSectionCards: View {
         VStack(spacing: 16) {
             FingerprintCard(
                 icon: "touchid",
-                label: "Source code fingerprint",
-                value: document.codeFingerprint,
+                label: "Release digest",
+                value: verification.codeDigest,
                 successBadgeText: "Verified",
                 status: status,
                 isDarkMode: isDarkMode
             )
 
-            InfoCard(isDarkMode: isDarkMode) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Full Code Fingerprint")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
-                    Text(document.codeFingerprint)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
+            if let codeMeasurement = verification.codeMeasurement {
+                InfoCard(isDarkMode: isDarkMode) {
+                    MeasurementList(
+                        title: "Code Measurements",
+                        measurement: codeMeasurement,
+                        isDarkMode: isDarkMode
+                    )
                 }
             }
 
@@ -537,8 +517,8 @@ private struct CodeSectionCards: View {
                             .frame(width: 24, height: 24)
                     }
                     ExternalLink(
-                        text: document.configRepo,
-                        url: "https://github.com/\(document.configRepo)"
+                        text: verification.configRepo,
+                        url: "https://github.com/\(verification.configRepo)"
                     )
                 }
             }
@@ -563,9 +543,9 @@ private struct CodeSectionCards: View {
                     }
                     ExternalLink(
                         text: "View on Sigstore",
-                        url: document.releaseDigest.isEmpty
+                        url: verification.codeDigest.isEmpty
                             ? "https://search.sigstore.dev"
-                            : "https://search.sigstore.dev/?hash=sha256:\(document.releaseDigest)"
+                            : "https://search.sigstore.dev/?hash=sha256:\(verification.codeDigest)"
                     )
                 }
             }
@@ -574,24 +554,16 @@ private struct CodeSectionCards: View {
 }
 
 private struct RuntimeSectionCards: View {
-    let document: VerificationDocument
+    let verification: Verification
     let status: VerifierStatus
     let isDarkMode: Bool
-
-    private var isSEV: Bool {
-        document.enclaveMeasurement.measurement.type.lowercased().contains("sev")
-    }
-
-    private var isTDX: Bool {
-        document.enclaveMeasurement.measurement.type.lowercased().contains("tdx")
-    }
 
     var body: some View {
         VStack(spacing: 16) {
             FingerprintCard(
                 icon: "touchid",
-                label: "Enclave code fingerprint",
-                value: document.enclaveFingerprint,
+                label: "Enclave TLS key fingerprint",
+                value: verification.tlsPublicKeyFingerprint,
                 successBadgeText: "Attested",
                 status: status,
                 isDarkMode: isDarkMode
@@ -602,57 +574,42 @@ private struct RuntimeSectionCards: View {
                     Text("Hardware Attestation")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
-                    Text("The verifier receives a signed measurement from NVIDIA\(isSEV ? ", AMD" : "")\(isTDX ? ", Intel" : "") certifying the enclave environment and the digest of the binary actively running inside it.")
+                    Text("The verifier receives a signed measurement from NVIDIA\(verification.isSEV ? ", AMD" : "")\(verification.isTDX ? ", Intel" : "") certifying the enclave environment and the digest of the binary actively running inside it.")
                         .font(.system(size: 13))
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 16) {
                         ExternalLink(text: "NVIDIA Attestation", url: "https://docs.nvidia.com/attestation/index.html")
-                        if isSEV {
+                        if verification.isSEV {
                             ExternalLink(text: "AMD SEV", url: "https://www.amd.com/en/developer/sev.html")
                         }
-                        if isTDX {
+                        if verification.isTDX {
                             ExternalLink(text: "Intel TDX", url: "https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html")
                         }
                     }
                 }
             }
 
-            if let tlsFingerprint = document.enclaveMeasurement.tlsPublicKeyFingerprint, !tlsFingerprint.isEmpty {
+            if let enclaveMeasurement = verification.enclaveMeasurement {
                 InfoCard(isDarkMode: isDarkMode) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("TLS Public Key Fingerprint")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
-                        Text(tlsFingerprint)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundColor(.primary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
-                    }
-                }
-            }
-
-            InfoCard(isDarkMode: isDarkMode) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Hardware Measurements")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
-
-                    MeasurementField(
-                        label: "Type",
-                        value: document.enclaveMeasurement.measurement.type
+                    MeasurementList(
+                        title: "Hardware Measurements",
+                        measurement: enclaveMeasurement,
+                        isDarkMode: isDarkMode
                     )
-
-                    ForEach(Array(document.enclaveMeasurement.measurement.registers.enumerated()), id: \.offset) { index, register in
-                        MeasurementField(
-                            label: "Register \(index)",
-                            value: register
-                        )
-                    }
                 }
             }
         }
+    }
+}
+
+private extension Verification {
+    var isSEV: Bool {
+        enclaveMeasurement?.type.lowercased().contains("sev") ?? false
+    }
+
+    var isTDX: Bool {
+        enclaveMeasurement?.type.lowercased().contains("tdx") ?? false
     }
 }
 
@@ -713,14 +670,6 @@ private struct FingerprintCard: View {
                     .font(.system(size: 11, weight: .bold))
             }
             .foregroundColor(.red)
-        case .loading:
-            HStack(spacing: 4) {
-                Text("Verifying")
-                    .font(.system(size: 13, weight: .medium))
-                ProgressView()
-                    .scaleEffect(0.6)
-            }
-            .foregroundColor(.secondary)
         case .pending:
             HStack(spacing: 4) {
                 Text("Pending")
@@ -771,6 +720,32 @@ private struct ExternalLink: View {
 private extension Color {
     static func verificationAccent(isDarkMode: Bool) -> Color {
         isDarkMode ? .tinfoilAccentBlueLight : .tinfoilAccentBlue
+    }
+}
+
+private struct MeasurementList: View {
+    let title: String
+    let measurement: Verification.Measurement
+    let isDarkMode: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
+
+            MeasurementField(
+                label: "Type",
+                value: measurement.type
+            )
+
+            ForEach(Array(measurement.registers.enumerated()), id: \.offset) { index, register in
+                MeasurementField(
+                    label: "Register \(index)",
+                    value: register
+                )
+            }
+        }
     }
 }
 

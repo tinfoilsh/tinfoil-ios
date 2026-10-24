@@ -12,40 +12,23 @@ import UniformTypeIdentifiers
 actor DocumentConversionService {
     static let shared = DocumentConversionService()
 
-    private var client: SecureClient?
-    private var verificationTask: Task<SecureClient, Error>?
+    private var handle: EnclaveHandle?
     private let decoder = JSONDecoder()
 
     private init() {}
 
-    private func getClient() async throws -> SecureClient {
-        if let client {
-            return client
+    /// The document conversion enclave's handle, which verifies on first use
+    /// and again whenever its attestation expires
+    private func enclaveHandle() throws -> EnclaveHandle {
+        if let handle {
+            return handle
         }
-
-        if let verificationTask {
-            return try await verificationTask.value
-        }
-
-        let task = Task<SecureClient, Error> {
-            let newClient = SecureClient(
-                githubRepo: Constants.DocumentProcessing.configRepo,
-                enclaveURL: Constants.DocumentProcessing.enclaveURL
-            )
-            _ = try await newClient.verify()
-            return newClient
-        }
-        verificationTask = task
-
-        do {
-            let verifiedClient = try await task.value
-            client = verifiedClient
-            verificationTask = nil
-            return verifiedClient
-        } catch {
-            verificationTask = nil
-            throw error
-        }
+        let created = try EnclaveHandle.enclave(
+            at: Constants.DocumentProcessing.enclaveURL,
+            repo: Constants.DocumentProcessing.configRepo
+        )
+        handle = created
+        return created
     }
 
     func convertToMarkdown(url: URL, filename: String, contentType: String? = nil, mode: String = Constants.DocumentProcessing.defaultMode) async throws -> String {
@@ -72,8 +55,8 @@ actor DocumentConversionService {
             throw DocumentConversionError.missingAPIKey
         }
 
-        let client = try await getClient()
-        let response = try await client.post(
+        let enclave = try enclaveHandle()
+        let (data, response) = try await enclave.post(
             url: components.url?.absoluteString ?? "\(Constants.DocumentProcessing.enclaveURL)\(Constants.DocumentProcessing.convertPath)",
             headers: [
                 "Authorization": "Bearer \(apiKey)",
@@ -86,7 +69,7 @@ actor DocumentConversionService {
             throw DocumentConversionError.requestFailed(statusCode: response.statusCode)
         }
 
-        let decoded = try decoder.decode(DocumentConversionResponse.self, from: response.body)
+        let decoded = try decoder.decode(DocumentConversionResponse.self, from: data)
         if let mdContent = decoded.document?.mdContent {
             return mdContent
         }
