@@ -256,14 +256,17 @@ struct WorkStepsSheetView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(Array(run.steps.enumerated()), id: \.offset) { _, step in
-                    WorkStepSection(step: step, isDarkMode: isDarkMode)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
+            // A scroll view rather than a List: a List row resizes after an
+            // expanded thought renders, so the thought overlaps other rows.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(run.steps.enumerated()), id: \.offset) { _, step in
+                        WorkStepSection(step: step, isDarkMode: isDarkMode)
+                    }
                 }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .listStyle(.plain)
             .navigationTitle(run.summaryLabel)
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -349,7 +352,7 @@ private struct WorkThinkingStepView: View {
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 if let chunks {
                     ForEach(chunks) { chunk in
                         ThinkingChunkView(chunk: chunk, isDarkMode: isDarkMode)
