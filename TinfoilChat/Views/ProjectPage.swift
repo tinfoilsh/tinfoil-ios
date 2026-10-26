@@ -221,17 +221,12 @@ struct ProjectPage: View {
                 Label("Remove from Project", systemImage: "arrow.uturn.left")
             }
 
-            ForEach(viewModel.projects.filter { $0.id != project?.id }) { destination in
-                Button {
-                    Task {
-                        await viewModel.moveChatToProject(chatId: chat.id, projectId: destination.id)
-                    }
-                } label: {
-                    Label {
-                        Text("Move to \(destination.name)")
-                    } icon: {
-                        ProjectFolderIcon(color: destination.color, size: 22)
-                    }
+            MoveToProjectMenu(
+                title: "Move to Project",
+                projects: viewModel.projects.filter { $0.id != project?.id }
+            ) { destination in
+                Task {
+                    await viewModel.moveChatToProject(chatId: chat.id, projectId: destination.id)
                 }
             }
         }

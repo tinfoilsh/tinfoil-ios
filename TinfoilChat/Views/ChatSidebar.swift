@@ -559,17 +559,14 @@ struct ChatSidebar: View {
                     }
                 }
                 if viewModel.hasPremiumAccess && !chat.isBlankChat && !chat.decryptionFailed {
-                    ForEach(viewModel.projects.filter { $0.decryptionFailed != true }) { project in
-                        Button {
-                            Task {
-                                await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
-                            }
-                        } label: {
-                            Label {
-                                Text("Add to \(project.name)")
-                            } icon: {
-                                ProjectFolderIcon(color: project.color, size: 22)
-                            }
+                    MoveToProjectMenu(
+                        title: chat.projectId == nil ? "Add to Project" : "Move to Project",
+                        projects: viewModel.projects.filter {
+                            $0.decryptionFailed != true && $0.id != chat.projectId
+                        }
+                    ) { project in
+                        Task {
+                            await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
                         }
                     }
                 }
@@ -725,19 +722,14 @@ struct ChatSidebar: View {
             }
 
             if viewModel.hasPremiumAccess {
-                ForEach(viewModel.projects.filter {
-                    $0.decryptionFailed != true && $0.id != chat.projectId
-                }) { project in
-                    Button {
-                        Task {
-                            await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
-                        }
-                    } label: {
-                        Label {
-                            Text(chat.projectId == nil ? "Add to \(project.name)" : "Move to \(project.name)")
-                        } icon: {
-                            ProjectFolderIcon(color: project.color, size: 22)
-                        }
+                MoveToProjectMenu(
+                    title: chat.projectId == nil ? "Add to Project" : "Move to Project",
+                    projects: viewModel.projects.filter {
+                        $0.decryptionFailed != true && $0.id != chat.projectId
+                    }
+                ) { project in
+                    Task {
+                        await viewModel.moveChatToProject(chatId: chat.id, projectId: project.id)
                     }
                 }
             }
