@@ -32,6 +32,7 @@ struct ChatContainer: View {
     @State private var lastBackgroundTime: Date?
     @State private var showPremiumModal = false
     @State private var isVerificationBadgeExpanded = false
+    @State private var isVerificationBadgeCollapsed = false
     @State private var sidebarNavigationRequest: ChatNavigationRequest?
 
     private var isAnySheetPresented: Bool {
@@ -41,6 +42,7 @@ struct ChatContainer: View {
     // Sidebar constants
     private let sidebarWidth: CGFloat = 300
     private let toolbarPrimaryLabelHeight: CGFloat = 22
+    private let sidebarLogoHeight: CGFloat = 28
 
     private let backgroundTimeThreshold: TimeInterval = 300 // 5 minutes in seconds
 
@@ -67,6 +69,16 @@ struct ChatContainer: View {
             && settings.isCloudSyncEnabled
             && settings.isLocalOnlyModeEnabled
             && viewModel.activeStorageTab == .local
+    }
+
+    private var showsSidebarLogo: Bool {
+        isSidebarOpen && viewModel.activeProject == nil
+    }
+
+    /// On iPhone the open sidebar covers the chat, so the chat's own
+    /// toolbar actions are hidden until it closes.
+    private var showsChatToolbarActions: Bool {
+        !(isSidebarOpen && UIDevice.current.userInterfaceIdiom == .phone)
     }
     
     var body: some View {
@@ -242,10 +254,10 @@ struct ChatContainer: View {
                     Image(colorScheme == .dark ? "logo-white" : "logo-dark")
                         .resizable()
                         .scaledToFit()
-                        .frame(height: toolbarPrimaryLabelHeight)
-                        .opacity(isSidebarOpen && viewModel.activeProject == nil ? 1 : 0)
+                        .frame(height: sidebarLogoHeight)
+                        .opacity(showsSidebarLogo ? 1 : 0)
                         .accessibilityLabel("Tinfoil")
-                        .accessibilityHidden(!(isSidebarOpen && viewModel.activeProject == nil))
+                        .accessibilityHidden(!showsSidebarLogo)
 
                     if !viewModel.isTemporaryMode && viewModel.activeProject == nil && authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled && viewModel.activeStorageTab == .local {
                         chatStorageLabel
@@ -282,7 +294,7 @@ struct ChatContainer: View {
                         .accessibilityHidden(isSidebarOpen || isVerificationBadgeExpanded)
                     }
                 }
-                .frame(height: showsPrimaryToolbarLabel ? toolbarPrimaryLabelHeight : 0)
+                .frame(height: showsPrimaryToolbarLabel ? (showsSidebarLogo ? sidebarLogoHeight : toolbarPrimaryLabelHeight) : 0)
 
                     if let presetId = viewModel.currentChat?.promptPresetId,
                        let preset = profileManager.promptPreset(for: presetId),
@@ -303,16 +315,20 @@ struct ChatContainer: View {
                 .animation(.easeInOut(duration: 0.2), value: isSidebarOpen)
                 .animation(.easeInOut(duration: 0.35), value: isVerificationBadgeExpanded)
             }
-            if viewModel.activeProject == nil {
+            if viewModel.activeProject == nil && showsChatToolbarActions {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    VerificationStatusIndicator(viewModel: viewModel, isBadgeExpanded: $isVerificationBadgeExpanded)
+                    VerificationStatusIndicator(
+                        viewModel: viewModel,
+                        isBadgeExpanded: $isVerificationBadgeExpanded,
+                        isCollapsed: $isVerificationBadgeCollapsed
+                    )
                 }
             }
             // Temporary (incognito) chat toggle. Only shown when no chat is in
             // progress (i.e. when the new-chat "+" button is hidden). Once a
             // chat has started, the temporary state is indicated by a label
             // in the navbar's principal slot instead.
-            if authManager.isAuthenticated && viewModel.activeProject == nil && (viewModel.currentChat?.isBlankChat ?? true) {
+            if authManager.isAuthenticated && viewModel.activeProject == nil && showsChatToolbarActions && (viewModel.currentChat?.isBlankChat ?? true) {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: toggleTemporaryMode) {
                         GhostIcon(
@@ -327,7 +343,7 @@ struct ChatContainer: View {
                 }
             }
             // Only show new chat button when chat has messages (not a new/blank chat)
-            if authManager.isAuthenticated && viewModel.activeProject == nil && !(viewModel.currentChat?.isBlankChat ?? true) {
+            if authManager.isAuthenticated && viewModel.activeProject == nil && showsChatToolbarActions && !(viewModel.currentChat?.isBlankChat ?? true) {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: createNewChat) {
                         Image(systemName: "plus")
@@ -995,7 +1011,9 @@ extension View {
 struct VerificationStatusIndicator: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @Binding var isBadgeExpanded: Bool
-    @State private var isCollapsed = false
+    /// Owned by the parent so the badge stays collapsed when the toolbar
+    /// removes and re-adds the indicator.
+    @Binding var isCollapsed: Bool
     @State private var collapseTask: Task<Void, Never>?
 
     private var iconName: String {
@@ -1073,6 +1091,7 @@ struct VerificationStatusIndicator: View {
         .accessibilityHint("Shows verification details")
         .onAppear {
             if viewModel.isVerified && viewModel.verificationError == nil {
+                guard !isCollapsed else { return }
                 isBadgeExpanded = true
                 collapseTask?.cancel()
                 collapseTask = Task { @MainActor in
@@ -1084,6 +1103,8 @@ struct VerificationStatusIndicator: View {
             } else if viewModel.isVerifying {
                 isBadgeExpanded = true
                 isCollapsed = false
+            } else {
+                isBadgeExpanded = false
             }
         }
         .onChange(of: viewModel.isVerified) { _, isVerified in
