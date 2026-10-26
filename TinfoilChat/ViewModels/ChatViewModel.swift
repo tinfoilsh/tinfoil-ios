@@ -4592,34 +4592,19 @@ class ChatViewModel: ObservableObject {
                     : nil
                 hapticGenerator?.prepare()
 
-                // Carry over any partial message state (a retry after a
-                // mid-stream auth refresh resumes into the same message).
-                var initialResponseContent = ""
-                var initialThoughts: String? = nil
-                var initialGenerationTime: TimeInterval? = nil
-                var initialIsThinking = false
-                if !streamChat.messages.isEmpty,
-                   let lastIndex = streamChat.messages.indices.last {
-                    initialResponseContent = streamChat.messages[lastIndex].content
-                    initialThoughts = streamChat.messages[lastIndex].thoughts
-                    initialGenerationTime = streamChat.messages[lastIndex].generationTimeSeconds
-                    initialIsThinking = streamChat.messages[lastIndex].isThinking
-                }
-
                 // All per-chunk parsing state (event markers, chunkers, the
                 // thinking state machine, tool calls, web search bookkeeping)
                 // lives in the processor so the stream can be consumed off
-                // the main actor.
+                // the main actor. It starts from the streaming message's
+                // existing state, so a retry after a mid-stream auth refresh
+                // or a continuation appends to the same response.
                 let processor = SynchronizedStreamingResponseProcessor(
                     StreamingResponseProcessor(
                         isWebSearchEnabled: webSearchEnabled,
                         hapticEnabled: hapticEnabled,
-                        responseContent: initialResponseContent,
                         modelDisplayName: streamModel.responseDisplayName,
                         modelDisplayNamesByName: modelDisplayNamesByName,
-                        currentThoughts: initialThoughts,
-                        generationTimeSeconds: initialGenerationTime,
-                        isInThinkingMode: initialIsThinking
+                        resuming: streamChat.messages.last
                     )
                 )
                 activeStreamProcessor = processor
