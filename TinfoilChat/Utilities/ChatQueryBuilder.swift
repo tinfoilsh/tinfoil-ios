@@ -52,6 +52,9 @@ struct ChatQueryBuilder {
     ///     persisted, keeping the system prompt and history byte-stable so
     ///     prefix caching works. Defaults to `false` so internal utilities
     ///     (title gen, memory) stay unaffected.
+    ///   - trailingInstruction: Request-only user instruction appended after
+    ///     the time reminder, e.g. asking the model to resume a partial
+    ///     response. Never persisted to the chat history.
     ///   - responseFormat: Optional structured response format for focused
     ///     non-streaming requests such as GenUI argument regeneration.
     /// - Returns: A configured ChatQuery
@@ -74,6 +77,7 @@ struct ChatQueryBuilder {
         autoCandidates: [ModelType]? = nil,
         autoIntelligence: AutoIntelligence = .default,
         includeTimeReminder: Bool = false,
+        trailingInstruction: String? = nil,
         responseFormat: ChatQuery.ResponseFormat? = nil
     ) throws -> ChatQuery {
 
@@ -204,8 +208,17 @@ struct ChatQueryBuilder {
             }
         }
 
+        // Both ephemeral tail messages share one user turn: some chat
+        // templates reject consecutive same-role messages.
+        var trailingParts: [String] = []
         if includeTimeReminder {
-            messages.append(.user(.init(content: .string(TimeReminder.formatCurrentTimeReminder()))))
+            trailingParts.append(TimeReminder.formatCurrentTimeReminder())
+        }
+        if let trailingInstruction {
+            trailingParts.append(trailingInstruction)
+        }
+        if !trailingParts.isEmpty {
+            messages.append(.user(.init(content: .string(trailingParts.joined(separator: "\n\n")))))
         }
 
         let enabledTools = genUIEnabled ? genUIRegistry.buildToolParams() : []

@@ -59,6 +59,54 @@ struct TimeReminderTests {
         #expect(!hasReminder)
     }
 
+    @Test @MainActor
+    func joinsTrailingInstructionWithTimeReminderInOneFinalUserMessage() throws {
+        let query = try ChatQueryBuilder.buildQuery(
+            modelId: "gpt-oss-120b",
+            systemPrompt: "be helpful",
+            rules: "",
+            conversationMessages: [
+                Message(role: .user, content: "hello"),
+                Message(role: .assistant, content: "Partial answer")
+            ],
+            stream: false,
+            genUIEnabled: false,
+            includeTimeReminder: true,
+            trailingInstruction: "Keep going."
+        )
+
+        let messages = try encodedMessages(from: query)
+        let last = try #require(messages.last)
+        #expect(last["role"] as? String == "user")
+        let content = try #require(last["content"] as? String)
+        #expect(content.hasPrefix("<system-reminder>Current time: "))
+        #expect(content.hasSuffix("</system-reminder>\n\nKeep going."))
+        let secondToLast = messages[messages.count - 2]
+        #expect(secondToLast["role"] as? String == "assistant")
+        #expect(secondToLast["content"] as? String == "Partial answer")
+    }
+
+    @Test @MainActor
+    func sendsTrailingInstructionAloneWithoutTimeReminder() throws {
+        let query = try ChatQueryBuilder.buildQuery(
+            modelId: "gpt-oss-120b",
+            systemPrompt: "be helpful",
+            rules: "",
+            conversationMessages: [
+                Message(role: .user, content: "hello"),
+                Message(role: .assistant, content: "Partial answer")
+            ],
+            stream: false,
+            genUIEnabled: false,
+            trailingInstruction: "Keep going."
+        )
+
+        let messages = try encodedMessages(from: query)
+        let last = try #require(messages.last)
+        #expect(last["role"] as? String == "user")
+        #expect(last["content"] as? String == "Keep going.")
+    }
+
     @Test
     func formattingIsStableWithinTheSameMinute() {
         let base = Date(timeIntervalSince1970: 1_784_800_800)
