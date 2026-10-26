@@ -444,34 +444,6 @@ struct StreamingThinkingSegmentTests {
         #expect(searchEndedAt >= searchStartedAt)
         #expect(searchEndedAt <= StreamingResponseProcessor.epochMilliseconds())
     }
-
-    private func reasoningChunk(_ reasoning: String) throws -> ChatStreamResult {
-        try decodeStreamChunk(delta: ["reasoning": reasoning])
-    }
-
-    private func contentChunk(
-        _ content: String,
-        finishReason: String? = nil
-    ) throws -> ChatStreamResult {
-        try decodeStreamChunk(delta: ["content": content], finishReason: finishReason)
-    }
-
-    private func toolCallChunk(
-        id: String,
-        name: String,
-        arguments: String
-    ) throws -> ChatStreamResult {
-        try decodeStreamChunk(delta: [
-            "tool_calls": [
-                [
-                    "index": 0,
-                    "id": id,
-                    "type": "function",
-                    "function": ["name": name, "arguments": arguments],
-                ]
-            ]
-        ])
-    }
 }
 
 @Suite("Resuming a stopped response")
@@ -573,16 +545,7 @@ struct StreamingResponseResumeTests {
             hapticEnabled: false,
             resuming: stopped
         )
-        _ = processor.process(processor.parse(try decodeStreamChunk(delta: [
-            "tool_calls": [
-                [
-                    "index": 0,
-                    "id": "call_2",
-                    "type": "function",
-                    "function": ["name": "widget", "arguments": "{}"],
-                ]
-            ]
-        ])))
+        _ = processor.process(processor.parse(try toolCallChunk(id: "call_2", name: "widget", arguments: "{}")))
 
         let snapshot = processor.snapshot()
         #expect(snapshot.toolCalls.map(\.id) == ["call_1", "call_2"])
@@ -635,17 +598,34 @@ struct StreamingResponseResumeTests {
             .text("Partial"),
         ])
     }
+}
 
-    private func reasoningChunk(_ reasoning: String) throws -> ChatStreamResult {
-        try decodeStreamChunk(delta: ["reasoning": reasoning])
-    }
+private func reasoningChunk(_ reasoning: String) throws -> ChatStreamResult {
+    try decodeStreamChunk(delta: ["reasoning": reasoning])
+}
 
-    private func contentChunk(
-        _ content: String,
-        finishReason: String? = nil
-    ) throws -> ChatStreamResult {
-        try decodeStreamChunk(delta: ["content": content], finishReason: finishReason)
-    }
+private func contentChunk(
+    _ content: String,
+    finishReason: String? = nil
+) throws -> ChatStreamResult {
+    try decodeStreamChunk(delta: ["content": content], finishReason: finishReason)
+}
+
+private func toolCallChunk(
+    id: String,
+    name: String,
+    arguments: String
+) throws -> ChatStreamResult {
+    try decodeStreamChunk(delta: [
+        "tool_calls": [
+            [
+                "index": 0,
+                "id": id,
+                "type": "function",
+                "function": ["name": name, "arguments": arguments],
+            ]
+        ]
+    ])
 }
 
 /// Builds and decodes a `ChatStreamResult` fixture from a raw delta payload.
