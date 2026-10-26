@@ -963,6 +963,36 @@ struct Message: Identifiable, Codable, Equatable {
         )
     }
 
+    /// True when a continuation request would show the model something to
+    /// resume: text or tool calls. Thoughts alone are not always sent back.
+    var hasContinuableResponse: Bool {
+        role == .assistant && (!content.isEmpty || !toolCalls.isEmpty)
+    }
+
+    /// Readies a stopped assistant response to be continued: clears the
+    /// failure that stopped it and closes any thinking round its dead
+    /// stream left open.
+    mutating func prepareForContinuation() {
+        streamError = nil
+        isRequestError = false
+        isRateLimitError = false
+        isHourlyLimitError = false
+        isConnectionError = false
+        isThinking = false
+        segments = segments?.map { (segment: MessageSegment) -> MessageSegment in
+            guard case .thinking(let content, true, let duration, let startedAt, let endedAt) = segment else {
+                return segment
+            }
+            return .thinking(
+                content: content,
+                isThinking: false,
+                duration: duration,
+                startedAt: startedAt,
+                endedAt: endedAt
+            )
+        }
+    }
+
     private static let iso8601Formatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

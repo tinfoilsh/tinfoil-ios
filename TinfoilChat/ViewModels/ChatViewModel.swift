@@ -4348,7 +4348,9 @@ class ChatViewModel: ObservableObject {
     }
 
     /// Generates an assistant response for the current conversation (expects user message to already be in chat)
-    private func generateResponse(dismissKeyboard: Bool = true) {
+    /// - Parameter continuesResponse: Resume the last assistant message
+    ///   instead of starting a new one.
+    private func generateResponse(dismissKeyboard: Bool = true, continuesResponse: Bool = false) {
         guard canGenerateInCurrentChat,
               let initialChat = currentChat,
               !streamState.isStreaming(chatId: initialChat.id) else {
@@ -4368,22 +4370,26 @@ class ChatViewModel: ObservableObject {
         let modelDisplayNamesByName = AppConfig.shared.modelDisplayNamesByName
         var turnChat = initialChat
         turnChat.hasActiveStream = true
-        if let userIndex = turnChat.messages.lastIndex(where: { $0.role == .user }) {
+        if !continuesResponse,
+           let userIndex = turnChat.messages.lastIndex(where: { $0.role == .user }) {
             turnChat.messages[userIndex].turnId = turnId
             turnChat.locallyModified = true
             turnChat.updatedAt = Date()
             updateChat(turnChat)
         }
 
-        // Create initial empty assistant message as a placeholder
-        let assistantMessage = Message(
-            role: .assistant,
-            turnId: turnId,
-            content: "",
-            modelDisplayName: streamModel.responseDisplayName,
-            isCollapsed: true
-        )
-        addMessage(assistantMessage)
+        // Create initial empty assistant message as a placeholder. A
+        // continuation streams into the existing response instead.
+        if !continuesResponse {
+            let assistantMessage = Message(
+                role: .assistant,
+                turnId: turnId,
+                content: "",
+                modelDisplayName: streamModel.responseDisplayName,
+                isCollapsed: true
+            )
+            addMessage(assistantMessage)
+        }
 
         guard var updatedStreamChat = currentChat else { return }
         let streamChatId = updatedStreamChat.id
@@ -4394,7 +4400,9 @@ class ChatViewModel: ObservableObject {
 
         let recoveryUserId = currentUserId
         let recoveryStorage: ChatRecoveryStorage?
-        if recoveryUserId == nil || streamChat.isTemporary {
+        // Recovery envelopes describe a fresh user turn, so a continuation
+        // streams without one.
+        if continuesResponse || recoveryUserId == nil || streamChat.isTemporary {
             recoveryStorage = nil
         } else if streamChat.isLocalOnly {
             recoveryStorage = .local
@@ -4583,7 +4591,8 @@ class ChatViewModel: ObservableObject {
                     genUIEnabled: SettingsManager.shared.genUIEnabled,
                     autoCandidates: modelSelection.autoCandidates,
                     autoIntelligence: streamAutoIntelligence,
-                    includeTimeReminder: true
+                    includeTimeReminder: true,
+                    trailingInstruction: continuesResponse ? Constants.ContinueResponse.instruction : nil
                 )
 
                 let hapticEnabled = SettingsManager.shared.hapticFeedbackEnabled
@@ -4592,34 +4601,19 @@ class ChatViewModel: ObservableObject {
                     : nil
                 hapticGenerator?.prepare()
 
-                // Carry over any partial message state (a retry after a
-                // mid-stream auth refresh resumes into the same message).
-                var initialResponseContent = ""
-                var initialThoughts: String? = nil
-                var initialGenerationTime: TimeInterval? = nil
-                var initialIsThinking = false
-                if !streamChat.messages.isEmpty,
-                   let lastIndex = streamChat.messages.indices.last {
-                    initialResponseContent = streamChat.messages[lastIndex].content
-                    initialThoughts = streamChat.messages[lastIndex].thoughts
-                    initialGenerationTime = streamChat.messages[lastIndex].generationTimeSeconds
-                    initialIsThinking = streamChat.messages[lastIndex].isThinking
-                }
-
                 // All per-chunk parsing state (event markers, chunkers, the
                 // thinking state machine, tool calls, web search bookkeeping)
                 // lives in the processor so the stream can be consumed off
-                // the main actor.
+                // the main actor. It starts from the streaming message's
+                // existing state, so a retry after a mid-stream auth refresh
+                // or a continuation appends to the same response.
                 let processor = SynchronizedStreamingResponseProcessor(
                     StreamingResponseProcessor(
                         isWebSearchEnabled: webSearchEnabled,
                         hapticEnabled: hapticEnabled,
-                        responseContent: initialResponseContent,
                         modelDisplayName: streamModel.responseDisplayName,
                         modelDisplayNamesByName: modelDisplayNamesByName,
-                        currentThoughts: initialThoughts,
-                        generationTimeSeconds: initialGenerationTime,
-                        isInThinkingMode: initialIsThinking
+                        resuming: streamChat.messages.last
                     )
                 )
                 activeStreamProcessor = processor
@@ -6067,6 +6061,45 @@ class ChatViewModel: ObservableObject {
         isScrollInteractionActive = false
         scrollToUserMessageTrigger = UUID()
         generateResponse()
+    }
+
+    /// Resumes the last assistant response where it stopped, streaming the
+    /// rest into the same message.
+    func continueLastResponse() {
+        guard canGenerateInCurrentChat,
+              messageEditSession == nil,
+              let chat = currentChat,
+              !isLoading else {
+            return
+        }
+
+        // Same as regenerating: an interrupted turn still waiting on
+        // recovery is abandoned first.
+        if hasPendingResponseRecovery {
+            let chatId = chat.id
+            Task { @MainActor in
+                guard await abandonPendingRecoveries(chatId: chatId),
+                      currentChat?.id == chatId else { return }
+                continueLastResponse()
+            }
+            return
+        }
+
+        guard let lastIndex = chat.messages.indices.last,
+              chat.messages[lastIndex].hasContinuableResponse else {
+            return
+        }
+
+        var updatedChat = chat
+        updatedChat.messages[lastIndex].prepareForContinuation()
+        updatedChat.locallyModified = true
+        updatedChat.updatedAt = Date()
+
+        currentChat = updatedChat
+        replaceChat(updatedChat)
+
+        saveChat(updatedChat)
+        generateResponse(continuesResponse: true)
     }
 
     func beginMessageEdit(at messageIndex: Int) {

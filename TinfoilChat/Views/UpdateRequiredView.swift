@@ -37,11 +37,13 @@ struct UpdateRequiredView: View {
                         .multilineTextAlignment(.center)
                     
                     // Description
-                    Text("A new version of Tinfoil is required to continue. Please update to the latest version from the App Store.")
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 16)
+                    BalancedTextLayout {
+                        Text("A new version of Tinfoil is required to continue. Please update to the latest version from the App Store.")
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 16)
                     
                     // Version info
                     VStack(spacing: 8) {

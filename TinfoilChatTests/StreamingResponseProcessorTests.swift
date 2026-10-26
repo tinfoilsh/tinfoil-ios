@@ -444,34 +444,188 @@ struct StreamingThinkingSegmentTests {
         #expect(searchEndedAt >= searchStartedAt)
         #expect(searchEndedAt <= StreamingResponseProcessor.epochMilliseconds())
     }
+}
 
-    private func reasoningChunk(_ reasoning: String) throws -> ChatStreamResult {
-        try decodeStreamChunk(delta: ["reasoning": reasoning])
+@Suite("Resuming a stopped response")
+struct StreamingResponseResumeTests {
+
+    @Test("new text extends the stopped response and keeps its details")
+    func newTextExtendsResponse() throws {
+        let citation = Annotation(
+            type: "url_citation",
+            url_citation: URLCitation(title: "Source", url: "https://example.com", start_index: nil, end_index: nil)
+        )
+        let search = WebSearchInstance(
+            id: "ws-0",
+            query: "q",
+            status: .completed,
+            sources: [WebSearchSource(title: "Source", url: "https://example.com", snippet: "Snippet")],
+            reason: nil,
+            startedAt: 1,
+            endedAt: 2
+        )
+        let widget = GenUIToolCall(id: "call_1", name: "widget", arguments: "{}")
+        var stopped = Message(role: .assistant, content: "Partial", modelDisplayName: "Original Model")
+        stopped.segments = [.webSearch(searchId: "ws-0"), .toolCall(toolCallId: "call_1"), .text("Partial")]
+        stopped.webSearches = [search]
+        stopped.toolCalls = [widget]
+        stopped.annotations = [citation]
+
+        let processor = StreamingResponseProcessor(
+            isWebSearchEnabled: true,
+            hapticEnabled: false,
+            modelDisplayName: "Selected Model",
+            resuming: stopped
+        )
+        _ = processor.process(processor.parse(try contentChunk(" rest.")))
+        _ = processor.process(processor.parse(try contentChunk("", finishReason: "stop")))
+        try processor.finishStream()
+
+        let snapshot = processor.snapshot()
+        #expect(snapshot.responseContent == "Partial rest.")
+        #expect(snapshot.contentChunks.map(\.content).joined() == "Partial rest.")
+        #expect(snapshot.segments == [
+            .webSearch(searchId: "ws-0"),
+            .toolCall(toolCallId: "call_1"),
+            .text("Partial rest."),
+        ])
+        #expect(snapshot.webSearches == [search])
+        #expect(snapshot.toolCalls == [widget])
+        #expect(snapshot.collectedAnnotations == [citation])
+        #expect(snapshot.collectedSources.map(\.url) == ["https://example.com"])
+        #expect(snapshot.modelDisplayName == "Original Model")
     }
 
-    private func contentChunk(
-        _ content: String,
-        finishReason: String? = nil
-    ) throws -> ChatStreamResult {
-        try decodeStreamChunk(delta: ["content": content], finishReason: finishReason)
+    @Test("new reasoning opens a thought after the earlier text")
+    func newReasoningFollowsEarlierThoughts() throws {
+        var stopped = Message(
+            role: .assistant,
+            content: "Partial",
+            thoughts: "Earlier.",
+            generationTimeSeconds: 2
+        )
+        stopped.segments = [
+            .thinking(content: "Earlier.", isThinking: false, duration: 2),
+            .text("Partial"),
+        ]
+
+        let processor = StreamingResponseProcessor(
+            isWebSearchEnabled: false,
+            hapticEnabled: false,
+            resuming: stopped
+        )
+        _ = processor.process(processor.parse(try reasoningChunk("More.")))
+        _ = processor.process(processor.parse(try contentChunk(" rest.")))
+
+        let snapshot = processor.snapshot()
+        #expect(snapshot.thoughts == "Earlier.\n\nMore.")
+        #expect(snapshot.thinkingChunks.map(\.content) == ["Earlier.", "More."])
+        #expect(snapshot.responseContent == "Partial rest.")
+        let generationTime = try #require(snapshot.generationTimeSeconds)
+        #expect(generationTime >= 2)
+        guard snapshot.segments.count == 4,
+              case .thinking("Earlier.", false, .some(2), _, _) = snapshot.segments[0],
+              case .text("Partial") = snapshot.segments[1],
+              case .thinking("More.", false, .some, _, _) = snapshot.segments[2],
+              case .text(" rest.") = snapshot.segments[3] else {
+            Issue.record("Unexpected segment shape: \(snapshot.segments)")
+            return
+        }
     }
 
-    private func toolCallChunk(
-        id: String,
-        name: String,
-        arguments: String
-    ) throws -> ChatStreamResult {
-        try decodeStreamChunk(delta: [
-            "tool_calls": [
-                [
-                    "index": 0,
-                    "id": id,
-                    "type": "function",
-                    "function": ["name": name, "arguments": arguments],
-                ]
-            ]
+    @Test("a new tool call keeps the earlier ones")
+    func newToolCallKeepsEarlierOnes() throws {
+        let earlier = GenUIToolCall(id: "call_1", name: "widget", arguments: "{}")
+        var stopped = Message(role: .assistant, content: "")
+        stopped.segments = [.toolCall(toolCallId: "call_1")]
+        stopped.toolCalls = [earlier]
+
+        let processor = StreamingResponseProcessor(
+            isWebSearchEnabled: false,
+            hapticEnabled: false,
+            resuming: stopped
+        )
+        _ = processor.process(processor.parse(try toolCallChunk(id: "call_2", name: "widget", arguments: "{}")))
+
+        let snapshot = processor.snapshot()
+        #expect(snapshot.toolCalls.map(\.id) == ["call_1", "call_2"])
+        #expect(snapshot.segments == [.toolCall(toolCallId: "call_1"), .toolCall(toolCallId: "call_2")])
+    }
+
+    @Test("a legacy response without segments keeps its text and thoughts visible")
+    func legacyResponseGainsSegments() throws {
+        let stopped = Message(
+            role: .assistant,
+            content: "Partial",
+            thoughts: "Earlier.",
+            generationTimeSeconds: 2
+        )
+
+        let processor = StreamingResponseProcessor(
+            isWebSearchEnabled: false,
+            hapticEnabled: false,
+            resuming: stopped
+        )
+        _ = processor.process(processor.parse(try contentChunk(" rest.")))
+
+        let snapshot = processor.snapshot()
+        #expect(snapshot.segments == [
+            .thinking(content: "Earlier.", isThinking: false, duration: 2),
+            .text("Partial rest."),
         ])
     }
+
+    @Test("preparing a failed response clears the failure and closes its open thought")
+    func preparingClearsFailure() {
+        var failed = Message(role: .assistant, content: "Partial", thoughts: "Mid-thought", isThinking: true)
+        failed.streamError = "Network connection was lost."
+        failed.isRequestError = true
+        failed.isConnectionError = true
+        failed.segments = [
+            .thinking(content: "Mid-thought", isThinking: true, duration: nil, startedAt: 1),
+            .text("Partial"),
+        ]
+
+        failed.prepareForContinuation()
+
+        #expect(failed.streamError == nil)
+        #expect(!failed.isRequestError)
+        #expect(!failed.isConnectionError)
+        #expect(!failed.isThinking)
+        #expect(failed.content == "Partial")
+        #expect(failed.segments == [
+            .thinking(content: "Mid-thought", isThinking: false, duration: nil, startedAt: 1),
+            .text("Partial"),
+        ])
+    }
+}
+
+private func reasoningChunk(_ reasoning: String) throws -> ChatStreamResult {
+    try decodeStreamChunk(delta: ["reasoning": reasoning])
+}
+
+private func contentChunk(
+    _ content: String,
+    finishReason: String? = nil
+) throws -> ChatStreamResult {
+    try decodeStreamChunk(delta: ["content": content], finishReason: finishReason)
+}
+
+private func toolCallChunk(
+    id: String,
+    name: String,
+    arguments: String
+) throws -> ChatStreamResult {
+    try decodeStreamChunk(delta: [
+        "tool_calls": [
+            [
+                "index": 0,
+                "id": id,
+                "type": "function",
+                "function": ["name": name, "arguments": arguments],
+            ]
+        ]
+    ])
 }
 
 /// Builds and decodes a `ChatStreamResult` fixture from a raw delta payload.

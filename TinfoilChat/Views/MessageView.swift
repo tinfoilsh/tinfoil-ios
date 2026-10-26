@@ -81,6 +81,21 @@ enum AssistantMessageActionPolicy {
             && messageIndex > 0
             && (!isRateLimitError || isHourlyLimitError)
     }
+
+    enum StreamErrorRetry: Equatable {
+        case continueResponse
+        case regenerate
+    }
+
+    /// The retry offered on a failed response's error box. A response with
+    /// something to resume is continued; otherwise it is generated again.
+    static func streamErrorRetry(
+        canRegenerate: Bool,
+        hasPartialResponse: Bool
+    ) -> StreamErrorRetry? {
+        guard canRegenerate else { return nil }
+        return hasPartialResponse ? .continueResponse : .regenerate
+    }
 }
 
 private struct PendingResponseRecoveryView: View {
@@ -222,10 +237,39 @@ struct MessageView: View {
         )
     }
 
+    private var streamErrorRetry: AssistantMessageActionPolicy.StreamErrorRetry? {
+        guard hasVisibleStreamError else { return nil }
+        return AssistantMessageActionPolicy.streamErrorRetry(
+            canRegenerate: canRegenerateAssistantResponse,
+            hasPartialResponse: message.hasContinuableResponse
+        )
+    }
+
+    private var streamErrorRetryButton: ErrorMessageView.Retry? {
+        switch streamErrorRetry {
+        case .continueResponse:
+            return ErrorMessageView.Retry(
+                label: Constants.MessageActions.continueLabel,
+                systemImage: Constants.MessageActions.continueSystemImage
+            ) {
+                viewModel.continueLastResponse()
+            }
+        case .regenerate:
+            return ErrorMessageView.Retry(
+                label: Constants.MessageActions.tryAgainLabel,
+                systemImage: Constants.MessageActions.tryAgainSystemImage
+            ) {
+                viewModel.regenerateLastResponse()
+            }
+        case nil:
+            return nil
+        }
+    }
+
+    /// An empty failed response needs no action row: its error box already
+    /// offers to generate it again.
     private var showsAssistantActionSection: Bool {
-        !isRenderingStream
-            && (message.hasVisibleAssistantContent
-                || (hasVisibleStreamError && canRegenerateAssistantResponse))
+        !isRenderingStream && message.hasVisibleAssistantContent
     }
 
     /// Secondary actions for assistant messages live behind an ellipsis so the
@@ -841,7 +885,8 @@ struct MessageView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                // Show an error box if the stream failed; retry stays in the action row.
+                // Show an error box if the stream failed, with a button that
+                // continues the partial response or generates it again.
                 if shouldShowStreamError(message: message, pendingRecoveries: recoveryContext.pendingRecoveries) {
                     ErrorMessageView(
                         errorMessage: message.streamError!,
@@ -850,7 +895,8 @@ struct MessageView: View {
                         isRateLimitError: message.isRateLimitError,
                         isHourlyLimit: message.isHourlyLimitError,
                         isConnectionError: message.isConnectionError,
-                        onUpgrade: (message.isRateLimitError && !message.isHourlyLimitError) ? { viewModel.showRateLimitPaywall = true } : nil
+                        onUpgrade: (message.isRateLimitError && !message.isHourlyLimitError) ? { viewModel.showRateLimitPaywall = true } : nil,
+                        retry: streamErrorRetryButton
                     )
                     .padding(.top, message.content.isEmpty && message.thoughts == nil ? 0 : 8)
                 }
@@ -893,8 +939,9 @@ struct MessageView: View {
                                     }
                                 }
 
-                                // Regenerate button - only on the last eligible assistant message
-                                if canRegenerateAssistantResponse {
+                                // Regenerate button - only on the last eligible assistant message,
+                                // unless the error box already offers the same action
+                                if canRegenerateAssistantResponse && streamErrorRetry != .regenerate {
                                     Button {
                                         viewModel.regenerateLastResponse()
                                     } label: {
@@ -2161,6 +2208,12 @@ struct UnsupportedGenUINoticeView: View {
 }
 
 struct ErrorMessageView: View {
+    struct Retry {
+        let label: String
+        let systemImage: String
+        let action: () -> Void
+    }
+
     let errorMessage: String
     let isDarkMode: Bool
     var isRequestError: Bool = false
@@ -2168,6 +2221,7 @@ struct ErrorMessageView: View {
     var isHourlyLimit: Bool = false
     var isConnectionError: Bool = false
     var onUpgrade: (() -> Void)? = nil
+    var retry: Retry? = nil
 
     private var accentColor: Color {
         isRateLimitError ? .orange : (isRequestError ? .red : .orange)
@@ -2228,6 +2282,22 @@ struct ErrorMessageView: View {
                             RoundedRectangle(cornerRadius: 8)
                                 .fill(Color.accentPrimary)
                         )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+
+            if let retry {
+                Button(action: retry.action) {
+                    Label(retry.label, systemImage: retry.systemImage)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(isDarkMode ? .white : .black)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(accentColor.opacity(0.5), lineWidth: 1)
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(PlainButtonStyle())
             }

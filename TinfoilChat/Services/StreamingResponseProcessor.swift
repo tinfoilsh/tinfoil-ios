@@ -93,6 +93,9 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     //   - the canonical `Message.timeline` tool_call blocks
     //     that the webapp uses to track resolution state.
     private var streamingToolCalls: [Int: GenUIToolCall] = [:]
+    // Tool calls of the response being resumed; kept apart because the
+    // new stream numbers its own tool-call deltas from zero.
+    private var resumedToolCalls: [GenUIToolCall] = []
     private var timelineBlocks: [JSONValue] = []
 
     // Summary actions produced outside `process` (thinking rounds closed
@@ -107,7 +110,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
 
     private var thinkStartTime: Date? = nil
     private var thoughtsBuffer = ""
-    private var isInThinkingMode: Bool
+    private var isInThinkingMode = false
     private var isUsingReasoningFormat = false
     // True while thinking was closed by answer content (not by
     // a tool boundary). Reasoning arriving in that state is the
@@ -133,25 +136,29 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     private let minHapticInterval: TimeInterval = 0.1
     private var hasStartedResponse = false
 
+    /// - Parameter resumedMessage: An assistant message this stream appends
+    ///   to. Its text, thoughts, segments, searches, tool calls, and
+    ///   citations carry over so new output continues the same response.
     init(
         isWebSearchEnabled: Bool,
         hapticEnabled: Bool,
-        responseContent: String = "",
         modelDisplayName: String? = nil,
         modelDisplayNamesByName: [String: String] = [:],
-        currentThoughts: String? = nil,
-        generationTimeSeconds: TimeInterval? = nil,
-        isInThinkingMode: Bool = false
+        resuming resumedMessage: Message? = nil
     ) {
         self.isWebSearchEnabled = isWebSearchEnabled
         self.hapticEnabled = hapticEnabled
-        self.responseContent = responseContent
-        self.modelDisplayName = modelDisplayName
+        self.responseContent = resumedMessage?.content ?? ""
+        // A resumed response keeps its own label, even an absent one, until
+        // the stream reports which model it was routed to.
+        self.modelDisplayName = resumedMessage.map(\.modelDisplayName) ?? modelDisplayName
         self.modelDisplayNamesByName = modelDisplayNamesByName
-        self.currentThoughts = currentThoughts
-        self.generationTimeSeconds = generationTimeSeconds
-        self.isInThinkingMode = isInThinkingMode
-        self.totalThinkingSeconds = generationTimeSeconds ?? 0
+        self.currentThoughts = resumedMessage?.thoughts
+        self.generationTimeSeconds = resumedMessage?.generationTimeSeconds
+        self.totalThinkingSeconds = resumedMessage?.generationTimeSeconds ?? 0
+        if let resumedMessage {
+            seed(from: resumedMessage)
+        }
     }
 
     // MARK: - Event application accessors (main actor, serialized)
@@ -356,7 +363,12 @@ final class StreamingResponseProcessor: @unchecked Sendable {
                 didRecordWebSearchBeforeThinking = true
                 webSearchBeforeThinking = webSearchStarted
             }
-            thoughtsBuffer = reasoningContent
+            // A resumed response already holds earlier thoughts; this round
+            // follows them like a round after a tool boundary.
+            if !thoughtsBuffer.isEmpty {
+                thoughtsBuffer += "\n\n"
+            }
+            thoughtsBuffer += reasoningContent
             thinkingChunker.appendToken(reasoningContent)
             currentThoughts = thoughtsBuffer.isEmpty ? nil : thoughtsBuffer
             openThinkingSegment(initialContent: reasoningContent)
@@ -538,7 +550,7 @@ final class StreamingResponseProcessor: @unchecked Sendable {
             generationTimeSeconds: generationTimeSeconds,
             segments: segments,
             webSearches: webSearches,
-            toolCalls: streamingToolCalls
+            toolCalls: resumedToolCalls + streamingToolCalls
                 .sorted(by: { $0.key < $1.key })
                 .map { $0.value }
                 .filter { !$0.id.isEmpty },
@@ -550,6 +562,48 @@ final class StreamingResponseProcessor: @unchecked Sendable {
     }
 
     // MARK: - Private helpers
+
+    /// Loads a resumed response's parsing state. Its thinking is treated as
+    /// closed, and trailing text stays open so new text extends it.
+    private func seed(from message: Message) {
+        thoughtsBuffer = message.thoughts ?? ""
+        if !thoughtsBuffer.isEmpty {
+            thinkingChunker.appendToken(thoughtsBuffer)
+            thinkingChunker.finalize()
+        }
+        if !responseContent.isEmpty {
+            chunker.appendToken(responseContent)
+        }
+
+        if let resumedSegments = message.segments {
+            segments = resumedSegments
+        } else {
+            // Legacy responses render from flat fields; once new segments
+            // stream in, those fields must be segments too to stay visible.
+            if !thoughtsBuffer.isEmpty {
+                segments.append(.thinking(
+                    content: thoughtsBuffer,
+                    isThinking: false,
+                    duration: message.generationTimeSeconds
+                ))
+            }
+            if !responseContent.isEmpty {
+                segments.append(.text(responseContent))
+            }
+        }
+
+        webSearches = message.webSearches ?? []
+        nextSearchId = webSearches.count
+        resumedToolCalls = message.toolCalls
+        timelineBlocks = message.timeline ?? []
+        // Sources mirror annotations one-to-one so citation indexes keep
+        // pointing at the right source.
+        collectedAnnotations = message.annotations ?? []
+        collectedSources = collectedAnnotations.map {
+            WebSearchSource(title: $0.url_citation.title, url: $0.url_citation.url)
+        }
+        didRecordWebSearchBeforeThinking = message.webSearchBeforeThinking != nil || !thoughtsBuffer.isEmpty
+    }
 
     /// Stops the current thinking round's clock and folds its elapsed time
     /// into the cumulative `generationTimeSeconds`. Returns the round's own
