@@ -506,6 +506,17 @@ enum Constants {
         static let moreSystemImage = "ellipsis"
         static let shareLabel = "Share"
         static let shareSystemImage = "square.and.arrow.up"
+        static let continueLabel = "Continue"
+        static let continueSystemImage = "forward"
+        static let tryAgainLabel = "Try again"
+        static let tryAgainSystemImage = "arrow.clockwise"
+    }
+
+    enum ContinueResponse {
+        /// Request-only instruction appended after a partial assistant
+        /// response so the model resumes it. Never stored or rendered.
+        /// Matches the webapp's wording.
+        static let instruction = "Continue your previous response exactly where it left off. Do not repeat, summarize, or restate anything you already wrote, and do not add any preamble."
     }
 
     enum Sync {

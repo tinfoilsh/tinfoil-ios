@@ -963,6 +963,12 @@ struct Message: Identifiable, Codable, Equatable {
         )
     }
 
+    /// True when a continuation request would show the model something to
+    /// resume: text or tool calls. Thoughts alone are not always sent back.
+    var hasContinuableResponse: Bool {
+        role == .assistant && (!content.isEmpty || !toolCalls.isEmpty)
+    }
+
     /// Readies a stopped assistant response to be continued: clears the
     /// failure that stopped it and closes any thinking round its dead
     /// stream left open.
