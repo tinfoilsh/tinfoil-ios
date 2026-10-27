@@ -340,6 +340,24 @@ final class PasskeyManager: ObservableObject {
         // fresh key would strand their un-migrated data.
         guard canMutateAccountKey else { return .recoveryFailed }
         if state.keyId == nil, !state.hasData {
+            // The registry is read again right before a fresh key is
+            // registered: data or a key another device stored meanwhile
+            // must not be stranded.
+            let current: EnclaveKeyCurrentResponse
+            do {
+                current = try await SyncEnclaveAPI.keyCurrent()
+            } catch {
+                PasskeyDiagnostics.failure(
+                    "attemptRecovery: keyCurrent failed before setup: \(PasskeyDiagnostics.describe(error))"
+                )
+                return canMutateAccountKey ? .temporarilyUnavailable : .recoveryFailed
+            }
+            guard canMutateAccountKey else { return .recoveryFailed }
+            guard current.keyId == nil, !current.hasData else {
+                PasskeyDiagnostics.failure("attemptRecovery: the account gained a key or data during setup")
+                passkeySetupAvailable = true
+                return .manualRecoveryRequired
+            }
             let result = await attemptNewUserPasskeySetup()
             if case .failure = result {
                 // No enclave key exists at all, so a leftover

@@ -80,6 +80,8 @@ final class ChatList: ObservableObject {
     private var restored = false
     private var loaded = false
     private var retryCursor: String?
+    /// The refreshes in flight; the list loads while there is one.
+    private var refreshing = 0
     /// Counts listings of the stored chats apart from the open chat, so that
     /// opening a chat keeps the list and only the latest listing applies.
     private var listing = 0
@@ -125,7 +127,6 @@ final class ChatList: ObservableObject {
         cloudListed = cached?.threads ?? []
         pinnedListed = cached?.pinned ?? []
         nextCursor = nil
-        loading = account.cloud
     }
 
     /// Reads the stored chats again: the first pages, or the page after a
@@ -137,7 +138,12 @@ final class ChatList: ObservableObject {
         if cursor == nil { listing += 1 }
         let version = listing
         if error != nil { error = nil; loaded = false }
+        refreshing += 1
         loading = true
+        defer {
+            refreshing -= 1
+            if refreshing == 0 { loading = false }
+        }
         do {
             let wanted = cursor == nil ? max(Self.pageSize, cloudListed.count) : Self.pageSize
             var threads: [ThreadSummary] = []
@@ -159,14 +165,12 @@ final class ChatList: ObservableObject {
             }
             nextCursor = next
             loaded = true
-            loading = false
             error = nil
             retryCursor = nil
             await persist()
         } catch {
             guard version == listing, !account.disposed, !(error is CancellationError) else { return }
             loaded = true
-            loading = false
             retryCursor = cursor
             self.error = error.localizedDescription
             throw error

@@ -733,7 +733,6 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         list.reloadDevice()
     }
 
-    /// Deletes the stored chats of a project.
     /// Forks the open chat from a message into a new chat holding the
     /// messages through it, and opens the fork.
     func fork(at messageIndex: Int) async throws -> String? {

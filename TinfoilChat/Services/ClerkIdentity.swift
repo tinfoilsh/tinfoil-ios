@@ -19,7 +19,7 @@ enum ClerkIdentity {
             return try await session.getToken(.init(skipCache: true))
         }
         do {
-            return try await session.getToken()
+            return try await session.getToken() ?? session.lastActiveToken?.jwt
         } catch {
             guard let last = session.lastActiveToken?.jwt else { throw error }
             return last

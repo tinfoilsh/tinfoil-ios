@@ -99,6 +99,8 @@ actor ChatAccessCache {
     /// does not, so an account at its hourly cap does not ask with every
     /// request.
     private var refused: (error: HarnessError, until: Date)?
+    /// The account last held a subscriber's token, which a run renews.
+    private var heldHourly = false
 
     init(
         controlPlane: ControlPlaneTransport,
@@ -133,10 +135,15 @@ actor ChatAccessCache {
     }
 
     /// When the chat token is minted again: as it enters its renewal window,
-    /// or once a refusal lifts. A free key, or no access, has no such time.
+    /// or once a refusal lifts. A subscriber whose token is gone, as after
+    /// a refusal lifted and a mint failed, is asked for again shortly. A
+    /// free key, or no access, has no such time.
     func renewsAt() -> Date? {
         if let refused, refused.until > now() { return refused.until }
-        guard let cached, cached.kind == .hourly else { return nil }
+        guard let cached else {
+            return heldHourly ? now().addingTimeInterval(Constants.Harness.runRenewalRetrySeconds) : nil
+        }
+        guard cached.kind == .hourly else { return nil }
         return cached.expiresAt.addingTimeInterval(-Constants.Harness.ChatAccess.renewBeforeExpirySeconds)
     }
 
@@ -184,6 +191,7 @@ actor ChatAccessCache {
         refused = nil
         let credential = Credential(key: key, expiresAt: expiresAt, kind: kind)
         cached = credential
+        heldHourly = kind == .hourly
         return credential
     }
 

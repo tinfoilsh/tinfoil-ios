@@ -151,6 +151,7 @@ struct PersonalizationView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Color.settingsBackground(for: colorScheme))
+        .disabled(isSaving)
         .navigationTitle("Personalization")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

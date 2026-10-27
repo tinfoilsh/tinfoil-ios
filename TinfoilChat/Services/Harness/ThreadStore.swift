@@ -209,8 +209,6 @@ final class CloudThreads: ThreadStore {
     private let account: HarnessAccount
     private let list: ListEdits
     private let attachments: OpenAttachments
-    /// The latest change asked of each chat, so an earlier change answered
-    /// after it does not list the chat as it was before the latest.
     /// The change whose answer each chat is listed from.
     private var latestListed: [String: Int] = [:]
     private var updates = 0

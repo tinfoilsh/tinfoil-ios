@@ -209,18 +209,28 @@ class ProfileManager: ObservableObject {
     /// session then shows the settings as they were.
     func savePersonalization(_ draft: PersonalizationDraft) async throws {
         guard let account else { throw HarnessError.unauthenticated }
+        let before = personalizationDraft
+        showPersonalization(draft)
+        do {
+            try await account.updateProfile([
+                "isUsingPersonalization": draft.isEnabled,
+                "nickname": draft.nickname,
+                "profession": draft.profession,
+                "traits": draft.traits,
+                "additionalContext": draft.additionalContext,
+            ])
+        } catch {
+            if personalizationDraft == draft { showPersonalization(before) }
+            throw error
+        }
+    }
+
+    private func showPersonalization(_ draft: PersonalizationDraft) {
         isUsingPersonalization = draft.isEnabled
         nickname = draft.nickname
         profession = draft.profession
         traits = draft.traits
         additionalContext = draft.additionalContext
-        try await account.updateProfile([
-            "isUsingPersonalization": draft.isEnabled,
-            "nickname": draft.nickname,
-            "profession": draft.profession,
-            "traits": draft.traits,
-            "additionalContext": draft.additionalContext,
-        ])
     }
 
     // MARK: - Prompt Presets
