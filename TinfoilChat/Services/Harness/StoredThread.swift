@@ -55,12 +55,6 @@ struct StoredThread: Equatable, Sendable {
         try JSONSerialization.data(withJSONObject: json, options: [.sortedKeys])
     }
 
-    /// The record as the protocol describes the members this client reads.
-    /// Members the client does not know are not in it.
-    var record: Components.Schemas.ThreadRecord? {
-        try? Components.Schemas.ThreadRecord(jsonObject: json)
-    }
-
     subscript(member: String) -> JSONValue? {
         get { fields[member] }
         set { fields[member] = newValue }
@@ -94,6 +88,13 @@ struct StoredThread: Equatable, Sendable {
     var messages: [JSONValue] {
         get { fields["messages"]?.arrayValue ?? [] }
         set { fields["messages"] = .array(newValue) }
+    }
+
+    private var contextUsage: ThreadSummary.ContextUsagePayload? {
+        guard let usage = fields["contextUsage"]?.objectValue,
+              let used = usage["usedTokens"]?.numberValue, let limit = usage["limitTokens"]?.numberValue,
+              let percentage = usage["percentage"]?.numberValue else { return nil }
+        return ThreadSummary.ContextUsagePayload(usedTokens: Int(used), limitTokens: Int(limit), percentage: percentage)
     }
 
     /// The members of an attachment that hold its bytes, which the view
@@ -160,9 +161,7 @@ struct StoredThread: Equatable, Sendable {
             model: model,
             webSearchEnabled: webSearchEnabled,
             pinned: false,
-            contextUsage: record?.contextUsage.map {
-                ThreadSummary.ContextUsagePayload(usedTokens: $0.usedTokens, limitTokens: $0.limitTokens, percentage: $0.percentage)
-            },
+            contextUsage: contextUsage,
             activeRun: nil,
             messageCount: messages.count,
             flagged: flagged ? true : nil
@@ -204,9 +203,10 @@ struct StoredThread: Equatable, Sendable {
         }
     }
 
-    /// The settings that differ from another copy of the chat.
+    /// The settings that differ from another copy of the chat. A setting a
+    /// copy leaves out is null in it.
     func changedSettings(from other: StoredThread) -> [String] {
-        Self.userSettings.filter { fields[$0] != other.fields[$0] }
+        Self.userSettings.filter { (fields[$0] ?? .null) != (other.fields[$0] ?? .null) }
     }
 
     /// The copy of the thread a share carries: image thumbnails and document
@@ -218,8 +218,7 @@ struct StoredThread: Equatable, Sendable {
             object["attachments"] = .array(attachments.map { attachment in
                 guard var fields = attachment.objectValue else { return attachment }
                 let text = Self.documentText(fields)
-                fields["base64"] = nil
-                fields["pages"] = nil
+                for member in Self.attachmentBytes { fields[member] = nil }
                 if let text, !text.isEmpty { fields["textContent"] = .string(text) }
                 return .object(fields)
             })

@@ -11,7 +11,7 @@ enum LegacyDeviceChats {
     private static let batchSize = 20
     private static let chatExtension = "enc"
     /// The files of the previous client's directory that are not chats.
-    private static let bookkeeping: Set<String> = ["index", "delete-intents", "remote-delete-tombstones"]
+    private static let bookkeeping: Set<String> = ["index", "delete-intents", "remote-delete-tombstones", "remote-delete-tombstones.corrupt"]
     /// The members the previous client wrote as seconds since 2001, which
     /// the chat service reads as a time only when written as one.
     private static let dateMembers = ["createdAt", "updatedAt", "syncedAt"]
@@ -60,7 +60,11 @@ enum LegacyDeviceChats {
             do {
                 let upgraded: Upgraded = try await account.post(.upgrade, UpgradeRequest(threads: records), keyless: true)
                 for raw in upgraded.threads {
-                    guard let thread = StoredThread(data: raw.data) else { continue }
+                    guard let thread = StoredThread(data: raw.data) else {
+                        failed = true
+                        logger.error("The chat service returned a converted chat this client cannot read")
+                        continue
+                    }
                     _ = try await store.add(thread, originals: [:])
                 }
             } catch {
