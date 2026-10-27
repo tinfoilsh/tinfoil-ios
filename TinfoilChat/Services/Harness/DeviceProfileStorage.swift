@@ -143,6 +143,15 @@ enum PreviousClientSettings {
         if defaults.object(forKey: settings.webSearchAvailable) != nil { fields["webSearchAvailable"] = defaults.bool(forKey: settings.webSearchAvailable) }
         if defaults.object(forKey: settings.piiCheckEnabled) != nil { fields["piiCheckEnabled"] = defaults.bool(forKey: settings.piiCheckEnabled) }
         if defaults.object(forKey: settings.genUIEnabled) != nil { fields["genUIEnabled"] = defaults.bool(forKey: settings.genUIEnabled) }
+        // The custom prompt setting older clients mirrored outside the
+        // profile, which the harness turns into a saved prompt.
+        let prefs = Constants.StorageKeys.UserPrefs.self
+        if fields["isUsingCustomPrompt"] == nil, defaults.object(forKey: prefs.customPromptEnabled) != nil {
+            fields["isUsingCustomPrompt"] = defaults.bool(forKey: prefs.customPromptEnabled)
+        }
+        if fields["customSystemPrompt"] == nil, let prompt = defaults.string(forKey: prefs.customSystemPrompt) {
+            fields["customSystemPrompt"] = prompt
+        }
         return fields
     }
 }
