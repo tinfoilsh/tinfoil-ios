@@ -395,7 +395,12 @@ class ChatViewModel: ObservableObject {
 
     private static func makeAccount(userId: String?, authManager: AuthManager?) throws -> HarnessAccount {
         let controlPlane = try URLSessionControlPlane()
-        let chatAccess = ChatAccessCache(controlPlane: controlPlane) { _ in }
+        // The quota a mint reports goes to the account, which is made after
+        // its chat access.
+        let quota = MintedQuotaRelay()
+        let chatAccess = ChatAccessCache(controlPlane: controlPlane) { limit in
+            Task { @MainActor in quota.account?.reportMintedRateLimit(limit) }
+        }
         let credentials = HarnessCredentialProvider(
             identity: { refresh in
                 guard userId != nil else { return nil }
@@ -406,7 +411,7 @@ class ChatViewModel: ObservableObject {
         )
         let transport = try SealedTransport()
         let client = HarnessClient(credentials: credentials, transport: transport)
-        return HarnessAccount(
+        let account = HarnessAccount(
             userId: userId,
             client: client,
             credentials: credentials,
@@ -414,6 +419,8 @@ class ChatViewModel: ObservableObject {
             settings: DeviceProfileStorage(),
             cloudSync: SettingsManager.shared.isCloudSyncEnabled
         )
+        quota.account = account
+        return account
     }
 
     /// The chats a signed-out caller kept in memory follow the account they
@@ -1222,4 +1229,10 @@ class ChatViewModel: ObservableObject {
 extension Notification.Name {
     /// Cloud sync was turned on or off in Settings.
     static let cloudSyncSettingChanged = Notification.Name("tinfoil.cloudSyncSettingChanged")
+}
+
+/// Hands the quota a mint reports to the account it is for.
+@MainActor
+private final class MintedQuotaRelay {
+    weak var account: HarnessAccount?
 }

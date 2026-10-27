@@ -423,8 +423,9 @@ extension ChatViewModel {
     }
 
     /// The user set a key by hand: the account's data loads with it.
-    func resumeAfterManualKeySetup() async {
-        await keyChanged()
+    /// The key is set, which already read the account again; the chat view
+    /// only needs a chat to show.
+    func resumeAfterManualKeySetup() {
         if currentChat == nil { createNewChat(focusInput: false) }
     }
 

@@ -42,17 +42,6 @@ final class CloudKeyPreflightValidator {
 
     private init() {}
 
-    /// Inspect the remote state through the key registry, which reports
-    /// whether the account holds any data. This does NOT require the user's
-    /// CEK and is safe to call before any key is loaded.
-    func inspectRemoteState() async -> CloudRemoteState {
-        do {
-            return try await SyncEnclaveAPI.keyCurrent().hasData ? .exists : .empty
-        } catch {
-            return .unknown
-        }
-    }
-
     /// Validate the local CEK against the enclave's current key id.
     ///
     ///  - No local key loaded                    → unknown / canWrite=false

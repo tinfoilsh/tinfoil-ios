@@ -338,9 +338,8 @@ final class PasskeyManager: ObservableObject {
         // chats predate the key registry reports no key but has_data, so
         // exclude them here and let them fall through to recovery — a
         // fresh key would strand their un-migrated data.
-        let remoteState = await CloudKeyPreflightValidator.shared.inspectRemoteState()
         guard canMutateAccountKey else { return .recoveryFailed }
-        if state.keyId == nil, !state.hasData, remoteState == .empty {
+        if state.keyId == nil, !state.hasData {
             let result = await attemptNewUserPasskeySetup()
             if case .failure = result {
                 // No enclave key exists at all, so a leftover

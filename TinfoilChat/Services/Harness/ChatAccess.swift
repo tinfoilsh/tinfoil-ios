@@ -135,10 +135,9 @@ actor ChatAccessCache {
     /// When the chat token is minted again: as it enters its renewal window,
     /// or once a refusal lifts. A free key, or no access, has no such time.
     func renewsAt() -> Date? {
+        if let refused, refused.until > now() { return refused.until }
         guard let cached, cached.kind == .hourly else { return nil }
-        let renewal = cached.expiresAt.addingTimeInterval(-Constants.Harness.ChatAccess.renewBeforeExpirySeconds)
-        if let refused, refused.until > renewal { return refused.until }
-        return renewal
+        return cached.expiresAt.addingTimeInterval(-Constants.Harness.ChatAccess.renewBeforeExpirySeconds)
     }
 
     /// Forgets the access and any refusal, as when the harness refused the
