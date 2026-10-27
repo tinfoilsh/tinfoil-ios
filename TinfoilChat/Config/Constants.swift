@@ -305,6 +305,28 @@ enum Constants {
         static let indicatorTopPadding: CGFloat = 6
     }
 
+    enum Harness {
+        static let url = "https://chat-api.tinfoil.sh"
+        static let configRepo = "tinfoilsh/confidential-tinfoil-harness"
+        /// An attestation that has not finished by then is abandoned: the
+        /// request fails, and the next one verifies the enclave again.
+        static let attestationTimeoutSeconds: TimeInterval = 20
+        /// A live run's chat access that could not be minted again, for a
+        /// reason that names no time to ask again, is asked for again after
+        /// this long.
+        static let runRenewalRetrySeconds: TimeInterval = 30
+        /// How long a run's stream may go without a byte before the
+        /// connection is given up.
+        static let streamIdleTimeoutSeconds: TimeInterval = 120
+        static let hpkePublicKeyBytes = 32
+        /// A refusal of the key requests are sealed to, which an enclave whose
+        /// key rotated since it was verified answers with.
+        static let keyConfigurationErrorStatus = 422
+        static let keyConfigurationErrorType = "urn:ietf:params:ehbp:error:key-config"
+        static let problemContentType = "application/problem+json"
+        static let maximumDiagnosticBytes = 4 * 1024
+    }
+
     enum SyncEnclave {
         static let url = "https://sync.tinfoil.sh"
         static let configRepo = "tinfoilsh/confidential-sync"

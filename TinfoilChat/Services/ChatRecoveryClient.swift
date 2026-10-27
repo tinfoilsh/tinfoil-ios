@@ -485,7 +485,7 @@ func recoveryResponseNonce(from response: HTTPURLResponse) throws -> Data {
     return nonce
 }
 
-private extension Data {
+extension Data {
     init?(lowercaseHex: String) {
         guard lowercaseHex.count.isMultiple(of: 2),
               lowercaseHex.unicodeScalars.allSatisfy({
