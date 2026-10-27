@@ -710,7 +710,7 @@ private struct DynamicCodingKey: CodingKey {
     }
 }
 
-enum JSONValue: Codable, Equatable {
+enum JSONValue: Codable, Equatable, Sendable {
     case null
     case bool(Bool)
     case number(Double)

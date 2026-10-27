@@ -30,8 +30,6 @@ struct JSONObject: Encodable, Sendable {
     }
 }
 
-extension JSONValue: Sendable {}
-
 extension JSONValue {
     /// A value as JSONSerialization reads it.
     init(any value: Any?) {
