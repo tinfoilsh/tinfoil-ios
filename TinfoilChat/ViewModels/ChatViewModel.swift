@@ -356,6 +356,7 @@ class ChatViewModel: ObservableObject {
         let session = ChatSession(account: account, device: store, cache: ChatListCache(directory: directory), receipts: RunReceiptStore(userId: userId))
         self.session = session
         ProfileManager.shared.bind(account)
+        KeyRegistry.shared.bind(account)
         await LinkMetadataService.shared.bind(account)
         session.objectWillChange.sink { [weak self] _ in
             self?.sessionGeneration += 1
@@ -1229,6 +1230,9 @@ class ChatViewModel: ObservableObject {
 extension Notification.Name {
     /// Cloud sync was turned on or off in Settings.
     static let cloudSyncSettingChanged = Notification.Name("tinfoil.cloudSyncSettingChanged")
+    /// The chat service refused the account's identity, after it was
+    /// refreshed: the user has to sign in again.
+    static let chatAuthenticationRequired = Notification.Name("tinfoil.chatAuthenticationRequired")
 }
 
 /// Hands the quota a mint reports to the account it is for.

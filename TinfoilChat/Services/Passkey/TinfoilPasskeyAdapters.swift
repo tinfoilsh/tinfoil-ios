@@ -23,17 +23,17 @@ enum TinfoilWrappedKeyAdapter {
 
     struct CandidateSet {
         struct Current {
-            let bundle: EnclaveKeyCurrentBundle
+            let bundle: KeyState.Bundle
             let wrappedKey: WrappedKey
         }
 
-        let orderedBundles: [EnclaveKeyCurrentBundle]
+        let orderedBundles: [KeyState.Bundle]
         let current: [Current]
-        let legacy: [EnclaveKeyCurrentBundle]
+        let legacy: [KeyState.Bundle]
 
         enum Selection {
             case current(Current)
-            case legacy(EnclaveKeyCurrentBundle)
+            case legacy(KeyState.Bundle)
             case missing
         }
 
@@ -45,7 +45,7 @@ enum TinfoilWrappedKeyAdapter {
             current.first { $0.bundle.credentialId == credentialId }
         }
 
-        func legacy(credentialId: String) -> EnclaveKeyCurrentBundle? {
+        func legacy(credentialId: String) -> KeyState.Bundle? {
             legacy.first { $0.credentialId == credentialId }
         }
 
@@ -77,9 +77,9 @@ enum TinfoilWrappedKeyAdapter {
         )
     }
 
-    static func bundleBody(_ wrappedKey: WrappedKey) -> SyncEnclaveBundleBody {
+    static func bundleBody(_ wrappedKey: WrappedKey) -> WrappedKeyBundle {
         let fields = enclaveFields(wrappedKey)
-        return SyncEnclaveBundleBody(
+        return WrappedKeyBundle(
             credentialId: fields.credentialId,
             kekIvHex: fields.kekIvHex,
             wrappedKeyHex: fields.wrappedKeyHex
@@ -87,10 +87,10 @@ enum TinfoilWrappedKeyAdapter {
     }
 
     static func partition(
-        _ bundles: [EnclaveKeyCurrentBundle],
+        _ bundles: [KeyState.Bundle],
         preferredCredentialId: String?
     ) -> CandidateSet {
-        let orderedBundles: [EnclaveKeyCurrentBundle]
+        let orderedBundles: [KeyState.Bundle]
         guard let preferredCredentialId,
               bundles.contains(where: { $0.credentialId == preferredCredentialId }) else {
             return candidateSet(orderedBundles: bundles)
@@ -101,14 +101,14 @@ enum TinfoilWrappedKeyAdapter {
     }
 
     private static func candidateSet(
-        orderedBundles: [EnclaveKeyCurrentBundle]
+        orderedBundles: [KeyState.Bundle]
     ) -> CandidateSet {
         var current: [CandidateSet.Current] = []
-        var legacy: [EnclaveKeyCurrentBundle] = []
+        var legacy: [KeyState.Bundle] = []
         for bundle in orderedBundles {
-            if bundle.kekIv.count == SyncEnclaveKeyBundle.aesGcmIvByteCount * 2,
+            if bundle.kekIv.count == ContentKeyBundle.aesGcmIvByteCount * 2,
                bundle.encryptedKeys.count == (
-                   SyncEnclaveKeyBundle.cekByteCount + SyncEnclaveKeyBundle.aesGcmTagByteCount
+                   ContentKeyBundle.cekByteCount + ContentKeyBundle.aesGcmTagByteCount
                ) * 2 {
                 current.append(CandidateSet.Current(
                     bundle: bundle,

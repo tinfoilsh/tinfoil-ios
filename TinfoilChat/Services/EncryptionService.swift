@@ -162,8 +162,8 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     }
 
     /// Return the raw 32-byte CEK for the primary key. Throws when no
-    /// primary key is loaded. Used by the sync-enclave wire which
-    /// expects a base64-encoded raw CEK on every push / pull / delete.
+    /// primary key is loaded. The chat service expects the raw CEK,
+    /// base64-encoded, with every request about stored chats.
     func getKeyBytesOrThrow() throws -> Data {
         guard let key = stagedPrimaryKey ?? loadKeyFromKeychain() else {
             throw EncryptionError.keyNotInitialized
@@ -358,7 +358,7 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         }
 
         let keyData = try alphanumericToBytes(processedKey)
-        guard keyData.count == SyncEnclaveKeyBundle.cekByteCount else {
+        guard keyData.count == ContentKeyBundle.cekByteCount else {
             throw EncryptionError.invalidKeyLength
         }
         let normalizedKey = "key_" + processedKey
@@ -593,7 +593,7 @@ enum EncryptionError: LocalizedError {
         case .invalidKeyCharacters:
             return "Key must only contain lowercase letters and numbers after the prefix"
         case .invalidKeyLength:
-            return "Key must decode to exactly \(SyncEnclaveKeyBundle.cekByteCount) bytes"
+            return "Key must decode to exactly \(ContentKeyBundle.cekByteCount) bytes"
         case .invalidEncryptedData:
             return "Missing IV or data in encrypted data"
         case .invalidBase64:

@@ -78,25 +78,6 @@ struct TinfoilChatApp: App {
                                     
                                     // Initialize authentication state
                                     await authManager.initializeAuthState()
-                                    
-                                    // The key registry's requests carry the account's
-                                    // identity.
-                                    await SyncEnclaveClient.shared.setTokenGetter { refresh in
-                                        try await ClerkIdentity.token(refresh: refresh)
-                                    }
-
-                                    // Pre-warm the sync-enclave attestation handshake
-                                    // so the first key request doesn't pay the
-                                    // cold-start latency.
-                                    Task.detached(priority: .utility) {
-                                        do {
-                                            try await SyncEnclaveClient.shared.ready()
-                                        } catch {
-                                            #if DEBUG
-                                            print("Failed to pre-warm sync enclave: \(error)")
-                                            #endif
-                                        }
-                                    }
 
                                     // Add observer for Clerk auth state changes
                                     NotificationCenter.default.addObserver(

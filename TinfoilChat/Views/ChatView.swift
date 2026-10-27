@@ -125,7 +125,7 @@ struct ChatContainer: View {
                 dragOffset = 0
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .cloudSyncAuthenticationRequired)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .chatAuthenticationRequired)) { _ in
             if !showAuthView {
                 showAuthView = true
             }

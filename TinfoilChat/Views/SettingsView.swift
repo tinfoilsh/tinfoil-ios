@@ -251,7 +251,6 @@ struct SettingsView: View {
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var profileManager = ProfileManager.shared
     @ObservedObject private var passkeyManager = PasskeyManager.shared
-    @ObservedObject private var syncHealth = SyncHealthStore.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAuthView = false
     @State private var showDeleteConfirmation = false
@@ -596,7 +595,7 @@ struct SettingsView: View {
                 } label: {
                     HStack {
                         Text("Cloud Sync")
-                        if settings.isCloudSyncEnabled && syncHealth.needsAttention() {
+                        if settings.isCloudSyncEnabled && chatViewModel.account?.keyLocked == true {
                             Circle()
                                 .fill(Color.orange)
                                 .frame(

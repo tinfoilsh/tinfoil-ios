@@ -51,10 +51,6 @@ extension ChatViewModel {
         passkeyManager.resumeAccountOperations()
         await openSession()
         guard isCurrentSignIn(token, userId: userId) else { return }
-        // Sign-out clears account-bound token providers, so restore them
-        // before passkey recovery or any other key registry request.
-        await SyncEnclaveClient.shared.setTokenGetter { refresh in try await ClerkIdentity.token(refresh: refresh) }
-        guard isCurrentSignIn(token, userId: userId) else { return }
         // Local chats with messages turn the Local tab on, unless the user
         // chose otherwise.
         if session?.list.deviceListed.contains(where: { $0.messageCount > 0 }) == true,
@@ -163,7 +159,6 @@ extension ChatViewModel {
         await accountOperationTracker.closeAndWait()
         session?.account.dispose()
         session = nil
-        await SyncEnclaveClient.shared.reset()
         CloudKeyAuthorizationStore.shared.clearAuthorization(userId: signingOutUserId)
         passkeySetupFailure = nil
         await passkeyManager.reset()
@@ -220,15 +215,20 @@ extension ChatViewModel {
 
     // MARK: - Legacy rows
 
-    /// Rows the previous clients sealed under earlier keys are re-sealed
-    /// by the key registry under the current one.
+    /// A held key the registry does not know becomes the account's, and
+    /// rows older keys sealed are resealed under it by the harness.
     func startLegacyMigration(token: AccountOperationFence.Token, userId: String) {
         let previousTask = legacyMigrationTask
         previousTask?.cancel()
         legacyMigrationTask = Task { [weak self] in
             await previousTask?.value
             guard let self, isCurrentSignIn(token, userId: userId) else { return }
-            _ = await LegacyBlobMigration.runAndFinalize()
+            do {
+                try await CloudKeyAuthorizationStore.shared.registerHeldKeyIfNeeded()
+            } catch {
+                guard !(error is CancellationError) else { return }
+                Self.logger.error("Failed to register the held key: \(error, privacy: .public)")
+            }
             guard isCurrentSignIn(token, userId: userId) else { return }
             await passkeyManager.refreshBundleState()
         }

@@ -182,9 +182,9 @@ final class CloudKeyAuthorizationStore {
         let cek = try EncryptionService.shared.getKeyBytesOrThrow()
         let keyB64 = cek.base64EncodedString()
 
-        let current: EnclaveKeyCurrentResponse
+        let current: KeyState
         do {
-            current = try await SyncEnclaveAPI.keyCurrent()
+            current = try await KeyRegistry.shared.current()
         } catch {
             throw CloudKeyAuthorizationError.validationFailed(
                 CloudKeyPreflightValidator.unknownRemoteStateMessage
@@ -192,20 +192,36 @@ final class CloudKeyAuthorizationStore {
         }
 
         if let remoteKeyId = current.keyId,
-           let localKeyId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek),
+           let localKeyId = try? ContentKeyBundle.deriveKeyIdHex(cek: cek),
            localKeyId == remoteKeyId {
             return
         }
 
-        _ = try await SyncEnclaveAPI.registerKey(
-            EnclaveKeyRegisterRequest(
-                key: keyB64,
-                ifMatch: current.etag ?? IfMatchSentinels.anyKey,
-                createdVia: SyncEnclaveCreatedVia.startFresh.rawValue,
-                idempotencyKey: newSyncEnclaveIdempotencyKey(),
-                initialBundle: nil
-            )
-        )
+        _ = try await KeyRegistry.shared.register(key: keyB64, ifMatch: current.etag ?? KeyRegistry.noKey, createdVia: .startFresh)
+    }
+
+    /// Makes the held key the account's where the registry has none: an
+    /// account whose rows predate the registry has them resealed under
+    /// the key by the harness, which registers it; an account without rows
+    /// registers it as entered by hand. A key already registered is left
+    /// alone. The harness owns the resealing; it is asked once.
+    func registerHeldKeyIfNeeded() async throws {
+        let held = EncryptionService.shared.getAllKeys()
+        guard let primary = held.primary, let primaryBytes = try? EncryptionService.shared.getAlternativeKeyBytes(primary) else { return }
+        let current = try await KeyRegistry.shared.current()
+        guard current.keyId == nil else { return }
+        let target = primaryBytes.base64EncodedString()
+        guard current.hasData else {
+            _ = try await KeyRegistry.shared.register(key: target, ifMatch: KeyRegistry.noKey, createdVia: .manual)
+            return
+        }
+        // Every key this device holds may have sealed a row.
+        var keys = [target]
+        for alternative in held.alternatives where alternative != primary {
+            guard let bytes = try? EncryptionService.shared.getAlternativeKeyBytes(alternative) else { continue }
+            keys.append(bytes.base64EncodedString())
+        }
+        try await KeyRegistry.shared.migrateAll(keys: keys, target: target)
     }
 
     func authorizeCurrentPrimaryKeyAfterValidation(

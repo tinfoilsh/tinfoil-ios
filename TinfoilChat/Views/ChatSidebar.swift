@@ -62,7 +62,6 @@ struct ChatSidebar: View {
     @State private var chatSearchTerm: String = ""
     @StateObject private var chatSearch = ChatSearchController()
     @ObservedObject private var settings = SettingsManager.shared
-    @ObservedObject private var syncHealth = SyncHealthStore.shared
 
     private var activeTab: ChatStorageTab {
         viewModel.activeStorageTab
@@ -499,7 +498,6 @@ struct ChatSidebar: View {
                 createdTimeString: chat.isBlankChat ? "" : relativeTimeString(from: chat.createdAt),
                 updatedTimeString: chat.isBlankChat ? "" : updatedTimeString(for: chat),
                 isSyncing: chat.pendingSave,
-                syncFailed: !chat.isBlankChat && syncHealth.failedChats[chat.id] != nil,
                 isGenerating: viewModel.isChatStreaming(chat.id),
                 isPinned: viewModel.isChatPinned(chat.id),
                 projectColor: chat.projectId.flatMap { projectColors[$0] },
@@ -673,7 +671,6 @@ struct ChatSidebar: View {
             createdTimeString: relativeTimeString(from: chat.createdAt),
             updatedTimeString: updatedTimeString(for: summary),
             isSyncing: chat.pendingSave,
-            syncFailed: syncHealth.failedChats[chat.id] != nil,
             isGenerating: viewModel.isChatStreaming(chat.id),
             isPinned: true,
             showPinnedIndicator: false,
@@ -783,7 +780,7 @@ struct ChatSidebar: View {
     private var settingsGearIcon: some View {
         Image(systemName: "gear")
             .overlay(alignment: .topTrailing) {
-                if authManager.isAuthenticated && settings.isCloudSyncEnabled && syncHealth.needsAttention() {
+                if authManager.isAuthenticated && settings.isCloudSyncEnabled && viewModel.account?.keyLocked == true {
                     Circle()
                         .fill(Color.orange)
                         .frame(
@@ -1175,7 +1172,6 @@ struct ChatListItem: View {
     let createdTimeString: String
     let updatedTimeString: String
     var isSyncing: Bool = false
-    var syncFailed: Bool = false
     var isGenerating: Bool = false
     var isPinned: Bool = false
     var showPinnedIndicator: Bool = true
@@ -1277,10 +1273,6 @@ struct ChatListItem: View {
                                 ProgressView()
                                     .scaleEffect(0.6)
                                     .frame(width: 12, height: 12)
-                            } else if syncFailed {
-                                Image(systemName: "exclamationmark.triangle")
-                                    .font(.caption2)
-                                    .foregroundColor(.orange)
                             } else if isSyncing {
                                 Image(systemName: "icloud.and.arrow.up")
                                     .font(.caption2)
@@ -1350,8 +1342,6 @@ struct ChatListItem: View {
             components.append(Constants.ChatFork.sidebarSpinnerLabel)
         } else if isGenerating {
             components.append("Generating response")
-        } else if syncFailed {
-            components.append("Couldn't sync with cloud")
         } else if isSyncing {
             components.append("Syncing with cloud")
         }

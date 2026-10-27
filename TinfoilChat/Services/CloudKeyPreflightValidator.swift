@@ -66,9 +66,9 @@ final class CloudKeyPreflightValidator {
             return unknownResult(message: CloudKeyValidationMessages.noEncryptionKey)
         }
 
-        let current: EnclaveKeyCurrentResponse
+        let current: KeyState
         do {
-            current = try await SyncEnclaveAPI.keyCurrent()
+            current = try await KeyRegistry.shared.current()
         } catch {
             return unknownResult(message: CloudKeyValidationMessages.unknownRemoteState)
         }
@@ -84,7 +84,7 @@ final class CloudKeyPreflightValidator {
             )
         }
 
-        guard let localKeyId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek) else {
+        guard let localKeyId = try? ContentKeyBundle.deriveKeyIdHex(cek: cek) else {
             return blockedResult()
         }
 

@@ -466,6 +466,14 @@ final class HarnessAccount: ObservableObject {
     func report(_ cause: Error) {
         guard !disposed, !(cause is CancellationError) else { return }
         error = cause.localizedDescription
+        Self.noteAuthenticationRequired(cause)
+    }
+
+    /// An identity the harness refused even once refreshed asks for a
+    /// sign-in, which the app shows.
+    static func noteAuthenticationRequired(_ cause: Error) {
+        guard let error = cause as? HarnessError, error.action == .reauthenticate else { return }
+        NotificationCenter.default.post(name: .chatAuthenticationRequired, object: nil)
     }
 }
 

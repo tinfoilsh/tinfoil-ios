@@ -94,6 +94,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         if let error = cause as? HarnessError {
             account.reportRateLimit(error.detail.rateLimit)
             patch { $0.failure = error.detail }
+            HarnessAccount.noteAuthenticationRequired(error)
         } else {
             patch { $0.failure = HarnessErrorBody(code: HarnessErrorCode.connection, message: cause.localizedDescription, action: .retry) }
         }
