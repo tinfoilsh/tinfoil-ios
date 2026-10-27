@@ -3,6 +3,8 @@ import Testing
 import UniformTypeIdentifiers
 @testable import TinfoilChat
 
+private typealias Attachment = TinfoilChat.Attachment
+
 @MainActor
 @Suite("Shared Import Coordinator Tests")
 struct SharedImportCoordinatorTests {

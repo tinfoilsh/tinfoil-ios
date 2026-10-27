@@ -1,6 +1,8 @@
 import Testing
 @testable import TinfoilChat
 
+private typealias Attachment = TinfoilChat.Attachment
+
 @Suite("Attachment Processing Tests")
 struct AttachmentProcessingTests {
     @Test("Only completed attachments can be sent")

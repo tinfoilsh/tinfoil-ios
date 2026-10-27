@@ -2,6 +2,8 @@ import Foundation
 import Testing
 @testable import TinfoilChat
 
+private typealias Attachment = TinfoilChat.Attachment
+
 @Suite("Attachment payload merge")
 struct AttachmentPayloadMergeTests {
     private let fullBase64 = String(repeating: "FULL", count: 64)

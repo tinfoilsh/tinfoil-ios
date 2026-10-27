@@ -2,6 +2,8 @@ import Foundation
 import Testing
 @testable import TinfoilChat
 
+private typealias Attachment = TinfoilChat.Attachment
+
 @Suite("Attachment rewrites")
 struct AttachmentRewriteTests {
     private func image(id: String, encryptionKey: String? = nil) -> Attachment {

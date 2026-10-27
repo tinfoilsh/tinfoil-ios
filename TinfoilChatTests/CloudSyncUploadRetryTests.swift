@@ -614,7 +614,7 @@ struct CloudSyncUploadRetryTests {
     }
 
     @Test func persistentAuthenticationIsTerminal() {
-        let decision = EnclaveErrorRecovery.decide(.authenticationActionRequired)
+        let decision = EnclaveErrorRecovery.decide(SyncEnclaveError.authenticationActionRequired)
         #expect(decision.action == .abort(reason: .authenticationRequired))
     }
 }

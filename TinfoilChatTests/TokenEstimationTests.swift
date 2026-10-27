@@ -11,6 +11,8 @@ import Foundation
 import Testing
 @testable import TinfoilChat
 
+private typealias Attachment = TinfoilChat.Attachment
+
 struct TokenEstimationTests {
 
     private func message(role: MessageRole = .user, content: String) -> Message {
