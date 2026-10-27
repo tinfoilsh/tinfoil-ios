@@ -335,6 +335,9 @@ class ChatViewModel: ObservableObject {
         let userId = currentUserId
         if case .some(let opened) = sessionUserId, opened == userId, session != nil { return }
         sessionUserId = .some(userId)
+        if let previous = session, previous.account.userId == nil, userId != nil {
+            memoryChats = await Self.deviceChats(of: previous.device)
+        }
         session?.account.dispose()
         sessionCancellables = []
         session = nil
@@ -414,10 +417,25 @@ class ChatViewModel: ObservableObject {
     /// sign in to, onto this device.
     private var memoryChats: [DeviceChatCopy] = []
 
+    private static func deviceChats(of store: LocalThreadStore) async -> [DeviceChatCopy] {
+        guard let listed = try? await store.list() else { return [] }
+        var copies: [DeviceChatCopy] = []
+        for summary in listed {
+            guard let thread = try? await store.get(summary.id), !thread.messages.isEmpty else { continue }
+            let originals = (try? await store.originals(summary.id, attachmentIds: thread.attachments.map(\.id))) ?? [:]
+            copies.append(DeviceChatCopy(thread: thread, originals: originals))
+        }
+        return copies
+    }
+
     private func migrateMemoryChats(into store: LocalThreadStore) async {
         guard currentUserId != nil, !memoryChats.isEmpty else { return }
         for copy in memoryChats {
-            _ = try? await store.add(copy.thread, originals: copy.originals)
+            do {
+                _ = try await store.add(copy.thread, originals: copy.originals)
+            } catch {
+                Self.logger.error("Failed to keep a signed-out chat for the account: \(error, privacy: .public)")
+            }
         }
         memoryChats = []
     }
