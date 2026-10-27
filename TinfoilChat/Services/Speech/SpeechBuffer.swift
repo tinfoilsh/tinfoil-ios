@@ -1,133 +1,65 @@
 import Foundation
 
-/// Tracks generated and scheduled audio together so scheduling a buffer does not
-/// free generation capacity until the device has actually played it.
+/// The audio of one message as it streams, scheduled block by block.
+/// Playback starts once enough audio has arrived to keep going, or the
+/// stream has ended, and rebuffers after an underrun rather than playing
+/// every tiny arrival. Scheduled audio counts as buffered until the device
+/// has actually played it.
 struct SpeechBuffer: Sendable {
-    struct Block: Sendable {
-        let chunkIndex: Int
-        let samples: [Float]
-    }
-
-    private struct Chunk: Sendable {
-        var blocks: [[Float]] = []
-        var queuedSamples = 0
-        var receivedSamples = 0
-        var pendingBuffers = 0
-        var isComplete = false
-    }
-
-    let chunkCount: Int
-    private var chunks: [Int: Chunk] = [:]
-    private(set) var nextRequest = 0
-    private(set) var nextSchedule = 0
-    private(set) var nextPlayback = 0
-    private(set) var inFlight = 0
+    private var blocks: [[Float]] = []
+    private var queuedSamples = 0
+    private var pendingBuffers = 0
+    private(set) var receivedSamples = 0
     private(set) var bufferedSamples = 0
     private(set) var scheduledSamples = 0
+    private(set) var isComplete = false
     private(set) var isPlaying = false
 
-    var isFinished: Bool { nextPlayback == chunkCount }
+    /// Every sample arrived and was played.
+    var isFinished: Bool { isComplete && blocks.isEmpty && pendingBuffers == 0 }
+
     /// Enough audio waits to play that the stream should not be read
     /// further.
     var isFull: Bool { bufferedSamples >= Constants.Speech.maxBufferedSamples }
 
-    init(chunkCount: Int) {
-        self.chunkCount = chunkCount
-    }
-
-    mutating func reserveRequests() -> [Int] {
-        var indices: [Int] = []
-        while inFlight < Constants.Speech.concurrentRequests,
-              nextRequest < chunkCount,
-              nextRequest < nextPlayback + Constants.Speech.lookaheadChunks,
-              bufferedSamples < Constants.Speech.highWaterSeconds * Constants.Speech.sampleRate {
-            let index = nextRequest
-            chunks[index] = Chunk()
-            nextRequest += 1
-            inFlight += 1
-            indices.append(index)
-        }
-        return indices
-    }
-
-    mutating func append(_ samples: [Float], to index: Int) throws {
+    mutating func append(_ samples: [Float]) throws {
         guard !samples.isEmpty else { return }
-        guard var chunk = chunks[index], !chunk.isComplete,
-              samples.count <= Constants.Speech.blockSamples else {
+        guard !isComplete, samples.count <= Constants.Speech.blockSamples else {
             throw SpeechError.invalidAudio
         }
-        chunk.blocks.append(samples)
-        chunk.queuedSamples += samples.count
-        chunk.receivedSamples += samples.count
-        chunks[index] = chunk
+        blocks.append(samples)
+        queuedSamples += samples.count
+        receivedSamples += samples.count
         bufferedSamples += samples.count
     }
 
-    mutating func finishRequest(_ index: Int) throws {
-        guard var chunk = chunks[index], !chunk.isComplete, chunk.receivedSamples > 0 else {
-            throw SpeechError.invalidAudio
-        }
-        chunk.isComplete = true
-        chunks[index] = chunk
-        inFlight -= 1
+    /// The stream ended. One that carried no audio is not one this client
+    /// plays.
+    mutating func finish() throws {
+        guard !isComplete, receivedSamples > 0 else { throw SpeechError.invalidAudio }
+        isComplete = true
     }
 
-    mutating func takePlayableBlocks() -> [Block] {
-        while nextSchedule < nextRequest,
-              let chunk = chunks[nextSchedule], chunk.isComplete, chunk.blocks.isEmpty {
-            nextSchedule += 1
-        }
-        retirePlayedChunks()
+    /// The blocks to schedule now: all that wait, once playback is on.
+    mutating func takePlayableBlocks() -> [[Float]] {
         if scheduledSamples == 0 { isPlaying = false }
-
-        var contiguousSamples = 0
-        var completeChunks = 0
-        for index in nextSchedule..<nextRequest {
-            guard let chunk = chunks[index] else { break }
-            contiguousSamples += chunk.queuedSamples
-            if !chunk.isComplete { break }
-            completeChunks += 1
-        }
-        let tailIsReady = completeChunks == chunkCount - nextSchedule
-        let windowIsReady = nextRequest == nextPlayback + Constants.Speech.lookaheadChunks
-            && nextSchedule + completeChunks == nextRequest
-        if !isPlaying, contiguousSamples > 0,
-           contiguousSamples >= Constants.Speech.startBufferSeconds * Constants.Speech.sampleRate
-            || tailIsReady || windowIsReady {
+        if !isPlaying, queuedSamples > 0,
+           queuedSamples >= Constants.Speech.startBufferSeconds * Constants.Speech.sampleRate || isComplete {
             isPlaying = true
         }
         guard isPlaying else { return [] }
-
-        var result: [Block] = []
-        while nextSchedule < nextRequest, var chunk = chunks[nextSchedule] {
-            result.append(contentsOf: chunk.blocks.map { Block(chunkIndex: nextSchedule, samples: $0) })
-            chunk.pendingBuffers += chunk.blocks.count
-            scheduledSamples += chunk.queuedSamples
-            chunk.blocks = []
-            chunk.queuedSamples = 0
-            chunks[nextSchedule] = chunk
-            if !chunk.isComplete { break }
-            nextSchedule += 1
-        }
-        retirePlayedChunks()
-        return result
+        let taken = blocks
+        pendingBuffers += taken.count
+        scheduledSamples += queuedSamples
+        blocks = []
+        queuedSamples = 0
+        return taken
     }
 
-    mutating func didPlay(chunkIndex: Int, sampleCount: Int) {
-        guard var chunk = chunks[chunkIndex], chunk.pendingBuffers > 0 else { return }
-        chunk.pendingBuffers -= 1
-        chunks[chunkIndex] = chunk
+    mutating func didPlay(sampleCount: Int) {
+        guard pendingBuffers > 0 else { return }
+        pendingBuffers -= 1
         scheduledSamples -= sampleCount
         bufferedSamples -= sampleCount
-        retirePlayedChunks()
-    }
-
-    private mutating func retirePlayedChunks() {
-        while nextPlayback < nextSchedule,
-              let chunk = chunks[nextPlayback], chunk.isComplete,
-              chunk.pendingBuffers == 0, chunk.blocks.isEmpty {
-            chunks.removeValue(forKey: nextPlayback)
-            nextPlayback += 1
-        }
     }
 }

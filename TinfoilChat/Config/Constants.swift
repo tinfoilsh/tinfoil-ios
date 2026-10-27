@@ -649,10 +649,9 @@ enum Constants {
         static let bytesPerSample = MemoryLayout<Int16>.size
         static let pcmScale: Float = 32_768
         static let blockSamples = 6_000
-        static let concurrentRequests = 1
-        static let lookaheadChunks = 1
+        /// Playback starts once this much audio has arrived, or the stream
+        /// ended.
         static let startBufferSeconds = 12
-        static let highWaterSeconds = 60
         /// The stream is not read further while this much audio waits to
         /// play.
         static let maxBufferedSeconds = 30

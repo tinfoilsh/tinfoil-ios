@@ -27,7 +27,7 @@ final class SpeechPlayer: ObservableObject {
         let owner: SpeechOwner
         let source: String
         let service: any SpeechSynthesizing
-        var buffer = SpeechBuffer(chunkCount: 1)
+        var buffer = SpeechBuffer()
         /// The stream is not read further while too much audio waits to
         /// play; playback wakes it.
         var drained: CheckedContinuation<Void, Never>?
@@ -134,11 +134,10 @@ final class SpeechPlayer: ObservableObject {
         }
         do {
             for block in blocks {
-                let index = block.chunkIndex
-                let sampleCount = block.samples.count
-                try output.schedule(block.samples) { [weak self] in
+                let sampleCount = block.count
+                try output.schedule(block) { [weak self] in
                     guard self?.session?.id == sessionId else { return }
-                    self?.session?.buffer.didPlay(chunkIndex: index, sampleCount: sampleCount)
+                    self?.session?.buffer.didPlay(sampleCount: sampleCount)
                     self?.pump(sessionId: sessionId)
                 }
                 guard self.session?.id == sessionId else { return }
@@ -155,19 +154,17 @@ final class SpeechPlayer: ObservableObject {
                 session.drained = nil
                 drained.resume()
             }
-            let indices = session.buffer.reserveRequests()
-            guard let index = indices.first else { return }
+            guard task == nil else { return }
             let service = session.service
             task = Task { [weak self] in
                 do {
                     try Task.checkCancellation()
                     try await service.generate { [weak self] samples in
-                        try await self?.receive(samples, index: index, sessionId: sessionId)
+                        try await self?.receive(samples, sessionId: sessionId)
                     }
                     try Task.checkCancellation()
                     guard let self, self.session?.id == sessionId else { return }
-                    self.task = nil
-                    try self.session?.buffer.finishRequest(index)
+                    try self.session?.buffer.finish()
                     self.pump(sessionId: sessionId)
                 } catch {
                     guard let self, self.session?.id == sessionId else { return }
@@ -181,9 +178,9 @@ final class SpeechPlayer: ObservableObject {
 
     /// Takes a block of the stream's audio, and holds the stream while
     /// enough audio waits to play.
-    private func receive(_ samples: [Float], index: Int, sessionId: UUID) async throws {
+    private func receive(_ samples: [Float], sessionId: UUID) async throws {
         guard let session, session.id == sessionId, !Task.isCancelled else { throw CancellationError() }
-        try session.buffer.append(samples, to: index)
+        try session.buffer.append(samples)
         pump(sessionId: sessionId)
         while let session = self.session, session.id == sessionId, session.buffer.isFull {
             await withCheckedContinuation { continuation in
