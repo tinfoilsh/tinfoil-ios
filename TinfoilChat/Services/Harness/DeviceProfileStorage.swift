@@ -46,6 +46,16 @@ final class DeviceProfileStorage: ProfileStorage {
         defaults.removeObject(forKey: Constants.Harness.Profile.localProfileChangesKey)
     }
 
+    /// Forgets the local profile and its bookkeeping, as when the account is
+    /// removed.
+    func clearLocalProfile() {
+        keychain.delete(for: Constants.Harness.Profile.localProfileKey, service: service)
+        keychain.delete(for: Constants.Harness.Profile.previousProfileKey, service: service)
+        clearLocalProfileChanges()
+        localProfileUpgraded = false
+        pendingProfileMerge = nil
+    }
+
     var localProfileUpgraded: Bool {
         get { defaults.bool(forKey: Constants.Harness.Profile.localProfileUpgradedKey) }
         set { defaults.set(newValue, forKey: Constants.Harness.Profile.localProfileUpgradedKey) }
