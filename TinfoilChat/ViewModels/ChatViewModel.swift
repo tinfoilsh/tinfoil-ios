@@ -384,6 +384,9 @@ class ChatViewModel: ObservableObject {
             guard self.session === session else { return }
             verification = VerificationInfo(error: error.localizedDescription)
             account.report(error)
+            // The settings this device holds show even while the chat
+            // service cannot be reached.
+            if !account.cloud { await account.refreshProfile() }
         }
         isClientInitializing = false
         account.watchChanges()
@@ -649,7 +652,7 @@ class ChatViewModel: ObservableObject {
 
     var canUseReadAloud: Bool {
         canUseCurrentChatActions && !isCurrentChatSafeguardFlagged && !isRecording && !AudioRecordingService.shared.isRecording
-            && account?.session?.features.additionalProperties["speech"] != false && isVerified
+            && account?.session?.features.additionalProperties["speech"] == true && isVerified
     }
 
     /// The latest summary of the reasoning the reply is thinking through.

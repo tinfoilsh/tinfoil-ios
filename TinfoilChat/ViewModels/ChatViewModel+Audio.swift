@@ -43,7 +43,7 @@ extension ChatViewModel {
 
     /// Audio input is a premium feature the chat service offers.
     var canUseAudioInput: Bool {
-        hasPremiumAccess && account?.session?.features.additionalProperties["transcription"] != false
+        hasPremiumAccess && account?.session?.features.additionalProperties["transcription"] == true
     }
 
     func startAudioRecording() async {
