@@ -1,0 +1,124 @@
+import Foundation
+import OpenAPIRuntime
+import Testing
+@testable import TinfoilChat
+
+@Suite("Chat view mapping")
+struct ChatViewMappingTests {
+    private static func message(_ object: [String: Any]) throws -> HarnessMessage {
+        try HarnessMessage(jsonObject: object)
+    }
+
+    private static func reply(_ timeline: [[String: Any]]) throws -> HarnessMessage {
+        try message(["id": "m", "role": "assistant", "createdAt": "2026-01-01T00:00:00Z", "timeline": timeline])
+    }
+
+    @Test func aReplysBlocksBecomeItsTextThoughtsAndSegments() throws {
+        let wire = try Self.reply([
+            ["id": "t1", "type": "thinking", "content": "why", "duration": 1.5, "startedAt": 1000, "endedAt": 2500],
+            ["id": "c1", "type": "content", "content": "Hello "],
+            ["id": "c2", "type": "content", "content": "world"],
+        ])
+        let shown = ChatViewMapping.message(wire, streaming: false, summaries: ["t1": "Thinking about it"])
+        #expect(shown.role == .assistant)
+        #expect(shown.content == "Hello world")
+        #expect(shown.thoughts == "why")
+        #expect(shown.thinkingDuration == 1.5)
+        #expect(shown.isThinking == false)
+        #expect(shown.segments == [
+            .thinking(content: "why", isThinking: false, duration: 1.5, startedAt: 1000, endedAt: 2500),
+            .text("Hello "),
+            .text("world"),
+        ])
+        #expect(shown.timeline?.first?.objectValue?["summary"]?.stringValue == "Thinking about it")
+    }
+
+    @Test func aStreamingReplyThinksOnlyInItsLastBlock() throws {
+        let thinkingLast = try Self.reply([
+            ["id": "c1", "type": "content", "content": "So far"],
+            ["id": "t1", "type": "thinking", "content": "more"],
+        ])
+        #expect(ChatViewMapping.message(thinkingLast, streaming: true).isThinking)
+        #expect(!ChatViewMapping.message(thinkingLast, streaming: false).isThinking)
+        let textLast = try Self.reply([
+            ["id": "t1", "type": "thinking", "content": "first"],
+            ["id": "c1", "type": "content", "content": "then"],
+        ])
+        #expect(!ChatViewMapping.message(textLast, streaming: true).isThinking)
+        #expect(ChatViewMapping.message(textLast, streaming: true).isStreaming)
+    }
+
+    @Test func searchesAndPageReadsShowWhatTheHarnessReports() throws {
+        let wire = try Self.reply([
+            ["id": "s", "type": "tool_call", "toolCallId": "s", "name": "web_search", "arguments": #"{"query":"cats"}"#, "complete": true,
+             "display": ["query": "cats", "status": "completed", "sources": [["url": "https://cats.test", "title": "Cats", "snippet": "All about cats."]]]],
+            ["id": "f", "type": "tool_call", "toolCallId": "f", "name": "web_fetch", "arguments": #"{"urls":["https://a.test","https://b.test"]}"#, "complete": true,
+             "result": ["failed": [["url": "https://b.test", "error": "timeout"]]],
+             "display": ["status": "completed", "sources": [["url": "https://a.test", "title": "A"]]]],
+            ["id": "c", "type": "content", "content": "Found it."],
+        ])
+        let shown = ChatViewMapping.message(wire)
+        let search = try #require(shown.webSearches?.first)
+        #expect(search.query == "cats")
+        #expect(search.status == .completed)
+        #expect(search.sources?.map(\.title) == ["Cats"])
+        #expect(shown.urlFetches.map(\.url) == ["https://a.test", "https://b.test"])
+        #expect(shown.urlFetches.map(\.status) == [.completed, .failed])
+        #expect(shown.segments == [.webSearch(searchId: "s"), .urlFetch(fetchId: "f"), .urlFetch(fetchId: "f-1"), .text("Found it.")])
+    }
+
+    @Test func aToolStillRunningOnceTheReplyStoppedWasCutOff() throws {
+        let wire = try Self.reply([
+            ["id": "s", "type": "tool_call", "toolCallId": "s", "name": "web_search", "arguments": "{}", "display": ["status": "running", "sources": []]],
+        ])
+        #expect(ChatViewMapping.message(wire, streaming: true).webSearches?.first?.status == .searching)
+        #expect(ChatViewMapping.message(wire, streaming: false).webSearches?.first?.status == .failed)
+    }
+
+    @Test func widgetsAreShownAndOtherToolsAreNot() throws {
+        let wire = try Self.reply([
+            ["id": "w", "type": "tool_call", "toolCallId": "w", "name": "render_clock", "arguments": #"{"tz":"UTC"}"#, "complete": true],
+            ["id": "h", "type": "tool_call", "toolCallId": "h", "name": "hidden_tool", "arguments": "{}", "complete": true],
+        ])
+        let shown = ChatViewMapping.message(wire)
+        #expect(shown.toolCalls == [GenUIToolCall(id: "w", name: "render_clock", arguments: #"{"tz":"UTC"}"#)])
+        #expect(shown.segments == [.toolCall(toolCallId: "w")])
+    }
+
+    @Test func aUserMessageKeepsItsTextAndAttachments() throws {
+        let wire = try Self.message([
+            "id": "u", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Look",
+            "attachments": [["id": "a", "kind": "image", "fileName": "cat.png", "mimeType": "image/png", "size": 12, "thumbnail": "AAAA"]],
+        ])
+        let shown = ChatViewMapping.message(wire)
+        #expect(shown.role == .user)
+        #expect(shown.content == "Look")
+        #expect(shown.attachments.map(\.fileName) == ["cat.png"])
+        #expect(shown.attachments.first?.type == .image)
+        #expect(shown.attachments.first?.thumbnailBase64 == "AAAA")
+        #expect(shown.attachments.first?.processingState == .completed)
+    }
+
+    @Test func aChatWaitingForItsTitleShowsTheDefaultOne() throws {
+        var summary = try ThreadSummary(jsonObject: [
+            "id": "t", "title": "New Chat", "titleState": "placeholder", "activityAt": "2026-01-01T00:00:00Z",
+            "model": "auto", "webSearchEnabled": true, "pinned": true, "messageCount": 2,
+            "contextUsage": ["usedTokens": 10, "limitTokens": 100, "percentage": 10],
+            "activeRun": ["runId": "r", "expiresAt": "2026-01-01T00:01:00Z", "instance": "i"],
+        ])
+        var chat = ChatViewMapping.chat(summary, local: false, presetId: "user:p")
+        #expect(chat.title == Chat.defaultTitle)
+        #expect(chat.titleState == .placeholder)
+        #expect(chat.pinned)
+        #expect(chat.messageCount == 2)
+        #expect(!chat.isBlankChat)
+        #expect(chat.promptPresetId == "user:p")
+        #expect(chat.contextUsage == ContextUsage(percentage: 10, usedTokens: 10, limitTokens: 100))
+        #expect(chat.activeRun?.runId == "r")
+        summary.title = "Cats"
+        summary.titleState = .generated
+        chat = ChatViewMapping.chat(summary, local: true)
+        #expect(chat.title == "Cats")
+        #expect(chat.isLocalOnly)
+    }
+}
