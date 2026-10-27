@@ -442,9 +442,6 @@ class AuthManager: ObservableObject {
         // keys, or personalization bleed into the next account on a shared
         // device. This runs before isAuthenticated is cleared below so the
         // view model can still resolve the signing-out user's id for the wipe.
-        chatViewModel?.resetSharedProfileSettingsForAccountTeardown()
-        // Reset shared settings before the profile wipe so observer-triggered
-        // profile writes are deleted by the final teardown operation.
         SettingsManager.shared.clearAllSettings()
         ProfileManager.shared.clearLocalProfileForAccountRemoval()
         if let chatViewModel {

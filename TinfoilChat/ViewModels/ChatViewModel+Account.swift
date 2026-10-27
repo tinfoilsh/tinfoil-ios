@@ -179,8 +179,6 @@ extension ChatViewModel {
         Task { await openSession() }
     }
 
-    func resetSharedProfileSettingsForAccountTeardown() {}
-
     /// Wipes the chats this device kept for the account signing out.
     func wipeLocalChatsForSignOut() async {
         guard let userId = currentUserId else { return }
