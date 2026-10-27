@@ -115,10 +115,10 @@ struct AttachmentProcessingStoreTests {
         let store = AttachmentProcessingStore()
 
         let successTask = store.start(id: "success", stagedFile: fixture.file) { _ in
-            _ = try? await DocumentProcessingService.shared.extractText(from: fixture.file.url)
+            _ = try? Data(contentsOf: fixture.file.url)
         }
         let failureTask = store.start(id: "failure", stagedFile: failedFixture.file) { _ in
-            _ = try? await DocumentProcessingService.shared.extractText(from: failedFixture.file.url)
+            _ = try? Data(contentsOf: failedFixture.file.url)
         }
         await successTask.value
         await failureTask.value

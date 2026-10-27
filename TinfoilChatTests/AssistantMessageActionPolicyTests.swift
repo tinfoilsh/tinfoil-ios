@@ -86,7 +86,8 @@ struct AssistantMessageActionPolicyTests {
     }
 
     @Test func onlyTextOrToolCallsCanBeContinued() {
-        var response = Message(role: .assistant, content: "", thoughts: "Thinking only")
+        var response = Message(role: .assistant, content: "")
+        response.thoughts = "Thinking only"
         #expect(!response.hasContinuableResponse)
 
         response.toolCalls = [GenUIToolCall(id: "call_1", name: "widget", arguments: "{}")]
