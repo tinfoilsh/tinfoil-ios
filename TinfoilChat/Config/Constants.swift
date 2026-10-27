@@ -328,6 +328,10 @@ enum Constants {
 
         /// How often the harness is asked what changed on other devices.
         static let changePollSeconds: TimeInterval = 20
+        /// The title of a chat waiting for its generated one.
+        static let placeholderTitle = "New Chat"
+        /// Where a device run's receipt is kept, by account.
+        static let runReceiptKeyPrefix = "tinfoil-harness-run-"
 
         /// Where this device keeps the settings the harness does not hold.
         enum Profile {
