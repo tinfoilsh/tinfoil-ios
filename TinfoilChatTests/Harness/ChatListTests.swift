@@ -141,6 +141,24 @@ struct ChatListTests {
         #expect(!list.loading)
         #expect(list.cloudListed.last?.id == "b")
     }
+
+    @Test func anEditDuringAReloadKeepsTheEditAndEndsTheLoad() async throws {
+        let (list, transport) = await makeList()
+        await transport.push(ListPage.json([summary("a")], pinned: []))
+        try await list.refresh()
+        await transport.push(ListPage.json([summary("a")], pinned: []))
+        await transport.hold()
+        let load = list.reload()
+        await transport.arrived()
+        #expect(list.loading)
+        // The run reports a chat while the page is in flight: the page is
+        // older than the report, and does not replace it.
+        list.cloud.reported(summary("fresh", title: "Fresh"))
+        await transport.release()
+        await load.value
+        #expect(!list.loading)
+        #expect(list.cloudListed.map(\.id) == ["fresh", "a"])
+    }
 }
 
 private struct NoControlPlane: ControlPlaneTransport {

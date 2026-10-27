@@ -37,6 +37,7 @@ actor ScriptedTransport: HarnessTransport {
 
     func release() {
         holding = false
+        held = false
         releases.forEach { $0.resume() }
         releases = []
     }
@@ -48,7 +49,6 @@ actor ScriptedTransport: HarnessTransport {
             arrivals.forEach { $0.resume() }
             arrivals = []
             await withCheckedContinuation { releases.append($0) }
-            held = false
         }
         guard !answers.isEmpty else {
             Issue.record("unscripted request to \(request.route.rawValue)")
