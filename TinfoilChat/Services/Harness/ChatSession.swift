@@ -378,7 +378,14 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
 
     /// A message as the view shows it, without its uploads' contents.
     private func shownMessage(_ record: Components.Schemas.MessageRecord) -> HarnessMessage {
-        HarnessMessage(shown: record)
+        HarnessMessage(
+            id: record.id, role: record.role, createdAt: record.createdAt, content: record.content, timeline: record.timeline,
+            quote: record.quote, model: record.model, modelDisplayName: record.modelDisplayName, isError: record.isError,
+            isInterrupted: record.isInterrupted, usage: record.usage, annotations: record.annotations,
+            attachments: record.attachments?.map {
+                Components.Schemas.AttachmentView(id: $0.id, kind: $0.kind, fileName: $0.fileName, mimeType: $0.mimeType, size: $0.size, thumbnail: $0.thumbnail, textContent: $0.textContent, description: $0.description)
+            }
+        )
     }
 
     /// The messages a turn that regenerates, edits or continues leaves, as

@@ -149,7 +149,9 @@ final class OpenAttachments {
     }
 
     func rememberThread(_ thread: StoredThread) {
-        for message in thread.messageRecords { remember(message.attachments ?? []) }
+        for (id, held) in thread.heldImages {
+            if let base64 = held.base64 { images[id] = (base64, thread.attachmentFields(id)?["mimeType"]?.stringValue ?? "image/jpeg") }
+        }
     }
 
     /// The attachments a turn sends stay readable until the chat stores
@@ -533,12 +535,11 @@ final class DeviceThreads: ThreadStore {
     /// A chat on this device keeps a document's text in its descriptor.
     func documentText(_ threadId: String?, attachmentId: String) async throws -> String {
         try await attachments.text(attachmentId) { [self] in
-            var descriptor = attachments.uploads[attachmentId]
-            if descriptor == nil, let threadId {
-                descriptor = try await store.get(threadId)?.attachments.first { $0.id == attachmentId }
+            var fields = try attachments.uploads[attachmentId].map { JSONValue(any: try $0.jsonObject()).objectValue ?? [:] }
+            if fields == nil, let threadId {
+                fields = try await store.get(threadId)?.attachmentFields(attachmentId)
             }
-            guard let descriptor else { throw Self.notOnDevice("document") }
-            let fields = JSONValue(any: try descriptor.jsonObject()).objectValue ?? [:]
+            guard let fields else { throw Self.notOnDevice("document") }
             return StoredThread.documentText(fields) ?? ""
         }
     }

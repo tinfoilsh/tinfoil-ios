@@ -96,8 +96,44 @@ struct StoredThread: Equatable, Sendable {
         set { fields["messages"] = .array(newValue) }
     }
 
-    var messageRecords: [Components.Schemas.MessageRecord] {
-        messages.compactMap { try? Components.Schemas.MessageRecord(jsonValue: $0) }
+    /// The members of an attachment that hold its bytes, which the view
+    /// and the harness's stored copy leave out.
+    private static let attachmentBytes = ["base64", "pages", "originalBase64"]
+
+    /// A message as the view shows it, without its attachments' bytes. A
+    /// message the protocol does not describe is not shown.
+    private static func shownMessage(_ message: JSONValue) -> HarnessMessage? {
+        guard var object = message.objectValue else { return nil }
+        if let attachments = object["attachments"]?.arrayValue {
+            object["attachments"] = .array(attachments.map { attachment in
+                guard var fields = attachment.objectValue else { return attachment }
+                for member in attachmentBytes { fields[member] = nil }
+                return .object(fields)
+            })
+        }
+        return try? HarnessMessage(jsonValue: .object(object))
+    }
+
+    /// The attachments of every message, as uploads return them, without
+    /// their pages.
+    var attachments: [Components.Schemas.Attachment] {
+        messages.flatMap { message -> [Components.Schemas.Attachment] in
+            (message.objectValue?["attachments"]?.arrayValue ?? []).compactMap { attachment in
+                guard var fields = attachment.objectValue else { return nil }
+                fields["pages"] = nil
+                return try? Components.Schemas.Attachment(jsonValue: .object(fields))
+            }
+        }
+    }
+
+    /// The fields of an attachment of the chat, by id.
+    func attachmentFields(_ id: String) -> [String: JSONValue]? {
+        for message in messages {
+            for attachment in message.objectValue?["attachments"]?.arrayValue ?? [] {
+                if let fields = attachment.objectValue, fields["id"]?.stringValue == id { return fields }
+            }
+        }
+        return nil
     }
 
     /// When the chat was last active: its latest message, or else its
@@ -156,7 +192,7 @@ struct StoredThread: Equatable, Sendable {
             flagged: summary.flagged,
             revision: "",
             presetId: presetId,
-            messages: messageRecords.map(HarnessMessage.init(shown:)),
+            messages: messages.compactMap(Self.shownMessage),
             hasOlder: false
         )
     }
@@ -171,11 +207,6 @@ struct StoredThread: Equatable, Sendable {
     /// The settings that differ from another copy of the chat.
     func changedSettings(from other: StoredThread) -> [String] {
         Self.userSettings.filter { fields[$0] != other.fields[$0] }
-    }
-
-    /// The attachments of every message, by id.
-    var attachments: [Components.Schemas.Attachment] {
-        messageRecords.flatMap { $0.attachments ?? [] }
     }
 
     /// The copy of the thread a share carries: image thumbnails and document
@@ -295,29 +326,5 @@ extension Decodable {
     init(jsonValue: JSONValue) throws {
         let data = try JSONSerialization.data(withJSONObject: jsonValue.any, options: [.fragmentsAllowed])
         self = try JSONDecoder().decode(Self.self, from: data)
-    }
-}
-
-extension HarnessMessage {
-    /// A message as the view shows it, from the record a chat on this device
-    /// keeps: without its attachments' bytes.
-    init(shown record: Components.Schemas.MessageRecord) {
-        self.init(
-            id: record.id,
-            role: record.role,
-            createdAt: record.createdAt,
-            content: record.content,
-            timeline: record.timeline,
-            quote: record.quote,
-            model: record.model,
-            modelDisplayName: record.modelDisplayName,
-            isError: record.isError,
-            isInterrupted: record.isInterrupted,
-            usage: record.usage,
-            annotations: record.annotations,
-            attachments: record.attachments?.map {
-                Components.Schemas.AttachmentView(id: $0.id, kind: $0.kind, fileName: $0.fileName, mimeType: $0.mimeType, size: $0.size, thumbnail: $0.thumbnail, textContent: $0.textContent, description: $0.description)
-            }
-        )
     }
 }

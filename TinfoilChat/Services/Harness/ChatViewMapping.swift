@@ -149,6 +149,7 @@ enum ChatViewMapping {
         attachment.thumbnailBase64 = view.thumbnail
         attachment.textContent = view.textContent
         attachment.description = view.description
+        attachment.processingState = .completed
         return attachment
     }
 
@@ -164,6 +165,7 @@ enum ChatViewMapping {
         attachment.textContent = uploaded.textContent
         attachment.description = uploaded.description
         attachment.base64 = uploaded.base64
+        attachment.processingState = .completed
         return attachment
     }
 
