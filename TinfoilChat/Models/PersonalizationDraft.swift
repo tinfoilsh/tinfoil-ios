@@ -15,16 +15,6 @@ struct PersonalizationDraft: Equatable {
         traits: ProfileDefaults.traits,
         additionalContext: ProfileDefaults.additionalContext
     )
-
-    func changedProfileFields(comparedTo current: PersonalizationDraft) -> [String] {
-        var fields: [String] = []
-        if isEnabled != current.isEnabled { fields.append("isUsingPersonalization") }
-        if nickname != current.nickname { fields.append("nickname") }
-        if profession != current.profession { fields.append("profession") }
-        if traits != current.traits { fields.append("traits") }
-        if additionalContext != current.additionalContext { fields.append("additionalContext") }
-        return fields
-    }
 }
 
 @MainActor
