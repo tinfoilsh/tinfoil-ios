@@ -53,11 +53,19 @@ actor ScriptedCredentials: HarnessCredentials {
 
     func anonymousKey(refresh: Bool) async throws -> String {
         calls.append(.anonymousKey(refresh: refresh))
+        guard !anonymousKeys.isEmpty else {
+            Issue.record("unscripted free key request")
+            throw HarnessError(code: HarnessErrorCode.connection, message: "unscripted", action: .stop)
+        }
         return anonymousKeys.removeFirst()
     }
 
     func chatAccess(identity: String, refresh: Bool) async throws -> String {
         calls.append(.chatAccess(identity: identity, refresh: refresh))
+        guard !access.isEmpty else {
+            Issue.record("unscripted chat access request")
+            throw HarnessError(code: HarnessErrorCode.connection, message: "unscripted", action: .stop)
+        }
         return try access.removeFirst().get()
     }
 
@@ -75,9 +83,10 @@ final class MemoryProfileStorage: ProfileStorage, @unchecked Sendable {
 
     func loadLocalProfile() -> ProfileFields { local }
 
-    func saveLocalProfile(_ patch: ProfileFields, replace: Bool) -> ProfileFields {
+    func saveLocalProfile(_ patch: ProfileFields, replace: Bool) throws -> ProfileFields {
         var profile = replace ? [:] : local
         profile.merge(patch) { $1 }
+        profile = profile.filter { !($0.value is NSNull) }
         local = profile
         if !replace { changes.formUnion(patch.keys) }
         return profile

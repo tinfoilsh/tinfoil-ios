@@ -35,6 +35,18 @@ struct StoredThreadTests {
         #expect(StoredThread(json: ["id": "t"]) == nil)
     }
 
+    @Test func numbersAndBooleansSurviveARoundTripThroughRawJSON() throws {
+        let text = #"{"flag":true,"off":false,"one":1,"zero":0,"big":9007199254740993,"ratio":0.5}"#
+        let raw = try JSONDecoder().decode(RawJSON.self, from: Data(text.utf8))
+        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(raw)) as! [String: Any]
+        #expect(written["flag"] as? Bool == true)
+        #expect(written["off"] as? Bool == false)
+        #expect(String(decoding: raw.data, as: UTF8.self).contains(#""one":1"#))
+        #expect(String(decoding: raw.data, as: UTF8.self).contains(#""zero":0"#))
+        #expect(String(decoding: raw.data, as: UTF8.self).contains(#""big":9007199254740993"#))
+        #expect(String(decoding: raw.data, as: UTF8.self).contains(#""ratio":0.5"#))
+    }
+
     @Test func theSummaryAndWindowLeaveOutTheBytesTheDeviceHolds() throws {
         let thread = try #require(StoredThread(json: Self.record))
         let summary = thread.summary
@@ -48,9 +60,10 @@ struct StoredThreadTests {
         #expect(attachments.map(\.id) == ["img", "doc"])
         #expect(attachments.first?.thumbnail == "QQ==")
         let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(window)) as! [String: Any]
-        let shown = ((encoded["messages"] as! [[String: Any]])[0]["attachments"] as! [[String: Any]])[0]
-        #expect(shown["base64"] == nil)
-        #expect(shown["pages"] == nil)
+        let shown = (encoded["messages"] as! [[String: Any]])[0]["attachments"] as! [[String: Any]]
+        #expect(shown[0]["base64"] == nil)
+        #expect(shown[1]["pages"] == nil)
+        #expect(shown[1]["fileName"] as? String == "notes.pdf")
     }
 
     @Test func heldImagesAreRestoredWhereTheHarnessLeftThemOut() throws {
@@ -124,7 +137,9 @@ struct DeviceThreadStoreTests {
         let store = DeviceThreadStore(directory: nil)
         _ = try await store.add(thread("a", at: "2026-01-01T00:00:00Z"))
         _ = try await store.add(thread("b", at: "2026-01-02T00:00:00Z"))
-        #expect(try await store.list().map(\.id) == ["b", "a"])
+        // Chats active at the same time list by id, the later first.
+        _ = try await store.add(thread("c", at: "2026-01-01T00:00:00Z"))
+        #expect(try await store.list().map(\.id) == ["b", "c", "a"])
         #expect(try await store.add(thread("a", at: "2026-01-03T00:00:00Z")) == nil)
         let updated = try await store.update("a") { current in
             var next = current!
@@ -138,9 +153,29 @@ struct DeviceThreadStoreTests {
         #expect(skipped == nil)
         try await store.delete("a")
         #expect(try await store.get("a") == nil)
-        #expect(try await store.list().map(\.id) == ["b"])
-        #expect(try await store.deleteAll() == 1)
+        #expect(try await store.list().map(\.id) == ["b", "c"])
+        #expect(try await store.deleteAll() == 2)
         #expect(try await store.list().isEmpty)
+    }
+
+    @Test func overlappingUpdatesOfOneChatKeepEachOthersChanges() async throws {
+        let store = DeviceThreadStore(directory: nil)
+        _ = try await store.add(thread("a", at: "2026-01-01T00:00:00Z"))
+        // Each update appends a message to what it reads; a lost update
+        // would leave fewer than all of them.
+        await withTaskGroup(of: Void.self) { group in
+            for index in 0..<8 {
+                group.addTask {
+                    _ = try? await store.update("a") { current in
+                        var next = current!
+                        next.messages.append(.object(["id": .string("m\(index)"), "role": .string("user"), "createdAt": .string("2026-01-01T00:00:00Z"), "content": .string("\(index)")]))
+                        return next
+                    }
+                }
+            }
+        }
+        #expect(try await store.get("a")?.messages.count == 9)
+        #expect(try await store.list().first?.messageCount == 9)
     }
 
     @Test func originalsFollowTheAttachmentsThatRemain() async throws {

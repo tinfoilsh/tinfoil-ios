@@ -99,16 +99,46 @@ struct ChatListTests {
         #expect(list.pinnedListed.isEmpty)
     }
 
-    @Test func aFailedListingOffersARetryFromItsCursor() async throws {
+    /// A first page as full as the list reads ahead, so the next waits for
+    /// Load More.
+    private var fullPage: [ThreadSummary] {
+        (0..<ChatList.pageSize).map { summary("p\($0)") }
+    }
+
+    @Test func aFailedPageIsReadAgainFromItsCursor() async throws {
         let (list, transport) = await makeList()
+        await transport.push(ListPage.json(fullPage, pinned: [], next: "c2"))
+        try await list.refresh()
+        #expect(list.nextCursor == "c2")
         await transport.push(Answers.refusal(503, code: "UPSTREAM_REFUSED", action: "retry"))
-        await #expect(throws: HarnessError.self) { try await list.refresh() }
+        await list.loadMore()?.value
         #expect(list.error != nil)
         #expect(!list.loading)
-        await transport.push(ListPage.json([summary("a")], pinned: []))
-        try await list.refresh()
+        #expect(list.cloudListed.count == ChatList.pageSize)
+        // The last page's cursor is empty.
+        await transport.push(ListPage.json([summary("b")], next: ""))
+        await list.retry().value
         #expect(list.error == nil)
-        #expect(list.cloudListed.map(\.id) == ["a"])
+        #expect(list.cloudListed.last?.id == "b")
+        #expect(list.cloudListed.count == ChatList.pageSize + 1)
+        #expect(list.nextCursor == nil)
+        let cursors = await transport.requests.filter { $0.route == .list }.map { $0.json["cursor"] as? String }
+        #expect(cursors == [nil, "c2", "c2"])
+    }
+
+    @Test func aPageLoadsWithTheListMarkedLoading() async throws {
+        let (list, transport) = await makeList()
+        await transport.push(ListPage.json(fullPage, pinned: [], next: "c2"))
+        try await list.refresh()
+        #expect(!list.loading)
+        await transport.push(ListPage.json([summary("b")], next: ""))
+        let load = list.loadMore()
+        // The load starts once this turn of the main actor yields.
+        await Task.yield()
+        #expect(list.loading)
+        await load?.value
+        #expect(!list.loading)
+        #expect(list.cloudListed.last?.id == "b")
     }
 }
 

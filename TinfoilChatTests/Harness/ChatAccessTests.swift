@@ -30,14 +30,20 @@ private final class Reported: @unchecked Sendable {
     var limits: [HarnessRateLimit] = []
 }
 
+/// A clock a test moves.
+private final class Clock: @unchecked Sendable {
+    var now: Date
+    init(_ now: Date) { self.now = now }
+}
+
 @Suite("Chat access")
 struct ChatAccessTests {
     private let now = ChatAccessCache.date(of: "2027-01-15T00:00:00Z")!
     private let inAnHour = "2027-01-15T01:00:00Z"
 
-    private func cache(_ controlPlane: ScriptedControlPlane, reported: Reported = Reported(), now: Date? = nil) -> ChatAccessCache {
-        let at = now ?? self.now
-        return ChatAccessCache(controlPlane: controlPlane, onRateLimit: { reported.limits.append($0) }, now: { at })
+    private func cache(_ controlPlane: ScriptedControlPlane, reported: Reported = Reported(), clock: Clock? = nil) -> ChatAccessCache {
+        let clock = clock ?? Clock(now)
+        return ChatAccessCache(controlPlane: controlPlane, onRateLimit: { reported.limits.append($0) }, now: { clock.now })
     }
 
     @Test func aSubscribersTokenIsMintedOnceAndReportsItsQuota() async throws {
@@ -74,20 +80,27 @@ struct ChatAccessTests {
         let resets = "2027-01-15T00:30:00Z"
         let plane = ScriptedControlPlane([
             answer(429, #"{"code":"HOURLY_LIMIT_REACHED","error":"Hourly limit reached","resets_at":"\#(resets)"}"#),
+            answer(200, #"{"key":"tok_2","expires_at":"\#(inAnHour)"}"#),
         ])
         let reported = Reported()
-        let access = cache(plane, reported: reported)
+        let clock = Clock(now)
+        let access = cache(plane, reported: reported, clock: clock)
         let first = await failure { try await access.get(identity: "jwt") }
         #expect(first?.code == HarnessErrorCode.quotaExhausted)
         #expect(first?.action == .wait)
         #expect(first?.detail.kind == "hourly")
         #expect(first?.detail.resetsAt == resets)
         #expect(reported.limits.first?.remaining == 0)
-        // The refusal answers again without asking the control plane.
+        // The refusal answers again without asking the control plane, and
+        // names when it lifts.
         let second = await failure { try await access.get(identity: "jwt") }
         #expect(second == first)
         #expect(await plane.calls.count == 1)
-        #expect(await access.renewsAt() == nil)
+        #expect(await access.renewsAt() == ChatAccessCache.date(of: resets))
+        // Once it lifts, the control plane is asked again.
+        clock.now = ChatAccessCache.date(of: resets)!.addingTimeInterval(1)
+        #expect(try await access.get(identity: "jwt") == "tok_2")
+        #expect(await plane.calls.count == 2)
     }
 
     @Test func aTransientFailureKeepsTheTokenHeld() async throws {
