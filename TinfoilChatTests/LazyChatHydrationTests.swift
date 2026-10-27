@@ -121,6 +121,7 @@ private actor RecordingChatLoadingService: ChatLoadingService {
     func deletedStorages() -> [ChatStorageTab] { deleteCalls.map(\.1) }
 }
 
+@Suite(.serialized)
 struct LazyChatHydrationTests {
     @Test
     func publishesThousandIndexSummariesWithoutLoadingFullChats() async throws {
