@@ -14,7 +14,6 @@ struct ChatListView: View {
     let onRequestSignIn: () -> Void
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @Binding var messageText: String
-    @ObservedObject private var recoveryDraftStore = ChatRecoveryDraftStore.shared
 
     @State private var isAtBottom = true
     @State private var userHasScrolled = false
@@ -26,63 +25,18 @@ struct ChatListView: View {
     @State private var scrollTrigger = UUID()
     @State private var scrollToUserTrigger = UUID()
     @State private var tableOpacity = 1.0
-    @State private var archivedMessagesStartIndex = 0
-
-    private var pendingRecoveryTurnIds: Set<String> {
-        Set((viewModel.currentChat?.pendingRecoveries ?? []).map(\.turnId))
-    }
 
     private var isCurrentChatReadOnly: Bool {
         viewModel.isCurrentChatSafeguardFlagged
     }
 
-    private var recoveryDraftTurnIds: Set<String> {
-        let chatId = viewModel.currentChat?.id
-        return Set(recoveryDraftStore.drafts.keys.compactMap { key in
-            key.chatId == chatId && pendingRecoveryTurnIds.contains(key.turnId)
-                ? key.turnId
-                : nil
-        })
-    }
-
     private var messages: [Message] {
-        guard let chatId = viewModel.currentChat?.id else {
-            return viewModel.messages
-        }
-        return messagesApplyingRecoveryDrafts(
-            viewModel.messages,
-            chatId: chatId,
-            pendingTurnIds: pendingRecoveryTurnIds,
-            drafts: recoveryDraftStore.drafts
-        )
-    }
-
-    /// Token estimation walks every message, so the result is cached and
-    /// refreshed only when the conversation, model, or message count changes
-    /// instead of on every body evaluation during streaming.
-    private func refreshArchivedMessagesStartIndex() {
-        let persistedMessages = viewModel.messages
-        let reasoningHistoryPolicy = AppConfig.shared.reasoningHistoryPolicy(for: viewModel.currentModel)
-        let persistedStartIndex = TokenEstimation.findContextStartIndex(
-            messages: persistedMessages,
-            budgetTokens: TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindowTokens),
-            reasoningHistoryPolicy: reasoningHistoryPolicy
-        )
-        guard persistedMessages.indices.contains(persistedStartIndex) else {
-            archivedMessagesStartIndex = 0
-            return
-        }
-        let boundaryMessageId = persistedMessages[persistedStartIndex].id
-        archivedMessagesStartIndex = messages.firstIndex {
-            $0.id == boundaryMessageId
-        } ?? persistedStartIndex
+        viewModel.messages
     }
 
     var body: some View {
         MessageTableView(
             messages: messages,
-            recoveryDraftTurnIds: recoveryDraftTurnIds,
-            archivedMessagesStartIndex: archivedMessagesStartIndex,
             isDarkMode: isDarkMode,
             isLoading: isLoading,
             onRequestSignIn: onRequestSignIn,
@@ -221,10 +175,6 @@ struct ChatListView: View {
             guard !viewModel.hasActiveStreams, authManager.isAuthenticated, !Task.isCancelled else { return }
             await authManager.safeguards.refresh()
         }
-        .onAppear {
-            refreshArchivedMessagesStartIndex()
-            pruneRecoveryDrafts()
-        }
         .onDisappear {
             viewModel.isScrollInteractionActive = false
         }
@@ -248,11 +198,7 @@ struct ChatListView: View {
             isKeyboardVisible = false
             keyboardHeight = 0
         }
-        .onChange(of: viewModel.currentModel.id) { _, _ in
-            refreshArchivedMessagesStartIndex()
-        }
         .onChange(of: messages.count) { oldCount, newCount in
-            refreshArchivedMessagesStartIndex()
             if newCount > oldCount {
                 let newMessages = messages.suffix(newCount - oldCount)
                 let hasUserMessage = newMessages.contains { $0.role == .user }
@@ -269,9 +215,6 @@ struct ChatListView: View {
                 }
             }
         }
-        .onChange(of: pendingRecoveryTurnIds) { _, _ in
-            pruneRecoveryDrafts()
-        }
         // Keyed off the chat id: reassigning the same chat (e.g. the disk
         // reload after a stream's backup completes) must not read as a chat
         // switch, since this handler force-scrolls to the bottom. Timestamps
@@ -279,8 +222,6 @@ struct ChatListView: View {
         // precision through the cloud sync ISO8601 round-trip, making
         // reloaded copies of the same chat compare unequal.
         .onChange(of: viewModel.currentChat?.id) { _, _ in
-            refreshArchivedMessagesStartIndex()
-            pruneRecoveryDrafts()
             userHasScrolled = false
             viewModel.isScrollInteractionActive = false
 
@@ -366,13 +307,5 @@ struct ChatListView: View {
         .accessibilityAddTraits(.updatesFrequently)
         .transition(.opacity)
         .animation(.easeInOut(duration: Constants.ChatFork.overlayFadeSeconds), value: viewModel.forkingChatId)
-    }
-
-    private func pruneRecoveryDrafts() {
-        guard let chatId = viewModel.currentChat?.id else { return }
-        recoveryDraftStore.prune(
-            chatId: chatId,
-            retaining: pendingRecoveryTurnIds
-        )
     }
 }

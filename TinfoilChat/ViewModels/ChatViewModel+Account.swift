@@ -1,0 +1,437 @@
+import Foundation
+import OSLog
+
+extension ChatViewModel {
+    // MARK: - Signing in and out
+
+    func handleSignIn() {
+        guard let userId = currentUserId else { return }
+        guard isAppPresentationReady else {
+            needsSignInWhenPresentationReady = true
+            return
+        }
+        signInTask?.cancel()
+        let token = accountOperationFence.begin(userId: userId)
+        activeSignInToken = token
+        signInTask = Task { [weak self] in
+            await self?.performSignIn(token: token, userId: userId)
+        }
+    }
+
+    private func isCurrentAccountOperation(_ token: AccountOperationFence.Token, userId: String) -> Bool {
+        token.userId == userId && accountOperationFence.isCurrent(token, currentUserId: currentUserId)
+    }
+
+    private func isCurrentSignIn(_ token: AccountOperationFence.Token, userId: String) -> Bool {
+        !Task.isCancelled && isCurrentAccountOperation(token, userId: userId)
+    }
+
+    /// The token of the sign-in in progress, or a new one for an operation
+    /// after it.
+    private func currentAccountOperationToken(userId: String) -> AccountOperationFence.Token {
+        if let activeSignInToken, accountOperationFence.isCurrent(activeSignInToken, currentUserId: userId) {
+            return activeSignInToken
+        }
+        let token = accountOperationFence.begin(userId: userId)
+        activeSignInToken = token
+        return token
+    }
+
+    private func finishSignIn(_ token: AccountOperationFence.Token, userId: String) {
+        guard isCurrentSignIn(token, userId: userId) else { return }
+        if activeSignInToken == token { activeSignInToken = nil }
+        readyForAccountActionsUserId = userId
+    }
+
+    /// Opens the account's session, unlocks its content key through a
+    /// passkey or the user, and loads its chats.
+    private func performSignIn(token: AccountOperationFence.Token, userId: String) async {
+        guard isCurrentSignIn(token, userId: userId) else { return }
+        isAccountTeardownInProgress = false
+        passkeyManager.resumeAccountOperations()
+        await openSession()
+        guard isCurrentSignIn(token, userId: userId) else { return }
+        // Sign-out clears account-bound token providers, so restore them
+        // before passkey recovery or any other key registry request.
+        await SyncEnclaveClient.shared.setTokenGetter { refresh in try await ClerkIdentity.token(refresh: refresh) }
+        guard isCurrentSignIn(token, userId: userId) else { return }
+        // Local chats with messages turn the Local tab on, unless the user
+        // chose otherwise.
+        if session?.list.deviceListed.contains(where: { $0.messageCount > 0 }) == true,
+           UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.localOnlyModeEnabled) == nil {
+            SettingsManager.shared.isLocalOnlyModeEnabled = true
+        }
+        // If no cloud key exists, try passkey recovery before falling back
+        if !EncryptionService.shared.hasEncryptionKey() {
+            passkeySetupFailure = nil
+            let result = await passkeyManager.attemptPasskeyKeyRecovery()
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            switch result {
+            case .success, .newUserSetupDone:
+                break
+            case .manualSetupRequired:
+                cloudSyncOnboardingMode = .setup
+                showCloudSyncOnboarding = true
+                finishSignIn(token, userId: userId)
+                return
+            case .manualRecoveryRequired:
+                cloudSyncOnboardingMode = .recovery
+                showCloudSyncOnboarding = true
+                finishSignIn(token, userId: userId)
+                return
+            case .temporarilyUnavailable:
+                needsSignInWhenPresentationReady = true
+                finishSignIn(token, userId: userId)
+                return
+            case .setupFailed(let failure):
+                passkeySetupFailure = failure
+                finishSignIn(token, userId: userId)
+                return
+            case .recoveryFailed:
+                finishSignIn(token, userId: userId)
+                return
+            }
+        }
+        do {
+            _ = try await EncryptionService.shared.initialize()
+        } catch {
+            syncErrors.append(error.localizedDescription)
+        }
+        guard isCurrentSignIn(token, userId: userId) else { return }
+        if !CloudKeyAuthorizationStore.shared.hasAuthorizedCurrentPrimaryKey(userId: userId) {
+            let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            if validation.canWrite {
+                _ = CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated, userId: userId)
+            }
+        }
+        // A local key that mismatches the enclave's registered key can never
+        // open the account's chats. Converge silently via passkey when
+        // possible; otherwise prompt the user to recover.
+        if SettingsManager.shared.isCloudSyncEnabled {
+            let mismatch = await passkeyManager.resolveKeyMismatchAtLaunch()
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            if mismatch == .manualRecoveryRequired {
+                cloudSyncOnboardingMode = .recovery
+                showCloudSyncOnboarding = true
+            }
+        }
+        await passkeyManager.checkPasskeyStateForExistingKey()
+        guard isCurrentSignIn(token, userId: userId) else { return }
+        startLegacyMigration(token: token, userId: userId)
+        await keyChanged()
+        guard isCurrentSignIn(token, userId: userId) else { return }
+        if SettingsManager.shared.isCloudSyncEnabled, let saved = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.cloudSyncActiveTab).flatMap(ChatStorageTab.init(rawValue:)) {
+            activeStorageTab = saved
+        } else if !SettingsManager.shared.isCloudSyncEnabled {
+            activeStorageTab = .local
+        }
+        lastSyncDate = Date()
+        if currentChat == nil || currentChat?.id.isEmpty == true { createNewChat(focusInput: false) }
+        finishSignIn(token, userId: userId)
+    }
+
+    /// The content key was set, recovered or rotated: the account's chats and
+    /// settings load again with it.
+    func keyChanged() async {
+        guard let session else { return }
+        session.account.invalidateKey()
+        session.list.clearCloud()
+        if !session.open.onDevice { session.newChat(local: false) }
+        session.controller.clearReceipt()
+        await session.account.refreshProfile()
+        if session.account.keyReady {
+            session.list.reload()
+            await loadProjects()
+        }
+    }
+
+    func handleSignOut() async {
+        speechPlayer.stop()
+        cancelMessageEdit()
+        cancelAudioRecording()
+        clearPendingAttachments()
+        let signingOutUserId = currentUserId
+        isAccountTeardownInProgress = true
+        clearProjectState()
+        isSyncing = false
+        signInTask?.cancel()
+        signInTask = nil
+        activeSignInToken = nil
+        legacyMigrationTask?.cancel()
+        legacyMigrationTask = nil
+        await accountOperationTracker.closeAndWait()
+        session?.account.dispose()
+        session = nil
+        await SyncEnclaveClient.shared.reset()
+        CloudKeyAuthorizationStore.shared.clearAuthorization(userId: signingOutUserId)
+        passkeySetupFailure = nil
+        await passkeyManager.reset()
+        activeStorageTab = .cloud
+        isViewingProjectChat = false
+        readyForAccountActionsUserId = nil
+    }
+
+    /// The account's teardown ended: a signed-out session opens.
+    func completeAccountTeardown() {
+        isAccountTeardownInProgress = false
+        accountOperationTracker.reopen()
+        Task { await openSession() }
+    }
+
+    func resetSharedProfileSettingsForAccountTeardown() {}
+
+    /// Wipes the chats this device kept for the account signing out.
+    func wipeLocalChatsForSignOut() async {
+        guard let userId = currentUserId else { return }
+        session?.account.dispose()
+        session = nil
+        Self.wipeDeviceChats(userId: userId)
+    }
+
+    static func wipeDeviceChats(userId: String) {
+        if let directory = try? DeviceThreadStore.directory(userId: userId) {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        LegacyDeviceChats.wipe(userId: userId)
+        PromptCacheSecret.forget(userId: userId)
+    }
+
+    /// The account's subscription changed: its chat access is minted again,
+    /// and the session read again for what it now offers.
+    func subscriptionChanged() {
+        guard let session else { return }
+        Task {
+            do { try await session.account.refresh(credentials: true) } catch { session.account.report(error) }
+        }
+    }
+
+    /// Stops narration for the account that signed out or changed.
+    func invalidateAccountPlayback() {
+        guard speechPlayer.snapshot.owner != nil else { return }
+        speechPlayer.stop()
+    }
+
+    func updateModelBasedOnAuthStatus(isAuthenticated: Bool, hasActiveSubscription: Bool) {
+        guard let session else { return }
+        Task {
+            do { try await session.account.refresh(credentials: true) } catch { session.account.report(error) }
+            if isAuthenticated { await loadProjects() }
+        }
+    }
+
+    // MARK: - Legacy rows
+
+    /// Rows the previous clients sealed under earlier keys are re-sealed
+    /// by the key registry under the current one.
+    func startLegacyMigration(token: AccountOperationFence.Token, userId: String) {
+        let previousTask = legacyMigrationTask
+        previousTask?.cancel()
+        legacyMigrationTask = Task { [weak self] in
+            await previousTask?.value
+            guard let self, isCurrentSignIn(token, userId: userId) else { return }
+            _ = await LegacyBlobMigration.runAndFinalize()
+            guard isCurrentSignIn(token, userId: userId) else { return }
+            await passkeyManager.refreshBundleState()
+        }
+    }
+
+    // MARK: - Keys and passkeys
+
+    func getCurrentEncryptionKey() -> String? {
+        EncryptionService.shared.getKey()
+    }
+
+    func reloadEncryptionKey() {
+        Task { await keyChanged() }
+    }
+
+    func initializeExistingEncryptionKeyIfAvailable() async {
+        guard let operationUserId = currentUserId, EncryptionService.shared.hasEncryptionKey() else { return }
+        let operationTask = Task {
+            guard !Task.isCancelled else { return }
+            _ = try? await EncryptionService.shared.initialize()
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            operationTask.cancel()
+            return
+        }
+        defer { accountOperationTracker.end(operationToken) }
+        await operationTask.value
+        guard currentUserId == operationUserId else { return }
+        await keyChanged()
+    }
+
+    /// Sets the content key, recovering the account's data with it or
+    /// starting the account afresh.
+    func setEncryptionKey(_ key: String, mode: CloudKeyActivationMode = .recoverExisting) async throws {
+        guard let operationUserId = currentUserId else { throw CancellationError() }
+        let operationTask = Task {
+            try await self.performSetEncryptionKey(key, mode: mode, operationUserId: operationUserId)
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            operationTask.cancel()
+            throw CancellationError()
+        }
+        defer { accountOperationTracker.end(operationToken) }
+        try await operationTask.value
+        try ensureCurrentAccount(operationUserId)
+        // A v1 user activating their key on a fresh device has legacy cloud
+        // data but no registered key. Re-kick migration now that a key is
+        // active so adoption happens in-session.
+        startLegacyMigration(token: currentAccountOperationToken(userId: operationUserId), userId: operationUserId)
+    }
+
+    private func performSetEncryptionKey(_ key: String, mode: CloudKeyActivationMode, operationUserId: String) async throws {
+        try Task.checkCancellation()
+        do {
+            switch mode {
+            case .recoverExisting:
+                _ = try await CloudKeyAuthorizationStore.shared.applyPrimaryKeyWithValidation(key)
+                try ensureCurrentAccount(operationUserId)
+            case .explicitStartFresh:
+                // Stage the key in memory so the enclave handshake runs
+                // against it without writing it to the Keychain first. Only
+                // after the enclave registers the start-fresh key do we
+                // persist it, so a new key is never stranded locally while
+                // the enclave keeps the old one.
+                var remoteRegistrationCommitted = false
+                do {
+                    try await EncryptionService.shared.setKey(key, persist: false)
+                    try ensureCurrentAccount(operationUserId)
+                    try await CloudKeyAuthorizationStore.shared.registerStartFreshKeyIfNeeded()
+                    remoteRegistrationCommitted = true
+                    try EncryptionService.shared.persistCurrentKeyState()
+                } catch {
+                    if !remoteRegistrationCommitted { EncryptionService.shared.discardStagedKeyState() }
+                    throw error
+                }
+                _ = CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh)
+            }
+            try ensureCurrentAccount(operationUserId)
+            showEncryptionSetup = false
+            isFirstTimeUser = false
+            await keyChanged()
+            try ensureCurrentAccount(operationUserId)
+            if passkeyManager.passkeyActive {
+                await passkeyManager.updatePasskeyBackup()
+                try ensureCurrentAccount(operationUserId)
+            }
+        } catch {
+            guard currentUserId == operationUserId else { throw CancellationError() }
+            if !(error is CancellationError) { syncErrors.append(error.localizedDescription) }
+            throw error
+        }
+    }
+
+    func retryPasskeyRecovery() async -> Bool {
+        guard let operationUserId = currentUserId else {
+            PasskeyDiagnostics.failure("retryRecovery: no current user id (auth still settling?)")
+            return false
+        }
+        let operationTask = Task { [passkeyManager] in
+            guard !Task.isCancelled else { return false }
+            return await passkeyManager.retryPasskeyRecovery()
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            PasskeyDiagnostics.failure("retryRecovery: rejected, account operation tracker is closed (account transition in progress)")
+            operationTask.cancel()
+            return false
+        }
+        defer { accountOperationTracker.end(operationToken) }
+        let succeeded = await operationTask.value
+        guard currentUserId == operationUserId else {
+            PasskeyDiagnostics.failure("retryRecovery: user changed mid-operation")
+            return false
+        }
+        if succeeded { await keyChanged() }
+        return succeeded
+    }
+
+    func reattemptPasskeyRecovery() async -> PasskeyRecoveryResult? {
+        guard let operationUserId = currentUserId else { return nil }
+        let operationTask = Task { [passkeyManager] in
+            guard !Task.isCancelled else { return PasskeyRecoveryResult.recoveryFailed }
+            return await passkeyManager.reenableRecoveryPrompt()
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            operationTask.cancel()
+            return nil
+        }
+        defer { accountOperationTracker.end(operationToken) }
+        let result = await operationTask.value
+        guard currentUserId == operationUserId else { return nil }
+        if case .success = result { await keyChanged() }
+        return result
+    }
+
+    func startFreshWithNewKey() async -> PasskeyBackupResult {
+        guard let operationUserId = currentUserId else { return .failure(.registerFailed) }
+        let operationTask = Task { [passkeyManager] in
+            guard !Task.isCancelled else { return PasskeyBackupResult.failure(.userCancelled) }
+            return await passkeyManager.startFreshWithNewKey()
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            operationTask.cancel()
+            return .failure(.userCancelled)
+        }
+        defer { accountOperationTracker.end(operationToken) }
+        let result = await operationTask.value
+        guard currentUserId == operationUserId else { return .failure(.userCancelled) }
+        if case .success = result { await keyChanged() }
+        return result
+    }
+
+    func retryPasskeySetup() async -> PasskeyRecoveryResult {
+        guard let operationUserId = currentUserId else { return .recoveryFailed }
+        let operationTask = Task { [passkeyManager] in
+            guard !Task.isCancelled else { return PasskeyRecoveryResult.recoveryFailed }
+            return await passkeyManager.retryPasskeySetup()
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            operationTask.cancel()
+            return .recoveryFailed
+        }
+        defer { accountOperationTracker.end(operationToken) }
+        let result = await operationTask.value
+        guard currentUserId == operationUserId else { return .recoveryFailed }
+        switch result {
+        case .success, .newUserSetupDone:
+            startLegacyMigration(token: currentAccountOperationToken(userId: operationUserId), userId: operationUserId)
+            await keyChanged()
+        default:
+            break
+        }
+        return result
+    }
+
+    @discardableResult
+    func createPasskeyBackup() async -> PasskeyBackupResult {
+        guard let operationUserId = currentUserId else { return .failure(.registerFailed) }
+        let operationTask = Task { [passkeyManager] in
+            guard !Task.isCancelled else { return PasskeyBackupResult.failure(.userCancelled) }
+            return await passkeyManager.createPasskeyBackup()
+        }
+        guard let operationToken = accountOperationTracker.begin(task: operationTask) else {
+            operationTask.cancel()
+            return .failure(.userCancelled)
+        }
+        defer { accountOperationTracker.end(operationToken) }
+        let result = await operationTask.value
+        guard currentUserId == operationUserId else { return .failure(.userCancelled) }
+        guard case .success = result else { return result }
+        startLegacyMigration(token: currentAccountOperationToken(userId: operationUserId), userId: operationUserId)
+        return .success
+    }
+
+    /// The user set a key by hand: the account's data loads with it.
+    func resumeAfterManualKeySetup() async {
+        await keyChanged()
+        if currentChat == nil { createNewChat(focusInput: false) }
+    }
+
+    private func ensureCurrentAccount(_ userId: String) throws {
+        try Task.checkCancellation()
+        guard currentUserId == userId else { throw CancellationError() }
+    }
+}

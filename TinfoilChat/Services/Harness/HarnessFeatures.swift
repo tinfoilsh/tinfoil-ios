@@ -1,6 +1,7 @@
 import Foundation
 import OSLog
 import UIKit
+import UniformTypeIdentifiers
 
 private let featuresLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Harness")
 
@@ -107,10 +108,8 @@ struct SearchPage: Decodable, Equatable, Sendable {
 
 @MainActor
 enum HarnessSearch {
-    static let limit = 20
-
     static func search(_ account: HarnessAccount, query: String) async throws -> SearchPage {
-        try await account.post(.search, SearchRequest(query: query, limit: limit))
+        try await account.post(.search, SearchRequest(query: query, limit: Constants.Harness.Search.resultLimit))
     }
 }
 
@@ -276,6 +275,19 @@ enum HarnessUploads {
     private static func fileExtension(of name: String) -> String {
         guard let dot = name.lastIndex(of: "."), dot != name.startIndex else { return "" }
         return name[dot...].lowercased()
+    }
+
+    /// A file's MIME type from its name, as an upload names it.
+    static func mimeType(for fileName: String) -> String {
+        let ext = (fileName as NSString).pathExtension
+        if let type = UTType(filenameExtension: ext), let mimeType = type.preferredMIMEType { return mimeType }
+        switch ext.lowercased() {
+        case "md": return "text/markdown"
+        case "csv": return "text/csv"
+        case "json": return "application/json"
+        case "xml": return "application/xml"
+        default: return "application/octet-stream"
+        }
     }
 
     /// Refuses a picked file before it uploads: one larger than its group

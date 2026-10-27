@@ -248,9 +248,6 @@ struct SafeguardsSettingsView: View {
         return (chatViewModel.localSidebarSummaries + chatViewModel.cloudSidebarSummaries)
             .first {
                 $0.id == flag.conversationId
-                    && !$0.decryptionFailed
-                    && !$0.dataCorrupted
-                    && ($0.isLocalOnly || !DeletedChatsTracker.shared.isDeleted($0.id))
                     && PremiumProjectPolicy.includesChat(
                         projectId: $0.projectId,
                         hasPremiumAccess: chatViewModel.hasPremiumAccess

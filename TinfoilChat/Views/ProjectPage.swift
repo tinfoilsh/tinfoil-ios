@@ -11,7 +11,6 @@ import SwiftUI
 struct ProjectPage: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
-    @ObservedObject private var profileManager = ProfileManager.shared
 
     @State private var deletingChatId: String?
     @State private var showDeleteChatAlert = false
@@ -159,7 +158,7 @@ struct ProjectPage: View {
                     }
                 }
                 Spacer()
-                if profileManager.isChatPinned(chat.id) {
+                if viewModel.isChatPinned(chat.id) {
                     Image(systemName: "pin.fill")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -172,13 +171,13 @@ struct ProjectPage: View {
         }
         .accessibilityHint("Opens chat")
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
-            if viewModel.canPinChat(chat) || profileManager.isChatPinned(chat.id) {
+            if viewModel.canPinChat(chat) || viewModel.isChatPinned(chat.id) {
                 Button {
                     viewModel.toggleChatPin(chat)
                 } label: {
                     Label(
-                        profileManager.isChatPinned(chat.id) ? "Unpin" : "Pin",
-                        systemImage: profileManager.isChatPinned(chat.id) ? "pin.slash" : "pin"
+                        viewModel.isChatPinned(chat.id) ? "Unpin" : "Pin",
+                        systemImage: viewModel.isChatPinned(chat.id) ? "pin.slash" : "pin"
                     )
                 }
                 .tint(.blue)
@@ -202,13 +201,13 @@ struct ProjectPage: View {
             .tint(.orange)
         }
         .contextMenu {
-            if viewModel.canPinChat(chat) || profileManager.isChatPinned(chat.id) {
+            if viewModel.canPinChat(chat) || viewModel.isChatPinned(chat.id) {
                 Button {
                     viewModel.toggleChatPin(chat)
                 } label: {
                     Label(
-                        profileManager.isChatPinned(chat.id) ? "Unpin" : "Pin",
-                        systemImage: profileManager.isChatPinned(chat.id) ? "pin.slash" : "pin"
+                        viewModel.isChatPinned(chat.id) ? "Unpin" : "Pin",
+                        systemImage: viewModel.isChatPinned(chat.id) ? "pin.slash" : "pin"
                     )
                 }
             }
@@ -422,7 +421,7 @@ struct ProjectDocumentsView: View {
                 filename: document.filename,
                 thumbnailBase64: document.thumbnailBase64,
                 textContent: document.content,
-                cacheKey: "project-document-\(document.id)-\(document.syncVersion)"
+                cacheKey: "project-document-\(document.id)-\(document.updatedAt)"
             )
             VStack(alignment: .leading, spacing: 2) {
                 Text(document.filename.isEmpty ? "Encrypted" : document.filename)

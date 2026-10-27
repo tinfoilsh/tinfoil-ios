@@ -81,7 +81,7 @@ enum PromptPresetSettings {
     /// substituted with a fallback.
     static func resolveModel(_ id: String?, available: [ModelType]) -> ModelType? {
         guard let id else { return nil }
-        if AutoModel.isAutoId(id) { return ModelAvailability.autoModel(from: available) }
+        if AutoModel.isAutoId(id) { return ModelType.auto }
         return available.first { $0.id == id }
     }
 

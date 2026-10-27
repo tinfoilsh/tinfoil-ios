@@ -244,42 +244,15 @@ enum LegacyBlobMigration {
         return report
     }
 
-    /// Drop the local alternative-keys list once the migration
-    /// report confirms every observed row has been re-sealed.
+    /// Drop the local alternative-keys list once the migration report
+    /// confirms every observed row has been re-sealed.
     @discardableResult
     static func finalizeAlternativesIfMigrated(_ report: MigrationReport) async -> Bool {
         guard !Task.isCancelled else { return false }
         guard report.fullyMigrated else { return false }
-        guard let userId = await Clerk.shared.user?.id,
-              let primary = try? EncryptionService.shared.getKeyBytesOrThrow(),
-              let primaryKeyId = try? SyncEnclaveKeyBundle.deriveKeyIdHex(cek: primary)
+        guard await Clerk.shared.user?.id != nil,
+              (try? EncryptionService.shared.getKeyBytesOrThrow()) != nil
         else {
-            return false
-        }
-        guard !Task.isCancelled else { return false }
-        guard let entries = try? await EncryptedFileStorage.cloud.loadIndex(userId: userId)
-        else {
-            return false
-        }
-        guard !Task.isCancelled else { return false }
-        for entry in entries {
-            guard !Task.isCancelled else { return false }
-            guard let chat = try? await EncryptedFileStorage.cloud.loadChat(
-                chatId: entry.id,
-                userId: userId
-            ) else {
-                return false
-            }
-            guard !Task.isCancelled else { return false }
-            if chat.pendingRecoveries?.contains(where: { $0.keyId != primaryKeyId }) == true {
-                return false
-            }
-        }
-        guard !Task.isCancelled else { return false }
-        guard await remoteRecoveriesUseOnlyPrimary(
-            userId: userId,
-            primaryKeyId: primaryKeyId
-        ) else {
             return false
         }
         guard !Task.isCancelled else { return false }
@@ -297,46 +270,6 @@ enum LegacyBlobMigration {
     }
 
     // MARK: - Private
-
-    private static func remoteRecoveriesUseOnlyPrimary(
-        userId: String,
-        primaryKeyId: String
-    ) async -> Bool {
-        var cursor: String?
-        var seenCursors: Set<String> = []
-        repeat {
-            guard !Task.isCancelled else { return false }
-            guard await Clerk.shared.user?.id == userId,
-                  let page = try? await CloudStorageService.shared.listChats(
-                      limit: Constants.SyncEnclave.listStatusPageLimit,
-                      continuationToken: cursor
-                  ),
-                  let pulled = try? await CloudStorageService.shared.pullChats(
-                      page.conversations.map(\.id)
-                  ),
-                  await Clerk.shared.user?.id == userId
-            else {
-                return false
-            }
-            guard !Task.isCancelled else { return false }
-            for result in pulled {
-                guard !Task.isCancelled else { return false }
-                guard case .ok(let chat) = result else {
-                    return false
-                }
-                if chat.pendingRecoveries?.contains(where: {
-                    $0.keyId != primaryKeyId
-                }) == true {
-                    return false
-                }
-            }
-            cursor = page.nextContinuationToken
-            if let cursor, !cursor.isEmpty, !seenCursors.insert(cursor).inserted {
-                return false
-            }
-        } while cursor?.isEmpty == false
-        return true
-    }
 
     /// Stable, non-secret fingerprint of the migration candidate key set
     /// (primary plus alternatives) the way `CEKEncoding.migrationKeys()`

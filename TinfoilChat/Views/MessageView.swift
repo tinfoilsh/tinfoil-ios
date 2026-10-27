@@ -19,51 +19,8 @@ struct IdentifiedGroup<T>: Identifiable {
     let items: [T]
 }
 
-private func messageHasPendingRecovery(
-    message: Message,
-    role: MessageRole,
-    pendingRecoveries: [PendingRecoveryEnvelope],
-    activeTurnId: String?
-) -> Bool {
-    guard message.role == role,
-          let turnId = message.turnId,
-          turnId != activeTurnId
-    else {
-        return false
-    }
-    return pendingRecoveries.contains { $0.turnId == turnId }
-}
-
-func shouldShowPendingResponseRecovery(
-    message: Message,
-    pendingRecoveries: [PendingRecoveryEnvelope],
-    activeTurnId: String?,
-    hasRecoveryDraft: Bool = false
-) -> Bool {
-    !hasRecoveryDraft && messageHasPendingRecovery(
-        message: message,
-        role: .user,
-        pendingRecoveries: pendingRecoveries,
-        activeTurnId: activeTurnId
-    )
-}
-
-func pendingResponseRecoveryDetail(phase: ChatRecoveryPhase) -> String {
-    switch phase {
-    case .generating:
-        return Constants.ChatRecovery.indicatorDetailGenerating
-    case .restoring:
-        return Constants.ChatRecovery.indicatorDetailRestoring
-    }
-}
-
-func shouldShowStreamError(message: Message, pendingRecoveries: [PendingRecoveryEnvelope]) -> Bool {
-    guard message.role == .assistant, let error = message.streamError else { return false }
-    let canRecover = message.isConnectionError || error == Constants.ChatRecovery.interruptedStreamMessage
-    let hasPendingRecovery = message.turnId.map { turnId in
-        pendingRecoveries.contains { $0.turnId == turnId }
-    } ?? false
-    return !canRecover || !hasPendingRecovery
+func shouldShowStreamError(message: Message) -> Bool {
+    message.role == .assistant && message.streamError != nil
 }
 
 enum AssistantMessageActionPolicy {
@@ -95,34 +52,6 @@ enum AssistantMessageActionPolicy {
     ) -> StreamErrorRetry? {
         guard canRegenerate else { return nil }
         return hasPartialResponse ? .continueResponse : .regenerate
-    }
-}
-
-private struct PendingResponseRecoveryView: View {
-    let isDarkMode: Bool
-    let phase: ChatRecoveryPhase
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Constants.ChatRecovery.indicatorTextSpacing) {
-            HStack(alignment: .center, spacing: Constants.ChatRecovery.indicatorSpacing) {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(isDarkMode ? .white.opacity(0.65) : .black.opacity(0.65))
-
-                Text(Constants.ChatRecovery.indicatorTitle)
-                    .font(.subheadline.weight(.medium))
-            }
-
-            Text(pendingResponseRecoveryDetail(phase: phase))
-                .font(.caption)
-                .foregroundColor(isDarkMode ? .white.opacity(0.55) : .black.opacity(0.55))
-        }
-        .foregroundColor(isDarkMode ? .white : .black)
-        .padding(.vertical, Constants.ChatRecovery.indicatorVerticalPadding)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            "\(Constants.ChatRecovery.indicatorTitle). \(pendingResponseRecoveryDetail(phase: phase))"
-        )
     }
 }
 
@@ -161,10 +90,8 @@ struct MessageView: View {
     let isDarkMode: Bool
     let isLastMessage: Bool
     let isLoading: Bool
-    let hasRecoveryDraft: Bool
     let messageIndex: Int
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
-    @ObservedObject private var recoveryPhaseTracker = ChatRecoveryPhaseTracker.shared
     @State private var showCopyFeedback = false
     @State private var cachedParsedContent: (thinkingText: String, remainderText: String, contentHash: Int)? = nil
     @State private var showLongMessageSheet = false
@@ -190,7 +117,7 @@ struct MessageView: View {
     }
 
     private var isRenderingStream: Bool {
-        (isLoading && isLastMessage) || (hasRecoveryDraft && message.isStreaming)
+        isLoading && isLastMessage
     }
 
     private var canUseUserMessageActions: Bool {
@@ -198,7 +125,6 @@ struct MessageView: View {
             && !viewModel.isLoading
             && viewModel.messageEditSession == nil
             && viewModel.pendingAttachments.isEmpty
-            && !viewModel.hasPendingResponseRecovery
     }
 
     private var canShowUserMessageMenu: Bool {
@@ -231,10 +157,7 @@ struct MessageView: View {
     }
 
     private var hasVisibleStreamError: Bool {
-        shouldShowStreamError(
-            message: message,
-            pendingRecoveries: recoveryContext.pendingRecoveries
-        )
+        shouldShowStreamError(message: message)
     }
 
     private var streamErrorRetry: AssistantMessageActionPolicy.StreamErrorRetry? {
@@ -308,23 +231,6 @@ struct MessageView: View {
         .buttonStyle(PlainButtonStyle())
         .accessibilityLabel(Constants.MessageActions.moreLabel)
         .accessibleHitTarget()
-    }
-
-    private var recoveryContext: (pendingRecoveries: [PendingRecoveryEnvelope], activeTurnId: String?) {
-        (
-            pendingRecoveries: viewModel.currentChat?.pendingRecoveries ?? [],
-            activeTurnId: viewModel.isLoading ? viewModel.messages.last?.turnId : nil
-        )
-    }
-
-    private var showsPendingResponseRecovery: Bool {
-        let context = recoveryContext
-        return shouldShowPendingResponseRecovery(
-            message: message,
-            pendingRecoveries: context.pendingRecoveries,
-            activeTurnId: context.activeTurnId,
-            hasRecoveryDraft: hasRecoveryDraft
-        )
     }
 
     /// Runs of adjacent segments collapsed for inline rendering. Adjacent
@@ -887,7 +793,7 @@ struct MessageView: View {
 
                 // Show an error box if the stream failed, with a button that
                 // continues the partial response or generates it again.
-                if shouldShowStreamError(message: message, pendingRecoveries: recoveryContext.pendingRecoveries) {
+                if shouldShowStreamError(message: message) {
                     ErrorMessageView(
                         errorMessage: message.streamError!,
                         isDarkMode: isDarkMode,
@@ -925,8 +831,7 @@ struct MessageView: View {
                                     .accessibilityLabel("Copy")
                                     .accessibleHitTarget()
 
-                                    if !hasRecoveryDraft,
-                                       viewModel.canUseReadAloud,
+                                    if viewModel.canUseReadAloud,
                                        SpeechTextProcessor.canRead(message),
                                        let chatId = viewModel.currentChat?.id {
                                         ReadAloudButton(
@@ -1042,15 +947,6 @@ struct MessageView: View {
                 }
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
 
-                if showsPendingResponseRecovery {
-                    PendingResponseRecoveryView(
-                        isDarkMode: isDarkMode,
-                        phase: recoveryPhaseTracker.phase(forTurnId: message.turnId)
-                    )
-                        .padding(.top, Constants.ChatRecovery.indicatorTopPadding)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
             }
         }
         .padding(.horizontal, 4)
@@ -1125,9 +1021,7 @@ struct MessageView: View {
         .sheet(isPresented: $showShareSheet) {
             if let currentChat = viewModel.currentChat {
                 ShareChatView(
-                    messages: currentChat.messages,
                     chatTitle: currentChat.title,
-                    chatCreatedAt: currentChat.createdAt,
                     chatId: currentChat.id
                 )
                 .id(currentChat.id)

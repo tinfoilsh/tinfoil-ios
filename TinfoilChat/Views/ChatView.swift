@@ -851,7 +851,6 @@ struct ModelTab: View {
     let isSelected: Bool
     let isDarkMode: Bool
     let isEnabled: Bool
-    let showPricingLabel: Bool
     var style: Style = .compact
     let onTap: () -> Void
 
@@ -872,21 +871,6 @@ struct ModelTab: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .opacity(isEnabled ? 1.0 : 0.7)
-
-                // Free/Premium indicator (only shown for non-premium users)
-                if showPricingLabel {
-                    Text(model.isFree ? "Free" : "Premium")
-                        .font(.system(size: 7, weight: .medium))
-                        .foregroundColor(isEnabled ? (model.isFree ? .green : .orange) : .gray)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(isEnabled ?
-                                      (model.isFree ? Color.green : Color.orange).opacity(0.1) :
-                                      Color.gray.opacity(0.1))
-                        )
-                }
             }
             .foregroundColor(isEnabled ? (isSelected ? .primary : .secondary) : .gray)
             .frame(width: style.cardSize.width, height: style.cardSize.height)
@@ -1138,7 +1122,7 @@ struct ModelPicker: View {
 
     var body: some View {
         Menu {
-            let selectableModels = AppConfig.shared.selectableModels
+            let selectableModels = viewModel.selectableModels
 
             ForEach(selectableModels) { model in
                 Button(action: {

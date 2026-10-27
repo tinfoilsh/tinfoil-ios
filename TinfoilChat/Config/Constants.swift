@@ -330,8 +330,19 @@ enum Constants {
         static let changePollSeconds: TimeInterval = 20
         /// The title of a chat waiting for its generated one.
         static let placeholderTitle = "New Chat"
+        static let temporaryTitle = "Temporary Chat"
         /// Where a device run's receipt is kept, by account.
         static let runReceiptKeyPrefix = "tinfoil-harness-run-"
+        /// Where an account's prompt cache secret is kept in the keychain.
+        static let promptCacheSecretKeyPrefix = "tinfoil-harness-prompt-cache-secret-"
+
+        enum Search {
+            static let debounceSeconds: TimeInterval = 0.3
+            static let resultLimit = 20
+            /// How long to wait before asking again while the index is
+            /// still being built.
+            static let reindexPollIntervalSeconds: TimeInterval = 2.0
+        }
 
         /// Where this device keeps the settings the harness does not hold.
         enum Profile {
@@ -381,26 +392,7 @@ enum Constants {
         /// How many full chat blobs to request per pull call. Keeps
         /// individual response payloads bounded when syncing many chats.
         static let pullBatchSize = 20
-
-        /// Encrypted chat search over the sync enclave. Mirrors the
-        /// webapp constants so both clients drive the enclave's
-        /// reindex lifecycle the same way.
-        enum Search {
-            static let debounceSeconds: TimeInterval = 0.3
-            static let resultLimit = 20
-            static let reindexPollIntervalSeconds: TimeInterval = 2.0
-            static let reindexServerBudgetSeconds: TimeInterval = 20 * 60.0
-            static let reindexResponseGraceSeconds: TimeInterval = 30.0
-            static let reindexPollBudgetSeconds: TimeInterval =
-                reindexServerBudgetSeconds + reindexResponseGraceSeconds
-            /// A failed rebuild puts further kicks on cooldown: every
-            /// attempt re-pulls and re-embeds the whole corpus, so
-            /// retrying on each query would loop a persistent failure
-            /// at full rebuild cost.
-            static let reindexFailureCooldownSeconds: TimeInterval = 60.0
-        }
     }
-
 
     enum Onboarding {
         static let completionMetadataKey = "has_completed_onboarding"
@@ -501,10 +493,6 @@ enum Constants {
         /// Label for an unset per-preset model or web search override, shown
         /// in the editor pickers and the detail view.
         static let noOverrideLabel = "No override set"
-    }
-
-    enum ChatFavorites {
-        static let maxPinnedChats = 20
     }
 
     enum AddToChatSheet {
@@ -614,53 +602,15 @@ enum Constants {
         static let collapseDelaySeconds: TimeInterval = 3.0
     }
 
-    enum Summarizer {
-        static let enclaveURL = "https://summarizer.tinfoil.sh"
-        static let configRepo = "tinfoilsh/confidential-summarizer"
-    }
-
     enum Metadata {
-        static let enclaveURL = "https://opengraph-metadata.tinfoil.sh"
-        static let configRepo = "tinfoilsh/confidential-website-metadata-fetcher"
         /// Cap on cached metadata and favicon entries.
         static let cacheEntryLimit = 200
     }
 
-    enum DocumentProcessing {
-        static let enclaveURL = "https://doc-upload.inf9.tinfoil.sh"
-        static let configRepo = "tinfoilsh/confidential-doc-upload"
-        static let convertPath = "/v1/convert/file"
-        static let defaultMode = "text"
-    }
-
-    enum ThinkingSummary {
-        static let minContentLength = 100
-        static let cooldownSeconds: TimeInterval = 3.0
-        static let tailWordCount = 200
-    }
-
-    enum ImageDescription {
-        /// Prompt used to turn an image into reusable text for project context,
-        /// matching the webapp so descriptions read the same across clients.
-        static let prompt = """
-        Describe this image in detail. Include:
-        - What is happening in the image
-        - Colors (provide hex codes where relevant)
-        - Any text visible in the image
-        - Layout and composition
-        - Other notable details
-        """
-        /// Attribute tag advertised by the controlplane for low-latency models.
-        static let preferredModelAttribute = "fast"
-    }
-
-    enum TitleGeneration {
-        static let wordThreshold = 100
-        static let systemPrompt = "Generate a concise, descriptive title of minimum 2 words, maximum 5 words for the following text. NEVER output markdown."
-    }
-
     enum Audio {
         static let microphoneIconName = "mic"
+        /// Recordings are AAC in an MPEG-4 container.
+        static let recordingMimeType = "audio/mp4"
         static let recordingTimeoutSeconds: TimeInterval = 600  // 10 minutes
         static let holdToRecordMinimumPressSeconds: TimeInterval = 0.3
         static let recordingButtonDiameter: CGFloat = 32
@@ -691,30 +641,24 @@ enum Constants {
     }
 
     enum Speech {
-        static let model = "qwen3-tts"
-        static let voice = "aiden"
-        static let instructions = "Read in a calm, natural conversational voice with a steady pace, consistent pitch range, and restrained expression. Use natural sentence pauses and maintain an even narration style."
+        /// The chat service streams a message's audio as raw PCM: mono,
+        /// signed 16-bit little-endian.
         static let contentType = "audio/pcm"
         static let sampleRate = 24_000
         static let channels: UInt32 = 1
         static let bytesPerSample = MemoryLayout<Int16>.size
         static let pcmScale: Float = 32_768
         static let blockSamples = 6_000
-        static let targetChunkCharacters = 300
-        static let maxChunkCharacters = 600
-        static let maxTextCharacters = 100_000
-        static let concurrentRequests = 2
-        static let lookaheadChunks = 4
+        static let concurrentRequests = 1
+        static let lookaheadChunks = 1
         static let startBufferSeconds = 12
         static let highWaterSeconds = 60
-        static let maxChunkAudioSeconds = 120
-        static let requestTimeoutSeconds: Double = 120
-        static let maxChunkSamples = maxChunkAudioSeconds * sampleRate
-        static let maxBufferedSamples = (highWaterSeconds + concurrentRequests * maxChunkAudioSeconds) * sampleRate
+        /// The stream is not read further while this much audio waits to
+        /// play.
+        static let maxBufferedSeconds = 30
+        static let maxBufferedSamples = maxBufferedSeconds * sampleRate
         static let actionSize: CGFloat = 32
         static let actionIconSize: CGFloat = 16
-        static let thinkingOpenTag = "<think>"
-        static let thinkingCloseTag = "</think>"
     }
 
     enum WebApp {

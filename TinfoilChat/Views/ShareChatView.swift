@@ -8,11 +8,10 @@
 import SwiftUI
 
 struct ShareChatView: View {
-    let messages: [Message]
     let chatTitle: String?
-    let chatCreatedAt: Date?
     let chatId: String?
 
+    @EnvironmentObject private var chatViewModel: ChatViewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
@@ -199,7 +198,8 @@ struct ShareChatView: View {
         Task {
             defer { isRevoking = false }
             do {
-                try await ShareAPIService.deleteSharedChat(chatId: chatId)
+                guard let account = chatViewModel.account else { throw LinkMetadataError.unavailable }
+                try await HarnessShares.revoke(account, threadId: chatId)
                 isShareEnabled = false
                 hasShare = false
                 shareUrl = nil
@@ -224,14 +224,15 @@ struct ShareChatView: View {
             return
         }
         do {
-            let shared = try await ShareAPIService.getShareStatus(chatId: chatId)
+            guard let account = chatViewModel.account else { throw LinkMetadataError.unavailable }
+            let shared = try await HarnessShares.status(account, threadId: chatId)
             guard !Task.isCancelled else { return }
             hasShare = shared
             isShareEnabled = shared
             if !shared { shareUrl = nil }
         } catch {
             guard !Task.isCancelled else { return }
-            errorMessage = ShareAPIError.statusFailed.localizedDescription
+            errorMessage = "Could not check whether this chat is shared."
         }
     }
 
@@ -308,40 +309,15 @@ struct ShareChatView: View {
 
         isUploading = true
         errorMessage = nil
-
-        // Capture view data on main thread before offloading
-        let capturedMessages = messages
-        let title = chatTitle
-        let createdAt = chatCreatedAt
-
-        Task.detached {
+        Task {
+            defer { isUploading = false }
             do {
-                let shareableData = SharePayloadBuilder.build(
-                    messages: capturedMessages,
-                    chatTitle: title,
-                    chatCreatedAt: createdAt
-                )
-                let plaintext = try SharePayloadBuilder.encode(shareableData)
-                let response = try await SyncEnclaveAPI.shareSeal(
-                    EnclaveShareSealRequest(plaintext: dataToBase64(plaintext))
-                )
-                let sealed = try ShareV2Contract.validate(response)
-
-                try await ShareAPIService.uploadSharedChat(chatId: chatId, encryptedData: sealed.ciphertext)
-
-                let url = ShareV2Contract.shareURL(chatId: chatId, shareKey: sealed.shareKey)
-
-                await MainActor.run {
-                    shareUrl = url
-                    hasShare = true
-                    isUploading = false
-                }
+                guard let session = chatViewModel.session else { throw LinkMetadataError.unavailable }
+                shareUrl = try await session.share(chatId)
+                hasShare = true
             } catch {
                 await loadShareStatus()
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                    isUploading = false
-                }
+                errorMessage = HarnessShares.isTooLarge(error) ? HarnessShares.tooLargeMessage : error.localizedDescription
             }
         }
     }

@@ -38,26 +38,16 @@ final class CloudKeyPreflightValidator {
     static let mismatchMessage = CloudKeyValidationMessages.keyMismatch
     static let unknownRemoteStateMessage = CloudKeyValidationMessages.unknownRemoteState
 
-    private let profileSync = ProfileSyncService.shared
-    private let cloudStorage = CloudStorageService.shared
     private let encryptionService = EncryptionService.shared
 
     private init() {}
 
-    /// Inspect the remote state by combining a profile-sync-status
-    /// check with a one-row chat snapshot fallback. This does NOT require
-    /// the user's CEK and is safe to call before any key is loaded.
+    /// Inspect the remote state through the key registry, which reports
+    /// whether the account holds any data. This does NOT require the user's
+    /// CEK and is safe to call before any key is loaded.
     func inspectRemoteState() async -> CloudRemoteState {
-        guard let profileStatus = await profileSync.getSyncStatus() else {
-            return .unknown
-        }
-
-        if profileStatus.exists {
-            return .exists
-        }
-
         do {
-            return try await cloudStorage.hasAnyChats() ? .exists : .empty
+            return try await SyncEnclaveAPI.keyCurrent().hasData ? .exists : .empty
         } catch {
             return .unknown
         }

@@ -140,7 +140,7 @@ struct ContentView: View {
                             chatViewModel.showCloudSyncOnboarding = false
                             passkeyManager.completeManualKeyRecovery()
                         }
-                        chatViewModel.resumeAfterManualKeySetup()
+                        await chatViewModel.resumeAfterManualKeySetup()
                         return nil
                     } catch {
                         return error.localizedDescription

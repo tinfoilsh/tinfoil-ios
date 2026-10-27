@@ -2,117 +2,74 @@
 //  ChatModels.swift
 //  TinfoilChat
 //
-//  Created on 04/10/25.
-//  Copyright © 2025 Tinfoil. All rights reserved.
-
+//  What the views show of a chat and its messages, built from what the
+//  chat service sends. Nothing here is stored: a chat kept on this device is
+//  a StoredThread, and a stored chat lives in the cloud.
+//
 
 import Foundation
 import UIKit
-import ClerkKit
 
-struct PendingRecoveryEnvelope: Codable, Equatable, Sendable {
-    let v: Int
-    let turnId: String
-    let keyId: String
-    let createdAt: String
-    let expiresAt: String
-    let nonce: String
-    let ciphertext: String
-}
-
-/// Represents a chat conversation
-struct Chat: Identifiable, Codable {
-    enum TitleState: String, Codable {
+/// A chat as the views show it.
+struct Chat: Identifiable, Equatable {
+    enum TitleState: String {
         case placeholder
         case generated
         case manual
     }
 
-    static let placeholderTitle = "New Chat"
+    static let placeholderTitle = Constants.Harness.placeholderTitle
+    /// What a chat waiting for its generated title shows.
+    static let defaultTitle = "Untitled"
 
     let id: String
     var title: String
-    var titleState: TitleState
+    var titleState: TitleState = .placeholder
     var messages: [Message]
-    var pendingRecoveries: [PendingRecoveryEnvelope]?
-    var hasActiveStream: Bool = false
     var createdAt: Date
-    var modelType: ModelType
-    var language: String?
-    var userId: String?
-    
-    // Sync metadata
-    var syncVersion: Int = 0
-    var syncedAt: Date?
-    var locallyModified: Bool = true
-    var updatedAt: Date
-
-    // Logical edit clock for conflict arbitration. Round-tripped across
-    // platforms; clockVersion records the syncVersion the clock was
-    // maintained at so a reader knows whether to trust it.
-    var clock: Int?
-    var writer: String?
-    var clockVersion: Int?
-    
-    // For handling encrypted chats that failed to decrypt
-    var decryptionFailed: Bool = false
-    var dataCorrupted: Bool = false
-
-    // Format version: 2=plaintext (enclave-unsealed)
-    var formatVersion: Int?
-
-    // Local-only flag: when true, chat is never synced to cloud
+    var updatedAt: Date?
+    /// When the chat's latest message was written, by which lists order it.
+    var activityAt: Date?
+    var model: String = ""
+    var messageCount: Int = 0
     var isLocalOnly: Bool = false
-
-    // Project association (used by React, preserved by iOS)
     var projectId: String?
-    var projectLocallyModified: Bool?
-
-    // Active prompt-library preset for this chat. Resolves to a built-in or
-    // user preset whose system prompt overrides the default for this chat.
     var promptPresetId: String?
-
     var webSearchEnabled: Bool = true
-
-    // Transient flag for ephemeral "temporary" chats. Never persisted to disk
-    // or cloud. Used to power the toolbar incognito toggle.
+    var pinned: Bool = false
+    /// The safeguards flagged the chat, which takes no more turns.
+    var flagged: Bool = false
+    /// A hint that a reply may be streaming, until the run's deadline.
+    var activeRun: ActiveRun?
+    /// How much of the model's context the chat uses, as the chat service
+    /// reports it.
+    var contextUsage: ContextUsage?
+    /// Transient flag for ephemeral "temporary" chats, which are never
+    /// stored. Powers the toolbar incognito toggle.
     var isTemporary: Bool = false
-
-    // Transient flag for a chat whose first save is still landing (e.g. a
-    // fork placeholder). Never persisted; drives the sidebar row spinner.
+    /// Transient flag for a chat whose first save is still landing (e.g. a
+    /// fork placeholder). Drives the sidebar row spinner.
     var pendingSave: Bool = false
 
-    // Computed properties for sync filtering
-    var isBlankChat: Bool {
-        // Don't treat failed-to-decrypt chats as blank
-        return messages.isEmpty && !decryptionFailed
+    init(id: String, title: String, messages: [Message] = [], createdAt: Date = Date()) {
+        self.id = id
+        self.title = title
+        self.messages = messages
+        self.createdAt = createdAt
     }
-    
+
+    var isBlankChat: Bool {
+        messages.isEmpty && messageCount == 0
+    }
+
     var needsGeneratedTitle: Bool {
-        return titleState == .placeholder
+        titleState == .placeholder
     }
 
     /// Last conversation activity: the later of the creation time and the
-    /// newest message. Every client orders the chat list by it, and the
-    /// sync enclave derives the same value so the server pages chats in
-    /// that order. Renames, settings changes, moves, and re-uploads never
-    /// change it.
-    var activityAt: Date {
-        Self.lastActivity(createdAt: createdAt, messages: messages)
-    }
-
-    static func lastActivity(createdAt: Date, messages: [Message]) -> Date {
-        messages.reduce(createdAt) { max($0, $1.timestamp) }
-    }
-
-    /// List refreshes must retain the draft identity used by recording and transcription.
-    func blankDraftForListRefresh(isLocalOnly: Bool, userId: String?) -> Chat? {
-        guard isBlankChat,
-              self.isLocalOnly == isLocalOnly,
-              self.userId == nil || self.userId == userId else { return nil }
-        var draft = self
-        draft.userId = userId
-        return draft
+    /// newest message.
+    var lastActivity: Date {
+        activityAt ?? messages.reduce(createdAt) { max($0, $1.timestamp) }
     }
 
     /// Generates a permanent reverse-timestamp ID locally (matching the web app format).
@@ -123,349 +80,11 @@ struct Chat: Identifiable, Codable {
         let reverseTsStr = String(repeating: "0", count: max(0, Constants.Sync.reverseTimestampDigits - unpadded.count)) + unpadded
         return "\(reverseTsStr)_\(UUID().uuidString.lowercased())"
     }
-
-    /// Title for a fork of a chat titled `sourceTitle`. Idempotent on the
-    /// suffix so forking a fork does not stack "(fork) (fork)".
-    static func forkTitle(for sourceTitle: String) -> String {
-        let trimmed = sourceTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let base = trimmed.isEmpty ? placeholderTitle : trimmed
-        return base.hasSuffix(Constants.ChatFork.titleSuffix)
-            ? base
-            : base + Constants.ChatFork.titleSuffix
-    }
-
-    /// Builds a client-side fork holding the messages up to and including
-    /// `index`. Only conversation content and settings carry over; sync
-    /// bookkeeping, the edit clock, and recovery envelopes belong to the
-    /// source row. Attachments get fresh ids and shed their server key so
-    /// the fork's first upload stores its own copies of their bytes. Cloud
-    /// chats are forked by the sync enclave instead, since their image
-    /// bytes live server-side.
-    func forked(throughMessageIndex index: Int, id forkId: String = Chat.generateReverseId()) throws -> Chat {
-        guard messages.indices.contains(index) else {
-            throw ChatForkError.messageIndexOutOfRange
-        }
-        let now = Date()
-        return Chat(
-            id: forkId,
-            title: Chat.forkTitle(for: title),
-            titleState: .manual,
-            messages: messages.prefix(index + 1).map { $0.forkCopy() },
-            createdAt: now,
-            modelType: modelType,
-            language: language,
-            userId: userId,
-            updatedAt: now,
-            isLocalOnly: isLocalOnly,
-            projectId: projectId,
-            promptPresetId: promptPresetId,
-            webSearchEnabled: webSearchEnabled
-        )
-    }
-
-    static func deriveTitleState(for title: String, messages: [Message]) -> TitleState {
-        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if messages.isEmpty {
-            return normalizedTitle.isEmpty || normalizedTitle == placeholderTitle ? .placeholder : .manual
-        }
-        if normalizedTitle.isEmpty || normalizedTitle == placeholderTitle {
-            return .placeholder
-        }
-        return .generated
-    }
-
-    init(
-        id: String = Chat.generateReverseId(),
-        title: String = Chat.placeholderTitle,
-        titleState: TitleState? = nil,
-        messages: [Message] = [],
-        pendingRecoveries: [PendingRecoveryEnvelope]? = nil,
-        createdAt: Date = Date(),
-        modelType: ModelType,
-        language: String? = nil,
-        userId: String? = nil,
-        syncVersion: Int = 0,
-        syncedAt: Date? = nil,
-        locallyModified: Bool = true,
-        updatedAt: Date? = nil,
-        decryptionFailed: Bool = false,
-        dataCorrupted: Bool = false,
-        formatVersion: Int? = nil,
-        isLocalOnly: Bool = false,
-        projectId: String? = nil,
-        projectLocallyModified: Bool? = nil,
-        promptPresetId: String? = nil,
-        webSearchEnabled: Bool = true)
-    {
-        let resolvedTitleState = titleState ?? Chat.deriveTitleState(for: title, messages: messages)
-
-        self.id = id
-        self.title = title
-        self.titleState = resolvedTitleState
-        self.messages = messages
-        self.pendingRecoveries = pendingRecoveries
-        self.createdAt = createdAt
-        self.modelType = modelType
-        self.language = language
-        self.userId = userId
-        self.syncVersion = syncVersion
-        self.syncedAt = syncedAt
-        self.locallyModified = locallyModified
-        self.updatedAt = updatedAt ?? createdAt
-        self.decryptionFailed = decryptionFailed
-        self.dataCorrupted = dataCorrupted
-        self.formatVersion = formatVersion
-        self.isLocalOnly = isLocalOnly
-        self.projectId = projectId
-        self.projectLocallyModified = projectLocallyModified
-        self.promptPresetId = promptPresetId
-        self.webSearchEnabled = webSearchEnabled
-    }
-    
-    // MARK: - Factory Methods
-
-    /// Creates a new chat with the current model from AppConfig
-    @MainActor
-    static func create(
-        id: String = Chat.generateReverseId(),
-        title: String = Chat.placeholderTitle,
-        titleState: TitleState? = nil,
-        messages: [Message] = [],
-        createdAt: Date = Date(),
-        modelType: ModelType? = nil,
-        language: String? = nil,
-        userId: String? = nil,
-        syncVersion: Int = 0,
-        syncedAt: Date? = nil,
-        locallyModified: Bool = true,
-        updatedAt: Date? = nil,
-        isLocalOnly: Bool = false,
-        projectId: String? = nil,
-        promptPresetId: String? = nil,
-        webSearchEnabled: Bool? = nil
-    ) -> Chat {
-        // Try to use the provided model, fall back to current model, then first available
-        guard let model = modelType ?? AppConfig.shared.currentModel ?? AppConfig.shared.availableModels.first else {
-            fatalError("Cannot create Chat without available models. Ensure AppConfig is initialized before creating chats.")
-        }
-        return Chat(
-            id: id,
-            title: title,
-            titleState: titleState,
-            messages: messages,
-            createdAt: createdAt,
-            modelType: model,
-            language: language,
-            userId: userId,
-            syncVersion: syncVersion,
-            syncedAt: syncedAt,
-            locallyModified: locallyModified,
-            updatedAt: updatedAt,
-            isLocalOnly: isLocalOnly,
-            projectId: projectId,
-            promptPresetId: promptPresetId,
-            webSearchEnabled: webSearchEnabled ?? SettingsManager.shared.webSearchAvailable
-        )
-    }
-    
-    // MARK: - Codable Implementation
-    
-    enum CodingKeys: String, CodingKey {
-        case id, title, titleState, messages, pendingRecoveries, createdAt, modelType, language, userId
-        case syncVersion, syncedAt, locallyModified, updatedAt
-        case decryptionFailed, dataCorrupted, formatVersion, isLocalOnly, projectId
-        case projectLocallyModified, promptPresetId
-        case webSearchEnabled
-        case clock, writer, clockVersion
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        
-        id = try container.decode(String.self, forKey: .id)
-        title = try container.decode(String.self, forKey: .title)
-        messages = try container.decode([Message].self, forKey: .messages)
-        pendingRecoveries = try container.decodeIfPresent([PendingRecoveryEnvelope].self, forKey: .pendingRecoveries)
-        titleState = (try? container.decode(TitleState.self, forKey: .titleState)) ?? Chat.deriveTitleState(for: title, messages: messages)
-        // hasActiveStream is transient UI state — always reset to false on decode
-        hasActiveStream = false
-        createdAt = try container.decode(Date.self, forKey: .createdAt)
-        modelType = try container.decode(ModelType.self, forKey: .modelType)
-        language = try container.decodeIfPresent(String.self, forKey: .language)
-        userId = try container.decodeIfPresent(String.self, forKey: .userId)
-        
-        // Sync metadata
-        syncVersion = try container.decodeIfPresent(Int.self, forKey: .syncVersion) ?? 0
-        syncedAt = try container.decodeIfPresent(Date.self, forKey: .syncedAt)
-        locallyModified = try container.decodeIfPresent(Bool.self, forKey: .locallyModified) ?? true
-        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
-        
-        // Encryption fields
-        decryptionFailed = try container.decodeIfPresent(Bool.self, forKey: .decryptionFailed) ?? false
-        dataCorrupted = try container.decodeIfPresent(Bool.self, forKey: .dataCorrupted) ?? false
-        formatVersion = try container.decodeIfPresent(Int.self, forKey: .formatVersion)
-        isLocalOnly = try container.decodeIfPresent(Bool.self, forKey: .isLocalOnly) ?? false
-        projectId = try container.decodeIfPresent(String.self, forKey: .projectId)
-        projectLocallyModified = try container.decodeIfPresent(
-            Bool.self,
-            forKey: .projectLocallyModified
-        )
-        promptPresetId = try container.decodeIfPresent(String.self, forKey: .promptPresetId)
-        webSearchEnabled = try container.decodeIfPresent(Bool.self, forKey: .webSearchEnabled) ?? true
-        clock = try container.decodeIfPresent(Int.self, forKey: .clock)
-        writer = try container.decodeIfPresent(String.self, forKey: .writer)
-        clockVersion = try container.decodeIfPresent(Int.self, forKey: .clockVersion)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(title, forKey: .title)
-        try container.encode(titleState, forKey: .titleState)
-        try container.encode(messages, forKey: .messages)
-        try container.encodeIfPresent(pendingRecoveries, forKey: .pendingRecoveries)
-        // hasActiveStream is transient UI state — never encode it
-        try container.encode(createdAt, forKey: .createdAt)
-        try container.encode(modelType, forKey: .modelType)
-        try container.encodeIfPresent(language, forKey: .language)
-        try container.encodeIfPresent(userId, forKey: .userId)
-        
-        // Sync metadata
-        try container.encode(syncVersion, forKey: .syncVersion)
-        try container.encodeIfPresent(syncedAt, forKey: .syncedAt)
-        try container.encode(locallyModified, forKey: .locallyModified)
-        try container.encode(updatedAt, forKey: .updatedAt)
-        
-        // Encryption fields
-        try container.encode(decryptionFailed, forKey: .decryptionFailed)
-        try container.encode(dataCorrupted, forKey: .dataCorrupted)
-        try container.encodeIfPresent(formatVersion, forKey: .formatVersion)
-        try container.encode(isLocalOnly, forKey: .isLocalOnly)
-        try container.encodeIfPresent(projectId, forKey: .projectId)
-        try container.encodeIfPresent(projectLocallyModified, forKey: .projectLocallyModified)
-        try container.encodeIfPresent(promptPresetId, forKey: .promptPresetId)
-        try container.encode(webSearchEnabled, forKey: .webSearchEnabled)
-        try container.encodeIfPresent(clock, forKey: .clock)
-        try container.encodeIfPresent(writer, forKey: .writer)
-        try container.encodeIfPresent(clockVersion, forKey: .clockVersion)
-    }
-    
-    // MARK: - Haptic Feedback Methods
-
-    /// Triggers haptic feedback when a chat operation succeeds
-    static func triggerSuccessFeedback() {
-        HapticFeedback.trigger(.success)
-    }
-
-    // MARK: - Per-Chat File Storage Methods
-
-    /// Routes to `.local` or `.cloud` storage based on `chat.isLocalOnly`.
-    /// Temporary chats are never persisted.
-    static func saveChat(_ chat: Chat, userId: String?) async {
-        guard !chat.isTemporary else { return }
-        guard let userId = userId else { return }
-        let storage: EncryptedFileStorage = chat.isLocalOnly ? .local : .cloud
-        do {
-            try await storage.saveChat(chat, userId: userId)
-        } catch {
-            #if DEBUG
-            print("Failed to save chat to file storage: \(error)")
-            #endif
-        }
-    }
-
-    /// Loads the cloud index only (backward compatible for pagination/sync callers).
-    static func loadChatIndex(userId: String?) async -> [ChatIndexEntry] {
-        guard let userId = userId else { return [] }
-        return (try? await EncryptedFileStorage.cloud.loadIndex(userId: userId)) ?? []
-    }
-
-    /// Loads the local-only index.
-    static func loadLocalChatIndex(userId: String?) async -> [ChatIndexEntry] {
-        guard let userId = userId else { return [] }
-        return (try? await EncryptedFileStorage.local.loadIndex(userId: userId)) ?? []
-    }
-
-    /// Tries local storage first, then cloud.
-    static func loadChat(chatId: String, userId: String?) async -> Chat? {
-        guard let userId = userId else { return nil }
-        if let chat = try? await EncryptedFileStorage.local.loadChat(chatId: chatId, userId: userId) {
-            return chat
-        }
-        return try? await EncryptedFileStorage.cloud.loadChat(chatId: chatId, userId: userId)
-    }
-
-    static func loadChats(chatIds: [String], userId: String?) async -> [Chat] {
-        guard let userId = userId else { return [] }
-        var results: [Chat] = []
-        for chatId in chatIds {
-            if let chat = await loadChat(chatId: chatId, userId: userId) {
-                results.append(chat)
-            }
-        }
-        return results
-    }
-
-    /// Loads chats from both stores and merges.
-    static func loadAllChats(userId: String?) async -> [Chat] {
-        guard let userId = userId else { return [] }
-        let localChats = (try? await EncryptedFileStorage.local.loadAllChats(userId: userId)) ?? []
-        let cloudChats = (try? await EncryptedFileStorage.cloud.loadAllChats(userId: userId)) ?? []
-        return localChats + cloudChats
-    }
-
-    /// Tries both stores to ensure the chat is removed wherever it lives.
-    static func deleteChatFromStorage(chatId: String, userId: String?) async {
-        guard let userId = userId else { return }
-        try? await EncryptedFileStorage.local.deleteChat(chatId: chatId, userId: userId)
-        try? await EncryptedFileStorage.cloud.deleteChat(chatId: chatId, userId: userId)
-    }
-
-    /// Deletes from both stores.
-    static func deleteAllChatsFromStorage(userId: String?) async {
-        guard let userId = userId else { return }
-        try? await EncryptedFileStorage.local.deleteAllChats(userId: userId)
-        try? await EncryptedFileStorage.cloud.deleteAllChats(userId: userId)
-    }
-
-    // MARK: - Title Generation handled via LLM (see ChatViewModel.generateLLMTitle)
-}
-
-/// Represents a message role
-enum ChatForkError: Error, Equatable {
-    case messageIndexOutOfRange
-}
-
-extension Message {
-    /// A copy suitable for a forked chat: same content and state, with
-    /// attachments detached from the source's server-side storage.
-    func forkCopy() -> Message {
-        var copy = self
-        copy.attachments = attachments.map { $0.forkCopy() }
-        return copy
-    }
-}
-
-extension Attachment {
-    /// A copy with a fresh id and no server key, so the fork's first upload
-    /// registers its own blob instead of sharing the source's.
-    func forkCopy() -> Attachment {
-        var copy = self
-        copy.id = UUID().uuidString.lowercased()
-        copy.encryptionKey = nil
-        return copy
-    }
 }
 
 enum MessageRole: String, Codable {
     case user
     case assistant
-}
-
-extension ReasoningHistoryPolicy {
-    func includesReasoning(for message: Message) -> Bool {
-        self == .all || (self == .toolCallOnly && !message.toolCalls.isEmpty)
-    }
 }
 
 // MARK: - Web Search Types
@@ -710,6 +329,7 @@ private struct DynamicCodingKey: CodingKey {
     }
 }
 
+
 enum JSONValue: Codable, Equatable, Sendable {
     case null
     case bool(Bool)
@@ -845,10 +465,13 @@ struct QueuedMessage: Identifiable, Equatable {
 }
 
 /// Represents a single message in a chat
-struct Message: Identifiable, Codable, Equatable {
+
+/// A message as the views show it: a question's text, or a reply's text,
+/// reasoning, searches, page reads and widgets, as the chat service's
+/// blocks describe them.
+struct Message: Identifiable, Equatable {
     let id: String
     let role: MessageRole
-    var turnId: String? = nil
     var content: String
     var modelDisplayName: String? = nil
     var thoughts: String? = nil
@@ -863,9 +486,8 @@ struct Message: Identifiable, Codable, Equatable {
     /// than the free-tier daily limit, so the UI shows a transient
     /// "try again shortly" message instead of an upgrade prompt.
     var isHourlyLimitError: Bool = false
-    /// True when the stream failed on connectivity (classified from the
-    /// URLError at catch time), so the error card shows the wifi icon and
-    /// "Connection Lost" header without inspecting the message text.
+    /// True when the stream failed on connectivity, so the error card shows
+    /// the wifi icon and "Connection Lost" header.
     var isConnectionError: Bool = false
     var generationTimeSeconds: Double? = nil
     var contentChunks: [ContentChunk] = []
@@ -873,43 +495,22 @@ struct Message: Identifiable, Codable, Equatable {
     var webSearchState: WebSearchState? = nil
     var urlFetches: [URLFetchState] = []
     var attachments: [Attachment] = []
-
-    // Passthrough fields for cross-platform round-trip (used by React, preserved by iOS)
     var thinkingDuration: Double? = nil
     var isError: Bool? = nil
     var webSearchBeforeThinking: Bool? = nil
     var annotations: [Annotation]? = nil
-    var searchReasoning: String? = nil
-    // Ordered content segments and per-search instances so web-search and
-    // URL-fetch events render inline with the assistant text in the exact
-    // order they streamed.
     var segments: [MessageSegment]? = nil
     var webSearches: [WebSearchInstance]? = nil
     var toolCalls: [GenUIToolCall] = []
-    /// Cross-platform timeline blocks. The webapp persists tool-call
-    /// resolution state on individual `tool_call` blocks here
-    /// (`resolvedAt` + `resolution`); iOS reads and writes the same
-    /// shape so chats round-trip losslessly. Other block types
-    /// (thinking, content, web_search, url_fetches) are preserved
-    /// verbatim even though iOS renders the chat off its own
-    /// `segments` representation.
+    /// The reply's blocks as the chat service sent them, which the widgets
+    /// read their state from.
     var timeline: [JSONValue]? = nil
 
-    var reasoningContentForHistory: String? {
-        if let segments {
-            let reasoning = segments.reduce(into: "") { result, segment in
-                if case .thinking(let content, _, _, _, _) = segment {
-                    result += content
-                }
-            }
-            if !reasoning.isEmpty {
-                return reasoning
-            }
-        }
-        if let thoughts, !thoughts.isEmpty {
-            return thoughts
-        }
-        return nil
+    init(id: String = UUID().uuidString.lowercased(), role: MessageRole, content: String, timestamp: Date = Date()) {
+        self.id = id
+        self.role = role
+        self.content = content
+        self.timestamp = timestamp
     }
 
     /// True when this assistant message has at least one tool call whose
@@ -917,31 +518,14 @@ struct Message: Identifiable, Codable, Equatable {
     /// "interactive component unavailable" notice for forward
     /// compatibility (e.g. a newly-added widget that web supports but
     /// iOS hasn't shipped yet).
-    @MainActor
-    var hasUnsupportedGenUI: Bool {
-        guard role == .assistant else { return false }
-        for toolCall in toolCalls {
-            if !GenUIRegistry.shared.isGenUIToolName(toolCall.name) {
-                return true
-            }
-        }
-        if let timeline = timeline {
-            for block in timeline {
-                guard let object = block.objectValue,
-                      object["type"]?.stringValue == "tool_call",
-                      let name = object["name"]?.stringValue else { continue }
-                if !GenUIRegistry.shared.isGenUIToolName(name) {
-                    return true
-                }
-            }
-        }
-        return false
+    @MainActor var hasUnsupportedGenUI: Bool {
+        toolCalls.contains { GenUIRegistry.widget(named: $0.name) == nil }
     }
 
     /// Resolution for the given tool-call id, read from the timeline.
-    /// Mirrors how the webapp reads `block.resolvedAt` / `block.resolution`.
     func genUIResolution(for toolCallId: String) -> GenUIResolution? {
-        TimelineToolCalls.resolution(in: timeline, toolCallId: toolCallId)
+        guard let timeline else { return nil }
+        return TimelineToolCalls.resolution(in: timeline, toolCallId: toolCallId)
     }
 
     static let longMessageAttachmentThreshold = 1200
@@ -967,604 +551,6 @@ struct Message: Identifiable, Codable, Equatable {
     /// resume: text or tool calls. Thoughts alone are not always sent back.
     var hasContinuableResponse: Bool {
         role == .assistant && (!content.isEmpty || !toolCalls.isEmpty)
-    }
-
-    /// Readies a stopped assistant response to be continued: clears the
-    /// failure that stopped it and closes any thinking round its dead
-    /// stream left open.
-    mutating func prepareForContinuation() {
-        streamError = nil
-        isRequestError = false
-        isRateLimitError = false
-        isHourlyLimitError = false
-        isConnectionError = false
-        isThinking = false
-        segments = segments?.map { (segment: MessageSegment) -> MessageSegment in
-            guard case .thinking(let content, true, let duration, let startedAt, let endedAt) = segment else {
-                return segment
-            }
-            return .thinking(
-                content: content,
-                isThinking: false,
-                duration: duration,
-                startedAt: startedAt,
-                endedAt: endedAt
-            )
-        }
-    }
-
-    private static let iso8601Formatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-    
-    private static let iso8601FormatterNoFractional: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
-    
-    init(id: String = UUID().uuidString.lowercased(), role: MessageRole, turnId: String? = nil, content: String, modelDisplayName: String? = nil, thoughts: String? = nil, isThinking: Bool = false, timestamp: Date = Date(), isCollapsed: Bool = true, generationTimeSeconds: Double? = nil, contentChunks: [ContentChunk] = [], thinkingChunks: [ThinkingChunk] = [], webSearchState: WebSearchState? = nil, attachments: [Attachment] = []) {
-        self.id = id
-        self.role = role
-        self.turnId = turnId
-        self.content = content
-        self.modelDisplayName = modelDisplayName
-        self.thoughts = thoughts
-        self.isThinking = isThinking
-        self.timestamp = timestamp
-        self.isCollapsed = isCollapsed
-        self.generationTimeSeconds = generationTimeSeconds
-        self.contentChunks = contentChunks
-        self.thinkingChunks = thinkingChunks
-        self.webSearchState = webSearchState
-        self.attachments = attachments
-    }
-    
-    // MARK: - Codable Implementation
-    
-    enum CodingKeys: String, CodingKey {
-        case id, role, turnId, content, modelDisplayName, thoughts, isThinking, timestamp, isCollapsed, isStreaming, streamError, isRequestError, isRateLimitError, isHourlyLimitError, isConnectionError, generationTimeSeconds, webSearchState
-        case webSearch // Alternative key used by React app
-        case urlFetches
-        case attachments
-        case thinkingDuration, isError
-        case webSearchBeforeThinking, annotations, searchReasoning
-        case segments, webSearches, toolCalls, timeline
-        // Legacy keys for decoding React messages that use the old format
-        case documentContent, imageData, imageBase64, multimodalText, documents
-    }
-    
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        
-        // Make id optional for cross-platform compatibility with React
-        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString.lowercased()
-        role = try container.decode(MessageRole.self, forKey: .role)
-        turnId = try container.decodeIfPresent(String.self, forKey: .turnId)
-        content = try container.decode(String.self, forKey: .content)
-        modelDisplayName = try container.decodeIfPresent(String.self, forKey: .modelDisplayName)
-        thoughts = try container.decodeIfPresent(String.self, forKey: .thoughts)
-        isThinking = try container.decodeIfPresent(Bool.self, forKey: .isThinking) ?? false
-        
-        // Handle timestamp as either Date or String (ISO8601) for cross-platform compatibility
-        if let date = try? container.decode(Date.self, forKey: .timestamp) {
-            timestamp = date
-        } else if let dateString = try? container.decode(String.self, forKey: .timestamp) {
-            // Try parsing with fractional seconds first, then without
-            timestamp = Self.iso8601Formatter.date(from: dateString) 
-                ?? Self.iso8601FormatterNoFractional.date(from: dateString)
-                ?? Date()
-        } else {
-            timestamp = Date()
-        }
-        
-        isCollapsed = try container.decodeIfPresent(Bool.self, forKey: .isCollapsed) ?? true
-        isStreaming = try container.decodeIfPresent(Bool.self, forKey: .isStreaming) ?? false
-        streamError = try container.decodeIfPresent(String.self, forKey: .streamError)
-        isRequestError = try container.decodeIfPresent(Bool.self, forKey: .isRequestError) ?? false
-        isRateLimitError = try container.decodeIfPresent(Bool.self, forKey: .isRateLimitError) ?? false
-        isHourlyLimitError = try container.decodeIfPresent(Bool.self, forKey: .isHourlyLimitError) ?? false
-        // Messages persisted before the typed flag existed (or written by
-        // clients that don't emit it) lack the key entirely; fall back to
-        // the legacy text heuristic so their error cards keep rendering as
-        // connection failures.
-        if let decodedConnectionError = try container.decodeIfPresent(Bool.self, forKey: .isConnectionError) {
-            isConnectionError = decodedConnectionError
-        } else {
-            isConnectionError = Self.isLegacyConnectionErrorText(streamError)
-        }
-        generationTimeSeconds = try container.decodeIfPresent(Double.self, forKey: .generationTimeSeconds)
-        // contentChunks and thinkingChunks are transient UI rendering state — never decoded from storage
-        contentChunks = []
-        thinkingChunks = []
-        // Try iOS key first, then React key for cross-platform compatibility
-        webSearchState = try container.decodeIfPresent(WebSearchState.self, forKey: .webSearchState)
-            ?? container.decodeIfPresent(WebSearchState.self, forKey: .webSearch)
-        urlFetches = try container.decodeIfPresent([URLFetchState].self, forKey: .urlFetches) ?? []
-        let decodedAttachments = try container.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
-
-        if !decodedAttachments.isEmpty {
-            attachments = decodedAttachments
-        } else {
-            // Reconstruct attachments from legacy React format (documents + imageData + documentContent + multimodalText)
-            attachments = Self.reconstructAttachments(from: container)
-        }
-
-        // Passthrough fields for cross-platform round-trip
-        thinkingDuration = try container.decodeIfPresent(Double.self, forKey: .thinkingDuration)
-        isError = try container.decodeIfPresent(Bool.self, forKey: .isError)
-        webSearchBeforeThinking = try container.decodeIfPresent(Bool.self, forKey: .webSearchBeforeThinking)
-        annotations = try container.decodeIfPresent([Annotation].self, forKey: .annotations)
-        searchReasoning = try container.decodeIfPresent(String.self, forKey: .searchReasoning)
-        // Segments and webSearches are forward-compatible: unknown segment
-        // shapes (e.g. a new `type` added by a future client) must not fail
-        // the entire message decode. Individual unknown entries are skipped
-        // by `MessageSegment.decodeArrayLenient`; if the whole field is
-        // otherwise malformed, treat it as missing.
-        if container.contains(.segments) {
-            segments = try? MessageSegment.decodeArrayLenient(
-                from: container,
-                forKey: .segments
-            )
-        } else {
-            segments = nil
-        }
-        webSearches = (try? container.decodeIfPresent([WebSearchInstance].self, forKey: .webSearches)) ?? nil
-        toolCalls = (try? container.decodeIfPresent([GenUIToolCall].self, forKey: .toolCalls)) ?? []
-        timeline = try? container.decodeIfPresent([JSONValue].self, forKey: .timeline)
-
-        // For cross-platform parity: webapp messages persist a `timeline`
-        // (chronological array of blocks) but no `segments`. Without
-        // segments, iOS falls into flat-field rendering which loses the
-        // original interleaving of thinking, web search, content, and
-        // tool calls. Synthesize segments + per-search instances from
-        // the timeline so the standard segments rendering pipeline can
-        // reproduce the webapp's chronological layout faithfully.
-        if role == .assistant,
-           segments == nil,
-           let timeline,
-           !timeline.isEmpty {
-            let derived = Self.deriveFromTimeline(timeline)
-            if !derived.segments.isEmpty {
-                segments = derived.segments
-            }
-            if webSearches == nil, !derived.webSearches.isEmpty {
-                webSearches = derived.webSearches
-            }
-            if toolCalls.isEmpty, !derived.toolCalls.isEmpty {
-                toolCalls = derived.toolCalls
-            }
-            if urlFetches.isEmpty, !derived.urlFetches.isEmpty {
-                urlFetches = derived.urlFetches
-            }
-        }
-    }
-
-    /// Walks a webapp-style timeline and produces the iOS-side render
-    /// inputs (segments + web-search instances) in chronological order.
-    /// Mirrors the webapp's `MessageAssembler.toMessage` plus the
-    /// chronological ordering used by `DefaultMessageRenderer`.
-    private static func deriveFromTimeline(
-        _ timeline: [JSONValue]
-    ) -> (
-        segments: [MessageSegment],
-        webSearches: [WebSearchInstance],
-        urlFetches: [URLFetchState],
-        toolCalls: [GenUIToolCall]
-    ) {
-        var segments: [MessageSegment] = []
-        var searches: [WebSearchInstance] = []
-        var fetches: [URLFetchState] = []
-        var calls: [GenUIToolCall] = []
-
-        for block in timeline {
-            guard let object = block.objectValue,
-                  let type = object["type"]?.stringValue else { continue }
-            switch type {
-            case "thinking":
-                let content = object["content"]?.stringValue ?? ""
-                let isThinking = (object["isThinking"]?.boolValue) ?? false
-                let duration = object["duration"]?.numberValue
-                segments.append(.thinking(
-                    content: content,
-                    isThinking: isThinking,
-                    duration: duration,
-                    startedAt: object["startedAt"]?.numberValue,
-                    endedAt: object["endedAt"]?.numberValue
-                ))
-
-            case "content":
-                let text = object["content"]?.stringValue ?? ""
-                if !text.isEmpty {
-                    segments.append(.text(text))
-                }
-
-            case "web_search":
-                guard let stateObject = object["state"]?.objectValue else { continue }
-                let id = object["id"]?.stringValue ?? "web-search-\(searches.count)"
-                let query = stateObject["query"]?.stringValue
-                let statusRaw = stateObject["status"]?.stringValue ?? "completed"
-                let status = WebSearchStatus(rawValue: statusRaw) ?? .completed
-                let reason = stateObject["reason"]?.stringValue
-                let sources = stateObject["sources"]?.arrayValue?.compactMap(WebSearchSource.fromTimeline)
-                let instance = WebSearchInstance(
-                    id: id,
-                    query: query,
-                    status: status,
-                    sources: sources,
-                    reason: reason,
-                    startedAt: object["startedAt"]?.numberValue,
-                    endedAt: object["endedAt"]?.numberValue
-                )
-                searches.append(instance)
-                segments.append(.webSearch(searchId: id))
-
-            case "url_fetches":
-                guard let array = object["fetches"]?.arrayValue else { continue }
-                // The webapp stamps the merged block, not each fetch; copying
-                // the block's span onto every fetch preserves the run's
-                // min-start / max-end for `WorkRun`.
-                let blockStartedAt = object["startedAt"]?.numberValue
-                let blockEndedAt = object["endedAt"]?.numberValue
-                for value in array {
-                    guard let item = value.objectValue,
-                          let id = item["id"]?.stringValue,
-                          let url = item["url"]?.stringValue else { continue }
-                    let statusRaw = item["status"]?.stringValue ?? "completed"
-                    let status = URLFetchStatus(rawValue: statusRaw) ?? .completed
-                    let fetch = URLFetchState(
-                        id: id,
-                        url: url,
-                        status: status,
-                        sources: item["sources"]?.arrayValue?.compactMap(WebSearchSource.fromTimeline),
-                        startedAt: item["startedAt"]?.numberValue ?? blockStartedAt,
-                        endedAt: item["endedAt"]?.numberValue ?? blockEndedAt
-                    )
-                    fetches.append(fetch)
-                    segments.append(.urlFetch(fetchId: id))
-                }
-
-            case "tool_call":
-                guard let toolCallId = object["toolCallId"]?.stringValue else { continue }
-                let name = object["name"]?.stringValue ?? ""
-                let arguments = object["arguments"]?.stringValue ?? ""
-                calls.append(GenUIToolCall(id: toolCallId, name: name, arguments: arguments))
-                segments.append(.toolCall(toolCallId: toolCallId))
-
-            default:
-                continue
-            }
-        }
-
-        return (segments, searches, fetches, calls)
-    }
-    
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(role.rawValue, forKey: .role)
-        try container.encodeIfPresent(turnId, forKey: .turnId)
-        try container.encode(content, forKey: .content)
-        try container.encodeIfPresent(modelDisplayName, forKey: .modelDisplayName)
-        try container.encodeIfPresent(thoughts, forKey: .thoughts)
-        try container.encode(isThinking, forKey: .isThinking)
-        try container.encode(Self.iso8601Formatter.string(from: timestamp), forKey: .timestamp)
-        try container.encode(isCollapsed, forKey: .isCollapsed)
-        try container.encode(isStreaming, forKey: .isStreaming)
-        try container.encodeIfPresent(streamError, forKey: .streamError)
-        if isRequestError { try container.encode(isRequestError, forKey: .isRequestError) }
-        if isRateLimitError { try container.encode(isRateLimitError, forKey: .isRateLimitError) }
-        if isHourlyLimitError { try container.encode(isHourlyLimitError, forKey: .isHourlyLimitError) }
-        // Always persisted alongside a stream error (even when false) so
-        // the decode-time legacy text heuristic only applies to messages
-        // written before the typed flag existed.
-        if streamError != nil || isConnectionError {
-            try container.encode(isConnectionError, forKey: .isConnectionError)
-        }
-        try container.encodeIfPresent(generationTimeSeconds, forKey: .generationTimeSeconds)
-        // contentChunks is transient UI rendering state — never encode it
-        // Encode as "webSearch" for React app compatibility
-        try container.encodeIfPresent(webSearchState, forKey: .webSearch)
-        if !urlFetches.isEmpty {
-            try container.encode(urlFetches, forKey: .urlFetches)
-        }
-        if !attachments.isEmpty {
-            try container.encode(attachments, forKey: .attachments)
-        }
-        // imageData, documents, documentContent, multimodalText are no longer encoded —
-        // all attachment data lives in the attachments array
-
-        // Passthrough fields for cross-platform round-trip
-        try container.encodeIfPresent(thinkingDuration, forKey: .thinkingDuration)
-        try container.encodeIfPresent(isError, forKey: .isError)
-        try container.encodeIfPresent(webSearchBeforeThinking, forKey: .webSearchBeforeThinking)
-        try container.encodeIfPresent(annotations, forKey: .annotations)
-        try container.encodeIfPresent(searchReasoning, forKey: .searchReasoning)
-        try container.encodeIfPresent(segments, forKey: .segments)
-        try container.encodeIfPresent(webSearches, forKey: .webSearches)
-        if !toolCalls.isEmpty {
-            try container.encode(toolCalls, forKey: .toolCalls)
-        }
-        try container.encodeIfPresent(buildSyncTimeline(), forKey: .timeline)
-    }
-
-    /// Builds a complete, webapp-compatible `timeline` for the wire.
-    ///
-    /// The webapp renders an assistant message exclusively from its
-    /// `timeline` blocks and suppresses the flat `content` whenever a
-    /// non-empty timeline exists. A timeline that omits content /
-    /// thinking / web-search blocks therefore makes those vanish on
-    /// web, and an absent timeline drops GenUI tool calls entirely
-    /// (the webapp's flat-field fallback never reconstructs tool_call
-    /// blocks). iOS keeps its ordered `segments` as the source of
-    /// truth, so this reconstructs the equivalent `TimelineBlock[]`
-    /// (mirroring the webapp's TimelineBuilder shapes) so chats
-    /// round-trip losslessly.
-    ///
-    /// A timeline carrying block types iOS cannot model (e.g.
-    /// `code_exec`) is preserved verbatim rather than rebuilt, so a
-    /// webapp-origin message never loses blocks on a round-trip.
-    func buildSyncTimeline() -> [JSONValue]? {
-        guard role == .assistant else { return timeline }
-        guard let segments, !segments.isEmpty else { return timeline }
-
-        let representable: Set<String> = ["thinking", "content", "web_search", "url_fetches", "tool_call"]
-        if let timeline {
-            for block in timeline {
-                if let type = block.objectValue?["type"]?.stringValue, !representable.contains(type) {
-                    return timeline
-                }
-            }
-        }
-
-        let searchById = Dictionary(
-            (webSearches ?? []).map { ($0.id, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        let fetchById = Dictionary(
-            urlFetches.map { ($0.id, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        let toolById = Dictionary(
-            toolCalls.map { ($0.id, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-
-        // iOS streams thinking as a single concatenated `thoughts`
-        // string rendered above the ordered segments, not as a
-        // `.thinking` segment (only webapp-origin messages carry one).
-        // Without a thinking block the webapp drops the thought box, so
-        // synthesize one up front when segments don't already model it.
-        let hasThinkingSegment = segments.contains { if case .thinking = $0 { return true }; return false }
-        var blocks: [JSONValue] = []
-        if !hasThinkingSegment,
-           let thoughts, !thoughts.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            var thinkingBlock: [String: JSONValue] = [
-                "type": .string("thinking"),
-                "id": .string("thinking-pre"),
-                "content": .string(thoughts),
-                "isThinking": .bool(false),
-            ]
-            if let thinkingDuration { thinkingBlock["duration"] = .number(thinkingDuration) }
-            blocks.append(.object(thinkingBlock))
-        }
-        var pendingFetches: [JSONValue] = []
-        var pendingFetchStartedAt: Double?
-        var pendingFetchEndedAt: Double?
-        var pendingFetchesSettled = true
-
-        func flushFetches() {
-            guard !pendingFetches.isEmpty else { return }
-            var block: [String: JSONValue] = [
-                "type": .string("url_fetches"),
-                "id": .string("url-fetches-\(blocks.count)"),
-                "fetches": .array(pendingFetches),
-            ]
-            // The webapp stamps the merged block: first start, last end.
-            if let pendingFetchStartedAt { block["startedAt"] = .number(pendingFetchStartedAt) }
-            if pendingFetchesSettled, let pendingFetchEndedAt { block["endedAt"] = .number(pendingFetchEndedAt) }
-            blocks.append(.object(block))
-            pendingFetches = []
-            pendingFetchStartedAt = nil
-            pendingFetchEndedAt = nil
-            pendingFetchesSettled = true
-        }
-
-        func resolutionFields(for toolCallId: String) -> [String: JSONValue] {
-            guard let timeline,
-                  let resolved = timeline.first(where: {
-                      $0.objectValue?["type"]?.stringValue == "tool_call"
-                          && $0.objectValue?["toolCallId"]?.stringValue == toolCallId
-                  })?.objectValue else { return [:] }
-            var fields: [String: JSONValue] = [:]
-            if let resolvedAt = resolved["resolvedAt"] { fields["resolvedAt"] = resolvedAt }
-            if let resolution = resolved["resolution"] { fields["resolution"] = resolution }
-            return fields
-        }
-
-        for segment in segments {
-            if case .urlFetch(let fetchId) = segment {
-                guard let fetch = fetchById[fetchId] else { continue }
-                var fetchFields: [String: JSONValue] = [
-                    "id": .string(fetch.id),
-                    "url": .string(fetch.url),
-                    "status": .string(fetch.status.rawValue),
-                ]
-                if let sources = fetch.sources {
-                    fetchFields["sources"] = .array(sources.map(\.timelineValue))
-                }
-                pendingFetches.append(.object(fetchFields))
-                if let startedAt = fetch.startedAt {
-                    pendingFetchStartedAt = min(pendingFetchStartedAt ?? startedAt, startedAt)
-                }
-                if let endedAt = fetch.endedAt {
-                    pendingFetchEndedAt = max(pendingFetchEndedAt ?? endedAt, endedAt)
-                } else {
-                    pendingFetchesSettled = false
-                }
-                continue
-            }
-
-            flushFetches()
-
-            switch segment {
-            case .text(let text):
-                blocks.append(.object([
-                    "type": .string("content"),
-                    "id": .string("content-\(blocks.count)"),
-                    "content": .string(text),
-                ]))
-            case .thinking(let content, let isThinking, let duration, let startedAt, let endedAt):
-                var block: [String: JSONValue] = [
-                    "type": .string("thinking"),
-                    "id": .string("thinking-\(blocks.count)"),
-                    "content": .string(content),
-                    "isThinking": .bool(isThinking),
-                ]
-                if let duration { block["duration"] = .number(duration) }
-                if let startedAt { block["startedAt"] = .number(startedAt) }
-                if let endedAt { block["endedAt"] = .number(endedAt) }
-                blocks.append(.object(block))
-            case .webSearch(let searchId):
-                var state: [String: JSONValue] = [:]
-                if let search = searchById[searchId] {
-                    if let query = search.query { state["query"] = .string(query) }
-                    state["status"] = .string(search.status.rawValue)
-                    if let sources = search.sources {
-                        state["sources"] = .array(sources.map(\.timelineValue))
-                    }
-                    if let reason = search.reason { state["reason"] = .string(reason) }
-                } else {
-                    state["status"] = .string(WebSearchStatus.completed.rawValue)
-                }
-                var block: [String: JSONValue] = [
-                    "type": .string("web_search"),
-                    "id": .string(searchId),
-                    "state": .object(state),
-                ]
-                if let startedAt = searchById[searchId]?.startedAt { block["startedAt"] = .number(startedAt) }
-                if let endedAt = searchById[searchId]?.endedAt { block["endedAt"] = .number(endedAt) }
-                blocks.append(.object(block))
-            case .toolCall(let toolCallId):
-                guard let tool = toolById[toolCallId] else { continue }
-                var block: [String: JSONValue] = [
-                    "type": .string("tool_call"),
-                    "id": .string("tool-call-\(blocks.count)"),
-                    "toolCallId": .string(toolCallId),
-                    "name": .string(tool.name),
-                    "arguments": .string(tool.arguments),
-                ]
-                block.merge(resolutionFields(for: toolCallId)) { _, new in new }
-                blocks.append(.object(block))
-            case .urlFetch:
-                break
-            }
-        }
-        flushFetches()
-
-        return blocks.isEmpty ? timeline : blocks
-    }
-
-    // MARK: - Legacy Format Reconstruction
-
-    /// Classifies a persisted error message as a connection failure using
-    /// the text heuristic that predates the typed `isConnectionError` flag.
-    /// Only used when decoding messages that lack the flag.
-    private static func isLegacyConnectionErrorText(_ streamError: String?) -> Bool {
-        guard let msg = streamError?.lowercased() else { return false }
-        return msg.contains("internet connection")
-            || msg.contains("network")
-            || msg.contains("connection was lost")
-            || msg.contains("unable to connect")
-    }
-
-    /// Reconstructs attachments from React's legacy format (documents + imageData + documentContent + multimodalText).
-    /// React stored these as parallel arrays: documents[i].name paired with imageData[i] for images.
-    private static func reconstructAttachments(from container: KeyedDecodingContainer<CodingKeys>) -> [Attachment] {
-        // Decode legacy fields
-        struct LegacyImageData: Codable {
-            let base64: String
-            let mimeType: String
-        }
-        struct LegacyDocumentName: Codable {
-            let name: String
-        }
-
-        let legacyDocuments = (try? container.decodeIfPresent([LegacyDocumentName].self, forKey: .documents)) ?? nil
-        let legacyImageData = (try? container.decodeIfPresent([LegacyImageData].self, forKey: .imageData)) ?? nil
-        let legacyImageBase64 = (try? container.decodeIfPresent(String.self, forKey: .imageBase64)) ?? nil
-        let legacyDocumentContent = (try? container.decodeIfPresent(String.self, forKey: .documentContent)) ?? nil
-        let legacyMultimodalText = (try? container.decodeIfPresent(String.self, forKey: .multimodalText)) ?? nil
-
-        guard legacyDocuments != nil || legacyImageData != nil || legacyImageBase64 != nil else {
-            return []
-        }
-
-        var result: [Attachment] = []
-
-        if let docs = legacyDocuments {
-            // React format: documents[] and imageData[] are parallel arrays.
-            // If imageData[i] exists, documents[i] is an image; otherwise it's a document.
-            for (i, doc) in docs.enumerated() {
-                if let imgArray = legacyImageData, i < imgArray.count {
-                    let img = imgArray[i]
-                    let description = extractImageDescription(named: doc.name, from: legacyMultimodalText)
-                    result.append(Attachment(
-                        type: .image,
-                        fileName: doc.name,
-                        mimeType: img.mimeType,
-                        base64: img.base64,
-                        description: description ?? doc.name
-                    ))
-                } else {
-                    let textContent = extractDocumentContent(named: doc.name, from: legacyDocumentContent)
-                    result.append(Attachment(
-                        type: .document,
-                        fileName: doc.name,
-                        textContent: textContent
-                    ))
-                }
-            }
-        } else if let legacyBase64 = legacyImageBase64 {
-            // Very old iOS format: single imageBase64 string, no documents array
-            result.append(Attachment(
-                type: .image,
-                fileName: "Image",
-                mimeType: Constants.Attachments.defaultImageMimeType,
-                base64: legacyBase64,
-                description: "Image"
-            ))
-        }
-
-        return result
-    }
-
-    /// Extracts a single image description from the combined multimodalText string.
-    /// React format: "Image: {name}\nDescription:\n{description}\n\nImage: {name2}\n..."
-    private static func extractImageDescription(named name: String, from multimodalText: String?) -> String? {
-        guard let text = multimodalText else { return nil }
-        let marker = "Image: \(name)\nDescription:\n"
-        guard let range = text.range(of: marker) else { return nil }
-        let rest = text[range.upperBound...]
-        if let nextImage = rest.range(of: "\n\nImage: ") {
-            return String(rest[..<nextImage.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return String(rest).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Extracts a single document's text content from the combined documentContent string.
-    /// React format: "Document title: {name}\nDocument contents:\n{content}\n\nDocument title: {name2}\n..."
-    private static func extractDocumentContent(named name: String, from documentContent: String?) -> String? {
-        guard let content = documentContent else { return nil }
-        let marker = "Document title: \(name)\nDocument contents:\n"
-        guard let range = content.range(of: marker) else { return nil }
-        let rest = content[range.upperBound...]
-        if let nextDoc = rest.range(of: "\nDocument title: ") {
-            return String(rest[..<nextDoc.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return String(rest).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -1593,10 +579,11 @@ enum HapticFeedback {
     }
 }
 
+
 // MARK: - Rate Limit Info
 
-/// Rate limit information surfaced to the UI.
-struct RateLimitInfo {
+/// The account's quota as the views show it.
+struct RateLimitInfo: Equatable {
     /// Distinguishes the anonymous/free-tier daily request limit from the
     /// per-account hourly usage cap that subscribers hit. Both flow through the
     /// same channel but render differently: the hourly cap is transient, does
@@ -1613,394 +600,18 @@ struct RateLimitInfo {
     var tokensUsed: Int? = nil
     var tokensRemaining: Int? = nil
     var kind: Kind = .freeDaily
-}
 
-// MARK: - Session Token Management
-
-/// Errors surfaced while acquiring a session/inference token for a send.
-enum SessionTokenError: Error, LocalizedError {
-    /// The signed-in subscriber is over the per-account hourly usage cap. The
-    /// cap is enforced when the inference token is minted (the inference path
-    /// never checks it), so it is surfaced at acquisition before any request
-    /// is sent rather than inferred from a downstream failure.
-    case hourlyLimitReached(resetsAt: String?)
-
-    var errorDescription: String? {
-        switch self {
-        case .hourlyLimitReached:
-            return "You have reached your hourly usage limit."
+    /// The quota the chat service reports, when it reports one.
+    init?(_ limit: HarnessRateLimit) {
+        guard let kind = limit.kind else { return nil }
+        self.kind = kind == .hourly ? .hourly : .freeDaily
+        maxRequests = limit.maxRequests ?? 0
+        remaining = limit.remaining ?? 0
+        resetsAt = limit.resetsAt ?? ""
+        if let input = limit.inputTokens {
+            maxTokens = input.max
+            tokensUsed = input.used
+            tokensRemaining = input.remaining
         }
-    }
-}
-
-/// Manages session token retrieval and rate limit tracking
-class SessionTokenManager {
-    static let shared = SessionTokenManager()
-
-    private var sessionToken: String?
-    private var sessionTokenExpiresAt: Date?
-    private let sessionTokenEndpoint = "\(Constants.API.baseURL)/api/keys/chat"
-    @MainActor private var sessionGeneration = UUID()
-    @MainActor private lazy var chatTokenRequests: ChatTokenRequestGate = {
-        let requests = ChatTokenRequestGate()
-        requests.onCooldownExpired = { [weak self] in
-            _ = await self?.fetchFreshSessionToken()
-        }
-        return requests
-    }()
-
-    /// Serializes access to `sessionToken` / `sessionTokenExpiresAt` so the
-    /// synchronous `currentToken` provider can be read from the SDK's
-    /// request-building thread while async refreshes update it.
-    private let stateLock = NSLock()
-
-    /// Deduplicates background refreshes kicked off from `currentToken`.
-    private var backgroundRefreshAdmission = SessionTokenRefreshAdmission()
-
-    /// Current rate limit info for free-tier users (nil for premium)
-    @MainActor private(set) var rateLimitInfo: RateLimitInfo? {
-        didSet { onRateLimitChanged?(rateLimitInfo) }
-    }
-
-    /// Callback invoked whenever rateLimitInfo changes, used by ChatViewModel to sync state
-    @MainActor var onRateLimitChanged: ((RateLimitInfo?) -> Void)?
-
-    /// Snapshot of remaining count taken before a request, used for stale-response detection
-    @MainActor private var remainingBeforeRequest: Int?
-
-    /// Guards against concurrent refreshRateLimit calls
-    @MainActor private var refreshTask: Task<Void, Never>?
-
-    /// Returns true if the cached token is expired or near expiry and needs refresh
-    var needsRefresh: Bool {
-        let snapshot = tokenSnapshot()
-        guard snapshot.token != nil, let expiresAt = snapshot.expiresAt else { return true }
-        return expiresAt.timeIntervalSinceNow <= Constants.API.sessionTokenExpiryBufferSeconds
-    }
-
-    private init() {}
-
-    /// Thread-safe write of the cached token and its expiry.
-    private func storeToken(_ token: String?, expiresAt: Date?) {
-        stateLock.lock()
-        sessionToken = token
-        sessionTokenExpiresAt = expiresAt
-        stateLock.unlock()
-    }
-
-    /// Thread-safe read of the cached token and its expiry.
-    private func tokenSnapshot() -> (token: String?, expiresAt: Date?) {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return (sessionToken, sessionTokenExpiresAt)
-    }
-
-    /// Synchronous, thread-safe accessor for the freshest cached token. Used as
-    /// the SDK's dynamic token provider so the bearer can rotate per request
-    /// without rebuilding the attested client. When the cached token is missing
-    /// or near expiry a background refresh is kicked off (deduplicated) and the
-    /// current value is returned for the in-flight request; the reactive 401
-    /// retry covers the rare case where it has already hard-expired.
-    var currentToken: String {
-        let snapshot = tokenSnapshot()
-        let isStale = snapshot.expiresAt.map {
-            $0.timeIntervalSinceNow <= Constants.API.sessionTokenExpiryBufferSeconds
-        } ?? true
-        if isStale {
-            triggerBackgroundRefresh()
-        }
-        return snapshot.token ?? ""
-    }
-
-    /// Kicks off a single background token refresh, coalescing concurrent
-    /// callers so a burst of requests does not trigger a stampede of fetches.
-    private func triggerBackgroundRefresh() {
-        guard let refreshID = stateLock.withLock({ backgroundRefreshAdmission.begin() }) else { return }
-
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            guard self.stateLock.withLock({ self.backgroundRefreshAdmission.requestID == refreshID }) else { return }
-            defer {
-                self.stateLock.withLock { self.backgroundRefreshAdmission.finish(refreshID) }
-            }
-            _ = await self.fetchFreshSessionToken()
-        }
-    }
-
-    /// Retrieves the session token, returning the cached value if still valid
-    /// - Returns: Session token string or empty string if unavailable
-    @MainActor func getSessionToken() async -> String {
-        guard !Task.isCancelled else { return "" }
-        let snapshot = tokenSnapshot()
-        if let token = snapshot.token,
-           let expiresAt = snapshot.expiresAt,
-           expiresAt.timeIntervalSinceNow > Constants.API.sessionTokenExpiryBufferSeconds {
-            return token
-        }
-
-        return await fetchFreshSessionToken()
-    }
-
-    /// Acquires a usable inference token for an outgoing send, mirroring the web
-    /// client: a subscriber over the per-account hourly cap is surfaced here and
-    /// the call throws, so the caller aborts before firing a request the
-    /// inference path cannot satisfy (the cap is a mint-time decision and is
-    /// never checked on inference). Coasting on a still-valid cached token is
-    /// preserved; the throw happens only when no usable token could be obtained
-    /// because the cap was hit.
-    /// - Parameter forceRefresh: bypass the cached token (used on a 401 retry).
-    @MainActor func acquireTokenForSend(forceRefresh: Bool) async throws {
-        let generation = sessionGeneration
-        let token = forceRefresh ? await fetchFreshSessionToken() : await getSessionToken()
-        guard generation == sessionGeneration, !Task.isCancelled else { throw CancellationError() }
-        if !token.isEmpty { return }
-        if rateLimitInfo?.kind == .hourly {
-            throw SessionTokenError.hourlyLimitReached(resetsAt: rateLimitInfo?.resetsAt)
-        }
-    }
-
-    /// Forces a fresh session token fetch, ignoring any cached value
-    /// - Returns: Session token string or empty string if unavailable
-    @MainActor func fetchFreshSessionToken(bypassRateLimit: Bool = false) async -> String {
-        guard !Task.isCancelled else { return "" }
-        if !bypassRateLimit, case .rateLimited(let resetsAt, _)? = chatTokenRequests.currentRateLimit {
-            return applyHourlyLimit(resetsAt: resetsAt)
-        }
-        let generation = sessionGeneration
-        do {
-            // Try to load Clerk if it's not loaded
-            let isLoaded = await Clerk.shared.isLoaded
-
-            if !isLoaded {
-                try await Clerk.shared.refreshClient()
-            }
-            guard isCurrentRequest(generation) else { return "" }
-
-            // Try a few times with a small delay for the session to be available
-            for attempt in 1...3 {
-                let session = await Clerk.shared.session
-                guard isCurrentRequest(generation) else { return "" }
-                if let session = session {
-                    let token = try? await session.getToken()
-                    guard isCurrentRequest(generation) else { return "" }
-
-                    guard let jwt = token ?? session.lastActiveToken?.jwt else {
-                        // No token available at all, wait and retry
-                        if attempt < 3 {
-                            try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
-                        }
-                        continue
-                    }
-
-                    // Resolve a token with this JWT: subscribers mint a stateless
-                    // JWT inference token, everyone else falls back to an opaque key.
-                    let result = await fetchAuthenticatedSessionToken(jwt: jwt, generation: generation, bypassRateLimit: bypassRateLimit)
-                    guard isCurrentRequest(generation) else { return "" }
-
-                    if let key = result {
-                        return key
-                    }
-
-                    // If getToken() gave us a fresh token and it still failed,
-                    // the issue isn't a stale JWT — stop retrying
-                    if token != nil {
-                        return ""
-                    }
-
-                    // The fresh getToken() call failed so we used a stale
-                    // lastActiveToken that the server rejected.
-                    // Refresh the Clerk client to get a new JWT and retry.
-                    _ = try? await Clerk.shared.refreshClient()
-                    let refreshedSession = await Clerk.shared.session
-                    guard isCurrentRequest(generation) else { return "" }
-                    if let refreshedToken = try? await refreshedSession?.getToken() {
-                        if let key = await fetchAuthenticatedSessionToken(jwt: refreshedToken, generation: generation, bypassRateLimit: bypassRateLimit) {
-                            return key
-                        }
-                    }
-
-                    return ""
-                }
-
-                // Wait a bit before trying again (only for first 2 attempts)
-                if attempt < 3 {
-                    try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
-                }
-            }
-
-            // No Clerk session — fetch an anonymous key without auth
-            if let key = await fetchSessionKey(jwt: nil, generation: generation) {
-                return key
-            }
-
-            return ""
-        } catch {
-            return ""
-        }
-    }
-
-    @MainActor private func isCurrentRequest(_ generation: UUID) -> Bool {
-        generation == sessionGeneration && !Task.isCancelled
-    }
-
-    private func tokenDuringCooldown() -> String {
-        let snapshot = tokenSnapshot()
-        guard let token = snapshot.token, let expiresAt = snapshot.expiresAt,
-              expiresAt.timeIntervalSinceNow > 0 else { return "" }
-        return token
-    }
-
-    @MainActor private func applyHourlyLimit(resetsAt: String?) -> String {
-        rateLimitInfo = RateLimitInfo(
-            maxRequests: 0,
-            remaining: 0,
-            resetsAt: resetsAt ?? "",
-            kind: .hourly
-        )
-        return tokenDuringCooldown()
-    }
-
-    /// Exchanges a Clerk JWT for a session API key, or fetches an anonymous key when jwt is nil
-    /// - Returns: The API key string, or nil on failure
-    @MainActor private func fetchSessionKey(jwt: String?, generation: UUID) async -> String? {
-        guard isCurrentRequest(generation) else { return nil }
-        do {
-            var request = URLRequest(url: URL(string: sessionTokenEndpoint)!)
-            request.httpMethod = "GET"
-            if let jwt = jwt {
-                request.addValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
-            }
-
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard isCurrentRequest(generation) else { return nil }
-
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200 else {
-                return nil
-            }
-
-            if let responseDict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let key = responseDict["key"] as? String {
-                let expiresAt: Date
-                if let expiresAtString = responseDict["expires_at"] as? String,
-                   let parsed = ISO8601DateFormatter().date(from: expiresAtString) {
-                    expiresAt = parsed
-                } else {
-                    // Fallback: assume a conservative expiry so we don't refetch on every call
-                    expiresAt = Date().addingTimeInterval(Constants.API.sessionTokenExpiryBufferSeconds * 2)
-                }
-                storeToken(key, expiresAt: expiresAt)
-
-                // Parse rate limit info for free-tier users
-                let isFreeTier = responseDict["is_free_tier"] as? Bool ?? false
-                if isFreeTier,
-                   let rateLimitDict = responseDict["rate_limit"] as? [String: Any],
-                   let maxRequests = rateLimitDict["max_requests"] as? Int,
-                   let remaining = rateLimitDict["remaining"] as? Int,
-                   let resetsAt = rateLimitDict["resets_at"] as? String {
-                    self.rateLimitInfo = RateLimitInfo(
-                        maxRequests: maxRequests,
-                        remaining: remaining,
-                        resetsAt: resetsAt,
-                        maxTokens: rateLimitDict["max_tokens"] as? Int,
-                        tokensUsed: rateLimitDict["tokens_used"] as? Int,
-                        tokensRemaining: rateLimitDict["tokens_remaining"] as? Int,
-                        kind: .freeDaily
-                    )
-                } else {
-                    self.rateLimitInfo = nil
-                }
-
-                return key
-            }
-
-            return nil
-        } catch {
-            return nil
-        }
-    }
-
-    /// Resolves a usable inference token for an authenticated user. Subscribers
-    /// mint a stateless JWT via /api/chat/token; everyone else falls back to an
-    /// opaque key from /api/keys/chat. Returns nil only when no definitive answer
-    /// was reached, so the caller can retry with a refreshed Clerk JWT.
-    @MainActor private func fetchAuthenticatedSessionToken(jwt: String, generation: UUID, bypassRateLimit: Bool) async -> String? {
-        guard isCurrentRequest(generation) else { return nil }
-        let result = await chatTokenRequests.fetch(jwt: jwt, bypassCooldown: bypassRateLimit)
-        guard isCurrentRequest(generation) else { return nil }
-        switch result {
-        case .token(let key, let expiresAt):
-            storeToken(key, expiresAt: expiresAt
-                ?? Date().addingTimeInterval(Constants.API.sessionTokenExpiryBufferSeconds * 2))
-            // Subscribers are not subject to the free-tier daily limit.
-            self.rateLimitInfo = nil
-            return key
-        case .rateLimited(let resetsAt, _):
-            // Subscriber over the per-account hourly cap. Surface it through the
-            // shared rate-limit channel so the UI can show an hourly-limit
-            // indicator, and do not fall back to the opaque /api/keys/chat path,
-            // which is not subject to the cap and would let it be bypassed.
-            // Reuse the cached token only while it is still valid so an in-flight
-            // session is not dropped; once it has expired there is no usable
-            // token to return.
-            return applyHourlyLimit(resetsAt: resetsAt)
-        case .unavailable:
-            return await fetchSessionKey(jwt: jwt, generation: generation)
-        case .cancelled:
-            return ""
-        }
-    }
-
-    /// Saves the current remaining count and optimistically decrements by 1.
-    /// Called just before sending a chat request so the UI updates immediately.
-    @MainActor func snapshotAndDecrementRemaining() {
-        guard var rateLimit = rateLimitInfo else { return }
-        remainingBeforeRequest = rateLimit.remaining
-        rateLimit.remaining = max(0, rateLimit.remaining - 1)
-        rateLimitInfo = rateLimit
-    }
-
-    /// Re-fetches the session token (and rate limit) from the server.
-    /// Handles stale responses: if the server returns a remaining count >= the pre-request
-    /// snapshot, the server hasn't yet accounted for our last request, so we use snapshot - 1.
-    @MainActor func refreshRateLimit() {
-        guard rateLimitInfo != nil else { return }
-        guard !chatTokenRequests.isCoolingDown else { return }
-        guard refreshTask == nil else { return }
-
-        let generation = sessionGeneration
-        let snapshot = remainingBeforeRequest
-        remainingBeforeRequest = nil
-
-        refreshTask = Task {
-            defer {
-                if generation == sessionGeneration { refreshTask = nil }
-            }
-
-            #if DEBUG
-            print("[SessionToken] refreshRateLimit: re-fetching token and rate limit")
-            #endif
-            _ = await fetchFreshSessionToken()
-            guard isCurrentRequest(generation) else { return }
-
-            if let snapshot = snapshot,
-               var rateLimit = rateLimitInfo,
-               rateLimit.remaining >= snapshot {
-                rateLimit.remaining = max(0, snapshot - 1)
-                rateLimitInfo = rateLimit
-            }
-        }
-    }
-
-    /// Clears the cached session token and rate limit info
-    @MainActor func clearSessionToken() {
-        sessionGeneration = UUID()
-        stateLock.withLock { backgroundRefreshAdmission.reset() }
-        chatTokenRequests.reset()
-        refreshTask?.cancel()
-        refreshTask = nil
-        remainingBeforeRequest = nil
-        storeToken(nil, expiresAt: nil)
-        rateLimitInfo = nil
     }
 }

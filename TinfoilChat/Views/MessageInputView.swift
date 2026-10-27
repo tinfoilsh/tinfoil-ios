@@ -27,11 +27,10 @@ func cameraPermissionAction(for status: AVAuthorizationStatus) -> CameraPermissi
 
 func shouldShowMessageStopAction(
     isStreaming: Bool,
-    hasActiveRecovery: Bool,
     hasSubmittableContent: Bool,
     isMessageQueueFull: Bool
 ) -> Bool {
-    (isStreaming || hasActiveRecovery) && (!hasSubmittableContent || isMessageQueueFull)
+    isStreaming && (!hasSubmittableContent || isMessageQueueFull)
 }
 
 func hasNonWhitespaceContent(_ text: String) -> Bool {
@@ -145,7 +144,6 @@ struct MessageInputView: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @EnvironmentObject private var authManager: AuthManager
-    @ObservedObject private var recoveryPhaseTracker = ChatRecoveryPhaseTracker.shared
     @State private var textHeight: CGFloat = Layout.defaultHeight
     @State private var messageTextHasNonWhitespace = false
     @State private var isCheckingRateLimit = false
@@ -209,7 +207,6 @@ struct MessageInputView: View {
         messageTextHasNonWhitespace
             && !viewModel.isLoading
             && viewModel.canUseCurrentChatActions
-            && !viewModel.hasPendingResponseRecovery
             && viewModel.pendingAttachments.isEmpty
     }
 
@@ -223,16 +220,13 @@ struct MessageInputView: View {
             || !viewModel.pendingAttachments.isEmpty
     }
 
-    /// While a response is streaming or being recovered, the button stays a
-    /// send button only while a sendable draft can actually be queued; with
-    /// nothing submittable, or the queue already full, it reverts to a stop
-    /// button so the stream can always be cancelled. Mirrors the webapp.
+    /// While a response is streaming, the button stays a send button only
+    /// while a sendable draft can actually be queued; with nothing
+    /// submittable, or the queue already full, it reverts to a stop button
+    /// so the stream can always be cancelled. Mirrors the webapp.
     private var showStopAction: Bool {
         shouldShowMessageStopAction(
             isStreaming: viewModel.isLoading,
-            hasActiveRecovery: viewModel.activeRecoveryEnvelope(
-                trackedBy: recoveryPhaseTracker
-            ) != nil,
             hasSubmittableContent: hasSubmittableContent,
             isMessageQueueFull: viewModel.isMessageQueueFull
         )
@@ -526,7 +520,7 @@ struct MessageInputView: View {
                     isCheckingRateLimit = true
                     Task { @MainActor in
                         defer { isCheckingRateLimit = false }
-                        _ = await SessionTokenManager.shared.fetchFreshSessionToken(bypassRateLimit: true)
+                        await viewModel.checkRateLimit()
                     }
                 }
                 .buttonStyle(.plain)
@@ -572,40 +566,13 @@ struct MessageInputView: View {
     /// The indicator is hidden on a blank chat, matching the webapp's
     /// welcome screen behavior.
     private var showContextIndicator: Bool {
-        !(viewModel.currentChat?.messages.isEmpty ?? true)
+        viewModel.currentChat?.contextUsage != nil
     }
 
-    /// Estimated context usage for the conversation: non-archived messages
-    /// plus the draft input and pending attachments, against the current
-    /// model's token budget. Mirrors the webapp's calculation.
+    /// The conversation's context usage, as the chat service reports it
+    /// against the model's budget.
     private var contextUsage: ContextUsage {
-        let limitTokens = TokenEstimation.contextTokenBudget(viewModel.currentModel.contextWindowTokens)
-        let reasoningHistoryPolicy = AppConfig.shared.reasoningHistoryPolicy(for: viewModel.currentModel)
-        var usedTokens = TokenEstimation.estimateTokenCount(messageText)
-
-        let messages = viewModel.messages
-        let startIndex = TokenEstimation.findContextStartIndex(
-            messages: messages,
-            budgetTokens: limitTokens,
-            reasoningHistoryPolicy: reasoningHistoryPolicy
-        )
-        for i in startIndex..<messages.count {
-            usedTokens += TokenEstimation.estimateMessageTokens(
-                messages[i],
-                reasoningHistoryPolicy: reasoningHistoryPolicy
-            )
-        }
-
-        for attachment in viewModel.pendingAttachments {
-            usedTokens += TokenEstimation.estimateTokenCount(attachment.textContent)
-            usedTokens += TokenEstimation.estimateTokenCount(attachment.description)
-        }
-
-        return ContextUsage(
-            percentage: Double(usedTokens) / Double(limitTokens) * 100,
-            usedTokens: usedTokens,
-            limitTokens: limitTokens
-        )
+        viewModel.currentChat?.contextUsage ?? ContextUsage(percentage: 0, usedTokens: 0, limitTokens: 0)
     }
 
     /// When the latest assistant message ends in an input-surface
@@ -1723,7 +1690,7 @@ struct ModelSelectorSheetView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var availableModels: [ModelType] {
-        AppConfig.shared.selectableModels
+        viewModel.selectableModels
     }
 
     /// Auto entries have no asset icon; show a routing glyph instead.

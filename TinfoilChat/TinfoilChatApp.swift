@@ -33,12 +33,6 @@ struct TinfoilChatApp: App {
             options: Clerk.Options(telemetryEnabled: false)
         )
         _clerk = State(initialValue: Clerk.shared)
-        // Build the profile manager before any view can read it. Its
-        // initializer applies the stored profile, which writes shared
-        // settings on other observable singletons; doing that lazily
-        // from a view's property initializer would publish those
-        // changes mid view update.
-        _ = ProfileManager.shared
     }
     
     var body: some Scene {
@@ -85,18 +79,15 @@ struct TinfoilChatApp: App {
                                     // Initialize authentication state
                                     await authManager.initializeAuthState()
                                     
-                                    // Initialize cloud sync services (sets robust token getter for profile sync)
-                                    do {
-                                        try await CloudSyncService.shared.initialize()
-                                    } catch {
-                                        #if DEBUG
-                                        print("Failed to initialize CloudSyncService: \(error)")
-                                        #endif
+                                    // The key registry's requests carry the account's
+                                    // identity.
+                                    await SyncEnclaveClient.shared.setTokenGetter { refresh in
+                                        try await ClerkIdentity.token(refresh: refresh)
                                     }
 
                                     // Pre-warm the sync-enclave attestation handshake
-                                    // so the first sync-driven request doesn't pay
-                                    // the cold-start latency.
+                                    // so the first key request doesn't pay the
+                                    // cold-start latency.
                                     Task.detached(priority: .utility) {
                                         do {
                                             try await SyncEnclaveClient.shared.ready()
@@ -107,11 +98,6 @@ struct TinfoilChatApp: App {
                                         }
                                     }
 
-                                    // Initialize ProfileManager to start auto-sync
-                                    _ = ProfileManager.shared
-                                    // Kick off an initial profile sync now that auth and token getter are ready
-                                    await ProfileManager.shared.performFullSync()
-                                    
                                     // Add observer for Clerk auth state changes
                                     NotificationCenter.default.addObserver(
                                         forName: NSNotification.Name("ClerkUserChanged"),
@@ -120,8 +106,6 @@ struct TinfoilChatApp: App {
                                     ) { _ in
                                         Task {
                                             await authManager.initializeAuthState()
-                                            // Sync profile when auth state changes
-                                            await ProfileManager.shared.performFullSync()
                                         }
                                     }
                                 } catch {

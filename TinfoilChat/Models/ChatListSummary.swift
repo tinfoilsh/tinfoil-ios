@@ -5,6 +5,7 @@
 
 import Foundation
 
+/// A chat as a list row shows it.
 struct ChatListSummary: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
@@ -13,39 +14,22 @@ struct ChatListSummary: Identifiable, Equatable, Sendable {
     let activityAt: Date
     var projectId: String?
     let isLocalOnly: Bool
-    let decryptionFailed: Bool
-    let dataCorrupted: Bool
     let isBlankChat: Bool
     let isTemporary: Bool
     let pendingSave: Bool
+    let isRunning: Bool
 
     init(from chat: Chat) {
         id = chat.id
         title = chat.title
         createdAt = chat.createdAt
-        updatedAt = chat.updatedAt
-        activityAt = chat.activityAt
+        updatedAt = chat.updatedAt ?? chat.createdAt
+        activityAt = chat.lastActivity
         projectId = chat.projectId
         isLocalOnly = chat.isLocalOnly
-        decryptionFailed = chat.decryptionFailed
-        dataCorrupted = chat.dataCorrupted
         isBlankChat = chat.isBlankChat
         isTemporary = chat.isTemporary
         pendingSave = chat.pendingSave
-    }
-
-    init(from entry: ChatIndexEntry) {
-        id = entry.id
-        title = entry.title
-        createdAt = entry.createdAt
-        updatedAt = entry.updatedAt
-        activityAt = entry.activityAt
-        projectId = entry.projectId
-        isLocalOnly = entry.isLocalOnly
-        decryptionFailed = entry.decryptionFailed
-        dataCorrupted = entry.dataCorrupted
-        isBlankChat = entry.messageCount == 0 && !entry.decryptionFailed
-        isTemporary = false
-        pendingSave = false
+        isRunning = chat.activeRun != nil
     }
 }
