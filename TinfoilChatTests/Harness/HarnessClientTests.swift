@@ -59,22 +59,22 @@ private actor ScriptedCredentials: HarnessCredentials {
     func chatAccessRenewsAt() async -> Date? { renewsAt }
 }
 
-/// A flag that waiters wake on.
+/// A flag that waiters wake on, or give up on when cancelled.
 private actor Signal {
     private var raised = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var waiters: [UUID: CheckedContinuation<Void, Never>] = [:]
 
     func raise() {
         raised = true
-        waiters.forEach { $0.resume() }
+        waiters.values.forEach { $0.resume() }
         waiters.removeAll()
     }
 
-    /// Whether the flag is raised within a second.
+    /// Whether the flag is raised within the time given.
     func raised(within seconds: Double) async -> Bool {
         if raised { return true }
         return await withTaskGroup(of: Bool.self) { group in
-            group.addTask { await self.wait(); return true }
+            group.addTask { await self.wait() }
             group.addTask { try? await Task.sleep(for: .seconds(seconds)); return false }
             let first = await group.next()!
             group.cancelAll()
@@ -82,9 +82,20 @@ private actor Signal {
         }
     }
 
-    private func wait() async {
-        if raised { return }
-        await withCheckedContinuation { waiters.append($0) }
+    /// Whether the flag was raised, rather than the wait cancelled.
+    private func wait() async -> Bool {
+        if raised { return true }
+        let waiter = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { waiters[waiter] = $0 }
+        } onCancel: {
+            Task { await self.giveUp(waiter) }
+        }
+        return raised
+    }
+
+    private func giveUp(_ waiter: UUID) {
+        waiters.removeValue(forKey: waiter)?.resume()
     }
 }
 
