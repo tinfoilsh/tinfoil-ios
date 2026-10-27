@@ -63,8 +63,6 @@ final class HarnessAccount: ObservableObject {
         let projects: String
     }
 
-    private struct Empty: Encodable {}
-
     init(
         userId: String?,
         client: HarnessClient,
@@ -138,7 +136,7 @@ final class HarnessAccount: ObservableObject {
         guard !disposed, keyless || generation == keyGeneration else { throw CancellationError() }
     }
 
-    func post<T: Decodable>(_ route: HarnessRoute, _ body: some Encodable = Empty(), keyless: Bool = false, threadId: String? = nil) async throws -> T {
+    func post<T: Decodable>(_ route: HarnessRoute, _ body: some Encodable = EmptyBody(), keyless: Bool = false, threadId: String? = nil) async throws -> T {
         let generation = keyGeneration
         let result: T = try await client.post(route, try keyed(body, keyless: keyless), threadId: threadId)
         try guardKey(generation, keyless: keyless)

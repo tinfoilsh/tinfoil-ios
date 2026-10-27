@@ -17,7 +17,7 @@ enum RunEvent: Equatable, Sendable {
     case toolCallResult(Components.Schemas.ToolCallResultEvent)
     case activitySnapshot(Components.Schemas.ActivitySnapshotEvent)
     case activityDelta(Components.Schemas.ActivityDeltaEvent)
-    case runFinished(Components.Schemas.RunFinishedEvent)
+    case runFinished(RunFinished)
     case runError(RunError)
 
     var type: HarnessEventType {
@@ -60,6 +60,18 @@ enum RunEvent: Equatable, Sendable {
     }
 }
 
+/// Ends a run, with what it reports. A device run's final event carries the
+/// whole chat, kept as the harness sent it, members this client does not
+/// know included.
+struct RunFinished: Equatable, Sendable {
+    let event: Components.Schemas.RunFinishedEvent
+    let thread: StoredThread?
+
+    var threadId: String { event.threadId }
+    var runId: String { event.runId }
+    var metadata: Components.Schemas.RunMetadata { event.metadata }
+}
+
 /// Ends a run that failed, with the members of an error. One a stream ends
 /// with after its run was lost names neither the chat nor the run.
 struct RunError: Equatable, Sendable, Decodable {
@@ -67,6 +79,8 @@ struct RunError: Equatable, Sendable, Decodable {
     var runId: String?
     var error: HarnessErrorBody
     var metadata: Components.Schemas.RunMetadata?
+    /// The whole chat a device run returns, as the harness sent it.
+    var thread: StoredThread?
 
     private enum CodingKeys: String, CodingKey {
         case threadId, runId, metadata
@@ -226,8 +240,20 @@ enum HarnessEventStream {
         case .toolCallResult: return .toolCallResult(try decoder.decode(Components.Schemas.ToolCallResultEvent.self, from: bytes))
         case .activitySnapshot: return .activitySnapshot(try decoder.decode(Components.Schemas.ActivitySnapshotEvent.self, from: bytes))
         case .activityDelta: return .activityDelta(try decoder.decode(Components.Schemas.ActivityDeltaEvent.self, from: bytes))
-        case .runFinished: return .runFinished(try decoder.decode(Components.Schemas.RunFinishedEvent.self, from: bytes))
-        case .runError: return .runError(try decoder.decode(RunError.self, from: bytes))
+        case .runFinished:
+            return .runFinished(RunFinished(event: try decoder.decode(Components.Schemas.RunFinishedEvent.self, from: bytes), thread: returnedThread(bytes)))
+        case .runError:
+            var failed = try decoder.decode(RunError.self, from: bytes)
+            failed.thread = returnedThread(bytes)
+            return .runError(failed)
         }
+    }
+
+    /// The chat a terminal event's metadata carries, whole.
+    private static func returnedThread(_ bytes: Data) -> StoredThread? {
+        guard let event = (try? JSONSerialization.jsonObject(with: bytes)) as? [String: Any],
+              let metadata = event["metadata"] as? [String: Any],
+              let thread = metadata["thread"] as? [String: Any] else { return nil }
+        return StoredThread(json: thread)
     }
 }
