@@ -39,6 +39,13 @@ private enum AttestationRecoveryFixture {
     ]
 }
 
+/// How many times a session's token was read.
+private actor TokenReads {
+    private(set) var count = 0
+
+    func record() { count += 1 }
+}
+
 private actor AttestationRecoveryGate {
     private var isOpen = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -289,7 +296,11 @@ struct SyncEnclaveAttestationRecoveryTests {
             number == 1 ? FakeEnclave(verificationGate: (started, release)) : FakeEnclave()
         }
         let client = makeClient(enclaves)
-        await client.setTokenGetter { _ in "old-session-token" }
+        let tokenReads = TokenReads()
+        await client.setTokenGetter { _ in
+            await tokenReads.record()
+            return "old-session-token"
+        }
         let request = Task { () -> EmptyResponse in
             try await client.get(path: "/v1/health")
         }
@@ -302,6 +313,7 @@ struct SyncEnclaveAttestationRecoveryTests {
         await release.open()
         await expectCancellation(request)
 
+        #expect(await tokenReads.count == 0)
         for enclave in enclaves.all {
             #expect(await enclave.requestCount == 0)
         }
