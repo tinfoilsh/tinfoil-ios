@@ -325,6 +325,43 @@ enum Constants {
         static let keyConfigurationErrorType = "urn:ietf:params:ehbp:error:key-config"
         static let problemContentType = "application/problem+json"
         static let maximumDiagnosticBytes = 4 * 1024
+
+        /// How often the harness is asked what changed on other devices.
+        static let changePollSeconds: TimeInterval = 20
+
+        /// Where this device keeps the settings the harness does not hold.
+        enum Profile {
+            static let keychainService = "com.tinfoil.chat.profile"
+            /// The profile the previous client kept, imported once.
+            static let previousProfileKey = "userProfile"
+            static let localProfileKey = "harnessLocalProfile"
+            static let cloudProfileCacheKeyPrefix = "harnessCloudProfile-"
+            static let localProfileChangesKey = "tinfoil-harness-local-profile-changes"
+            static let localProfileUpgradedKey = "tinfoil-harness-local-profile-upgraded"
+            static let pendingProfileMergeKey = "tinfoil-harness-pending-profile-merge"
+        }
+
+        /// How the chat access a signed-in account carries is minted from
+        /// the control plane, and a signed-out caller's free key issued.
+        enum ChatAccess {
+            static let freeKeyPath = "/api/keys/chat"
+            static let freeKeyPrefix = "free_"
+            static let maximumKeyLength = 256
+            /// Chat access is minted again once it has less than this left,
+            /// so a reply started with it can finish first.
+            static let renewBeforeExpirySeconds: TimeInterval = 5 * 60
+            static let mintTimeoutSeconds: TimeInterval = 15
+            /// A busy, unavailable or suspended answer that names no time to
+            /// ask again is kept this long, so requests do not ask with each
+            /// one.
+            static let refusalFallbackSeconds: TimeInterval = 60
+            static let subscriptionRequiredStatus = 402
+            static let forbiddenStatus = 403
+            static let tooManyRequestsStatus = 429
+            static let unavailableStatus = 503
+            static let serverErrorStatus = 500
+            static let accountProvisioningCode = "ACCOUNT_PROVISIONING"
+        }
     }
 
     enum SyncEnclave {
