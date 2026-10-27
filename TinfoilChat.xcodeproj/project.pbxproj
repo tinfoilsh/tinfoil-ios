@@ -19,6 +19,7 @@
 		99F154862F4F633400E9174E /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154852F4F633400E9174E /* RevenueCatUI */; };
 		A1B2C3D40100000000000001 /* TinfoilPasskeyKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40100000000000003 /* TinfoilPasskeyKit */; };
 		A1B2C3D40100000000000004 /* TinfoilPasskeyKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40100000000000003 /* TinfoilPasskeyKit */; };
+		A1B2C3D40200000000000001 /* OpenAPIRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40200000000000003 /* OpenAPIRuntime */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -125,6 +126,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1B2C3D40100000000000001 /* TinfoilPasskeyKit in Frameworks */,
+				A1B2C3D40200000000000001 /* OpenAPIRuntime in Frameworks */,
 				99EAB0012FC0000100EAB001 /* EHBP in Frameworks */,
 				99EEFB1B2F9EE9E8005B3D75 /* TinfoilAI in Frameworks */,
 				99F154822F4F632500E9174E /* Sentry in Frameworks */,
@@ -241,6 +243,7 @@
 			name = TinfoilChat;
 			packageProductDependencies = (
 				A1B2C3D40100000000000003 /* TinfoilPasskeyKit */,
+				A1B2C3D40200000000000003 /* OpenAPIRuntime */,
 				99F154682F4F60C500E9174E /* ClerkKit */,
 				99F1546A2F4F60C500E9174E /* ClerkKitUI */,
 				99F1546F2F4F610000E9174E /* SwiftMath */,
@@ -288,6 +291,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				A1B2C3D40100000000000002 /* XCRemoteSwiftPackageReference "tinfoil-passkey-kit" */,
+				A1B2C3D40200000000000002 /* XCRemoteSwiftPackageReference "swift-openapi-runtime" */,
 				99F154672F4F60C500E9174E /* XCRemoteSwiftPackageReference "clerk-ios" */,
 				99F1546C2F4F60E900E9174E /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 				99F1546D2F4F60F600E9174E /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
@@ -822,6 +826,14 @@
 				version = 0.2.2;
 			};
 		};
+		A1B2C3D40200000000000002 /* XCRemoteSwiftPackageReference "swift-openapi-runtime" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-openapi-runtime";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.8.2;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -874,6 +886,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A1B2C3D40100000000000002 /* XCRemoteSwiftPackageReference "tinfoil-passkey-kit" */;
 			productName = TinfoilPasskeyKit;
+		};
+		A1B2C3D40200000000000003 /* OpenAPIRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D40200000000000002 /* XCRemoteSwiftPackageReference "swift-openapi-runtime" */;
+			productName = OpenAPIRuntime;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
