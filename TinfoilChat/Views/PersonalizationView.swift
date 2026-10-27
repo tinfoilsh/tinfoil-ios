@@ -126,6 +126,8 @@ struct PersonalizationView: View {
     @ObservedObject private var profileManager: ProfileManager
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var editor: PersonalizationEditorState
+    @State private var isSaving = false
+    @State private var saveError: String?
 
     private let availableTraits = SettingsManager.shared.availableTraits
 
@@ -154,11 +156,28 @@ struct PersonalizationView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Save") {
-                    profileManager.savePersonalization(editor.draft)
-                    dismiss()
+                    isSaving = true
+                    Task { @MainActor in
+                        defer { isSaving = false }
+                        do {
+                            try await profileManager.savePersonalization(editor.draft)
+                            dismiss()
+                        } catch {
+                            saveError = error.localizedDescription
+                        }
+                    }
                 }
                 .fontWeight(.semibold)
+                .disabled(isSaving)
             }
+        }
+        .alert("Could Not Save Personalization", isPresented: Binding(
+            get: { saveError != nil },
+            set: { if !$0 { saveError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(saveError ?? "")
         }
         .onTapGesture {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)

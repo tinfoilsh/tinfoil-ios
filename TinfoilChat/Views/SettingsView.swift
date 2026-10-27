@@ -70,7 +70,7 @@ class SettingsManager: ObservableObject {
         didSet {
             UserDefaults.standard.set(webSearchAvailable, forKey: Constants.StorageKeys.Settings.webSearchAvailable)
             if !isApplyingSharedProfile {
-                ProfileManager.shared.sharedSettingsDidChange()
+                ProfileManager.shared.sharedSettingDidChange(.webSearchAvailable)
             }
         }
     }
@@ -79,7 +79,7 @@ class SettingsManager: ObservableObject {
         didSet {
             UserDefaults.standard.set(piiCheckEnabled, forKey: Constants.StorageKeys.Settings.piiCheckEnabled)
             if !isApplyingSharedProfile {
-                ProfileManager.shared.sharedSettingsDidChange()
+                ProfileManager.shared.sharedSettingDidChange(.piiCheckEnabled)
             }
         }
     }
@@ -89,7 +89,7 @@ class SettingsManager: ObservableObject {
         didSet {
             UserDefaults.standard.set(genUIEnabled, forKey: Constants.StorageKeys.Settings.genUIEnabled)
             if !isApplyingSharedProfile {
-                ProfileManager.shared.sharedSettingsDidChange()
+                ProfileManager.shared.sharedSettingDidChange(.genUIEnabled)
             }
         }
     }
@@ -98,7 +98,7 @@ class SettingsManager: ObservableObject {
     @Published var isCloudSyncEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isCloudSyncEnabled, forKey: Constants.StorageKeys.Settings.cloudSyncEnabled)
-            if isCloudSyncEnabled != oldValue {
+            if isCloudSyncEnabled != oldValue, !isApplyingSharedProfile {
                 NotificationCenter.default.post(name: .cloudSyncSettingChanged, object: nil)
             }
         }
@@ -209,7 +209,11 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.cloudSyncEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.localOnlyModeEnabled)
 
-        // Reset in-memory state to defaults
+        // Reset in-memory state to defaults. The resets are not the user's
+        // changes: none is written to the account's profile, which the
+        // teardown clears.
+        isApplyingSharedProfile = true
+        defer { isApplyingSharedProfile = false }
         hapticFeedbackEnabled = true
         selectedLanguage = ProfileDefaults.language
         isPersonalizationEnabled = ProfileDefaults.isUsingPersonalization

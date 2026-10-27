@@ -16,21 +16,28 @@ final class DeviceProfileStorage: ProfileStorage {
     }
 
     /// The first read imports the settings the previous client kept, once;
-    /// afterwards only the local profile is read.
+    /// afterwards only the local profile is read. A stored profile that
+    /// cannot be read is logged and shown as empty, without an import.
     func loadLocalProfile() -> ProfileFields {
         if let data = keychain.load(for: Constants.Harness.Profile.localProfileKey, service: service) {
-            return Self.object(data) ?? [:]
+            guard let profile = Self.object(data) else {
+                Self.logger.error("The local settings could not be read")
+                return [:]
+            }
+            return profile
         }
         let imported = PreviousClientSettings.profile(keychain: keychain, defaults: defaults)
-        if !imported.isEmpty { write(imported) }
+        if !imported.isEmpty {
+            do { try write(imported) } catch { Self.logger.error("Failed to keep the imported settings: \(error, privacy: .public)") }
+        }
         return imported
     }
 
-    func saveLocalProfile(_ patch: ProfileFields, replace: Bool) -> ProfileFields {
+    func saveLocalProfile(_ patch: ProfileFields, replace: Bool) throws -> ProfileFields {
         var profile = replace ? [:] : loadLocalProfile()
         profile.merge(patch) { $1 }
         profile = profile.filter { !($0.value is NSNull) }
-        write(profile)
+        try write(profile)
         if !replace {
             let changed = Set(localProfileChanges()).union(patch.keys)
             defaults.set(Array(changed).sorted(), forKey: Constants.Harness.Profile.localProfileChangesKey)
@@ -91,10 +98,9 @@ final class DeviceProfileStorage: ProfileStorage {
         Constants.Harness.Profile.cloudProfileCacheKeyPrefix + userId
     }
 
-    private func write(_ profile: ProfileFields) {
+    private func write(_ profile: ProfileFields) throws {
         guard let data = Self.data(profile), keychain.save(data, for: Constants.Harness.Profile.localProfileKey, service: service) else {
-            Self.logger.error("Failed to save local settings")
-            return
+            throw HarnessError(code: HarnessErrorCode.localSaveFailed, message: "Your settings could not be saved on this device.", action: .retry)
         }
     }
 
@@ -115,8 +121,8 @@ enum PreviousClientSettings {
     /// The members of the previous client's profile that are the harness's.
     private static let profileFields = [
         "themeMode", "language", "nickname", "profession", "traits", "additionalContext", "isUsingPersonalization",
-        "customPromptPresets", "favoritePromptPresetIds", "defaultPromptPresetId", "reasoningEffort", "thinkingEnabled",
-        "webSearchAvailable", "piiCheckEnabled", "genUIEnabled", "chatFont",
+        "isUsingCustomPrompt", "customSystemPrompt", "customPromptPresets", "favoritePromptPresetIds", "defaultPromptPresetId",
+        "reasoningEffort", "thinkingEnabled", "webSearchAvailable", "piiCheckEnabled", "genUIEnabled", "chatFont",
     ]
 
     static func profile(keychain: KeychainHelper, defaults: UserDefaults) -> ProfileFields {

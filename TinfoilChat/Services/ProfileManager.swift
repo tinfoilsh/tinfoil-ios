@@ -114,7 +114,10 @@ class ProfileManager: ObservableObject {
         }
         cancellable = Publishers.CombineLatest(account.$profile, account.$session)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _, _ in self?.apply(account.effectiveProfile) }
+            .sink { [weak self] _, _ in
+                guard let self, let account = self.account else { return }
+                apply(account.effectiveProfile)
+            }
     }
 
     private func apply(_ profile: Components.Schemas.Profile) {
@@ -127,16 +130,21 @@ class ProfileManager: ObservableObject {
         customPromptPresets = (profile.customPromptPresets ?? []).map(SyncedPromptPreset.init)
         favoritePromptPresetIds = profile.favoritePromptPresetIds ?? ProfileDefaults.favoritePromptPresetIds
         defaultPromptPresetId = profile.defaultPromptPresetId ?? ProfileDefaults.defaultPromptPresetId
+        // The toggles Settings keeps follow the profile only where it holds
+        // them: a profile not loaded yet leaves them as they were.
         let settings = SettingsManager.shared
         settings.isApplyingSharedProfile = true
         defer { settings.isApplyingSharedProfile = false }
-        let webSearchAvailable = profile.webSearchAvailable ?? ProfileDefaults.webSearchAvailable
-        if settings.webSearchAvailable != webSearchAvailable { settings.webSearchAvailable = webSearchAvailable }
-        let piiCheckEnabled = profile.piiCheckEnabled ?? ProfileDefaults.piiCheckEnabled
-        if settings.piiCheckEnabled != piiCheckEnabled { settings.piiCheckEnabled = piiCheckEnabled }
-        let genUIEnabled = profile.genUIEnabled ?? ProfileDefaults.genUIEnabled
-        if settings.genUIEnabled != genUIEnabled { settings.genUIEnabled = genUIEnabled }
-        if settings.selectedLanguage != language { settings.selectedLanguage = language }
+        if let webSearchAvailable = profile.webSearchAvailable, settings.webSearchAvailable != webSearchAvailable {
+            settings.webSearchAvailable = webSearchAvailable
+        }
+        if let piiCheckEnabled = profile.piiCheckEnabled, settings.piiCheckEnabled != piiCheckEnabled {
+            settings.piiCheckEnabled = piiCheckEnabled
+        }
+        if let genUIEnabled = profile.genUIEnabled, settings.genUIEnabled != genUIEnabled {
+            settings.genUIEnabled = genUIEnabled
+        }
+        if let language = profile.language, settings.selectedLanguage != language { settings.selectedLanguage = language }
     }
 
     /// Saves a change to the profile. The change shows at once through the
@@ -168,15 +176,23 @@ class ProfileManager: ObservableObject {
         save(["language": language])
     }
 
-    /// The toggles Settings shares with the profile changed there.
-    func sharedSettingsDidChange() {
+    /// A toggle Settings shares with the profile.
+    enum SharedSetting: String {
+        case webSearchAvailable
+        case piiCheckEnabled
+        case genUIEnabled
+    }
+
+    /// A shared toggle changed in Settings.
+    func sharedSettingDidChange(_ setting: SharedSetting) {
         let settings = SettingsManager.shared
-        save([
-            "webSearchAvailable": settings.webSearchAvailable,
-            "piiCheckEnabled": settings.piiCheckEnabled,
-            "genUIEnabled": settings.genUIEnabled,
-            "language": settings.selectedLanguage,
-        ])
+        let value: Bool
+        switch setting {
+        case .webSearchAvailable: value = settings.webSearchAvailable
+        case .piiCheckEnabled: value = settings.piiCheckEnabled
+        case .genUIEnabled: value = settings.genUIEnabled
+        }
+        save([setting.rawValue: value])
     }
 
     var personalizationDraft: PersonalizationDraft {
@@ -189,13 +205,16 @@ class ProfileManager: ObservableObject {
         )
     }
 
-    func savePersonalization(_ draft: PersonalizationDraft) {
+    /// Saves the personalization, or throws what refused it; the account's
+    /// session then shows the settings as they were.
+    func savePersonalization(_ draft: PersonalizationDraft) async throws {
+        guard let account else { throw HarnessError.unauthenticated }
         isUsingPersonalization = draft.isEnabled
         nickname = draft.nickname
         profession = draft.profession
         traits = draft.traits
         additionalContext = draft.additionalContext
-        save([
+        try await account.updateProfile([
             "isUsingPersonalization": draft.isEnabled,
             "nickname": draft.nickname,
             "profession": draft.profession,
