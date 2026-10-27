@@ -13,8 +13,9 @@ struct Project: Identifiable, Equatable {
     var color: String?
     var description: String
     var systemInstructions: String
-    var createdAt: String
-    var updatedAt: String
+    /// When the harness dated the project, if it did.
+    var createdAt: String?
+    var updatedAt: String?
 
     init(_ project: Components.Schemas.Project) {
         id = project.id
@@ -22,8 +23,8 @@ struct Project: Identifiable, Equatable {
         color = project.color
         description = project.description
         systemInstructions = project.systemInstructions
-        createdAt = project.createdAt ?? ""
-        updatedAt = project.updatedAt ?? ""
+        createdAt = project.createdAt
+        updatedAt = project.updatedAt
     }
 
     init(_ project: ProjectView) {
@@ -32,8 +33,8 @@ struct Project: Identifiable, Equatable {
         color = project.color
         description = project.description
         systemInstructions = project.systemInstructions
-        createdAt = project.createdAt ?? ""
-        updatedAt = project.updatedAt ?? ""
+        createdAt = project.createdAt
+        updatedAt = project.updatedAt
     }
 }
 
@@ -43,8 +44,8 @@ struct ProjectDocument: Identifiable, Equatable {
     var filename: String
     var contentType: String
     var sizeBytes: Int
-    var createdAt: String
-    var updatedAt: String
+    var createdAt: String?
+    var updatedAt: String?
     var content: String?
     var thumbnailBase64: String?
 
@@ -54,8 +55,8 @@ struct ProjectDocument: Identifiable, Equatable {
         filename = document.filename
         contentType = document.contentType
         sizeBytes = document.sizeBytes
-        createdAt = document.createdAt ?? ""
-        updatedAt = document.updatedAt ?? ""
+        createdAt = document.createdAt
+        updatedAt = document.updatedAt
         content = document.content
         thumbnailBase64 = document.thumbnailBase64
     }

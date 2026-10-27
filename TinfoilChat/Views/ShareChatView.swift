@@ -198,7 +198,7 @@ struct ShareChatView: View {
         Task {
             defer { isRevoking = false }
             do {
-                guard let account = chatViewModel.account else { throw LinkMetadataError.unavailable }
+                guard let account = chatViewModel.account else { throw HarnessError.unauthenticated }
                 try await HarnessShares.revoke(account, threadId: chatId)
                 isShareEnabled = false
                 hasShare = false
@@ -224,7 +224,7 @@ struct ShareChatView: View {
             return
         }
         do {
-            guard let account = chatViewModel.account else { throw LinkMetadataError.unavailable }
+            guard let account = chatViewModel.account else { throw HarnessError.unauthenticated }
             let shared = try await HarnessShares.status(account, threadId: chatId)
             guard !Task.isCancelled else { return }
             hasShare = shared
@@ -232,7 +232,7 @@ struct ShareChatView: View {
             if !shared { shareUrl = nil }
         } catch {
             guard !Task.isCancelled else { return }
-            errorMessage = "Could not check whether this chat is shared."
+            errorMessage = "Could not check whether this chat is shared. \(error.localizedDescription)"
         }
     }
 
@@ -312,7 +312,7 @@ struct ShareChatView: View {
         Task {
             defer { isUploading = false }
             do {
-                guard let session = chatViewModel.session else { throw LinkMetadataError.unavailable }
+                guard let session = chatViewModel.session else { throw HarnessError.unauthenticated }
                 shareUrl = try await session.share(chatId)
                 hasShare = true
             } catch {

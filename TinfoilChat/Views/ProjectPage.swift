@@ -421,7 +421,7 @@ struct ProjectDocumentsView: View {
                 filename: document.filename,
                 thumbnailBase64: document.thumbnailBase64,
                 textContent: document.content,
-                cacheKey: "project-document-\(document.id)-\(document.updatedAt)"
+                cacheKey: "project-document-\(document.id)-\(document.updatedAt ?? "")"
             )
             VStack(alignment: .leading, spacing: 2) {
                 Text(document.filename.isEmpty ? "Encrypted" : document.filename)
@@ -472,8 +472,8 @@ struct ProjectSettingsView: View {
         Form {
             if let project {
                 Section("Project info") {
-                    LabeledContent("Created", value: relativeDate(project.createdAt))
-                    LabeledContent("Updated", value: relativeDate(project.updatedAt))
+                    if let created = relativeDate(project.createdAt) { LabeledContent("Created", value: created) }
+                    if let updated = relativeDate(project.updatedAt) { LabeledContent("Updated", value: updated) }
                     LabeledContent("Documents", value: "\(viewModel.projectDocuments.count)")
                     LabeledContent("Chats", value: "\(viewModel.activeProjectChats.count)")
                 }
@@ -508,10 +508,9 @@ struct ProjectSettingsView: View {
         }
     }
 
-    private func relativeDate(_ iso: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = formatter.date(from: iso) ?? ISO8601DateFormatter().date(from: iso) ?? Date()
+    /// A date relative to now, or nil for one the harness did not give.
+    private func relativeDate(_ iso: String?) -> String? {
+        guard let iso, let date = ChatAccessCache.date(of: iso) else { return nil }
         let style = RelativeDateTimeFormatter()
         style.unitsStyle = .abbreviated
         return style.localizedString(for: date, relativeTo: Date())

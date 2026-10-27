@@ -10,10 +10,18 @@
 
 import Foundation
 
-enum LinkMetadataError: Error {
+enum LinkMetadataError: LocalizedError {
     case invalidURL
     case unavailable
     case notFound
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidURL: return "The link is not a valid web address."
+        case .unavailable: return "Link previews are not available right now."
+        case .notFound: return "The site has no icon."
+        }
+    }
 }
 
 actor LinkMetadataService {
@@ -30,9 +38,12 @@ actor LinkMetadataService {
     private init() {}
 
     /// The account whose session reads previews, which changes as the
-    /// account does.
+    /// account does. Previews in flight for the account before are not
+    /// waited on: a card asks again through the new one.
     func bind(_ account: HarnessAccount?) {
         self.account = account
+        inFlight = [:]
+        faviconInFlight = [:]
     }
 
     func metadata(for url: String) async throws -> LinkPreview {
@@ -43,7 +54,7 @@ actor LinkMetadataService {
             try await HarnessMetadata.link(account, url: url)
         }
         inFlight[url] = task
-        defer { inFlight[url] = nil }
+        defer { if inFlight[url] == task { inFlight[url] = nil } }
         let result = try await task.value
         storeInCache(result, for: url)
         return result
@@ -61,7 +72,7 @@ actor LinkMetadataService {
             return favicon.data
         }
         faviconInFlight[host] = task
-        defer { faviconInFlight[host] = nil }
+        defer { if faviconInFlight[host] == task { faviconInFlight[host] = nil } }
         let result = try await task.value
         storeFaviconInCache(result, for: host)
         return result

@@ -2,7 +2,6 @@ import Foundation
 
 enum SpeechError: Error, Equatable, LocalizedError {
     case empty
-    case tooLong
     case invalidAudio
     case timedOut
     case unavailable
@@ -14,7 +13,6 @@ enum SpeechError: Error, Equatable, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .empty: return "This response has no readable text."
-        case .tooLong: return "This response is too long to read aloud."
         case .invalidAudio: return "The speech service returned invalid audio. Please try again."
         case .timedOut: return "Read aloud timed out. Please try again."
         case .unavailable: return "Read aloud is not available yet. Please try again shortly."
