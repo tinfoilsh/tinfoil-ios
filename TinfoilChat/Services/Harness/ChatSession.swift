@@ -60,7 +60,8 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     private(set) var opened: String?
     private var refreshedRevision: (id: String, revision: String)?
     private var cancellables: Set<AnyCancellable> = []
-    private var latestUpdate: [String: Int] = [:]
+    /// The change whose answer each chat is shown from.
+    private var latestShown: [String: Int] = [:]
     private var updates = 0
 
     private lazy var cloudStore = CloudThreads(account: account, list: list.cloud, attachments: attachments)
@@ -294,11 +295,11 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         if !open.onDevice, open.id == summary.id { list.cloud.reported(summary) }
     }
 
-    func runSaved(_ run: DeviceRun, event: RunEvent, attached: Bool) async {
+    func runSaved(_ run: DeviceRun, event: RunEvent, attached: Bool) async -> Bool {
         do {
-            guard let saved = try await DeviceRunStorage.store(run, event: event, changedSince: controller.settingsChangedSince(run)) else { return }
+            guard let saved = try await DeviceRunStorage.store(run, event: event, changedSince: controller.settingsChangedSince(run)) else { return true }
             markSaved(saved.id)
-            guard open.id == saved.id else { return }
+            guard open.id == saved.id else { return true }
             attachments.rememberThread(saved)
             controller.updateView { state in
                 guard var shown = state.snapshot.thread, shown.id == saved.id, shown.title != saved.title else { return }
@@ -306,11 +307,13 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
                 shown.titleState = saved.titleState
                 state.snapshot.thread = shown
             }
+            return true
         } catch {
             Self.logger.error("Failed to save a local chat: \(error, privacy: .public)")
             if attached {
                 patch { $0.failure = HarnessErrorBody(code: HarnessErrorCode.localSaveFailed, message: "This chat could not be saved on this device.", action: .stop) }
             }
+            return false
         }
     }
 
@@ -531,9 +534,9 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         if let prepare = controller.retryPreparation { return await prepare() }
         let threads = openStore()
         if let pending = controller.pending {
-            if let run = pending.run { controller.begin(run) }
             var input = pending.input
-            input.key = try? threads.runKey()
+            do { input.key = try threads.runKey() } catch { report(error); return false }
+            if let run = pending.run { controller.begin(run) }
             return await controller.run(.turn, .turn(input), options: RunOptions(device: pending.run))
         }
         if let threadId = open.id, let runId = state.runId ?? state.snapshot.thread?.activeRun?.runId {
@@ -617,8 +620,19 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             patch { $0.presetChosen = true; $0.chosenPresetId = next; $0.modelChosen = false; $0.webSearch = nil }
             return
         }
+        let before = (chosen: open.presetChosen, presetId: open.chosenPresetId)
         patch { $0.presetChosen = true; $0.chosenPresetId = next }
-        if let summary = try await update(threadId, ThreadPatch(presetId: Nullable(next))), open.id == threadId {
+        let summary: ThreadSummary?
+        do {
+            summary = try await update(threadId, ThreadPatch(presetId: Nullable(next)))
+        } catch {
+            // A refused choice shows the prompt the chat kept.
+            if open.id == threadId, open.chosenPresetId == next {
+                patch { $0.presetChosen = before.chosen; $0.chosenPresetId = before.presetId }
+            }
+            throw error
+        }
+        if let summary, open.id == threadId {
             patch { $0.model = summary.model; $0.webSearch = nil }
         }
     }
@@ -630,7 +644,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     }
 
     private func requireIdle(_ threadId: String) throws {
-        if controller.deviceRuns[threadId] != nil || controller.startingThread == threadId || (open.id == threadId && running) {
+        if moving[threadId] != nil || controller.deviceRuns[threadId] != nil || controller.startingThread == threadId || (open.id == threadId && running) {
             throw HarnessTransfers.inFlight
         }
     }
@@ -666,12 +680,6 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         }
         updates += 1
         let update = updates
-        latestUpdate[threadId] = update
-        var latest = false
-        defer {
-            latest = latestUpdate[threadId] == update
-            if latest { latestUpdate[threadId] = nil }
-        }
         let summary: ThreadSummary?
         do {
             summary = try await store.update(threadId, patch)
@@ -683,7 +691,12 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             undo()
             return nil
         }
-        if open.id == threadId, latestUpdate[threadId] == update { showSummary(summary) }
+        // The latest change answered shows the chat; one asked earlier and
+        // answered later does not show it as it was before.
+        if open.id == threadId, update > latestShown[threadId, default: 0] {
+            latestShown[threadId] = update
+            showSummary(summary)
+        }
         return summary
     }
 
@@ -721,12 +734,6 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     }
 
     /// Deletes the stored chats of a project.
-    func removeProjectChats(_ projectId: String) async throws {
-        let _: Deleted = try await account.post(.deleteAll, ProjectChatsRequest(projectId: projectId))
-        newChat()
-        try await list.refresh()
-    }
-
     /// Forks the open chat from a message into a new chat holding the
     /// messages through it, and opens the fork.
     func fork(at messageIndex: Int) async throws -> String? {
@@ -920,16 +927,12 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     }
 
     func image(_ attachment: Attachment) async throws -> (data: Data, mimeType: String) {
-        try await openStore().image(open.id, attachmentId: attachment.id)
+        try await openStore().image(open.id, attachmentId: attachment.id, mimeType: attachment.mimeType)
     }
 }
 
 private struct Deleted: Decodable {
     var deleted: Int
-}
-
-private struct ProjectChatsRequest: Encodable {
-    var projectId: String
 }
 
 /// The list edits of a store whose chats are not listed, as a temporary

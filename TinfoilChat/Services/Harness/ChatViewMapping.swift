@@ -139,32 +139,37 @@ enum ChatViewMapping {
     }
 
     static func attachment(_ view: Components.Schemas.AttachmentView) -> Attachment {
-        var attachment = Attachment(
-            id: view.id,
-            type: view.kind == .image ? .image : .document,
-            fileName: view.fileName,
-            mimeType: view.mimeType,
-            fileSize: Int64(view.size ?? 0)
+        attachment(
+            id: view.id, kind: view.kind, fileName: view.fileName, mimeType: view.mimeType, size: view.size,
+            thumbnail: view.thumbnail, textContent: view.textContent, description: view.description
         )
-        attachment.thumbnailBase64 = view.thumbnail
-        attachment.textContent = view.textContent
-        attachment.description = view.description
-        attachment.processingState = .completed
+    }
+
+    /// An upload also carries the copy of an image the chat sends models.
+    static func attachment(_ uploaded: Components.Schemas.Attachment) -> Attachment {
+        var attachment = attachment(
+            id: uploaded.id, kind: uploaded.kind, fileName: uploaded.fileName, mimeType: uploaded.mimeType, size: uploaded.size,
+            thumbnail: uploaded.thumbnail, textContent: uploaded.textContent, description: uploaded.description
+        )
+        attachment.base64 = uploaded.base64
         return attachment
     }
 
-    static func attachment(_ uploaded: Components.Schemas.Attachment) -> Attachment {
+    /// An attachment the harness holds is complete as the view shows it.
+    private static func attachment(
+        id: String, kind: Components.Schemas.AttachmentKind, fileName: String, mimeType: String, size: Int?,
+        thumbnail: String?, textContent: String?, description: String?
+    ) -> Attachment {
         var attachment = Attachment(
-            id: uploaded.id,
-            type: uploaded.kind == .image ? .image : .document,
-            fileName: uploaded.fileName,
-            mimeType: uploaded.mimeType,
-            fileSize: Int64(uploaded.size ?? 0)
+            id: id,
+            type: kind == .image ? .image : .document,
+            fileName: fileName,
+            mimeType: mimeType,
+            fileSize: Int64(size ?? 0)
         )
-        attachment.thumbnailBase64 = uploaded.thumbnail
-        attachment.textContent = uploaded.textContent
-        attachment.description = uploaded.description
-        attachment.base64 = uploaded.base64
+        attachment.thumbnailBase64 = thumbnail
+        attachment.textContent = textContent
+        attachment.description = description
         attachment.processingState = .completed
         return attachment
     }

@@ -5,7 +5,14 @@ import OSLog
 private struct CloudPage: Decodable {
     var threads: [ThreadSummary]
     var pinned: [ThreadSummary]?
+    /// Empty on the last page.
     var nextCursor: String?
+
+    /// The cursor of the page after, if there is one.
+    var next: String? {
+        guard let nextCursor, !nextCursor.isEmpty else { return nil }
+        return nextCursor
+    }
 }
 
 /// The listed chats of one scope, kept on this device so the list shows at
@@ -103,15 +110,18 @@ final class ChatList: ObservableObject {
 
     // MARK: - Listing
 
-    /// Shows the scope's last listing while the harness's loads.
+    /// Shows the scope's last listing while the harness's loads. A scope
+    /// restored while the cache was read is the one shown.
     func restore(projectId: String?) async {
         if restored, self.projectId == projectId { return }
         listing += 1
+        let version = listing
         self.projectId = projectId
         restored = true
         loaded = false
         error = nil
         let cached = await cache.read(projectId: projectId)
+        guard version == listing else { return }
         cloudListed = cached?.threads ?? []
         pinnedListed = cached?.pinned ?? []
         nextCursor = nil
@@ -126,7 +136,8 @@ final class ChatList: ObservableObject {
         guard account.keyReady else { return }
         if cursor == nil { listing += 1 }
         let version = listing
-        if error != nil { error = nil; loaded = false; loading = true }
+        if error != nil { error = nil; loaded = false }
+        loading = true
         do {
             let wanted = cursor == nil ? max(Self.pageSize, cloudListed.count) : Self.pageSize
             var threads: [ThreadSummary] = []
@@ -136,8 +147,8 @@ final class ChatList: ObservableObject {
                 let page: CloudPage = try await account.post(.list, ListRequest(cursor: next, limit: Self.pageSize, projectId: projectId))
                 if let listed = page.pinned { pinned = listed }
                 threads.append(contentsOf: page.threads.filter { thread in !threads.contains { $0.id == thread.id } })
-                if page.nextCursor == next { break }
-                next = page.nextCursor
+                if page.next == next { break }
+                next = page.next
             } while cursor == nil && next != nil && threads.count < wanted && version == listing
             guard version == listing else { return }
             if cursor != nil {
@@ -162,7 +173,8 @@ final class ChatList: ObservableObject {
         }
     }
 
-    func reload(after cursor: String? = nil) {
+    @discardableResult
+    func reload(after cursor: String? = nil) -> Task<Void, Never> {
         Task {
             do { try await refresh(after: cursor) } catch {
                 Self.logger.error("Failed to list chats: \(error, privacy: .public)")
@@ -170,13 +182,17 @@ final class ChatList: ObservableObject {
         }
     }
 
-    func retry() {
+    /// Reads again what failed to: the page after the cursor it was read
+    /// from, or the first pages.
+    @discardableResult
+    func retry() -> Task<Void, Never> {
         reload(after: retryCursor)
     }
 
-    func loadMore() {
-        guard let nextCursor else { return }
-        reload(after: nextCursor)
+    @discardableResult
+    func loadMore() -> Task<Void, Never>? {
+        guard let nextCursor else { return nil }
+        return reload(after: nextCursor)
     }
 
     /// Reads the chats this device keeps again, as they change.
@@ -283,6 +299,12 @@ final class ChatList: ObservableObject {
         }
     }
 
+    /// A store accepted a chat's change: the previews shown for it are
+    /// settled, and not taken back by a later refusal.
+    private func settlePreviews(_ threadId: String) {
+        previews[threadId] = nil
+    }
+
     private func removeShown(_ path: ReferenceWritableKeyPath<ChatList, [ThreadSummary]>, _ before: ThreadSummary) -> () -> Void {
         let index = self[keyPath: path].firstIndex(of: before) ?? 0
         self[keyPath: path].removeAll { $0 == before }
@@ -294,7 +316,7 @@ final class ChatList: ObservableObject {
 
     private func appendShown(_ path: ReferenceWritableKeyPath<ChatList, [ThreadSummary]>, _ after: ThreadSummary) -> () -> Void {
         self[keyPath: path].append(after)
-        return { [weak self] in self?[keyPath: path].removeAll { $0 == after } }
+        return { [weak self] in self?[keyPath: path].removeAll { $0.id == after.id } }
     }
 
     // MARK: - Edits
@@ -313,6 +335,7 @@ final class ChatList: ObservableObject {
 
         func replace(_ summary: ThreadSummary) {
             guard let list else { return }
+            list.settlePreviews(summary.id)
             if list.inScope(summary) {
                 list.cloudListed = list.cloudListed.map { $0.id == summary.id ? summary : $0 }
             } else {
@@ -353,7 +376,9 @@ final class ChatList: ObservableObject {
         }
 
         func replace(_ summary: ThreadSummary) {
-            list?.deviceListed = list?.deviceListed.map { $0.id == summary.id ? summary : $0 } ?? []
+            guard let list else { return }
+            list.settlePreviews(summary.id)
+            list.deviceListed = list.deviceListed.map { $0.id == summary.id ? summary : $0 }
         }
 
         func remove(_ threadId: String) {

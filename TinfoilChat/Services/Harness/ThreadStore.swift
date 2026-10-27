@@ -91,8 +91,8 @@ protocol ThreadStore: AnyObject {
     func askContext(_ threadId: String, profile: ProfileFields) async throws -> AskContext
     func documentText(_ threadId: String?, attachmentId: String) async throws -> String
     /// An image's bytes: the file the user picked while this app holds it,
-    /// or the copy the chat keeps.
-    func image(_ threadId: String?, attachmentId: String) async throws -> (data: Data, mimeType: String)
+    /// or the copy the chat keeps, named by the type the attachment holds.
+    func image(_ threadId: String?, attachmentId: String, mimeType: String?) async throws -> (data: Data, mimeType: String)
 }
 
 /// The members of a turn an action sets beyond the defaults.
@@ -211,7 +211,8 @@ final class CloudThreads: ThreadStore {
     private let attachments: OpenAttachments
     /// The latest change asked of each chat, so an earlier change answered
     /// after it does not list the chat as it was before the latest.
-    private var latestUpdate: [String: Int] = [:]
+    /// The change whose answer each chat is listed from.
+    private var latestListed: [String: Int] = [:]
     private var updates = 0
 
     init(account: HarnessAccount, list: ListEdits, attachments: OpenAttachments) {
@@ -229,16 +230,19 @@ final class CloudThreads: ThreadStore {
         return (window.messages, window.hasOlder)
     }
 
+    /// The latest change answered lists the chat; one asked earlier and
+    /// answered later does not list it as it was before.
     func update(_ threadId: String, _ patch: ThreadPatch) async throws -> ThreadSummary? {
         updates += 1
         let update = updates
-        latestUpdate[threadId] = update
-        defer { if latestUpdate[threadId] == update { latestUpdate[threadId] = nil } }
         let summary: ThreadSummary = try await account.post(.update, ThreadUpdateRequest(
             id: threadId, title: patch.title, model: patch.model, presetId: patch.presetId,
             webSearchEnabled: patch.webSearchEnabled, pinned: patch.pinned, projectId: patch.projectId
         ))
-        if latestUpdate[threadId] == update { list.replace(summary) }
+        if update > latestListed[threadId, default: 0] {
+            latestListed[threadId] = update
+            list.replace(summary)
+        }
         return summary
     }
 
@@ -315,11 +319,11 @@ final class CloudThreads: ThreadStore {
         }
     }
 
-    func image(_ threadId: String?, attachmentId: String) async throws -> (data: Data, mimeType: String) {
+    func image(_ threadId: String?, attachmentId: String, mimeType: String?) async throws -> (data: Data, mimeType: String) {
         if let original = attachments.originals[attachmentId], let data = Data(base64Encoded: original.base64) {
             return (data, original.mimeType)
         }
-        return (try await download(threadId, attachmentId), "image/jpeg")
+        return (try await download(threadId, attachmentId), mimeType ?? Constants.Attachments.defaultImageMimeType)
     }
 }
 
@@ -416,7 +420,9 @@ final class DeviceThreads: ThreadStore {
                 local: true, thread: sent, profile: ProfileFieldsInput(profile)
             )
         }
-        return changed?.summary
+        guard let summary = changed?.summary else { return nil }
+        list.replace(summary)
+        return summary
     }
 
     func remove(_ threadId: String) async throws {
@@ -430,7 +436,9 @@ final class DeviceThreads: ThreadStore {
         guard let source = try await store.get(threadId) else { return nil }
         let forked = try await request(.fork, source, MessageRequest(threadId: threadId, messageId: messageId, local: true, thread: source))
         let originals = try await store.originals(threadId, attachmentIds: forked.attachments.map(\.id))
-        return try await store.add(forked, originals: originals).map { _ in forked.id }
+        guard let stored = try await store.add(forked, originals: originals) else { return nil }
+        list.add(stored.summary)
+        return stored.id
     }
 
     func deleteMessage(_ threadId: String, messageId: String) async throws -> ThreadResult? {
@@ -546,7 +554,7 @@ final class DeviceThreads: ThreadStore {
 
     /// The file the user picked when this device keeps it, or else the copy
     /// the chat sends models.
-    func image(_ threadId: String?, attachmentId: String) async throws -> (data: Data, mimeType: String) {
+    func image(_ threadId: String?, attachmentId: String, mimeType: String?) async throws -> (data: Data, mimeType: String) {
         var image: (base64: String, mimeType: String)? = attachments.originals[attachmentId].map { ($0.base64, $0.mimeType) }
         if image == nil, let threadId, let original = try await store.originals(threadId, attachmentIds: [attachmentId])[attachmentId] {
             image = (original.base64, original.mimeType)

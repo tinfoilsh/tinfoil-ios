@@ -56,6 +56,8 @@ struct RunOptions {
     /// Rejoining a run left behind: losing it shows no error.
     var quiet = false
     var rejoined = false
+    /// The view the run was started for, which a rejoin keeps.
+    var version: Int?
     /// The run started before this stream: one followed by its id is, unless
     /// a stream that only queued it is rejoined.
     var started: Bool?
@@ -78,8 +80,9 @@ protocol RunControllerDelegate: AnyObject {
     /// The run the view shows changed the chat's summary, as when it
     /// started, titled the chat or ended.
     func runReported(_ summary: ThreadSummary)
-    /// A device run's final event returns the thread to store.
-    func runSaved(_ run: DeviceRun, event: RunEvent, attached: Bool) async
+    /// A device run's final event returns the thread to store. Returns
+    /// whether it was stored.
+    func runSaved(_ run: DeviceRun, event: RunEvent, attached: Bool) async -> Bool
     /// A run ended, which may have changed the chat list.
     func runEnded()
     /// The open chat's run is over though its stream did not say so.
@@ -206,7 +209,7 @@ final class RunController: ObservableObject {
         let device = options.device
         let widgetRetry = options.widgetRetry
         let follower = UUID()
-        let version = generation
+        let version = options.version ?? generation
         let attached = { [weak self] in version == self?.generation }
         let initial = Outcome(runId: body.runId, threadId: body.threadId, started: options.started ?? (body.runId != nil), state: view)
         let task = Task { [weak self] () -> Outcome in
@@ -257,7 +260,12 @@ final class RunController: ObservableObject {
                     }
                     guard event.isTerminal else { continue }
                     if let device {
-                        await delegate?.runSaved(device, event: event, attached: attached())
+                        // A reply this device could not store keeps the run's
+                        // receipt, so the run can be followed again.
+                        guard await delegate?.runSaved(device, event: event, attached: attached()) != false else {
+                            delegate?.runEnded()
+                            continue
+                        }
                         device.saved = true
                     }
                     forgetReceipt(outcome.runId)
@@ -296,6 +304,7 @@ final class RunController: ObservableObject {
             var again = options
             again.rejoined = true
             again.started = outcome.started
+            again.version = version
             return await run(.follow, follow, options: again)
         }
         if attached() {
