@@ -58,11 +58,6 @@ enum AutoIntelligence: String, CaseIterable, Codable, Sendable {
 /// Remote configuration structure (mobile-specific settings only)
 struct RemoteConfig: Codable {
     let minSupportedVersion: String
-    let syncProtocolVersion: Int?
-
-    var effectiveSyncProtocolVersion: Int {
-        min(syncProtocolVersion ?? Constants.Sync.protocolVersion, Constants.Sync.documentAttachmentsProtocolVersion)
-    }
 }
 
 /// A model as the chat service's session offers it.
@@ -154,7 +149,7 @@ struct ModelType: Identifiable, Hashable, Equatable {
 }
 
 /// The app's remote configuration: the version the control plane still
-/// supports, and the sync protocol version the key registry speaks.
+/// supports.
 @MainActor
 class AppConfig: ObservableObject {
     static let shared = AppConfig()
@@ -213,10 +208,6 @@ class AppConfig: ObservableObject {
 
     var minSupportedVersion: String {
         loadedConfig.minSupportedVersion
-    }
-
-    var syncProtocolVersion: Int {
-        config?.effectiveSyncProtocolVersion ?? Constants.Sync.protocolVersion
     }
 
     /// Current app version from bundle

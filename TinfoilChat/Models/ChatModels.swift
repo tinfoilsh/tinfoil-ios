@@ -75,9 +75,9 @@ struct Chat: Identifiable, Equatable {
     /// Generates a permanent reverse-timestamp ID locally (matching the web app format).
     /// Format: {reverseTimestamp padded to 13 digits}_{UUID}
     static func generateReverseId(timestampMs: Int = Int(Date().timeIntervalSince1970 * 1000)) -> String {
-        let reverseTimestamp = Constants.Sync.maxReverseTimestamp - timestampMs
+        let reverseTimestamp = Constants.Harness.maxReverseTimestamp - timestampMs
         let unpadded = String(reverseTimestamp)
-        let reverseTsStr = String(repeating: "0", count: max(0, Constants.Sync.reverseTimestampDigits - unpadded.count)) + unpadded
+        let reverseTsStr = String(repeating: "0", count: max(0, Constants.Harness.reverseTimestampDigits - unpadded.count)) + unpadded
         return "\(reverseTsStr)_\(UUID().uuidString.lowercased())"
     }
 }

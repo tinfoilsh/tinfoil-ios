@@ -248,6 +248,18 @@ enum Constants {
     enum Harness {
         static let url = "https://chat-api.tinfoil.sh"
         static let configRepo = "tinfoilsh/confidential-tinfoil-harness"
+
+        enum Keys {
+            /// The registry answers an account without a key with this.
+            static let notFoundStatus = 404
+            /// Statuses from here up are the registry's own failures.
+            static let serverErrorStatus = 500
+        }
+
+        /// A chat's id starts with the time it was made, reversed so the
+        /// latest sorts first, as the web app makes them.
+        static let maxReverseTimestamp: Int = 9999999999999
+        static let reverseTimestampDigits: Int = String(maxReverseTimestamp).count
         /// An attestation that has not finished by then is abandoned: the
         /// request fails, and the next one verifies the enclave again.
         static let attestationTimeoutSeconds: TimeInterval = 20
@@ -317,21 +329,6 @@ enum Constants {
             static let serverErrorStatus = 500
             static let accountProvisioningCode = "ACCOUNT_PROVISIONING"
         }
-    }
-
-    enum SyncEnclave {
-        static let url = "https://sync.tinfoil.sh"
-        static let configRepo = "tinfoilsh/confidential-sync"
-        static let chatListLimit = 100
-        static let projectListLimit = 100
-        static let projectChatListLimit = 100
-        static let plaintextChatFormatVersion = 2
-        /// Hard per-page cap the enclave's list-status endpoint
-        /// enforces; requests above it are clamped server-side.
-        static let listStatusPageLimit = 500
-        /// How many full chat blobs to request per pull call. Keeps
-        /// individual response payloads bounded when syncing many chats.
-        static let pullBatchSize = 20
     }
 
     enum Onboarding {
@@ -484,36 +481,6 @@ enum Constants {
         static let continueSystemImage = "forward"
         static let tryAgainLabel = "Try again"
         static let tryAgainSystemImage = "arrow.clockwise"
-    }
-
-    enum Sync {
-        static let protocolVersion = 2
-        static let documentAttachmentsProtocolVersion = 3
-        static let maxConcurrentChatUploads = 2
-        static let chatSyncIntervalSeconds: TimeInterval = 20.0
-        static let profileSyncIntervalSeconds: TimeInterval = 60.0  // 1 minute
-        static let profileSyncProtocolVersion = 2
-        static let clientInitTimeoutSeconds: TimeInterval = 60.0
-        static let backgroundTaskName = "CompleteStreamingResponse"
-        static let maxReverseTimestamp: Int = 9999999999999
-        static let reverseTimestampDigits: Int = String(maxReverseTimestamp).count
-
-        static let createdAtFallbackThresholdSeconds: TimeInterval = 5.0
-        static let uploadBaseDelaySeconds: TimeInterval = 1.0
-        static let uploadMaxDelaySeconds: TimeInterval = 8.0
-        static let uploadMaxRetries: Int = 3
-
-        // Poll cadence and deadline for the enclave's async
-        // migrate-all coordinator. Mirrors the webapp constants so
-        // both clients keep the same drain budget.
-        static let migrationPollIntervalSeconds: TimeInterval = 2.0
-        static let migrationPollTimeoutSeconds: TimeInterval = 15 * 60.0
-
-        // How long sync must stay paused before the UI escalates from
-        // the quiet settings status line to the attention badge.
-        // Transient network blips and enclave restarts resolve well
-        // inside this window; anything longer deserves attention.
-        static let pausedAttentionWindowSeconds: TimeInterval = 5 * 60.0
     }
 
     enum Verification {
@@ -680,20 +647,6 @@ enum Constants {
         }
 
         // MARK: - One-shot migration flags
-        enum Migration {
-            /// Set the first time a build evicts locally-cached cloud chats
-            /// that the legacy v0/v1 decrypt path used to handle. The enclave
-            /// rewraps any orphan rows server-side; the next sync repopulates.
-            static let legacyCloudChatsEvicted = "tinfoil-migration-legacy-cloud-chats-evicted"
-            /// Per-user fingerprint (suffixed with the clerk user id) of the
-            /// migration candidate key set whose last completed sweep left
-            /// rows blocked under every key this client holds. While it
-            /// matches the current key set the launch sweep is skipped so a
-            /// doomed migrate-all is not re-driven every launch; a changed
-            /// key set no longer matches and the sweep runs again. Cleared
-            /// once a sweep fully migrates with nothing blocked.
-            static let migrationExhaustedKeyset = "tinfoil-migration-exhausted-keyset"
-        }
 
         /// Legacy UserDefaults keys that should be purged on app
         /// launch. These named the v1 sync state (passkey JSONB
@@ -710,7 +663,11 @@ enum Constants {
             "tinfoil-sync-chat-deletes-watermark",
             "tinfoil-chat-sync-status",
             "tinfoil-all-chats-sync-status",
+            "tinfoil-migration-legacy-cloud-chats-evicted",
         ]
+        /// The previous client's record, by account, of a resealing sweep
+        /// that could not go further; the harness owns the sweep now.
+        static let legacyMigrationKeyPrefix = "tinfoil-migration-exhausted-keyset"
     }
 
     enum AppReview {
@@ -804,7 +761,7 @@ enum StorageKeysMigration {
             UserDefaults.standard.removeObject(forKey: key)
         }
         for key in UserDefaults.standard.dictionaryRepresentation().keys
-            where key.hasPrefix(legacyProjectChatStatusPrefix) {
+            where key.hasPrefix(legacyProjectChatStatusPrefix) || key.hasPrefix(Constants.StorageKeys.legacyMigrationKeyPrefix) {
             UserDefaults.standard.removeObject(forKey: key)
         }
 
