@@ -113,7 +113,9 @@ class ChatViewModel: ObservableObject {
 
     /// The account's use of the chat service, made anew as the account
     /// changes: a signed-out caller has one too.
-    @Published var session: ChatSession?
+    @Published var session: ChatSession? {
+        didSet { sessionGeneration += 1 }
+    }
     private var sessionCancellables: Set<AnyCancellable> = []
 
     var account: HarnessAccount? { session?.account }
@@ -278,6 +280,11 @@ class ChatViewModel: ObservableObject {
 
     private var observers: [NSObjectProtocol] = []
     private var cancellables: Set<AnyCancellable> = []
+    /// Counts the session's changes, so what the views show is built once
+    /// per change rather than on every read.
+    private var sessionGeneration = 0
+    private var shownChat: (generation: Int, chat: Chat?)?
+    private var shownChats: (generation: Int, chats: [Chat])?
     /// Whether the account changed since a session was opened for it.
     private var sessionUserId: String?? = nil
 
@@ -347,7 +354,10 @@ class ChatViewModel: ObservableObject {
         self.session = session
         ProfileManager.shared.bind(account)
         await LinkMetadataService.shared.bind(account)
-        session.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &sessionCancellables)
+        session.objectWillChange.sink { [weak self] _ in
+            self?.sessionGeneration += 1
+            self?.objectWillChange.send()
+        }.store(in: &sessionCancellables)
         account.$rateLimit.receive(on: RunLoop.main).sink { [weak self] limit in self?.rateLimit = limit.flatMap(RateLimitInfo.init) }.store(in: &sessionCancellables)
         account.$profile.receive(on: RunLoop.main).sink { [weak self] _ in self?.applyProfileSettings() }.store(in: &sessionCancellables)
         account.$session.receive(on: RunLoop.main).sink { [weak self] _ in self?.applySessionModels() }.store(in: &sessionCancellables)
@@ -652,6 +662,13 @@ class ChatViewModel: ObservableObject {
 
     /// The open chat, built from what its run and store show.
     var currentChat: Chat? {
+        if let shownChat, shownChat.generation == sessionGeneration { return shownChat.chat }
+        let chat = buildCurrentChat()
+        shownChat = (sessionGeneration, chat)
+        return chat
+    }
+
+    private func buildCurrentChat() -> Chat? {
         guard let session else { return nil }
         let state = session.state
         let open = session.open
@@ -722,6 +739,13 @@ class ChatViewModel: ObservableObject {
     /// The chats the sidebar lists, the latest active first. A run this app
     /// streams is active in the list before the list next reports it.
     var chats: [Chat] {
+        if let shownChats, shownChats.generation == sessionGeneration { return shownChats.chats }
+        let chats = buildChats()
+        shownChats = (sessionGeneration, chats)
+        return chats
+    }
+
+    private func buildChats() -> [Chat] {
         guard let session else { return [] }
         let listsCloud = session.account.cloud && !session.account.keyLocked
         let openId = session.open.id

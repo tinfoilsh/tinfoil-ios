@@ -16,7 +16,7 @@ enum ChatViewMapping {
     /// reasoning ends once the reply goes on to text or a tool call.
     static func message(_ wire: HarnessMessage, streaming: Bool = false, summaries: [String: String] = [:]) -> Message {
         let role: MessageRole = wire.role == .user ? .user : .assistant
-        var message = Message(id: wire.id, role: role, content: wire.content ?? "", timestamp: ChatAccessCache.date(of: wire.createdAt) ?? Date())
+        var message = Message(id: wire.id, role: role, content: wire.content ?? "", timestamp: ChatAccessCache.date(of: wire.createdAt) ?? .distantPast)
         message.modelDisplayName = wire.modelDisplayName
         message.isError = wire.isError
         message.annotations = wire.annotations?.compactMap { annotation in
