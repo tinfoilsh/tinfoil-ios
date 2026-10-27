@@ -8,6 +8,8 @@ typealias TimelineBlock = Components.Schemas.Block
 typealias ThreadSummary = Components.Schemas.ThreadSummary
 typealias QueueItem = Components.Schemas.QueueItem
 typealias HarnessRateLimit = Components.Schemas.RateLimit
+/// How a content key came to be registered.
+typealias KeyOrigin = Components.Schemas.KeyOrigin
 typealias ErrorAction = Components.Schemas.ErrorAction
 typealias ToolActivity = Components.Schemas.ToolActivity
 typealias CommittedReply = Components.Schemas.CommittedReply
