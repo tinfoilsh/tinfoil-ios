@@ -9,6 +9,10 @@ actor ScriptedTransport: HarnessTransport {
 
     private(set) var requests: [HarnessRequest] = []
     private var answers: [Answer]
+    private var holding = false
+    private var held = false
+    private var arrivals: [CheckedContinuation<Void, Never>] = []
+    private var releases: [CheckedContinuation<Void, Never>] = []
 
     init(_ answers: [Answer]) {
         self.answers = answers
@@ -19,8 +23,33 @@ actor ScriptedTransport: HarnessTransport {
         answers.append(answer)
     }
 
+    /// Holds the requests that follow in flight until released, so a test
+    /// can look at what shows while one is.
+    func hold() {
+        holding = true
+    }
+
+    /// Waits for a held request to arrive.
+    func arrived() async {
+        if held { return }
+        await withCheckedContinuation { arrivals.append($0) }
+    }
+
+    func release() {
+        holding = false
+        releases.forEach { $0.resume() }
+        releases = []
+    }
+
     func send(_ request: HarnessRequest) async throws -> HarnessResponse {
         requests.append(request)
+        if holding {
+            held = true
+            arrivals.forEach { $0.resume() }
+            arrivals = []
+            await withCheckedContinuation { releases.append($0) }
+            held = false
+        }
         guard !answers.isEmpty else {
             Issue.record("unscripted request to \(request.route.rawValue)")
             throw HarnessError(code: HarnessErrorCode.connection, message: "unscripted", action: .stop)

@@ -38,13 +38,15 @@ struct StoredThreadTests {
     @Test func numbersAndBooleansSurviveARoundTripThroughRawJSON() throws {
         let text = #"{"flag":true,"off":false,"one":1,"zero":0,"big":9007199254740993,"ratio":0.5}"#
         let raw = try JSONDecoder().decode(RawJSON.self, from: Data(text.utf8))
-        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(raw)) as! [String: Any]
-        #expect(written["flag"] as? Bool == true)
-        #expect(written["off"] as? Bool == false)
-        #expect(String(decoding: raw.data, as: UTF8.self).contains(#""one":1"#))
-        #expect(String(decoding: raw.data, as: UTF8.self).contains(#""zero":0"#))
-        #expect(String(decoding: raw.data, as: UTF8.self).contains(#""big":9007199254740993"#))
-        #expect(String(decoding: raw.data, as: UTF8.self).contains(#""ratio":0.5"#))
+        let written = String(decoding: try JSONEncoder().encode(raw), as: UTF8.self)
+        for member in [#""flag":true"#, #""off":false"#, #""one":1"#, #""zero":0"#, #""big":9007199254740993"#, #""ratio":0.5"#] {
+            #expect(written.contains(member), "\(written) lacks \(member)")
+        }
+        // Values this client builds itself encode the same way.
+        let built = String(decoding: try JSONEncoder().encode(AnyJSON(["flag": true, "one": 1, "ratio": 0.5] as [String: Any])), as: UTF8.self)
+        for member in [#""flag":true"#, #""one":1"#, #""ratio":0.5"#] {
+            #expect(built.contains(member), "\(built) lacks \(member)")
+        }
     }
 
     @Test func theSummaryAndWindowLeaveOutTheBytesTheDeviceHolds() throws {

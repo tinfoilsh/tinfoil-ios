@@ -132,10 +132,11 @@ struct ChatListTests {
         try await list.refresh()
         #expect(!list.loading)
         await transport.push(ListPage.json([summary("b")], next: ""))
+        await transport.hold()
         let load = list.loadMore()
-        // The load starts once this turn of the main actor yields.
-        await Task.yield()
+        await transport.arrived()
         #expect(list.loading)
+        await transport.release()
         await load?.value
         #expect(!list.loading)
         #expect(list.cloudListed.last?.id == "b")
