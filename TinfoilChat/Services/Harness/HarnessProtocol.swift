@@ -15,7 +15,7 @@ typealias HarnessSession = Components.Schemas.Session
 typealias ThreadWindow = Components.Schemas.ThreadWindow
 
 /// The harness's routes. Every one is a POST.
-enum HarnessRoute: String, Sendable {
+enum HarnessRoute: String, CaseIterable, Sendable {
     case session = "/v1/session"
     case changes = "/v1/changes"
     case profileGet = "/v1/profile/get"
