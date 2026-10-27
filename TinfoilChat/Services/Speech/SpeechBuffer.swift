@@ -27,6 +27,9 @@ struct SpeechBuffer: Sendable {
     private(set) var isPlaying = false
 
     var isFinished: Bool { nextPlayback == chunkCount }
+    /// Enough audio waits to play that the stream should not be read
+    /// further.
+    var isFull: Bool { bufferedSamples >= Constants.Speech.maxBufferedSamples }
 
     init(chunkCount: Int) {
         self.chunkCount = chunkCount
@@ -50,9 +53,7 @@ struct SpeechBuffer: Sendable {
     mutating func append(_ samples: [Float], to index: Int) throws {
         guard !samples.isEmpty else { return }
         guard var chunk = chunks[index], !chunk.isComplete,
-              samples.count <= Constants.Speech.blockSamples,
-              samples.count <= Constants.Speech.maxChunkSamples - chunk.receivedSamples,
-              samples.count <= Constants.Speech.maxBufferedSamples - bufferedSamples else {
+              samples.count <= Constants.Speech.blockSamples else {
             throw SpeechError.invalidAudio
         }
         chunk.blocks.append(samples)

@@ -8,7 +8,6 @@
 import Foundation
 import AVFoundation
 import UIKit
-import OpenAI
 
 /// Service for managing audio recording and transcription
 @MainActor
@@ -129,59 +128,29 @@ class AudioRecordingService: NSObject, ObservableObject {
     // MARK: - Transcription
 
     /// Owns the recording until the request and its optional authentication retry finish.
+    /// The words of the recording, as `send` transcribes its bytes.
     func transcribe(
         fileURL: URL,
-        model: String,
-        prepareRequest: (_ forceRefresh: Bool) async throws -> Void,
-        request: (AudioTranscriptionQuery) async throws -> AudioTranscriptionResult,
-        isAuthenticationError: (Error) -> Bool
+        send: (_ recording: Data) async throws -> String
     ) async throws -> String {
         isTranscribing = true
         defer {
             isTranscribing = false
             cleanupRecordingFile(at: fileURL)
         }
-
         try Task.checkCancellation()
         let audioData = try await Task.detached {
             try Data(contentsOf: fileURL)
         }.value
-
         guard !audioData.isEmpty else {
             throw AudioRecordingError.emptyRecording
         }
-
-        let query = AudioTranscriptionQuery(
-            file: audioData,
-            fileType: .m4a,
-            model: model,
-            responseFormat: .json
-        )
-
-        func send(forceRefresh: Bool) async throws -> AudioTranscriptionResult {
-            try Task.checkCancellation()
-            try await prepareRequest(forceRefresh)
-            try Task.checkCancellation()
-            return try await request(query)
-        }
-
-        let result: AudioTranscriptionResult
-        do {
-            result = try await send(forceRefresh: false)
-        } catch {
-            try Task.checkCancellation()
-            guard isAuthenticationError(error) else { throw error }
-            // Reuse the same audio bytes; cleanup runs only after both attempts.
-            result = try await send(forceRefresh: true)
-        }
+        let result = try await send(audioData)
         try Task.checkCancellation()
-
-        let transcription = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-
+        let transcription = result.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !transcription.isEmpty else {
             throw AudioRecordingError.emptyTranscription
         }
-
         return transcription
     }
 
@@ -232,7 +201,6 @@ enum AudioRecordingError: LocalizedError {
     case recordingFailed
     case emptyRecording
     case emptyTranscription
-    case sessionUnavailable
     case transcriptionFailed(String)
 
     var errorDescription: String? {
@@ -245,8 +213,6 @@ enum AudioRecordingError: LocalizedError {
             return "Recording is empty"
         case .emptyTranscription:
             return "Transcription returned empty"
-        case .sessionUnavailable:
-            return "Could not connect to your Tinfoil session. Please try again."
         case .transcriptionFailed(let message):
             return "Transcription failed: \(message)"
         }

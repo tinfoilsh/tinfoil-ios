@@ -1,5 +1,4 @@
 import Foundation
-import OpenAI
 
 enum SpeechError: Error, Equatable, LocalizedError {
     case empty
@@ -28,21 +27,13 @@ enum SpeechError: Error, Equatable, LocalizedError {
 
     static func sanitized(_ error: Error) -> SpeechError {
         if let error = error as? SpeechError { return error }
-        if error is SessionTokenError { return .rateLimited }
-        if error is AudioSpeechStreamError { return .invalidAudio }
         if let error = error as? URLError, error.code == .timedOut { return .timedOut }
-        if let error = error as? OpenAIError {
-            switch error {
-            case .emptyData: return .invalidAudio
-            case .statusError(_, let status) where status == Constants.API.tooManyRequestsStatusCode: return .rateLimited
-            default: break
+        if let error = error as? HarnessError {
+            switch error.code {
+            case HarnessErrorCode.quotaExhausted, HarnessErrorCode.rateLimited: return .rateLimited
+            case HarnessErrorCode.toolUnavailable: return .unavailable
+            default: return .requestFailed
             }
-        }
-        if let error = error as? APIErrorResponse,
-           error.error.type == Constants.API.ErrorType.rateLimit
-            || error.error.code == Constants.API.ErrorCode.rateLimitExceeded
-            || error.error.code == Constants.API.ErrorCode.insufficientQuota {
-            return .rateLimited
         }
         return .requestFailed
     }

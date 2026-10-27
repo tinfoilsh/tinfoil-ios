@@ -20,27 +20,29 @@ final class SpeechPlayer: ObservableObject {
         var status: Status = .idle
     }
 
+    /// One message read aloud: the chat service streams its audio as one
+    /// response, which plays as it arrives.
     private final class Session {
         let id: UUID
         let owner: SpeechOwner
         let source: String
-        let text: [String]
         let service: any SpeechSynthesizing
-        var buffer: SpeechBuffer
+        var buffer = SpeechBuffer(chunkCount: 1)
+        /// The stream is not read further while too much audio waits to
+        /// play; playback wakes it.
+        var drained: CheckedContinuation<Void, Never>?
 
-        init(id: UUID, owner: SpeechOwner, source: String, text: [String], service: any SpeechSynthesizing) {
+        init(id: UUID, owner: SpeechOwner, source: String, service: any SpeechSynthesizing) {
             self.id = id
             self.owner = owner
             self.source = source
-            self.text = text
             self.service = service
-            self.buffer = SpeechBuffer(chunkCount: text.count)
         }
     }
 
     @Published private(set) var snapshot = Snapshot()
     private var session: Session?
-    private var tasks: [Int: Task<Void, Never>] = [:]
+    private var task: Task<Void, Never>?
     private let output: any SpeechAudioPlaying
     private var failureAcknowledged = false
 
@@ -49,17 +51,18 @@ final class SpeechPlayer: ObservableObject {
     }
 
     deinit {
-        tasks.values.forEach { $0.cancel() }
+        task?.cancel()
         let output = self.output
         Task { @MainActor in output.stop() }
     }
 
+    /// Reads a message aloud. Its text is kept to notice the message
+    /// changing under the narration.
     func read(owner: SpeechOwner, content: String, service: any SpeechSynthesizing) throws {
-        let chunks = SpeechTextProcessor.split(try SpeechTextProcessor.prepare(content))
-        guard !chunks.isEmpty else { throw SpeechError.empty }
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw SpeechError.empty }
         stop()
         let id = UUID()
-        session = Session(id: id, owner: owner, source: content, text: chunks, service: service)
+        session = Session(id: id, owner: owner, source: content, service: service)
         update(owner: owner, status: .loading)
         guard session?.id == id else { return }
         do {
@@ -75,10 +78,13 @@ final class SpeechPlayer: ObservableObject {
     }
 
     func stop() {
+        let ended = session
         session = nil
         failureAcknowledged = false
-        tasks.values.forEach { $0.cancel() }
-        tasks.removeAll()
+        task?.cancel()
+        task = nil
+        ended?.drained?.resume()
+        ended?.drained = nil
         output.stop()
         update(owner: nil, status: .idle)
     }
@@ -145,25 +151,27 @@ final class SpeechPlayer: ObservableObject {
             guard self.session?.id == sessionId else { return }
             update(owner: session.owner, status: session.buffer.isPlaying ? .playing : .loading)
             guard self.session?.id == sessionId else { return }
+            if !session.buffer.isFull, let drained = session.drained {
+                session.drained = nil
+                drained.resume()
+            }
             let indices = session.buffer.reserveRequests()
+            guard let index = indices.first else { return }
             let service = session.service
-            for index in indices {
-                let text = session.text[index]
-                tasks[index] = Task { [weak self] in
-                    do {
-                        try Task.checkCancellation()
-                        try await service.generate(text) { [weak self] samples in
-                            try await self?.receive(samples, index: index, sessionId: sessionId)
-                        }
-                        try Task.checkCancellation()
-                        guard let self, self.session?.id == sessionId else { return }
-                        self.tasks.removeValue(forKey: index)
-                        try self.session?.buffer.finishRequest(index)
-                        self.pump(sessionId: sessionId)
-                    } catch {
-                        guard let self, self.session?.id == sessionId else { return }
-                        self.fail(error, sessionId: sessionId)
+            task = Task { [weak self] in
+                do {
+                    try Task.checkCancellation()
+                    try await service.generate { [weak self] samples in
+                        try await self?.receive(samples, index: index, sessionId: sessionId)
                     }
+                    try Task.checkCancellation()
+                    guard let self, self.session?.id == sessionId else { return }
+                    self.task = nil
+                    try self.session?.buffer.finishRequest(index)
+                    self.pump(sessionId: sessionId)
+                } catch {
+                    guard let self, self.session?.id == sessionId else { return }
+                    self.fail(error, sessionId: sessionId)
                 }
             }
         } catch {
@@ -171,10 +179,19 @@ final class SpeechPlayer: ObservableObject {
         }
     }
 
-    private func receive(_ samples: [Float], index: Int, sessionId: UUID) throws {
-        guard session?.id == sessionId, !Task.isCancelled else { throw CancellationError() }
-        try session?.buffer.append(samples, to: index)
+    /// Takes a block of the stream's audio, and holds the stream while
+    /// enough audio waits to play.
+    private func receive(_ samples: [Float], index: Int, sessionId: UUID) async throws {
+        guard let session, session.id == sessionId, !Task.isCancelled else { throw CancellationError() }
+        try session.buffer.append(samples, to: index)
         pump(sessionId: sessionId)
+        while let session = self.session, session.id == sessionId, session.buffer.isFull {
+            await withCheckedContinuation { continuation in
+                session.drained?.resume()
+                session.drained = continuation
+            }
+        }
+        guard self.session?.id == sessionId, !Task.isCancelled else { throw CancellationError() }
     }
 
     private func fail(_ error: Error, sessionId: UUID) {

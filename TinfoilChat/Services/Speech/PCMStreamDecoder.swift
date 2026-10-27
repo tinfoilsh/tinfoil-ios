@@ -6,8 +6,6 @@ struct PCMStreamDecoder {
     private(set) var receivedBytes = 0
 
     mutating func decode(_ data: Data) throws -> [[Float]] {
-        let maximumBytes = Constants.Speech.maxChunkSamples * Constants.Speech.bytesPerSample
-        guard data.count <= maximumBytes - receivedBytes else { throw SpeechError.invalidAudio }
         receivedBytes += data.count
         var blocks: [[Float]] = []
         for byte in data {

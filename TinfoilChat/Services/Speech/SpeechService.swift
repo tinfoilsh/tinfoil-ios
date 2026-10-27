@@ -1,65 +1,36 @@
 import Foundation
-import OpenAI
 
 protocol SpeechSynthesizing: Sendable {
-    func generate(
-        _ text: String,
-        receive: @escaping @Sendable ([Float]) async throws -> Void
-    ) async throws
+    /// Streams a message's audio as blocks of samples until it ends.
+    func generate(receive: @escaping @Sendable ([Float]) async throws -> Void) async throws
 }
 
-struct SpeechService: SpeechSynthesizing {
-    typealias StreamFactory = @MainActor @Sendable (String) async throws -> AsyncThrowingStream<AudioSpeechResult, Error>
-    let makeStream: StreamFactory
-    private let waitForDeadline: @Sendable () async throws -> Void
+/// The audio the chat service reads a message aloud with: one stream of raw
+/// PCM, mono, signed 16-bit little-endian at 24 kHz, decoded as it arrives.
+struct HarnessSpeechStream: SpeechSynthesizing {
+    typealias Open = @Sendable () async throws -> HarnessResponse
+    let open: Open
 
-    init(timeout: Duration = .seconds(Constants.Speech.requestTimeoutSeconds), makeStream: @escaping StreamFactory) {
-        self.init(waitForDeadline: { try await Task.sleep(for: timeout) }, makeStream: makeStream)
+    init(open: @escaping Open) {
+        self.open = open
     }
 
-    init(waitForDeadline: @escaping @Sendable () async throws -> Void, makeStream: @escaping StreamFactory) {
-        self.waitForDeadline = waitForDeadline
-        self.makeStream = makeStream
-    }
-
-    static func query(for text: String) -> AudioSpeechQuery {
-        AudioSpeechQuery(
-            model: Constants.Speech.model,
-            input: text,
-            voice: .custom(Constants.Speech.voice),
-            instructions: Constants.Speech.instructions,
-            responseFormat: .pcm,
-            streamFormat: .audio
-        )
-    }
-
-    func generate(
-        _ text: String,
-        receive: @escaping @Sendable ([Float]) async throws -> Void
-    ) async throws {
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask {
+    func generate(receive: @escaping @Sendable ([Float]) async throws -> Void) async throws {
+        try Task.checkCancellation()
+        let response = try await open()
+        let mediaType = response.header("content-type")?.split(separator: ";", maxSplits: 1).first?
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard mediaType == Constants.Speech.contentType else { throw SpeechError.invalidAudio }
+        var decoder = PCMStreamDecoder()
+        for try await data in response.body {
+            try Task.checkCancellation()
+            for block in try decoder.decode(data) {
                 try Task.checkCancellation()
-                let stream = try await makeStream(text)
-                var decoder = PCMStreamDecoder()
-                for try await result in stream {
-                    try Task.checkCancellation()
-                    for block in try decoder.decode(result.audio) {
-                        try Task.checkCancellation()
-                        try await receive(block)
-                    }
-                }
-                try Task.checkCancellation()
-                let tail = try decoder.finish()
-                if !tail.isEmpty { try await receive(tail) }
+                try await receive(block)
             }
-            group.addTask {
-                try await waitForDeadline()
-                try Task.checkCancellation()
-                throw SpeechError.timedOut
-            }
-            defer { group.cancelAll() }
-            _ = try await group.next()
         }
+        try Task.checkCancellation()
+        let tail = try decoder.finish()
+        if !tail.isEmpty { try await receive(tail) }
     }
 }
