@@ -90,10 +90,10 @@ struct AnyJSON: Codable {
         var container = encoder.singleValueContainer()
         switch value {
         case is NSNull: try container.encodeNil()
-        // A number read as NSNumber casts to Bool when it is 0 or 1; only a
-        // CFBoolean is one.
+        // A number read as NSNumber casts to Bool when it is 0 or 1, and a
+        // Bool casts to a number: only a CFBoolean is a boolean, and a
+        // Swift Bool bridges to one.
         case let number as NSNumber where CFGetTypeID(number) == CFBooleanGetTypeID(): try container.encode(number.boolValue)
-        case let bool as Bool: try container.encode(bool)
         case let int as Int64: try container.encode(int)
         case let int as Int: try container.encode(int)
         case let double as Double: try container.encode(double)

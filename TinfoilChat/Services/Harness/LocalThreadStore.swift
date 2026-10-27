@@ -195,7 +195,9 @@ actor DeviceThreadStore: LocalThreadStore {
     }
 
     /// The summaries of every chat, read from the files once. A chat whose
-    /// file cannot be read is left out of the list, and logged.
+    /// file cannot be read is left out of the list, and logged. A write
+    /// that filled the cache while the files were read is the newer one,
+    /// and wins.
     private func loadSummaries() async throws -> [String: ThreadSummary] {
         if let summaries { return summaries }
         var listed: [String: ThreadSummary] = [:]
@@ -213,6 +215,7 @@ actor DeviceThreadStore: LocalThreadStore {
                 if let thread = StoredThread(data: entry.thread) { listed[id] = thread.summary }
             }
         }
+        if let summaries { return summaries }
         summaries = listed
         return listed
     }
