@@ -14,7 +14,7 @@ generator="$generator_cache/.build/release/swift-openapi-generator"
 
 # The copy is of the commit it names, so the harness's protocol must be as
 # committed.
-if [[ -n "$(git -C "$harness" status --porcelain --untracked-files=all -- protocol)" ]]; then
+if [[ -n "$(git -C "$harness" status --porcelain --untracked-files=all --ignored -- protocol)" ]]; then
   echo "$harness/protocol has changes not committed" >&2
   exit 1
 fi
@@ -43,7 +43,7 @@ trap 'rm -rf "$work"' EXIT
   awk '
     /^  schemas:/ { in_schemas = 1; next }
     in_schemas && /^  [^ ]/ { exit }
-    in_schemas && /^    [A-Za-z]+:/ { sub(/:.*/, ""); sub(/^ +/, ""); print "    - " $0 }
+    in_schemas && /^    [A-Za-z][A-Za-z0-9_.-]*:/ { sub(/:.*/, ""); sub(/^ +/, ""); print "    - " $0 }
   ' "$harness/protocol/openapi.yaml"
 } > "$work/config.yaml"
 
@@ -53,13 +53,16 @@ if ! "$generator" generate --config "$work/config.yaml" --output-directory "$wor
   exit 1
 fi
 
-# Nothing is replaced until the harness's protocol is read and its types are
-# written.
+# Nothing in the checkout is replaced until the whole copy and every
+# generated file are written.
 header="// Generated from harness-protocol/openapi.yaml by scripts/sync-harness-protocol.sh. Do not edit."
-rm -rf "$protocol_dir"
-cp -R "$harness/protocol" "$protocol_dir"
-printf '%s\n' "$revision" > "$protocol_dir/revision"
-mkdir -p "$generated_dir"
-{ echo "$header"; cat "$work/out/Types+Components.swift"; } > "$generated_dir/Components.swift"
-{ echo "$header"; cat "$work/out/Types+Components+Schemas.swift"; } > "$generated_dir/Schemas.swift"
+cp -R "$harness/protocol" "$work/protocol"
+printf '%s\n' "$revision" > "$work/protocol/revision"
+mkdir -p "$work/generated"
+{ echo "$header"; cat "$work/out/Types+Components.swift"; } > "$work/generated/Components.swift"
+{ echo "$header"; cat "$work/out/Types+Components+Schemas.swift"; } > "$work/generated/Schemas.swift"
+rm -rf "$protocol_dir" "$generated_dir"
+mv "$work/protocol" "$protocol_dir"
+mkdir -p "$(dirname "$generated_dir")"
+mv "$work/generated" "$generated_dir"
 echo "Synced harness protocol at $revision"

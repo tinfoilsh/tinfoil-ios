@@ -59,6 +59,35 @@ private actor ScriptedCredentials: HarnessCredentials {
     func chatAccessRenewsAt() async -> Date? { renewsAt }
 }
 
+/// A flag that waiters wake on.
+private actor Signal {
+    private var raised = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func raise() {
+        raised = true
+        waiters.forEach { $0.resume() }
+        waiters.removeAll()
+    }
+
+    /// Whether the flag is raised within a second.
+    func raised(within seconds: Double) async -> Bool {
+        if raised { return true }
+        return await withTaskGroup(of: Bool.self) { group in
+            group.addTask { await self.wait(); return true }
+            group.addTask { try? await Task.sleep(for: .seconds(seconds)); return false }
+            let first = await group.next()!
+            group.cancelAll()
+            return first
+        }
+    }
+
+    private func wait() async {
+        if raised { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+}
+
 private struct Ok: Decodable, Equatable {
     let ok: Bool
 }
@@ -237,6 +266,23 @@ struct HarnessClientTests {
         let requests = await transport.requests
         #expect(requests.map { $0.headers[HarnessHeader.instance] } == [nil, "node-7", "node-7"])
         #expect(requests.map { $0.headers[HarnessHeader.lastEventId] } == [nil, nil, "1"])
+    }
+
+    @Test func leavingARunStreamEndsItsResponse() async throws {
+        let ended = Signal()
+        let body = AsyncThrowingStream<Data, Error> { continuation in
+            continuation.yield(Data("id: 0\ndata: {\"type\":\"RUN_STARTED\",\"threadId\":\"t\",\"runId\":\"r\",\"instance\":\"i\"}\n\n".utf8))
+            continuation.onTermination = { _ in Task { await ended.raise() } }
+        }
+        let transport = ScriptedTransport([{ _ in HarnessResponse(status: 200, headers: ["content-type": "text/event-stream"], body: body) }])
+        let credentials = ScriptedCredentials(identities: ["jwt"], access: [.success("k")])
+        var seen = 0
+        for try await _ in try await Self.client(transport, credentials).events(.turn, Input(threadId: "t")) {
+            seen += 1
+            break
+        }
+        #expect(seen == 1)
+        #expect(await ended.raised(within: 2))
     }
 
     @Test func aRunThatDoesNotAnswerWithEventsIsNotAStream() async throws {

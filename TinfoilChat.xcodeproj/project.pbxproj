@@ -20,6 +20,7 @@
 		A1B2C3D40100000000000001 /* TinfoilPasskeyKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40100000000000003 /* TinfoilPasskeyKit */; };
 		A1B2C3D40100000000000004 /* TinfoilPasskeyKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40100000000000003 /* TinfoilPasskeyKit */; };
 		A1B2C3D40200000000000001 /* OpenAPIRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40200000000000003 /* OpenAPIRuntime */; };
+		A1B2C3D40200000000000004 /* OpenAPIRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40200000000000003 /* OpenAPIRuntime */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -111,6 +112,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1B2C3D40100000000000004 /* TinfoilPasskeyKit in Frameworks */,
+				A1B2C3D40200000000000004 /* OpenAPIRuntime in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -193,6 +195,7 @@
 			name = TinfoilChatTests;
 			packageProductDependencies = (
 				A1B2C3D40100000000000003 /* TinfoilPasskeyKit */,
+				A1B2C3D40200000000000003 /* OpenAPIRuntime */,
 			);
 			productName = TinfoilChatTests;
 			productReference = 992FC2952F532EA800699029 /* TinfoilChatTests.xctest */;

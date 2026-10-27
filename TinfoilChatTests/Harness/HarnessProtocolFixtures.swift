@@ -27,9 +27,11 @@ enum HarnessProtocolFixtures {
         return try names.map { name in
             let data = try Data(contentsOf: fixtures.appendingPathComponent(name))
             let run = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-            let frames = try (run["frames"] as! [[String: Any]]).map { frame -> Frame in
+            // A frame of a type this client does not know is ignored, as the
+            // stream reader ignores it.
+            let frames = try (run["frames"] as! [[String: Any]]).compactMap { frame -> Frame? in
                 let event = try JSONSerialization.data(withJSONObject: frame["event"]!)
-                return try HarnessEventStream.decode([UInt8](event), id: frame["id"] as? Int)!
+                return try HarnessEventStream.decode([UInt8](event), id: frame["id"] as? Int)
             }
             return RecordedRun(
                 name: name,

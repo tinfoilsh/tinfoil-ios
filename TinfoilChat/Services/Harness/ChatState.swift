@@ -33,7 +33,8 @@ struct ChatState: Equatable, Sendable {
     var cursors: [String: Int] = [:]
     /// The latest summary of each thinking block of the run, by block id.
     var summaries: [String: String] = [:]
-    /// The harness refused a turn because the safeguards flagged the chat.
+    /// The safeguards flagged the chat, as it was loaded or as the harness
+    /// refused a turn, so it takes no more turns.
     var flagged = false
 
     /// The state before any run, of a chat as it was loaded, or of a new one.
@@ -42,6 +43,7 @@ struct ChatState: Equatable, Sendable {
         messages = thread?.messages ?? []
         hasOlder = thread?.hasOlder ?? false
         status = .idle
+        flagged = thread?.flagged ?? false
     }
 }
 

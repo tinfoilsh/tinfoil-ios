@@ -96,7 +96,7 @@ final class SealedTransport: HarnessTransport {
             if attempt == 0, Self.mayRefuseKey(response) {
                 let body = try await Self.diagnostic(of: stream)
                 if Self.refusesKey(response, body) {
-                    _ = try await handle.verify()
+                    _ = try await verified(again: true)
                     continue
                 }
                 return .collected(status: response.statusCode, headers: Self.headers(of: response), body: body)
@@ -110,12 +110,26 @@ final class SealedTransport: HarnessTransport {
         )
     }
 
-    /// The key requests are sealed to, verified within the attestation
-    /// timeout. A verification that has not finished by then fails the
-    /// request; the next one asks again.
+    /// The key requests are sealed to, from the enclave's verification.
     private func publicKey() async throws -> Data {
-        let verification = try await withThrowingTaskGroup(of: Verification.self) { group in
-            group.addTask { try await self.handle.verifyIfNeeded() }
+        let verification = try await verified(again: false)
+        guard let hex = verification.hpkePublicKey, let key = Data(lowercaseHex: hex),
+              key.count == Constants.Harness.hpkePublicKeyBytes else {
+            throw HarnessError(
+                code: HarnessErrorCode.configuration,
+                message: "The chat service endorses no key to seal requests to.",
+                action: .stop
+            )
+        }
+        return key
+    }
+
+    /// The enclave's verification, fresh or made again, within the
+    /// attestation timeout. One that has not finished by then fails the
+    /// request; the next one asks again.
+    private func verified(again: Bool) async throws -> Verification {
+        try await withThrowingTaskGroup(of: Verification.self) { group in
+            group.addTask { try await again ? self.handle.verify() : self.handle.verifyIfNeeded() }
             group.addTask {
                 try await Task.sleep(for: .seconds(Constants.Harness.attestationTimeoutSeconds))
                 throw HarnessError(
@@ -128,15 +142,6 @@ final class SealedTransport: HarnessTransport {
             group.cancelAll()
             return first
         }
-        guard let hex = verification.hpkePublicKey, let key = Data(lowercaseHex: hex),
-              key.count == Constants.Harness.hpkePublicKeyBytes else {
-            throw HarnessError(
-                code: HarnessErrorCode.configuration,
-                message: "The chat service endorses no key to seal requests to.",
-                action: .stop
-            )
-        }
-        return key
     }
 
     private static func headers(of response: HTTPURLResponse) -> [String: String] {

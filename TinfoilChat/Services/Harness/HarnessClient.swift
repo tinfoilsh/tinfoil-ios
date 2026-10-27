@@ -11,7 +11,8 @@ protocol HarnessCredentials: Sendable {
     /// harness refused and issues another.
     func anonymousKey(refresh: Bool) async throws -> String
     /// The chat access a signed-in account minted from the control plane, or
-    /// its refusal, as a HarnessError. Refreshing mints again.
+    /// its refusal, as a HarnessError. The access held is minted again once
+    /// it enters its renewal window; refreshing mints again at once.
     func chatAccess(identity: String, refresh: Bool) async throws -> String
     /// When the held chat access enters its renewal window, if one is held.
     func chatAccessRenewsAt() async -> Date?
