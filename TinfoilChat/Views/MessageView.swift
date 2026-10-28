@@ -1041,16 +1041,15 @@ struct MessageView: View {
                     let afterFirstTilde = path[path.index(after: tildeIndex)...]
                     if let secondTildeIndex = afterFirstTilde.firstIndex(of: "~") {
                         let encodedUrl = String(afterFirstTilde[..<secondTildeIndex])
-                        if let decodedUrl = encodedUrl.removingPercentEncoding,
-                           let sourceURL = URL(string: decodedUrl) {
-                            UIApplication.shared.open(sourceURL)
+                        if let decodedUrl = encodedUrl.removingPercentEncoding {
+                            LinkOpener.open(decodedUrl)
                             return .handled
                         }
                     }
                 }
                 return .handled
             }
-            return .systemAction
+            return LinkOpener.canOpen(url) ? .systemAction : .discarded
         })
     }
 
@@ -2376,9 +2375,7 @@ private struct SourcesSheetView: View {
                 LazyVStack(spacing: 8) {
                     ForEach(sources) { source in
                         Button {
-                            if let url = URL(string: source.url) {
-                                UIApplication.shared.open(url)
-                            }
+                            LinkOpener.open(source.url)
                         } label: {
                             HStack(spacing: 12) {
                                 FaviconImage(
