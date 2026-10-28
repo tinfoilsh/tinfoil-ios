@@ -127,6 +127,7 @@ final class HarnessAccount: ObservableObject {
 
     /// A request's body with the content key, unless the route reads none.
     private func keyed(_ body: some Encodable, keyless: Bool) throws -> JSONObject {
+        guard !disposed else { throw CancellationError() }
         var object = try body.jsonObject()
         if !keyless, let key = try key() { object["key"] = key }
         return JSONObject(object)

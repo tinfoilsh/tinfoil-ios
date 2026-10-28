@@ -197,6 +197,7 @@ actor HarnessClient {
         if !anonymous { try await mint(refresh: false) }
         for attempt in 0..<2 {
             try Task.checkCancellation()
+            guard !disposed else { throw CancellationError() }
             var headers = ["Content-Type": contentType]
             let languages = languages()
             if !languages.isEmpty { headers["Accept-Language"] = languages.joined(separator: ",") }

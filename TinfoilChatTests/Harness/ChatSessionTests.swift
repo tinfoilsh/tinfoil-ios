@@ -196,6 +196,15 @@ struct ChatSessionTests {
         #expect(try await session.device.get(session.open.id!)?.messages.count == 1)
     }
 
+    @Test func anAccountSignedOutOfSendsNothingMore() async throws {
+        let fixture = Fixture(userId: "user", answers: [])
+        fixture.account.dispose()
+        await #expect(throws: CancellationError.self) {
+            let _: RawJSON = try await fixture.account.post(.session, keyless: true)
+        }
+        #expect(await fixture.transport.requests.isEmpty)
+    }
+
     @Test func anUploadIsTheAttachmentTheHarnessConvertedItTo() async throws {
         let sessionAnswer: [String: Any] = [
             "protocol": ["version": 1, "minimum": 1], "user": ["id": "", "anonymous": true], "rateLimit": ["kind": NSNull()],
