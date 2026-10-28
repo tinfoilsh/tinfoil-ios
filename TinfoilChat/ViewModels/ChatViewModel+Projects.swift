@@ -77,9 +77,9 @@ extension ChatViewModel {
         createNewChat(isLocalOnly: false, projectId: projectId, focusInput: false)
     }
 
-    /// Loads a project and its documents, and makes it the active context.
-    /// A newer load supersedes one in flight, which neither changes the
-    /// context nor reports success.
+    /// Loads a project and its documents, and makes it the active context,
+    /// which shows the project's page. A newer load supersedes one in
+    /// flight, which neither changes the context nor reports success.
     @discardableResult
     func loadActiveProject(projectId: String) async -> Bool {
         guard let session, canUseProjects else { return false }
@@ -94,6 +94,7 @@ extension ChatViewModel {
             let project = Project(loaded)
             projects = projects.map { $0.id == project.id ? project : $0 }
             if !projects.contains(where: { $0.id == project.id }) { projects.insert(project, at: 0) }
+            isViewingProjectChat = false
             activeProject = project
             projectDocuments = (loaded.documents ?? []).map(ProjectDocument.init)
             return true
