@@ -73,8 +73,23 @@ struct HarnessAccountTests {
         let (account, _) = makeAccount(userId: "user-1", answers: [Answers.json(sessionAnswer), Answers.refusal(409, code: HarnessErrorCode.keyMismatch, action: "unlock")], key: key)
         try await account.refresh()
         #expect(account.keyLocked)
+        #expect(!account.profileFailed)
         #expect(account.readsHeldKey)
         key.bytes = nil
         #expect(!account.readsHeldKey)
+    }
+
+    @Test func settingsThatFailedForAnotherReasonLoadOnTheNextRefresh() async throws {
+        let (account, _) = makeAccount(userId: "user-1", answers: [
+            Answers.json(sessionAnswer), Answers.refusal(503, code: "UPSTREAM_UNAVAILABLE", action: "retry"),
+            Answers.json(sessionAnswer), Answers.json(["language": "French"]),
+        ])
+        try await account.refresh()
+        #expect(account.profileFailed)
+        #expect(!account.keyLocked)
+        try await account.refresh(credentials: true)
+        #expect(!account.profileFailed)
+        #expect(account.profileReady)
+        #expect(account.profile["language"] as? String == "French")
     }
 }

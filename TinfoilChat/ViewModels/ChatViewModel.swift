@@ -153,6 +153,7 @@ class ChatViewModel: ObservableObject {
     }
     @Published var verification = VerificationInfo()
     @Published var enclaveVerification: Verification? = nil
+    private var isRetryingSession = false
     var isVerifying: Bool { verification.isVerifying }
     var isVerified: Bool { verification.isVerified }
     var verificationError: String? { verification.error }
@@ -299,6 +300,18 @@ class ChatViewModel: ObservableObject {
         observers.append(NotificationCenter.default.addObserver(forName: .cloudSyncSettingChanged, object: nil, queue: .main) { [weak self] _ in
             Task { await self?.storageModeChanged() }
         })
+        // A chat service that could not be reached is tried again as the app
+        // returns and as the network does.
+        observers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.retryClientSetupIfFailed() }
+        })
+        AppConfig.shared.networkMonitor.$isConnected
+            .dropFirst()
+            .removeDuplicates()
+            .filter { $0 }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.retryClientSetupIfFailed() }
+            .store(in: &cancellables)
     }
 
     deinit {
@@ -369,7 +382,11 @@ class ChatViewModel: ObservableObject {
         session.objectWillChange.sink { [weak self] _ in self?.sessionChanged() }.store(in: &sessionCancellables)
         account.$rateLimit.receive(on: RunLoop.main).sink { [weak self] limit in self?.rateLimit = limit.flatMap(RateLimitInfo.init) }.store(in: &sessionCancellables)
         account.$profile.receive(on: RunLoop.main).sink { [weak self] _ in self?.applyProfileSettings() }.store(in: &sessionCancellables)
-        account.$session.receive(on: RunLoop.main).sink { [weak self] _ in self?.applySessionModels() }.store(in: &sessionCancellables)
+        account.$session.receive(on: RunLoop.main).sink { [weak self, weak account] loaded in
+            self?.applySessionModels()
+            guard loaded != nil, let account else { return }
+            Task { await self?.showVerification(of: account) }
+        }.store(in: &sessionCancellables)
         account.$chatRevision.receive(on: RunLoop.main).sink { [weak self] _ in Task { await self?.session?.refreshIfChanged() } }.store(in: &sessionCancellables)
         account.$projectRevision.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in Task { await self?.loadProjects() } }.store(in: &sessionCancellables)
         account.$keyReady.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] ready in
@@ -383,9 +400,6 @@ class ChatViewModel: ObservableObject {
         do {
             try await account.refresh(credentials: true)
             guard self.session === session else { return }
-            let verified = await account.client.verification()
-            enclaveVerification = verified
-            verification = VerificationInfo(isVerified: verified != nil, error: verified == nil ? "The chat service could not be verified." : nil)
         } catch {
             guard self.session === session else { return }
             verification = VerificationInfo(error: error.localizedDescription)
@@ -1419,11 +1433,45 @@ class ChatViewModel: ObservableObject {
         verifierView = nil
     }
 
+    /// Opens the chat service again: the session and the account's settings,
+    /// or the whole session when its client could not be made. The open
+    /// chat stays.
     func retryClientSetup() {
-        Task {
-            sessionUserId = nil
-            await openSession()
+        guard !verification.isVerifying, !isRetryingSession else { return }
+        guard let session else {
+            verification = VerificationInfo(isVerifying: true)
+            Task {
+                sessionUserId = nil
+                await openSession()
+            }
+            return
         }
+        isRetryingSession = true
+        Task {
+            defer { isRetryingSession = false }
+            do {
+                try await session.account.refresh(credentials: true)
+            } catch {
+                guard self.session === session else { return }
+                if verification.error != nil { verification = VerificationInfo(error: error.localizedDescription) }
+                session.account.report(error)
+            }
+        }
+    }
+
+    /// Tries the chat service again when it could not be verified or the
+    /// account's settings could not load.
+    private func retryClientSetupIfFailed() {
+        guard verification.error != nil || account?.profileFailed == true else { return }
+        retryClientSetup()
+    }
+
+    /// Shows how the enclave the account's session reached was verified.
+    private func showVerification(of account: HarnessAccount) async {
+        let verified = await account.client.verification()
+        guard self.account === account else { return }
+        enclaveVerification = verified
+        verification = VerificationInfo(isVerified: verified != nil, error: verified == nil ? "The chat service could not be verified." : nil)
     }
 }
 

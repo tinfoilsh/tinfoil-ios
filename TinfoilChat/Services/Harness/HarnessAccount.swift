@@ -128,6 +128,12 @@ final class HarnessAccount: ObservableObject {
         cloud ? settings.cloudProfileCache(userId: userId) : [:]
     }
 
+    /// The settings could not load for a reason other than the key, and
+    /// load again as the session is refreshed.
+    var profileFailed: Bool {
+        !profileReady && !keyLocked && error != nil
+    }
+
     /// The settings were read, or are being read, with the content key this
     /// device holds now, so nothing the key opens needs loading again.
     /// Settings this device holds read no key.
