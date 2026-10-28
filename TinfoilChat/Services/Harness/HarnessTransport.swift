@@ -72,7 +72,7 @@ final class SealedTransport: HarnessTransport {
         configuration.waitsForConnectivity = true
         configuration.httpCookieStorage = nil
         configuration.urlCache = nil
-        session = URLSession(configuration: configuration)
+        session = URLSession(configuration: configuration, delegate: RedirectRefusal.shared, delegateQueue: nil)
     }
 
     func verification() async -> Verification? {

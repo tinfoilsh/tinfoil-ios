@@ -36,7 +36,7 @@ struct URLSessionControlPlane: ControlPlaneTransport {
         configuration.timeoutIntervalForRequest = Constants.Harness.ChatAccess.mintTimeoutSeconds
         configuration.httpCookieStorage = nil
         configuration.urlCache = nil
-        session = URLSession(configuration: configuration)
+        session = URLSession(configuration: configuration, delegate: RedirectRefusal.shared, delegateQueue: nil)
     }
 
     func get(_ path: String, identity: String?) async throws -> ControlPlaneAnswer {

@@ -180,6 +180,8 @@ class AuthManager: ObservableObject {
     private let authStateKey = Constants.StorageKeys.Auth.state
 
     private let userDataStore = CachedUserDataStore(keychain: KeychainHelper.shared, defaults: .standard)
+    /// The account's metadata, which no cache may keep.
+    private let metadataSession = URLSession.ephemeralRefusingRedirects()
 
     private func applySubscriptionAccess(_ isActive: Bool) {
         let shouldRefreshCredentials = SubscriptionAccessPolicy.requiresCredentialRefresh(
@@ -544,7 +546,7 @@ class AuthManager: ObservableObject {
             request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             request.addValue("application/json", forHTTPHeaderField: "Content-Type")
             
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await metadataSession.data(for: request)
             guard isCurrentSubscriptionRefresh(refreshContext, clerk: expectedClerk) else { return false }
             
             guard let httpResponse = response as? HTTPURLResponse,
