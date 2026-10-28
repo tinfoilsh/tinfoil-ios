@@ -1186,6 +1186,8 @@ class ChatViewModel: ObservableObject {
         let content = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty || !pendingAttachments.isEmpty else { return false }
         guard attachmentsAreReadyToSend(pendingAttachments) else { return false }
+        // A message the chat cannot take now stays in the composer.
+        guard session.acceptsTurn else { return false }
         if session.running, isMessageQueueFull { return false }
         if let rateLimit, rateLimit.kind == .freeDaily, rateLimit.exhausted, authManager?.hasActiveSubscription != true {
             showRateLimitPaywall = true

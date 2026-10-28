@@ -83,6 +83,15 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     var state: ChatState { controller.view }
     var running: Bool { [.submitting, .streaming, .queued].contains(state.status) }
 
+    /// Whether the open chat takes a turn now: not while one is being
+    /// submitted, a device chat's turn is starting, the chat loads or moves.
+    var acceptsTurn: Bool {
+        guard state.status != .submitting, open.loadingId == nil else { return false }
+        if openStore().local, controller.startingThread != nil { return false }
+        if let id = open.id, moving[id] != nil { return false }
+        return true
+    }
+
     /// The open chat is a new chat whose first turn gave it its id, and is
     /// not stored yet: the conversation on screen is the one that was blank.
     var isNewChatsFirstTurn: Bool { open.id != nil && open.unsaved == open.id }
@@ -425,10 +434,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     @discardableResult
     func send(_ fields: TurnFields) async -> Bool {
         let threads = openStore()
-        guard state.status != .submitting else { return false }
-        if threads.local, controller.startingThread != nil { return false }
-        if open.loadingId != nil { return false }
-        if let id = open.id, moving[id] != nil { return false }
+        guard acceptsTurn else { return false }
         patch { $0.failure = nil }
         attachments.rememberSent(fields.attachments)
         // A turn the key could not be read for is not shown as sent.
