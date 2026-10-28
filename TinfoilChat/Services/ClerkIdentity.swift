@@ -8,6 +8,11 @@ enum ClerkIdentity {
     /// falls back to the token last issued, and is thrown when there is
     /// none, so an outage is retried rather than taken for a revoked
     /// session.
+    /// The signed-in user's id, or nil when signed out.
+    static func userId() async -> String? {
+        await Clerk.shared.user?.id
+    }
+
     static func token(refresh: Bool) async throws -> String? {
         guard await !Clerk.shared.publishableKey.isEmpty else { return nil }
         if await !Clerk.shared.isLoaded {

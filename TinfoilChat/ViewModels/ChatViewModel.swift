@@ -432,9 +432,14 @@ class ChatViewModel: ObservableObject {
             Task { @MainActor in quota.account?.reportMintedRateLimit(limit) }
         }
         let credentials = HarnessCredentialProvider(
+            // Requests go as the account the session was opened for, or not
+            // at all: a signed-in account never falls back to a free key.
             identity: { refresh in
-                guard userId != nil else { return nil }
-                return try await ClerkIdentity.token(refresh: refresh)
+                guard let userId else { return nil }
+                let token = try await ClerkIdentity.token(refresh: refresh)
+                guard await ClerkIdentity.userId() == userId else { throw CancellationError() }
+                guard let token else { throw HarnessError.unauthenticated }
+                return token
             },
             chatAccess: chatAccess,
             anonymousAccess: AnonymousAccessCache(controlPlane: controlPlane)
