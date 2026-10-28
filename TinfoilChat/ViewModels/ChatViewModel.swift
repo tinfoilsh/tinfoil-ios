@@ -936,7 +936,7 @@ class ChatViewModel: ObservableObject {
         }
         var chat: Chat
         if let summary {
-            chat = ChatViewMapping.chat(summary, messages: shownMessages, local: open.local && !open.temporary, temporary: open.temporary, presetId: session.presetId)
+            chat = ChatViewMapping.chat(summary, messages: shownMessages, local: open.onDevice, temporary: open.temporary, presetId: session.presetId)
             if open.temporary { chat.title = Constants.Harness.temporaryTitle }
             if let webSearch { chat.webSearchEnabled = webSearch }
             chat.pendingSave = open.unsaved == summary.id
@@ -944,7 +944,7 @@ class ChatViewModel: ObservableObject {
             let selected = open.loadingId ?? open.failedId ?? open.id
             chat = Chat(id: selected ?? "", title: open.temporary ? Constants.Harness.temporaryTitle : (open.loadingId != nil ? "Loading chat…" : Chat.defaultTitle), messages: shownMessages, createdAt: Date())
             chat.isTemporary = open.temporary
-            chat.isLocalOnly = open.local && !open.temporary
+            chat.isLocalOnly = open.onDevice
             chat.pendingSave = open.id != nil && open.unsaved == open.id
             chat.model = model
             chat.projectId = open.onDevice ? nil : open.projectId
