@@ -82,7 +82,7 @@ struct Chat: Identifiable, Equatable {
     }
 }
 
-enum MessageRole: String, Codable {
+enum MessageRole: String {
     case user
     case assistant
 }
@@ -90,7 +90,7 @@ enum MessageRole: String, Codable {
 // MARK: - Web Search Types
 
 /// Represents a source from web search results
-struct WebSearchSource: Codable, Equatable, Identifiable {
+struct WebSearchSource: Equatable, Identifiable {
     let id: String
     let title: String
     let url: String
@@ -101,15 +101,6 @@ struct WebSearchSource: Codable, Equatable, Identifiable {
         self.title = title
         self.url = url
         self.snippet = snippet
-    }
-    
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        // Generate UUID if id is missing (React app doesn't include it)
-        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString.lowercased()
-        title = try container.decode(String.self, forKey: .title)
-        url = try container.decode(String.self, forKey: .url)
-        snippet = try container.decodeIfPresent(String.self, forKey: .snippet)
     }
 
     var timelineValue: JSONValue {
@@ -126,7 +117,7 @@ struct WebSearchSource: Codable, Equatable, Identifiable {
 }
 
 /// Status of a web search operation
-enum WebSearchStatus: String, Codable, Equatable {
+enum WebSearchStatus: String, Equatable {
     case searching
     case completed
     case failed
@@ -134,7 +125,7 @@ enum WebSearchStatus: String, Codable, Equatable {
 }
 
 /// State of web search for a message
-struct WebSearchState: Codable, Equatable {
+struct WebSearchState: Equatable {
     var query: String?
     var status: WebSearchStatus
     var sources: [WebSearchSource]
@@ -156,7 +147,7 @@ struct WebSearchState: Codable, Equatable {
 // MARK: - URL Fetch Types
 
 /// Status of a URL fetch operation
-enum URLFetchStatus: String, Codable, Equatable {
+enum URLFetchStatus: String, Equatable {
     case fetching
     case completed
     case failed
@@ -164,7 +155,7 @@ enum URLFetchStatus: String, Codable, Equatable {
 }
 
 /// Tracks the state of a single URL being fetched during web search
-struct URLFetchState: Codable, Equatable, Identifiable {
+struct URLFetchState: Equatable, Identifiable {
     let id: String
     let url: String
     var status: URLFetchStatus
@@ -191,7 +182,7 @@ struct URLFetchState: Codable, Equatable, Identifiable {
 }
 
 /// A single web search instance referenced by an inline message segment.
-struct WebSearchInstance: Codable, Equatable, Identifiable {
+struct WebSearchInstance: Equatable, Identifiable {
     let id: String
     var query: String?
     var status: WebSearchStatus
@@ -204,7 +195,7 @@ struct WebSearchInstance: Codable, Equatable, Identifiable {
 
 /// An ordered segment of assistant content. Preserves the exact order in which
 /// text and inline events (thinking, web search, URL fetch, tool call) streamed.
-enum MessageSegment: Codable, Equatable {
+enum MessageSegment: Equatable {
     case text(String)
     /// `startedAt`/`endedAt` are wall-clock epoch ms stamped while
     /// streaming so a run of trace segments can be summarized as
@@ -213,105 +204,6 @@ enum MessageSegment: Codable, Equatable {
     case webSearch(searchId: String)
     case urlFetch(fetchId: String)
     case toolCall(toolCallId: String)
-
-    private enum CodingKeys: String, CodingKey {
-        case type
-        case text
-        case content
-        case isThinking
-        case duration
-        case startedAt
-        case endedAt
-        case searchId
-        case fetchId
-        case toolCallId
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let type = try container.decode(String.self, forKey: .type)
-        switch type {
-        case "text":
-            let text = try container.decode(String.self, forKey: .text)
-            self = .text(text)
-        case "thinking":
-            let content = try container.decodeIfPresent(String.self, forKey: .content) ?? ""
-            let isThinking = try container.decodeIfPresent(Bool.self, forKey: .isThinking) ?? false
-            let duration = try container.decodeIfPresent(Double.self, forKey: .duration)
-            let startedAt = try container.decodeIfPresent(Double.self, forKey: .startedAt)
-            let endedAt = try container.decodeIfPresent(Double.self, forKey: .endedAt)
-            self = .thinking(content: content, isThinking: isThinking, duration: duration, startedAt: startedAt, endedAt: endedAt)
-        case "web_search":
-            let searchId = try container.decode(String.self, forKey: .searchId)
-            self = .webSearch(searchId: searchId)
-        case "url_fetch":
-            let fetchId = try container.decode(String.self, forKey: .fetchId)
-            self = .urlFetch(fetchId: fetchId)
-        case "tool_call":
-            let toolCallId = try container.decode(String.self, forKey: .toolCallId)
-            self = .toolCall(toolCallId: toolCallId)
-        default:
-            throw DecodingError.dataCorruptedError(
-                forKey: .type,
-                in: container,
-                debugDescription: "Unknown segment type: \(type)"
-            )
-        }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        switch self {
-        case .text(let text):
-            try container.encode("text", forKey: .type)
-            try container.encode(text, forKey: .text)
-        case .thinking(let content, let isThinking, let duration, let startedAt, let endedAt):
-            try container.encode("thinking", forKey: .type)
-            try container.encode(content, forKey: .content)
-            try container.encode(isThinking, forKey: .isThinking)
-            try container.encodeIfPresent(duration, forKey: .duration)
-            try container.encodeIfPresent(startedAt, forKey: .startedAt)
-            try container.encodeIfPresent(endedAt, forKey: .endedAt)
-        case .webSearch(let searchId):
-            try container.encode("web_search", forKey: .type)
-            try container.encode(searchId, forKey: .searchId)
-        case .urlFetch(let fetchId):
-            try container.encode("url_fetch", forKey: .type)
-            try container.encode(fetchId, forKey: .fetchId)
-        case .toolCall(let toolCallId):
-            try container.encode("tool_call", forKey: .type)
-            try container.encode(toolCallId, forKey: .toolCallId)
-        }
-    }
-
-    /// Decodes an array of segments while tolerating individual entries whose
-    /// shape is unknown to this client (e.g. a newer platform introduced a
-    /// segment type we don't understand). Unrecognized entries are skipped
-    /// instead of failing the whole decode.
-    static func decodeArrayLenient<K: CodingKey>(
-        from container: KeyedDecodingContainer<K>,
-        forKey key: K
-    ) throws -> [MessageSegment]? {
-        guard container.contains(key) else { return nil }
-        // Decode into a forgiving wrapper that accepts any JSON shape so the
-        // unkeyed container reliably advances past unknown entries, then
-        // attempt to re-decode each wrapper as a `MessageSegment` via its
-        // preserved raw value. Entries that still don't match are dropped.
-        let wrappers = try container.decode([LenientSegment].self, forKey: key)
-        return wrappers.compactMap { $0.segment }
-    }
-}
-
-/// Wrapper that decodes any JSON value into an intermediate form and then
-/// tries to re-interpret it as a `MessageSegment`. Unknown shapes decode
-/// successfully (advancing the unkeyed container) but yield a `nil`
-/// segment so callers can drop them.
-private struct LenientSegment: Decodable {
-    let segment: MessageSegment?
-
-    init(from decoder: Decoder) throws {
-        self.segment = try? MessageSegment(from: decoder)
-    }
 }
 
 private struct DynamicCodingKey: CodingKey {
@@ -421,7 +313,7 @@ enum JSONValue: Codable, Equatable, Sendable {
 }
 
 /// URL citation from web search results, matching React's Annotation type
-struct URLCitation: Codable, Equatable {
+struct URLCitation: Equatable {
     let title: String
     let url: String
     let start_index: Int?
@@ -429,22 +321,16 @@ struct URLCitation: Codable, Equatable {
 }
 
 /// Annotation wrapper, matching React's { type: 'url_citation', url_citation: URLCitation }
-struct Annotation: Codable, Equatable {
+struct Annotation: Equatable {
     let type: String
     let url_citation: URLCitation
 }
 
-struct GenUIToolCall: Codable, Equatable, Identifiable {
+struct GenUIToolCall: Equatable, Identifiable {
     let id: String
     let name: String
     let arguments: String
 }
-
-// `GenUIResolution` (defined in `Views/GenUI/GenUIWidget.swift`) is used
-// both as the in-memory render input and the on-disk storage shape. Its
-// JSON representation matches the webapp's
-// `TimelineToolCallBlock.resolution` so chats round-trip across
-// platforms.
 
 /// A user message submitted while the assistant was busy, held until the
 /// current response finishes. Mirrors the webapp's `QueuedMessage`.
@@ -477,7 +363,6 @@ struct Message: Identifiable, Equatable {
     var thoughts: String? = nil
     var isThinking: Bool = false
     var timestamp: Date
-    var isCollapsed: Bool = true
     var isStreaming: Bool = false
     var streamError: String? = nil
     var isRateLimitError: Bool = false
@@ -485,14 +370,11 @@ struct Message: Identifiable, Equatable {
     /// than the free-tier daily limit, which a regeneration may outlast.
     var isHourlyLimitError: Bool = false
     var generationTimeSeconds: Double? = nil
-    var contentChunks: [ContentChunk] = []
-    var thinkingChunks: [ThinkingChunk] = []
     var webSearchState: WebSearchState? = nil
     var urlFetches: [URLFetchState] = []
     var attachments: [Attachment] = []
     var thinkingDuration: Double? = nil
     var isError: Bool? = nil
-    var webSearchBeforeThinking: Bool? = nil
     var annotations: [Annotation]? = nil
     var segments: [MessageSegment]? = nil
     var webSearches: [WebSearchInstance]? = nil

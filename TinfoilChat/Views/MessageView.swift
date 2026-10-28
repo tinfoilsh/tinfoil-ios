@@ -632,30 +632,18 @@ struct MessageView: View {
                             }
 
                             if !message.content.isEmpty {
-                                if !message.contentChunks.isEmpty {
-                                    ChunkedContentView(
-                                        chunks: message.contentChunks,
-                                        isDarkMode: isDarkMode,
-                                        isStreaming: isRenderingStream,
-                                        textSelectionEnabled: inlineAssistantTextSelectionEnabled,
-                                        citationUrls: citationUrls
-                                    )
-                                        .equatable()
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                } else {
-                                    LaTeXMarkdownView(
-                                        content: message.content,
-                                        isDarkMode: isDarkMode,
-                                        isStreaming: isRenderingStream,
-                                        textSelectionEnabled: inlineAssistantTextSelectionEnabled,
-                                        citationUrls: citationUrls
-                                    )
-                                        .equatable()
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .transaction { transaction in
-                                            transaction.animation = nil
-                                        }
-                                }
+                                LaTeXMarkdownView(
+                                    content: message.content,
+                                    isDarkMode: isDarkMode,
+                                    isStreaming: isRenderingStream,
+                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled,
+                                    citationUrls: citationUrls
+                                )
+                                    .equatable()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .transaction { transaction in
+                                        transaction.animation = nil
+                                    }
                             }
                         }
                     }
@@ -736,27 +724,15 @@ struct MessageView: View {
                                 )
                             }
 
-                            if !message.contentChunks.isEmpty {
-                                ChunkedContentView(
-                                    chunks: message.contentChunks,
-                                    isDarkMode: isDarkMode,
-                                    isStreaming: isRenderingStream,
-                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled,
-                                    citationUrls: citationUrls
-                                )
-                                    .equatable()
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            } else {
-                                LaTeXMarkdownView(
-                                    content: message.content,
-                                    isDarkMode: isDarkMode,
-                                    isStreaming: isRenderingStream,
-                                    textSelectionEnabled: inlineAssistantTextSelectionEnabled,
-                                    citationUrls: citationUrls
-                                )
-                                    .equatable()
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
+                            LaTeXMarkdownView(
+                                content: message.content,
+                                isDarkMode: isDarkMode,
+                                isStreaming: isRenderingStream,
+                                textSelectionEnabled: inlineAssistantTextSelectionEnabled,
+                                citationUrls: citationUrls
+                            )
+                                .equatable()
+                                .frame(maxWidth: .infinity, alignment: .leading)
 
                             // Render any GenUI tool calls that came from a
                             // session that didn't persist segments (e.g.
@@ -976,7 +952,6 @@ struct MessageView: View {
         .sheet(isPresented: $showThoughtsSheet) {
             ThoughtsSheetView(
                 thinkingText: thoughtsContent ?? "",
-                thinkingChunks: message.thinkingChunks,
                 generationTimeSeconds: message.generationTimeSeconds,
                 isDarkMode: isDarkMode
             )
@@ -1768,17 +1743,15 @@ struct CollapsibleThinkingBox: View {
 
 struct ThoughtsSheetView: View {
     let thinkingText: String
-    let thinkingChunks: [ThinkingChunk]
     let generationTimeSeconds: Double?
     let isDarkMode: Bool
-    /// Chunks rebuilt from `thinkingText` when the message was loaded from
-    /// storage, where streaming chunks are not persisted. Chunked (and
-    /// laid out lazily) so a very large thought never becomes one Text view
-    /// whose CoreText layout blocks the main thread.
-    @State private var reconstructedChunks: [ThinkingChunk]? = nil
+    /// `thinkingText` in chunks, laid out lazily so a very large thought
+    /// never becomes one Text view whose CoreText layout blocks the main
+    /// thread.
+    @State private var chunks: [ThinkingChunk]? = nil
 
     private var displayChunks: [ThinkingChunk] {
-        thinkingChunks.isEmpty ? (reconstructedChunks ?? []) : thinkingChunks
+        chunks ?? []
     }
 
     private var titleText: String {
@@ -1808,9 +1781,9 @@ struct ThoughtsSheetView: View {
             .navigationTitle(titleText)
             .navigationBarTitleDisplayMode(.inline)
             .task {
-                guard thinkingChunks.isEmpty, reconstructedChunks == nil, !thinkingText.isEmpty else { return }
+                guard chunks == nil, !thinkingText.isEmpty else { return }
                 let text = thinkingText
-                reconstructedChunks = await Task.detached {
+                chunks = await Task.detached {
                     ThinkingTextChunker.chunk(text)
                 }.value
             }
@@ -1955,111 +1928,6 @@ struct MessageActionsView: View {
     
     var body: some View {
         EmptyView() // Placeholder - replace with actual content when needed
-    }
-}
-
-/// A simplified code block view without syntax highlighting
-
-struct ChunkedContentView: View, Equatable {
-    let chunks: [ContentChunk]
-    let isDarkMode: Bool
-    let isStreaming: Bool
-    let textSelectionEnabled: Bool
-    let citationUrls: Set<String>?
-
-    init(
-        chunks: [ContentChunk],
-        isDarkMode: Bool,
-        isStreaming: Bool,
-        textSelectionEnabled: Bool,
-        citationUrls: Set<String>? = nil
-    ) {
-        self.chunks = chunks
-        self.isDarkMode = isDarkMode
-        self.isStreaming = isStreaming
-        self.textSelectionEnabled = textSelectionEnabled
-        self.citationUrls = citationUrls
-    }
-
-    static func == (lhs: ChunkedContentView, rhs: ChunkedContentView) -> Bool {
-        lhs.chunks == rhs.chunks &&
-        lhs.isDarkMode == rhs.isDarkMode &&
-        lhs.isStreaming == rhs.isStreaming &&
-        lhs.textSelectionEnabled == rhs.textSelectionEnabled &&
-        lhs.citationUrls == rhs.citationUrls
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(chunks) { chunk in
-                ChunkView(
-                    chunk: chunk,
-                    isDarkMode: isDarkMode,
-                    isStreaming: isStreaming,
-                    textSelectionEnabled: textSelectionEnabled,
-                    citationUrls: citationUrls
-                )
-            }
-        }
-    }
-}
-
-struct ChunkView: View, Equatable {
-    let chunk: ContentChunk
-    let isDarkMode: Bool
-    let isStreaming: Bool
-    let textSelectionEnabled: Bool
-    let citationUrls: Set<String>?
-
-    static func == (lhs: ChunkView, rhs: ChunkView) -> Bool {
-        if lhs.chunk.isComplete && rhs.chunk.isComplete {
-            return lhs.chunk.id == rhs.chunk.id &&
-                   lhs.isDarkMode == rhs.isDarkMode &&
-                   lhs.textSelectionEnabled == rhs.textSelectionEnabled &&
-                   lhs.citationUrls == rhs.citationUrls
-        }
-        return lhs.chunk.id == rhs.chunk.id &&
-               lhs.chunk.isComplete == rhs.chunk.isComplete &&
-               lhs.chunk.content == rhs.chunk.content &&
-               lhs.isDarkMode == rhs.isDarkMode &&
-               lhs.isStreaming == rhs.isStreaming &&
-               lhs.textSelectionEnabled == rhs.textSelectionEnabled &&
-               lhs.citationUrls == rhs.citationUrls
-    }
-
-    var body: some View {
-        if chunk.type == .table && isStreaming {
-            GeneratingTableView(isDarkMode: isDarkMode)
-        } else {
-            LaTeXMarkdownView(
-                content: chunk.content,
-                isDarkMode: isDarkMode,
-                isStreaming: chunk.isComplete ? false : isStreaming,
-                textSelectionEnabled: textSelectionEnabled,
-                citationUrls: citationUrls
-            )
-            .equatable()
-        }
-    }
-}
-
-struct GeneratingTableView: View {
-    let isDarkMode: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text("Generating table")
-                .font(.subheadline.weight(.medium))
-                .foregroundColor(isDarkMode ? .white : .black)
-            InlineLoadingDotsView(isDarkMode: isDarkMode)
-        }
-        .frame(height: 48)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isDarkMode ? Color.white.opacity(0.15) : Color.black.opacity(0.15), lineWidth: 1)
-        )
     }
 }
 

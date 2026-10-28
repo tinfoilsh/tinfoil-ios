@@ -975,10 +975,7 @@ class ObservableMessageWrapper: ObservableObject {
     func update(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, messageIndex: Int) {
         let contentChanged = self.message.content != message.content ||
                             self.message.thoughts != message.thoughts ||
-                            self.message.contentChunks != message.contentChunks ||
-                            self.message.thinkingChunks != message.thinkingChunks ||
                             self.message.isThinking != message.isThinking ||
-                            self.message.isCollapsed != message.isCollapsed ||
                             self.message.generationTimeSeconds != message.generationTimeSeconds ||
                             self.message.streamError != message.streamError ||
                             self.message.webSearchState != message.webSearchState ||
@@ -988,7 +985,6 @@ class ObservableMessageWrapper: ObservableObject {
                             self.message.toolCalls != message.toolCalls ||
                             self.message.timeline != message.timeline ||
                             self.message.annotations != message.annotations ||
-                            self.message.webSearchBeforeThinking != message.webSearchBeforeThinking ||
                             self.isDarkMode != isDarkMode
 
         let metadataChanged = self.isLastMessage != isLastMessage ||
@@ -1039,8 +1035,6 @@ class ObservableMessageWrapper: ObservableObject {
     func getCacheKey() -> Int {
         message.content.hashValue ^
         (message.thoughts?.hashValue ?? 0) ^
-        (message.contentChunks.hashValue) ^
-        (message.thinkingChunks.hashValue) ^
         isDarkMode.hashValue
     }
 }
