@@ -1221,10 +1221,12 @@ class ChatViewModel: ObservableObject {
     func toggleTemporaryMode() {
         guard let session else { return }
         if isTemporaryMode {
-            session.newChat(local: activeStorageTab == .local)
             if let previous = previousChatIdBeforeTemporary {
                 previousChatIdBeforeTemporary = nil
+                session.newChat(local: activeStorageTab == .local)
                 _ = selectChat(id: previous, isLocalOnly: session.list.isOnDevice(previous))
+            } else {
+                createNewChat()
             }
         } else {
             previousChatIdBeforeTemporary = currentChat?.isBlankChat == false ? session.open.id : nil
