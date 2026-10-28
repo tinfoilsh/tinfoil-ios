@@ -559,13 +559,26 @@ class ChatViewModel: ObservableObject {
         currentModel = model
         session?.setModel(model.id)
         saveSetting("selectedModel", model.id)
+        keepWithOpenChat(ThreadPatch(model: model.id))
     }
 
     func setWebSearchEnabled(_ enabled: Bool) {
         isWebSearchEnabled = enabled
         session?.setWebSearch(enabled)
-        if let id = session?.open.id, session?.open.onDevice == false {
-            Task { try? await session?.update(id, ThreadPatch(webSearchEnabled: enabled)) }
+        keepWithOpenChat(ThreadPatch(webSearchEnabled: enabled))
+    }
+
+    /// A setting changed in the open chat is kept with the chat, wherever it
+    /// is stored, so it opens with it here and on other devices. A chat not
+    /// written yet takes its settings with its first turn.
+    private func keepWithOpenChat(_ patch: ThreadPatch) {
+        guard let session, let id = session.open.id, session.open.unsaved != id else { return }
+        Task {
+            do {
+                _ = try await session.update(id, patch)
+            } catch {
+                Self.logger.error("Failed to keep a setting with the open chat: \(error, privacy: .public)")
+            }
         }
     }
 
