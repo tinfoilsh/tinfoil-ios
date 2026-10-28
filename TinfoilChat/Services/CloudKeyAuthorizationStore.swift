@@ -109,7 +109,7 @@ final class CloudKeyAuthorizationStore {
     /// The harness reseals only under the registered key, and owns the
     /// resealing once asked.
     func registerHeldKeyIfNeeded() async throws {
-        let held = EncryptionService.shared.getAllKeys()
+        let held = try EncryptionService.shared.getAllKeys()
         guard let primary = held.primary, let primaryBytes = try? EncryptionService.shared.getAlternativeKeyBytes(primary) else { return }
         let current = try await KeyRegistry.shared.current()
         let target = primaryBytes.base64EncodedString()

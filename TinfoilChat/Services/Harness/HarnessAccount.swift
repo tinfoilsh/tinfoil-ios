@@ -255,9 +255,16 @@ final class HarnessAccount: ObservableObject {
         let version = profileVersion
         if !cloud {
             profileSource = .local
-            let local = settings.loadLocalProfile()
             keyReady = userId == nil
             keyLocked = false
+            let local: ProfileFields
+            do {
+                local = try settings.loadLocalProfile()
+            } catch {
+                profileReady = false
+                self.error = error.localizedDescription
+                return false
+            }
             profileReady = true
             error = nil
             showProfile(local)
@@ -272,7 +279,7 @@ final class HarnessAccount: ObservableObject {
             let merging = settings.pendingProfileMerge == userId
             let fields: ProfileFields
             if merging {
-                let local = settings.loadLocalProfile()
+                let local = try settings.loadLocalProfile()
                 let merged: RawJSON = try await post(.profileMerge, JSONObject(["profile": JSONValue(any: local), "changedFields": JSONValue(any: settings.localProfileChanges())]))
                 fields = try Self.object(of: merged)
             } else {
@@ -322,7 +329,7 @@ final class HarnessAccount: ObservableObject {
                 let sent = try JSONSerialization.data(withJSONObject: local, options: [.sortedKeys])
                 let upgraded: RawJSON = try await post(.profileUpgrade, JSONObject(["profile": JSONValue(any: local)]), keyless: true)
                 guard !disposed else { return }
-                let current = try JSONSerialization.data(withJSONObject: settings.loadLocalProfile(), options: [.sortedKeys])
+                let current = try JSONSerialization.data(withJSONObject: try settings.loadLocalProfile(), options: [.sortedKeys])
                 guard current == sent else { return }
                 let fields = try Self.object(of: upgraded)
                 let saved = try settings.saveLocalProfile(fields, replace: true)
@@ -482,7 +489,7 @@ final class HarnessAccount: ObservableObject {
 /// upgraded, a merge into the cloud still pending, and the cloud profile
 /// last seen.
 protocol ProfileStorage: AnyObject {
-    func loadLocalProfile() -> ProfileFields
+    func loadLocalProfile() throws -> ProfileFields
     func saveLocalProfile(_ patch: ProfileFields, replace: Bool) throws -> ProfileFields
     func localProfileChanges() -> [String]
     func clearLocalProfileChanges()

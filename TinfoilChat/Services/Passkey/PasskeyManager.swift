@@ -1552,7 +1552,7 @@ final class PasskeyManager: ObservableObject {
     }
 
     private func snapshotCurrentKeys() async throws -> CloudKeySnapshot {
-        return EncryptionService.shared.getAllKeys()
+        return try EncryptionService.shared.getAllKeys()
     }
 
     private func ensureCurrentPrimaryKeyAuthorized() async -> Bool {

@@ -7,6 +7,7 @@
 
 import Foundation
 import CryptoKit
+import OSLog
 import Security
 
 /// Represents encrypted data with initialization vector
@@ -18,6 +19,7 @@ struct EncryptedData: Codable {
 /// Keeps the account's content key, and the keys it replaced, in the Keychain.
 class EncryptionService: ObservableObject, @unchecked Sendable {
     static let shared = EncryptionService()
+    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Keys")
 
     private let keychainKey = "sh.tinfoil.encryptionKey"
     private let keychainService = "sh.tinfoil.chat"
@@ -53,7 +55,7 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     /// Initialize with existing key (does NOT generate new keys)
     func initialize() async throws -> String {
         // Check if we have a stored key in Keychain
-        guard let storedKey = loadKeyFromKeychain() else {
+        guard let storedKey = try loadKeyFromKeychain() else {
             throw EncryptionError.keyNotInitialized
         }
 
@@ -76,21 +78,22 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
             return
         }
 
-        let previousKey = loadKeyFromKeychain()
+        let previousKey = try loadKeyFromKeychain()
         try saveKeyToKeychain(normalizedKey)
         try updateKeyHistory(withNewKey: normalizedKey, previousKey: previousKey)
         stagedPrimaryKey = nil
     }
     
-    /// Get current encryption key as alphanumeric string
+    /// Get current encryption key as alphanumeric string, or nil when none
+    /// is set or the Keychain cannot be read.
     func getKey() -> String? {
-        return stagedPrimaryKey ?? loadKeyFromKeychain()
+        return stagedPrimaryKey ?? (try? loadKeyFromKeychain())
     }
 
     /// Check if an encryption key exists in the keychain
     /// Returns true if key exists OR if we previously set up a key (to handle temporary keychain failures)
     func hasEncryptionKey() -> Bool {
-        if loadKeyFromKeychain() != nil {
+        if (try? loadKeyFromKeychain()) != nil {
             return true
         }
         return UserDefaults.standard.bool(forKey: encryptionKeySetupFlagKey)
@@ -98,15 +101,15 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
 
     /// Get the primary key and all alternative (fallback) keys as a bundle.
     /// Used by passkey backup to snapshot the full key state for encryption.
-    func getAllKeys() -> (primary: String?, alternatives: [String]) {
-        return (primary: loadKeyFromKeychain(), alternatives: loadKeyHistory())
+    func getAllKeys() throws -> (primary: String?, alternatives: [String]) {
+        return (primary: try loadKeyFromKeychain(), alternatives: try loadKeyHistory())
     }
 
     /// Return the raw 32-byte CEK for the primary key. Throws when no
     /// primary key is loaded. The chat service expects the raw CEK,
     /// base64-encoded, with every request about stored chats.
     func getKeyBytesOrThrow() throws -> Data {
-        guard let key = stagedPrimaryKey ?? loadKeyFromKeychain() else {
+        guard let key = try stagedPrimaryKey ?? loadKeyFromKeychain() else {
             throw EncryptionError.keyNotInitialized
         }
         let (_, bytes) = try normalizeKeyInput(key)
@@ -139,11 +142,11 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     func addDecryptionKey(_ keyString: String) throws {
         let (normalizedKey, _) = try normalizeKeyInput(keyString)
 
-        if normalizedKey == loadKeyFromKeychain() {
+        if normalizedKey == (try loadKeyFromKeychain()) {
             return
         }
 
-        var history = loadKeyHistory()
+        var history = try loadKeyHistory()
         guard !history.contains(normalizedKey) else { return }
 
         history.append(normalizedKey)
@@ -178,7 +181,7 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     func persistCurrentKeyState() throws {
         guard let staged = stagedPrimaryKey else { return }
 
-        let previousKey = loadKeyFromKeychain()
+        let previousKey = try loadKeyFromKeychain()
         try saveKeyToKeychain(staged)
         try updateKeyHistory(withNewKey: staged, previousKey: previousKey)
 
@@ -191,12 +194,19 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         stagedPrimaryKey = nil
     }
 
-    /// Remove encryption key
-    func clearKey() {
+    /// Remove the encryption key and the keys it replaced. Returns whether
+    /// both are gone; a failure is logged.
+    @discardableResult
+    func clearKey() -> Bool {
         stagedPrimaryKey = nil
-        deleteKeyFromKeychain()
-        deleteKeyHistoryFromKeychain()
+        let keyStatus = deleteKeyFromKeychain()
+        let historyStatus = deleteKeyHistoryFromKeychain()
         UserDefaults.standard.removeObject(forKey: encryptionKeySetupFlagKey)
+        let failures = [keyStatus, historyStatus].filter { $0 != errSecSuccess && $0 != errSecItemNotFound }
+        for status in failures {
+            Self.logger.error("Failed to remove the encryption key from the keychain: \(status, privacy: .public)")
+        }
+        return failures.isEmpty
     }
     
     // MARK: - Helper Methods
@@ -221,7 +231,7 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     }
 
     private func updateKeyHistory(withNewKey newKey: String, previousKey: String?) throws {
-        var history = loadKeyHistory()
+        var history = try loadKeyHistory()
 
         // Remove any existing occurrences of the current default key
         history.removeAll { $0 == newKey }
@@ -235,60 +245,65 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         try saveKeyHistory(history)
     }
 
-    private func loadKeyHistory() -> [String] {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: keychainHistoryKey,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
+    /// The replaced keys, newest first; none when no history is stored.
+    /// Throws when the Keychain cannot be read, as while the device is
+    /// locked.
+    private func loadKeyHistory() throws -> [String] {
+        var query = itemQuery(account: keychainHistoryKey)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
 
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let history = try? JSONDecoder().decode([String].self, from: data) else {
+        if status == errSecItemNotFound { return [] }
+        guard status == errSecSuccess, let data = result as? Data else {
+            throw KeychainError(status: status)
+        }
+        guard let history = try? JSONDecoder().decode([String].self, from: data) else {
+            Self.logger.error("The stored key history could not be read")
             return []
         }
-
         return history
     }
 
+    /// Stores the history in place, so a failed save leaves the previous
+    /// one; an empty history removes it.
     private func saveKeyHistory(_ history: [String]) throws {
         if history.isEmpty {
-            deleteKeyHistoryFromKeychain()
+            let status = deleteKeyHistoryFromKeychain()
+            guard status == errSecSuccess || status == errSecItemNotFound else {
+                throw EncryptionError.keychainSaveFailed(status: status)
+            }
             return
         }
 
         let data = try JSONEncoder().encode(history)
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: keychainHistoryKey,
+        let query = itemQuery(account: keychainHistoryKey)
+        let attributes: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
 
-        // Delete any existing item before saving
-        SecItemDelete(query as CFDictionary)
-
-        let status = SecItemAdd(query as CFDictionary, nil)
+        var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            status = SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil)
+        }
         if status != errSecSuccess {
             throw EncryptionError.keychainSaveFailed(status: status)
         }
     }
 
-    private func deleteKeyHistoryFromKeychain() {
-        let query: [String: Any] = [
+    private func deleteKeyHistoryFromKeychain() -> OSStatus {
+        SecItemDelete(itemQuery(account: keychainHistoryKey) as CFDictionary)
+    }
+
+    private func itemQuery(account: String) -> [String: Any] {
+        [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: keychainHistoryKey
+            kSecAttrAccount as String: account
         ]
-
-        SecItemDelete(query as CFDictionary)
     }
 
     /// Convert bytes to alphanumeric string (a-z, 0-9)
@@ -368,38 +383,28 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         UserDefaults.standard.set(true, forKey: encryptionKeySetupFlagKey)
     }
 
-    private func loadKeyFromKeychain() -> String? {
+    /// The stored primary key, or nil when none is stored. Throws when
+    /// the Keychain cannot be read, as while the device is locked.
+    private func loadKeyFromKeychain() throws -> String? {
         keychainLock.lock()
         defer { keychainLock.unlock() }
 
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: keychainKey,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
+        var query = itemQuery(account: keychainKey)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
 
-        if status == errSecSuccess,
-           let data = result as? Data,
-           let key = String(data: data, encoding: .utf8) {
-            return key
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else {
+            throw KeychainError(status: status)
         }
-
-        return nil
+        return String(data: data, encoding: .utf8)
     }
     
-    private func deleteKeyFromKeychain() {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: keychainKey
-        ]
-        
-        SecItemDelete(query as CFDictionary)
+    private func deleteKeyFromKeychain() -> OSStatus {
+        SecItemDelete(itemQuery(account: keychainKey) as CFDictionary)
     }
 }
 
