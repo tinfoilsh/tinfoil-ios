@@ -779,13 +779,16 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     }
 
     /// Forks the open chat from a message into a new chat holding the
-    /// messages through it, and opens the fork.
-    func fork(at messageIndex: Int) async throws -> String? {
+    /// messages through it, and opens the fork once `opening` has returned,
+    /// unless the view moved to another chat meanwhile.
+    func fork(at messageIndex: Int, opening: @MainActor (_ forkId: String) async -> Void = { _ in }) async throws -> String? {
         guard let threadId = open.id, !open.temporary, state.messages.indices.contains(messageIndex) else { return nil }
         let messageId = state.messages[messageIndex].id
         let store = storeOf(threadId)
         let shown = controller.track()
         guard let forkId = try await store.fork(threadId, messageId: messageId), shown() else { return nil }
+        await opening(forkId)
+        guard shown() else { return nil }
         _ = try await openChat(forkId, local: store.local)
         return forkId
     }

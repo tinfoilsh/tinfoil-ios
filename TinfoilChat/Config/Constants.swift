@@ -430,6 +430,9 @@ enum Constants {
     }
 
     enum ChatFork {
+        /// The "forking" overlay stays up at least this long so a fast fork
+        /// still reads as an action instead of a flicker.
+        static let overlayMinVisibleSeconds: TimeInterval = 0.6
         static let overlayLabel = "Forking conversation..."
         static let overlayDimOpacity: Double = 0.7
         static let overlayFadeSeconds: TimeInterval = 0.15

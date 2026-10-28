@@ -874,7 +874,12 @@ class ChatViewModel: ObservableObject {
         return NewChatRow.id(local: session.open.local)
     }
 
-    var hydratingChatId: String? { session?.open.loadingId }
+    /// The chat loading to be shown; a fork opening shows the fork overlay
+    /// instead.
+    var hydratingChatId: String? {
+        guard let loading = session?.open.loadingId, loading != forkingChatId else { return nil }
+        return loading
+    }
 
     var chatHydrationError: String? {
         guard let session, session.open.failedId != nil else { return nil }
@@ -1525,11 +1530,23 @@ class ChatViewModel: ObservableObject {
         return session.state.messages.indices.contains(index)
     }
 
+    /// Forks the open chat from a message and opens the fork. The fork
+    /// overlay covers the chat for at least its minimum time, then the fork
+    /// while it opens.
     func forkChat(throughMessageIndex index: Int) async {
         guard let session, canForkMessage(at: index), let id = session.open.id else { return }
+        let startedAt = Date()
         forkingChatId = id
         defer { forkingChatId = nil }
-        do { _ = try await session.fork(at: index) } catch { session.report(error) }
+        do {
+            _ = try await session.fork(at: index) { [weak self] forkId in
+                let remaining = Constants.ChatFork.overlayMinVisibleSeconds - Date().timeIntervalSince(startedAt)
+                if remaining > 0 { try? await Task.sleep(for: .seconds(remaining)) }
+                self?.forkingChatId = forkId
+            }
+        } catch {
+            session.report(error)
+        }
     }
 
     func deleteMessage(at index: Int) {

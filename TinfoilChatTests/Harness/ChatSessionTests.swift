@@ -208,6 +208,31 @@ struct ChatSessionTests {
         #expect(session.state.messages.last?.timeline?.first?.content == "Hi.")
     }
 
+    @Test func aForkOpensOnceItsOpeningReturnsUnlessTheViewMoved() async throws {
+        let forkId = "0000000000002_00000000-0000-4000-8000-000000000002"
+        func window(_ id: String) -> [String: Any] {
+            summary(id: id).merging([
+                "revision": "rev-1", "presetId": NSNull(), "flagged": false,
+                "messages": [["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"]],
+                "hasOlder": false,
+            ]) { $1 }
+        }
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(window(threadId)), Answers.json(summary(id: forkId)), Answers.json(window(forkId))])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        var shownWhileOpening: String?
+        let forked = try await session.fork(at: 0) { _ in shownWhileOpening = session.open.id }
+        #expect(forked == forkId)
+        #expect(shownWhileOpening == threadId)
+        #expect(session.open.id == forkId)
+
+        await fixture.transport.push(Answers.json(summary(id: "0000000000003_00000000-0000-4000-8000-000000000003")))
+        let moved = try await session.fork(at: 0) { _ in session.newChat() }
+        #expect(moved == nil)
+        #expect(session.open.id == nil)
+        #expect(await fixture.transport.requests.map(\.route) == [.get, .fork, .get, .fork])
+    }
+
     @Test func aRefusedTurnLeavesTheChatAsItWasWithTheError() async throws {
         let fixture = Fixture(answers: [Answers.refusal(429, code: "QUOTA_EXHAUSTED", action: "wait")])
         let session = fixture.session
