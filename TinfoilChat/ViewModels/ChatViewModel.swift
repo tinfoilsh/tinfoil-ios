@@ -682,6 +682,15 @@ class ChatViewModel: ObservableObject {
         publishedLayout = layout
         nextPublishAt = now.addingTimeInterval(Constants.Streaming.uiUpdateInterval)
         tickStreamingHaptic(at: now)
+        // Reading aloud stops, and an edit is given up, once its message is
+        // no longer shown, as when the chat changes or the message is
+        // regenerated or deleted.
+        if speechPlayer.snapshot.owner != nil || messageEditSession != nil {
+            let chat = currentChat
+            speechPlayer.reconcile(chatId: chat?.id, messages: chat?.messages ?? [])
+            let edit = MessageEditSessionTransition.reconcile(messageEditSession, chatId: chat?.id, messages: chat?.messages ?? [])
+            if edit != messageEditSession { messageEditSession = edit }
+        }
         objectWillChange.send()
     }
 
