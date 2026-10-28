@@ -282,6 +282,10 @@ enum Constants {
         /// connection is given up.
         static let streamIdleTimeoutSeconds: TimeInterval = 120
         static let hpkePublicKeyBytes = 32
+        /// The version of the protocol this client was built from, the
+        /// info.version of harness-protocol/openapi.yaml. A harness that no
+        /// longer serves it asks the user to update the app.
+        static let protocolVersion = 1
 
         /// How often the harness is asked what changed on other devices.
         static let changePollSeconds: TimeInterval = 20

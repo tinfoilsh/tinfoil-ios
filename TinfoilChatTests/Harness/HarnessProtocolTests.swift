@@ -26,6 +26,12 @@ struct HarnessProtocolTests {
         #expect(Set(HarnessRoute.allCases.map(\.rawValue)) == paths)
     }
 
+    @Test func namesTheProtocolVersionItWasBuiltFrom() throws {
+        let document = try HarnessProtocolFixtures.document
+        let info = try Self.matches(#"^info:\n(?:  .*\n)*?  version: "(\d+)"$"#, in: document)
+        #expect(info == [String(Constants.Harness.protocolVersion)])
+    }
+
     @Test func actionsItDoesNotKnowStopTheRequest() {
         #expect(ErrorAction.of("reload") == .reload)
         #expect(ErrorAction.of("later_action") == .stop)

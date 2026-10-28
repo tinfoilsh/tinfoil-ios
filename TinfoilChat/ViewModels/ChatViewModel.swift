@@ -515,6 +515,7 @@ class ChatViewModel: ObservableObject {
     // MARK: - Models and settings from the session
 
     private func applySessionModels() {
+        if let minimum = account?.session?._protocol.minimum { AppConfig.shared.harnessServes(minimumProtocol: minimum) }
         guard let models = account?.session?.models else { return }
         let available = models.map(ModelType.init)
         if let current = available.first(where: { $0.id == currentModel.id }) {

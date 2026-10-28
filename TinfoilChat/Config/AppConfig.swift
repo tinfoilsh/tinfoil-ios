@@ -215,14 +215,24 @@ class AppConfig: ObservableObject {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
     }
 
-    /// Check if current app version is supported
-    var isAppVersionSupported: Bool {
-        return compareVersions(currentAppVersion, minSupportedVersion) != .orderedAscending
+    /// Whether the chat service still serves the protocol this app was built
+    /// from, as the last session it opened said.
+    @Published private(set) var isHarnessProtocolSupported = true
+
+    /// The oldest protocol version the chat service serves, from a session.
+    func harnessServes(minimumProtocol minimum: Int) {
+        let supported = Constants.Harness.protocolVersion >= minimum
+        if supported != isHarnessProtocolSupported { isHarnessProtocolSupported = supported }
     }
 
-    /// Check if app update is required
-    var isUpdateRequired: Bool {
-        return !isAppVersionSupported
+    /// The app version required, when this one is older.
+    var requiredAppVersion: String? {
+        compareVersions(currentAppVersion, minSupportedVersion) == .orderedAscending ? minSupportedVersion : nil
+    }
+
+    /// Check if current app version is supported
+    var isAppVersionSupported: Bool {
+        requiredAppVersion == nil && isHarnessProtocolSupported
     }
 
     /// Compare two version strings (e.g., "1.0.5" vs "1.0.3")

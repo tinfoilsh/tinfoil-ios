@@ -50,9 +50,11 @@ struct UpdateRequiredView: View {
                         Text("Current Version: \(AppConfig.shared.currentAppVersion)")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text("Required Version: \(AppConfig.shared.minSupportedVersion)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        if let required = AppConfig.shared.requiredAppVersion {
+                            Text("Required Version: \(required)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
                 
