@@ -32,6 +32,14 @@ struct ChatNavigationRequest: Equatable {
     let destination: ChatNavigationDestination
 }
 
+/// The rows atop the cloud and local chat lists that stand for a new chat.
+enum NewChatRow {
+    static let cloudId = "new-chat-cloud"
+    static let localId = "new-chat-local"
+
+    static func id(local: Bool) -> String { local ? localId : cloudId }
+}
+
 /// Graded reasoning effort exposed to the user, in the chat service's
 /// vocabulary.
 enum ReasoningEffort: String, CaseIterable, Sendable {
@@ -845,9 +853,13 @@ class ChatViewModel: ObservableObject {
         return chats.contains { $0.id == chatId && $0.activeRun?.isLive(at: now) == true }
     }
 
+    /// The chat the list shows as open: a new chat outside a project is the
+    /// new chat row of the list it will be stored in.
     var selectedChatId: String? {
         guard let session else { return nil }
-        return session.open.loadingId ?? session.open.failedId ?? session.open.id
+        if let id = session.open.loadingId ?? session.open.failedId ?? session.open.id { return id }
+        guard !session.open.temporary, activeProject == nil else { return nil }
+        return NewChatRow.id(local: session.open.local)
     }
 
     var hydratingChatId: String? { session?.open.loadingId }
@@ -1014,8 +1026,9 @@ class ChatViewModel: ObservableObject {
         return shown
     }
 
-    /// The chats the sidebar lists, the latest active first. A run this app
-    /// streams is active in the list before the list next reports it.
+    /// The chats the sidebar lists, the latest active first, under a new chat
+    /// row for each list. A run this app streams is active in the list
+    /// before the list next reports it.
     var chats: [Chat] {
         if let shownChats, shownChats.generation == sessionGeneration { return shownChats.chats }
         let chats = buildChats()
@@ -1036,7 +1049,7 @@ class ChatViewModel: ObservableObject {
         }
         listed += session.list.deviceListed.map { ChatViewMapping.chat($0, local: true) }
         let shownActivity = session.state.messages.compactMap { ChatAccessCache.date(of: $0.createdAt) }.max()
-        return listed.map { chat in
+        let sorted = listed.map { chat in
             var chat = chat
             if chat.activeRun == nil, let runId = session.controller.deviceRuns[chat.id]?.run?.runId ?? (chat.id == openId ? shownRun : nil) {
                 chat.activeRun = ActiveRun(runId: runId, expiresAt: "", instance: "")
@@ -1044,6 +1057,16 @@ class ChatViewModel: ObservableObject {
             if chat.id == openId, let shownActivity, shownActivity > chat.lastActivity { chat.activityAt = shownActivity }
             return chat
         }.sorted { $0.lastActivity > $1.lastActivity }
+        guard hasChatAccess else { return sorted }
+        let newChats = session.account.cloud ? [Self.newChatRow(local: false), Self.newChatRow(local: true)] : [Self.newChatRow(local: true)]
+        return newChats + sorted
+    }
+
+    /// The row atop a chat list that starts a new chat stored there.
+    private static func newChatRow(local: Bool) -> Chat {
+        var chat = Chat(id: NewChatRow.id(local: local), title: Chat.placeholderTitle, createdAt: .distantPast)
+        chat.isLocalOnly = local
+        return chat
     }
 
     var cloudSidebarSummaries: [ChatListSummary] {
@@ -1151,6 +1174,12 @@ class ChatViewModel: ObservableObject {
     @discardableResult
     func selectChat(id: String, isLocalOnly: Bool) -> Bool {
         guard let session else { return false }
+        if id == NewChatRow.id(local: isLocalOnly) {
+            guard selectedChatId != id else { return true }
+            leaveProjectContext()
+            createNewChat(isLocalOnly: isLocalOnly, focusInput: false)
+            return true
+        }
         if session.open.id == id, session.open.loadingId == nil { return true }
         cancelMessageEdit()
         cancelAudioRecording()

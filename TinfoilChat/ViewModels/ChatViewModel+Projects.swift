@@ -16,7 +16,7 @@ extension ChatViewModel {
         leaveProjectContext()
     }
 
-    private func leaveProjectContext() {
+    func leaveProjectContext() {
         activeProject = nil
         projectDocuments = []
         projectError = nil
