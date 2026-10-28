@@ -140,7 +140,8 @@ struct ChatContainer: View {
             ImageViewerOverlay(
                 images: viewModel.imageViewerImages,
                 initialIndex: viewModel.imageViewerIndex,
-                onDismiss: { viewModel.showImageViewer = false }
+                onDismiss: { viewModel.showImageViewer = false },
+                loadFullImage: { await viewModel.fullImageData(for: $0) }
             )
         }
         .sheet(isPresented: $showAuthView) {

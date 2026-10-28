@@ -752,6 +752,18 @@ class ChatViewModel: ObservableObject {
         session?.running == true
     }
 
+    /// The full image of an attachment of the open chat, which the chat keeps
+    /// apart from the thumbnail its message shows.
+    func fullImageData(for attachment: Attachment) async -> Data? {
+        guard let session else { return nil }
+        do {
+            return try await session.image(attachment).data
+        } catch {
+            Self.logger.error("Failed to load an image of the open chat: \(error, privacy: .public)")
+            return nil
+        }
+    }
+
     /// The harness's id of the message a row of the open chat shows.
     func messageId(ofRow rowId: String) -> String {
         rows.messageId(ofRow: rowId)
