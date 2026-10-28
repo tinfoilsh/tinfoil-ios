@@ -735,6 +735,11 @@ class ChatViewModel: ObservableObject {
         session?.running == true
     }
 
+    /// The harness's id of the message a row of the open chat shows.
+    func messageId(ofRow rowId: String) -> String {
+        rows.messageId(ofRow: rowId)
+    }
+
     /// The open chat was blank until the turn it is sending gave it its id.
     var isNewChatsFirstTurn: Bool {
         session?.isNewChatsFirstTurn == true

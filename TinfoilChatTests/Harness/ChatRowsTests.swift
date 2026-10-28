@@ -38,6 +38,10 @@ struct ChatRowsTests {
         let streaming = rows.rows(chatId: "c", messages: stored + [try Self.reply("r1", "Fine")], running: true, summaries: [:], replyModelName: "Model")
         #expect(streaming.map(\.id) == waiting.map(\.id))
         #expect(streaming.last?.content == "Fine")
+        // Requests about a message name it by the harness's id.
+        #expect(rows.messageId(ofRow: try #require(streaming.last?.id)) == "r1")
+        #expect(rows.messageId(ofRow: streaming[2].id) == "u1")
+        #expect(rows.messageId(ofRow: "u0") == "u0")
 
         // The rows keep those ids after the reply ends.
         let done = rows.rows(chatId: "c", messages: stored + [try Self.reply("r1", "Fine, thanks")], running: false, summaries: [:], replyModelName: "Model")

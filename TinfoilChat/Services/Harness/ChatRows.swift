@@ -77,6 +77,12 @@ final class ChatRows {
         return rows
     }
 
+    /// The harness's id of the message a row shows, which requests about the
+    /// message name.
+    func messageId(ofRow rowId: String) -> String {
+        shownIds.first { $0.value == rowId }?.key ?? rowId
+    }
+
     /// The row of a reply that has not started: the row it waits in, which
     /// shows the error when the turn ends without one.
     func awaitedReplyRowId(_ messages: [HarnessMessage]) -> String? {
