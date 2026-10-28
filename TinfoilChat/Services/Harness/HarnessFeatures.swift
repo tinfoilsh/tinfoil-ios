@@ -319,7 +319,7 @@ enum HarnessUploads {
             guard let image = UIImage(data: data) else { return Prepared(data: data, mimeType: mimeType) }
             let longest = max(image.size.width * image.scale, image.size.height * image.scale)
             let scale = min(1, CGFloat(maxSide) / longest)
-            if scale == 1, mimeType == "image/jpeg" { return Prepared(data: data, mimeType: mimeType) }
+            if scale == 1 { return Prepared(data: data, mimeType: mimeType) }
             let size = CGSize(width: max(1, floor(image.size.width * image.scale * scale)), height: max(1, floor(image.size.height * image.scale * scale)))
             let format = UIGraphicsImageRendererFormat()
             format.scale = 1
