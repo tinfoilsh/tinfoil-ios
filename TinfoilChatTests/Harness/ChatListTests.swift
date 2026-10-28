@@ -237,6 +237,22 @@ struct ChatListTests {
         #expect(project.cloudListed.map(\.id) == ["r"])
     }
 
+    @Test func theProjectsListedLastAreKeptSealedUntilTheListIsCleared() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = ChatListCache(directory: directory)
+        #expect(await cache.readProjects() == nil)
+        let projects = [Project(Components.Schemas.Project(id: "p1", name: "Taxes", description: "Receipts", systemInstructions: "Be brief", color: "blue"))]
+        await cache.writeProjects(projects)
+        #expect(await cache.readProjects() == projects)
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        #expect(files.count == 1)
+        #expect(!String(decoding: try Data(contentsOf: try #require(files.first)), as: UTF8.self).contains("Taxes"))
+        cache.clear()
+        #expect(await cache.readProjects() == nil)
+    }
+
     @Test func anEditDuringAReloadKeepsTheEditAndEndsTheLoad() async throws {
         let (list, transport) = await makeList()
         await transport.push(ListPage.json([summary("a")], pinned: []))

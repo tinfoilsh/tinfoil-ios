@@ -23,9 +23,11 @@ struct ChatListSnapshot: Codable, Equatable {
     var pinned: [ThreadSummary]
 }
 
-/// Keeps the last listing of each scope in an encrypted file under the
-/// account's directory.
+/// Keeps the last listing of each scope, and of the account's projects, in
+/// an encrypted file under the account's directory.
 final class ChatListCache: Sendable {
+    private static let projectsFileName = "projects.cache"
+
     private let directory: URL?
     private let encryptor: ChatEncryptor
 
@@ -39,14 +41,31 @@ final class ChatListCache: Sendable {
     }
 
     func read(projectId: String?) async -> ChatListSnapshot? {
-        guard let url = file(projectId), let sealed = try? Data(contentsOf: url),
-              let envelope = try? JSONDecoder().decode(EncryptedData.self, from: sealed),
-              let data = try? await encryptor.decryptData(envelope) else { return nil }
-        return try? JSONDecoder().decode(ChatListSnapshot.self, from: data)
+        await read(ChatListSnapshot.self, from: file(projectId))
     }
 
     func write(_ snapshot: ChatListSnapshot, projectId: String?) async {
-        guard let url = file(projectId), let data = try? JSONEncoder().encode(snapshot),
+        await write(snapshot, to: file(projectId))
+    }
+
+    /// The account's projects as they were last listed.
+    func readProjects() async -> [Project]? {
+        await read([Project].self, from: directory?.appendingPathComponent(Self.projectsFileName))
+    }
+
+    func writeProjects(_ projects: [Project]) async {
+        await write(projects, to: directory?.appendingPathComponent(Self.projectsFileName))
+    }
+
+    private func read<T: Decodable>(_ type: T.Type, from url: URL?) async -> T? {
+        guard let url, let sealed = try? Data(contentsOf: url),
+              let envelope = try? JSONDecoder().decode(EncryptedData.self, from: sealed),
+              let data = try? await encryptor.decryptData(envelope) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
+    }
+
+    private func write(_ value: some Encodable, to url: URL?) async {
+        guard let url, let data = try? JSONEncoder().encode(value),
               let envelope = try? await encryptor.encryptData(data), let sealed = try? JSONEncoder().encode(envelope) else { return }
         try? sealed.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
     }
@@ -78,7 +97,7 @@ final class ChatList: ObservableObject {
 
     private let account: HarnessAccount
     private let device: LocalThreadStore
-    private let cache: ChatListCache
+    let cache: ChatListCache
     private var projectId: String?
     private var restored = false
     private var loaded = false

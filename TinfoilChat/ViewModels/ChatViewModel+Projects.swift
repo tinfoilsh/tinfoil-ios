@@ -33,15 +33,25 @@ extension ChatViewModel {
         createNewChat(focusInput: false)
     }
 
+    /// Lists the account's projects. The projects this device listed last
+    /// show until the chat service lists them, while the key is checked.
     func loadProjects() async {
         guard let session else { return }
         projectListLoadGeneration += 1
         let generation = projectListLoadGeneration
-        guard canUseProjects else {
+        guard hasPremiumAccess, session.account.cloud, !session.account.keyLocked else {
             projects = []
             projectError = nil
             isLoadingProjects = false
             if !hasPremiumAccess { revokeProjectAccess() }
+            return
+        }
+        if projects.isEmpty, let cached = await session.list.cache.readProjects(),
+           generation == projectListLoadGeneration, self.session === session, projects.isEmpty {
+            projects = cached
+        }
+        guard canUseProjects else {
+            isLoadingProjects = false
             return
         }
         isLoadingProjects = true
@@ -51,6 +61,7 @@ extension ChatViewModel {
             let listed = try await HarnessProjects.list(session.account)
             guard generation == projectListLoadGeneration, self.session === session else { return }
             projects = listed.map(Project.init)
+            keepProjectList()
             if let active = activeProject, let current = projects.first(where: { $0.id == active.id }) {
                 activeProject = current
             } else if activeProject != nil {
@@ -60,6 +71,14 @@ extension ChatViewModel {
             guard generation == projectListLoadGeneration, !(error is CancellationError) else { return }
             projectError = error.localizedDescription
         }
+    }
+
+    /// Keeps the projects listed on this device, to show on the next launch
+    /// before the chat service lists them.
+    private func keepProjectList() {
+        guard let session else { return }
+        let listed = projects
+        Task { await session.list.cache.writeProjects(listed) }
     }
 
     /// Creates a project and opens it.
@@ -77,6 +96,7 @@ extension ChatViewModel {
             ))
             guard self.session === session else { return nil }
             projects.insert(created, at: 0)
+            keepProjectList()
             await enterProject(projectId: created.id)
             return created
         } catch {
@@ -173,6 +193,7 @@ extension ChatViewModel {
             ))
             guard self.session === session else { return }
             projects = projects.map { $0.id == updated.id ? updated : $0 }
+            keepProjectList()
             if activeProject?.id == updated.id { activeProject = updated }
         } catch {
             projectError = error.localizedDescription
@@ -186,6 +207,7 @@ extension ChatViewModel {
             try await HarnessProjects.delete(session.account, id: project.id)
             guard self.session === session else { return }
             projects.removeAll { $0.id == project.id }
+            keepProjectList()
             if activeProject?.id == project.id { exitProject() }
             session.list.reload()
         } catch {
@@ -200,6 +222,7 @@ extension ChatViewModel {
         try await HarnessProjects.deleteAll(session.account)
         guard self.session === session else { return }
         projects = []
+        keepProjectList()
         if activeProject != nil { exitProject() }
         session.list.reload()
     }

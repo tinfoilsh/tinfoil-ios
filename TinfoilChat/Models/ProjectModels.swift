@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct Project: Identifiable, Equatable {
+struct Project: Identifiable, Equatable, Codable {
     let id: String
     var name: String
     var color: String?
