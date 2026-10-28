@@ -13,6 +13,17 @@ struct ChatViewMappingTests {
         try message(["id": "m", "role": "assistant", "createdAt": "2026-01-01T00:00:00Z", "timeline": timeline])
     }
 
+    @Test func aReplyStillThinkingHasNoSettledThinkingTime() throws {
+        // The chat service updates a thought's duration as it streams.
+        let wire = try Self.reply([["id": "t1", "type": "thinking", "content": "Hmm", "duration": 2.0, "startedAt": 1000, "endedAt": 3000]])
+        let live = ChatViewMapping.message(wire, streaming: true)
+        #expect(live.isThinking)
+        #expect(live.generationTimeSeconds == nil)
+        let settled = ChatViewMapping.message(wire, streaming: false)
+        #expect(!settled.isThinking)
+        #expect(settled.generationTimeSeconds == 2.0)
+    }
+
     @Test func aReplysBlocksBecomeItsTextThoughtsAndSegments() throws {
         let wire = try Self.reply([
             ["id": "t1", "type": "thinking", "content": "why", "duration": 1.5, "startedAt": 1000, "endedAt": 2500],

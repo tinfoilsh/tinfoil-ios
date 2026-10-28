@@ -1697,11 +1697,9 @@ struct CollapsibleThinkingBox: View {
     var body: some View {
         Button(action: onTap) {
             HStack {
-                if let seconds = generationTimeSeconds {
-                    Text("Thought for \(String(format: "%.1f", seconds))s")
-                        .font(.subheadline)
-                        .foregroundColor(isDarkMode ? .white.opacity(0.7) : Color.black.opacity(0.6))
-                } else if isStreaming {
+                // A thought still going on has a duration that grows as it
+                // streams; it shows as thinking until it ends.
+                if isStreaming {
                     if let summary = thinkingSummary, !summary.isEmpty {
                         Text(summary)
                             .font(.subheadline)
@@ -1718,6 +1716,10 @@ struct CollapsibleThinkingBox: View {
                         }
                         .modifier(TextShimmerAnimation())
                     }
+                } else if let seconds = generationTimeSeconds {
+                    Text("Thought for \(String(format: "%.1f", seconds))s")
+                        .font(.subheadline)
+                        .foregroundColor(isDarkMode ? .white.opacity(0.7) : Color.black.opacity(0.6))
                 } else {
                     Text("Thinking")
                         .font(.system(size: 16))

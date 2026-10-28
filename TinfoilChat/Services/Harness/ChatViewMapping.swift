@@ -85,7 +85,8 @@ enum ChatViewMapping {
         message.thoughts = thoughts.isEmpty ? nil : thoughts
         message.isThinking = thinking
         message.isStreaming = streaming
-        message.generationTimeSeconds = thinkingSeconds > 0 ? thinkingSeconds : nil
+        // A reply still thinking has thought for no settled time yet.
+        message.generationTimeSeconds = !thinking && thinkingSeconds > 0 ? thinkingSeconds : nil
         message.thinkingDuration = thinkingSeconds > 0 ? thinkingSeconds : nil
         message.segments = segments
         message.webSearches = searches.isEmpty ? nil : searches
