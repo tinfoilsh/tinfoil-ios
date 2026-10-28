@@ -7,7 +7,7 @@ import Foundation
 /// for logs; the card shows it only as details.
 struct StreamErrorPresentation: Equatable {
     enum Kind: Equatable {
-        case connection, auth, key, rateLimit, busy, queueFull, contextLength, tooLarge, model, document, server, storage, revise, refused
+        case connection, auth, key, rateLimit, busy, queueFull, contextLength, tooLarge, model, document, server, storage, revise, refused, unfinished
     }
 
     let kind: Kind
@@ -99,6 +99,9 @@ struct StreamErrorPresentation: Equatable {
         .storage, "This chat could not be saved on this device",
         "The reply arrived, but this device could not store it, so it may be missing when the chat is opened again."
     )
+    private static let unfinished = StreamErrorPresentation(
+        .unfinished, "This reply didn't finish", "Try again to get a complete reply."
+    )
     private static let server = StreamErrorPresentation(
         .server, "The service is having trouble right now",
         "Our servers may be briefly overloaded. Please try again, or switch to a different model."
@@ -123,6 +126,7 @@ struct StreamErrorPresentation: Equatable {
         case HarnessErrorCode.threadTooLarge: return tooLarge
         case HarnessErrorCode.modelUnavailable: return model
         case HarnessErrorCode.localSaveFailed: return storage
+        case HarnessErrorCode.unfinishedReply: return unfinished
         case HarnessErrorCode.streamInterrupted, HarnessErrorCode.connection: return connection
         default: return byAction(error, occurredAt: occurredAt)
         }

@@ -619,6 +619,10 @@ class ChatViewModel: ObservableObject {
         return !safeguardsHaveLoaded || isCurrentChatSafeguardFlagged
     }
 
+    /// The id of the row an error shows in when no reply answers the last
+    /// message, after that message's id.
+    private static let errorRowSuffix = "-error"
+
     // MARK: - Publishing the session
 
     /// What the chat table lays out: a change to it publishes at once.
@@ -862,7 +866,7 @@ class ChatViewModel: ObservableObject {
             }
             return view
         }
-        let shownMessages = Self.withError(messages, state: state, failure: open.failure, replyRowId: rows.awaitedReplyRowId(state.messages))
+        let shownMessages = Self.withError(messages, failure: Self.failure(of: session)?.error, replyRowId: rows.awaitedReplyRowId(state.messages))
         let webSearch = open.webSearch ?? choice.webSearchEnabled
         let summary = state.snapshot.thread ?? open.loadingId.flatMap { loading in
             (open.local ? session.list.deviceListed : session.list.cloudListed + session.list.pinnedListed).first { $0.id == loading }
@@ -891,21 +895,29 @@ class ChatViewModel: ObservableObject {
     /// The open chat's error, which the card on its last reply explains, and
     /// when its run failed. A request that failed outside a run has no time.
     var shownFailure: (error: HarnessErrorBody, at: Date?)? {
-        guard let session else { return nil }
+        session.flatMap(Self.failure(of:))
+    }
+
+    /// The open chat's error: a request's, its run's, or, for a chat opened
+    /// on a reply that did not finish or on a message no reply answers, that
+    /// the reply is unfinished.
+    private static func failure(of session: ChatSession) -> (error: HarnessErrorBody, at: Date?)? {
         if let failure = session.open.failure { return (failure, nil) }
-        guard session.state.status == .error, let error = session.state.error else { return nil }
-        return (error, session.controller.errorAt)
+        if session.state.status == .error, let error = session.state.error { return (error, session.controller.errorAt) }
+        return session.hasUnfinishedReply ? (HarnessErrorBody.unfinishedReply, nil) : nil
     }
 
     /// A run's error shows on the reply it ended, as the message cards show
     /// errors; a turn that ended before its reply started shows it in the row
     /// the reply waited in.
-    private static func withError(_ messages: [Message], state: ChatState, failure: HarnessErrorBody?, replyRowId: String?) -> [Message] {
-        guard let error = failure ?? (state.status == .error ? state.error : nil), !messages.isEmpty else { return messages }
+    private static func withError(_ messages: [Message], failure: HarnessErrorBody?, replyRowId: String?) -> [Message] {
+        guard let error = failure, !messages.isEmpty else { return messages }
         var shown = messages
         var last = shown[shown.count - 1]
         if last.role == .user {
-            var reply = Message(id: replyRowId ?? UUID().uuidString.lowercased(), role: .assistant, content: "", timestamp: Date())
+            // The row keeps its id across rebuilds, so the table does not
+            // reload it each time the chat changes.
+            var reply = Message(id: replyRowId ?? "\(last.id)\(Self.errorRowSuffix)", role: .assistant, content: "", timestamp: Date())
             reply.modelDisplayName = nil
             shown.append(reply)
             last = shown[shown.count - 1]
@@ -1235,13 +1247,14 @@ class ChatViewModel: ObservableObject {
         Task { await session.regenerate(at: index, options: turnOptions) }
     }
 
-    /// Continues a reply whose run failed from what it streamed. Anything
-    /// else is retried: a reply whose stream dropped may still be running.
+    /// Continues a reply whose run failed, or that a chat was opened on
+    /// unfinished, from what it streamed. Anything else is retried: a reply
+    /// whose stream dropped may still be running.
     func continueLastResponse() {
         guard let session, canGenerateInCurrentChat else { return }
         let state = session.state
-        guard state.status == .error, state.failedRun != nil, let index = state.messages.indices.last,
-              state.messages[index].role == .assistant else {
+        let failed = (state.status == .error && state.failedRun != nil) || session.hasUnfinishedReply
+        guard failed, let index = state.messages.indices.last, state.messages[index].role == .assistant else {
             retryLastResponse()
             return
         }

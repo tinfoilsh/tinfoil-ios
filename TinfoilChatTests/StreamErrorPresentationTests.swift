@@ -44,6 +44,11 @@ struct StreamErrorPresentationTests {
         #expect(shown.kind == .connection && shown.resends)
     }
 
+    @Test func anUnfinishedReplyOffersToAskForItAgain() {
+        let shown = StreamErrorPresentation(HarnessErrorBody.unfinishedReply, occurredAt: nil)
+        #expect(shown.kind == .unfinished && shown.offersRetry && !shown.resends)
+    }
+
     @Test func aDocumentThatFailedToConvertShowsTheConvertersExplanation() {
         let shown = StreamErrorPresentation(Self.error(HarnessErrorCode.upstreamRefused, .revise, upstreamCode: "document_unreadable"), occurredAt: nil)
         #expect(shown.kind == .document)

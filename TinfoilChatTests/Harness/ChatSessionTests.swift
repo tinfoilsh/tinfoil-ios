@@ -148,6 +148,26 @@ struct ChatSessionTests {
         #expect(session.state.snapshot.thread?.title == "Dogs")
     }
 
+    @Test func aChatOpenedOnAnUnansweredMessageAsksTheHarnessToAnswerIt() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        let stored = StoredThread(json: record(messages: [
+            ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "second question"],
+        ]))!
+        _ = try await session.device.add(stored, originals: [:])
+        session.list.reloadDevice()
+        #expect(try await session.openChat(threadId, local: true) == .opened)
+        #expect(session.hasUnfinishedReply)
+
+        await fixture.transport.push(Answers.events(deviceRun(id: threadId, question: "second question", questionId: "u1")))
+        #expect(await session.retry())
+        let request = try #require(await fixture.transport.requests.last)
+        #expect(request.route == .turn)
+        #expect(request.json["kind"] as? String == "retry")
+        #expect(session.state.messages.count == 2)
+        #expect(!session.hasUnfinishedReply)
+    }
+
     @Test func aStoredChatIsNamedByItsKey() async throws {
         let window: [String: Any] = summary().merging([
             "revision": "rev-1", "presetId": NSNull(), "flagged": false,

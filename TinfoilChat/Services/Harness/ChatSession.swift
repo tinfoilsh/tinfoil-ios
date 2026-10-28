@@ -83,6 +83,13 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     var state: ChatState { controller.view }
     var running: Bool { [.submitting, .streaming, .queued].contains(state.status) }
 
+    /// The open chat, at rest, ends on a reply that did not finish or on a
+    /// message no reply answers, as one left by a turn that failed.
+    var hasUnfinishedReply: Bool {
+        guard state.status == .idle, open.loadingId == nil, open.failure == nil, let last = state.messages.last else { return false }
+        return last.role == .user || last.isError == true
+    }
+
     /// Whether the open chat takes a turn now: not while one is being
     /// submitted, a device chat's turn is starting, the chat loads or moves.
     var acceptsTurn: Bool {
@@ -573,7 +580,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// stream reconnects.
     @discardableResult
     func retry(options: TurnOptions? = nil) async -> Bool {
-        guard state.failedRun != nil, state.status == .error else { return await reconnect() }
+        guard (state.failedRun != nil && state.status == .error) || hasUnfinishedReply else { return await reconnect() }
         return await send(TurnFields(kind: .retry, options: options))
     }
 

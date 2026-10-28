@@ -52,6 +52,14 @@ struct HarnessErrorBody: Equatable, Sendable {
         action: .stop
     )
 
+    /// A reply the open chat ends on that did not finish, or that a turn left
+    /// unanswered. Retrying asks the harness for it again.
+    static let unfinishedReply = HarnessErrorBody(
+        code: HarnessErrorCode.unfinishedReply,
+        message: "",
+        action: .retry
+    )
+
     /// Why a request failed when its answer did not come from the harness:
     /// a refusal the enclave did not seal says nothing this client may show
     /// or act on, and whether the request took effect is unknown, as when

@@ -166,6 +166,9 @@ enum HarnessErrorCode {
     static let streamInterrupted = "STREAM_INTERRUPTED"
     /// A reply this device could not store.
     static let localSaveFailed = "LOCAL_SAVE_FAILED"
+    /// The chat ends on a reply that did not finish or on a message no reply
+    /// answers.
+    static let unfinishedReply = "UNFINISHED_REPLY"
 }
 
 extension ErrorAction {
