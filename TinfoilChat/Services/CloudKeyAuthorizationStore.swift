@@ -81,25 +81,6 @@ final class CloudKeyAuthorizationStore {
         UserDefaults.standard.removeObject(forKey: storageKey(userId: resolvedUserId))
     }
 
-    func applyKeyBundleWithValidation(
-        primary: String,
-        alternatives: [String],
-        successMode: CloudKeyAuthorizationMode = .validated,
-        failureMode: CloudKeyAuthorizationMode? = nil
-    ) async throws -> CloudKeyAuthorizationMode {
-        return try await applyAndValidate(
-            stageKeys: {
-                try await EncryptionService.shared.setAllKeys(
-                    primary: primary,
-                    alternatives: alternatives,
-                    persist: false
-                )
-            },
-            successMode: successMode,
-            failureMode: failureMode
-        )
-    }
-
     func applyPrimaryKeyWithValidation(
         _ key: String,
         successMode: CloudKeyAuthorizationMode = .validated,

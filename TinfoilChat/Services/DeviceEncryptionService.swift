@@ -41,11 +41,6 @@ actor DeviceEncryptionService: ChatEncryptor {
         return try AESGCMHelper.open(encrypted, using: key)
     }
 
-    func getKeyBytesOrThrow() throws -> Data {
-        let key = try getExistingKey()
-        return key.withUnsafeBytes { Data($0) }
-    }
-
     // MARK: - Key Management
 
     /// Removes the device key from the keychain (used during destructive cleanup).
