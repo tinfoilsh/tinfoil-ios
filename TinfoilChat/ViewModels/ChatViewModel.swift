@@ -284,6 +284,9 @@ class ChatViewModel: ObservableObject {
     /// The user stopped the reply, which was announced as stopped rather than
     /// complete.
     private var stopAnnounced = false
+    /// A reply asked for again scrolls its message to the top once its turn
+    /// starts, when the reply's row has replaced the one it regenerates.
+    private var scrollsToTurnOnStart = false
     private lazy var streamingHaptic = UIImpactFeedbackGenerator(style: .light)
     /// Whether the account changed since a session was opened for it.
     private var sessionUserId: String?? = nil
@@ -346,6 +349,7 @@ class ChatViewModel: ObservableObject {
         trailingPublish = nil
         publishedLayout = nil
         hapticReply = nil
+        scrollsToTurnOnStart = false
         rows = ChatRows()
         session = nil
         verification = VerificationInfo(isVerifying: true)
@@ -671,6 +675,12 @@ class ChatViewModel: ObservableObject {
         trailingPublish?.cancel()
         trailingPublish = nil
         announceGenerationStatus(from: publishedLayout, to: layout)
+        if layout?.chatId != publishedLayout?.chatId { scrollsToTurnOnStart = false }
+        if scrollsToTurnOnStart, let layout, [.submitting, .queued, .streaming].contains(layout.status) {
+            scrollsToTurnOnStart = false
+            isScrollInteractionActive = false
+            scrollToUserMessageTrigger = UUID()
+        }
         publishedLayout = layout
         nextPublishAt = now.addingTimeInterval(Constants.Streaming.uiUpdateInterval)
         tickStreamingHaptic(at: now)
@@ -1193,7 +1203,7 @@ class ChatViewModel: ObservableObject {
     /// when it has no reply.
     func regenerateLastResponse() {
         guard let session, canGenerateInCurrentChat, let index = session.state.messages.indices.last else { return }
-        dismissKeyboard()
+        startTurn(scrollingToMessage: true)
         Task { await session.regenerate(at: index, options: turnOptions) }
     }
 
@@ -1207,18 +1217,24 @@ class ChatViewModel: ObservableObject {
             retryLastResponse()
             return
         }
-        dismissKeyboard()
+        startTurn(scrollingToMessage: false)
         Task { await session.continueReply(at: index, options: turnOptions) }
     }
 
     /// Tries the failed reply again, or reconnects to a dropped one.
     func retryLastResponse() {
         guard let session, canGenerateInCurrentChat else { return }
-        dismissKeyboard()
+        startTurn(scrollingToMessage: true)
         Task { await session.retry(options: turnOptions) }
     }
 
-    /// A turn the user starts puts the keyboard away.
+    /// A turn the user starts puts the keyboard away; one that asks for a
+    /// reply again shows its message at the top as the reply comes in.
+    private func startTurn(scrollingToMessage: Bool) {
+        dismissKeyboard()
+        if scrollingToMessage { scrollsToTurnOnStart = true }
+    }
+
     private func dismissKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
@@ -1274,7 +1290,7 @@ class ChatViewModel: ObservableObject {
         messageEditSession = nil
         let messageId = session.state.messages[index].id
         let content = newContent.trimmingCharacters(in: .whitespacesAndNewlines)
-        dismissKeyboard()
+        startTurn(scrollingToMessage: false)
         Task {
             if session.running { try? await session.cancel() }
             await session.send(TurnFields(kind: .edit, content: content, messageId: messageId, options: turnOptions))
