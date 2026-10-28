@@ -222,7 +222,6 @@ enum Constants {
         /// use policy violation, and a flag can be linked back to the chat.
         /// The router strips it before the request reaches the model.
         static let conversationIdHeader = "X-Tinfoil-Conversation-Id"
-        static let dailyRateLimitMessage = "You've reached your daily rate limit."
         /// Read-only recovery endpoint for passkeys registered on the
         /// pre-enclave (v1) webapp. Consulted only when the enclave key
         /// registry has no usable bundle for this device.
@@ -486,6 +485,7 @@ enum Constants {
         static let continueLabel = "Continue"
         static let continueSystemImage = "forward"
         static let tryAgainLabel = "Try again"
+        static let resendLabel = "Resend message"
         static let tryAgainSystemImage = "arrow.clockwise"
     }
 

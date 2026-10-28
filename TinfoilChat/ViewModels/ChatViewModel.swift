@@ -856,6 +856,15 @@ class ChatViewModel: ObservableObject {
         return chat
     }
 
+    /// The open chat's error, which the card on its last reply explains, and
+    /// when its run failed. A request that failed outside a run has no time.
+    var shownFailure: (error: HarnessErrorBody, at: Date?)? {
+        guard let session else { return nil }
+        if let failure = session.open.failure { return (failure, nil) }
+        guard session.state.status == .error, let error = session.state.error else { return nil }
+        return (error, session.controller.errorAt)
+    }
+
     /// A run's error shows on the reply it ended, as the message cards show
     /// errors; a turn that ended before its reply started shows it in the row
     /// the reply waited in.
@@ -870,10 +879,8 @@ class ChatViewModel: ObservableObject {
             last = shown[shown.count - 1]
         }
         last.streamError = error.message
-        last.isRequestError = true
         last.isRateLimitError = error.code == HarnessErrorCode.quotaExhausted || error.code == HarnessErrorCode.rateLimited
         last.isHourlyLimitError = error.kind == "hourly"
-        last.isConnectionError = error.code == HarnessErrorCode.streamInterrupted || error.code == HarnessErrorCode.connection
         shown[shown.count - 1] = last
         return shown
     }

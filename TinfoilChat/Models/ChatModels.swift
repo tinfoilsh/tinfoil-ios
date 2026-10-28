@@ -480,15 +480,10 @@ struct Message: Identifiable, Equatable {
     var isCollapsed: Bool = true
     var isStreaming: Bool = false
     var streamError: String? = nil
-    var isRequestError: Bool = false
     var isRateLimitError: Bool = false
     /// True when the rate-limit error is the subscriber hourly usage cap rather
-    /// than the free-tier daily limit, so the UI shows a transient
-    /// "try again shortly" message instead of an upgrade prompt.
+    /// than the free-tier daily limit, which a regeneration may outlast.
     var isHourlyLimitError: Bool = false
-    /// True when the stream failed on connectivity, so the error card shows
-    /// the wifi icon and "Connection Lost" header.
-    var isConnectionError: Bool = false
     var generationTimeSeconds: Double? = nil
     var contentChunks: [ContentChunk] = []
     var thinkingChunks: [ThinkingChunk] = []

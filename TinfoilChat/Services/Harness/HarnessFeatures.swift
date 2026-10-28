@@ -130,7 +130,7 @@ enum HarnessShares {
     /// A share the harness or the share store refused for its size.
     static func isTooLarge(_ error: Error) -> Bool {
         guard let error = error as? HarnessError else { return false }
-        return error.status == 413 || error.detail.status == 413 || error.code == "THREAD_TOO_LARGE"
+        return error.status == 413 || error.detail.status == 413 || error.code == HarnessErrorCode.threadTooLarge
     }
 
     /// Shares are keyed by the chat they share, so the owner can check and

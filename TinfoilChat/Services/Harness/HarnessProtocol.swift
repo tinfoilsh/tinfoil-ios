@@ -139,6 +139,11 @@ enum HarnessErrorCode {
     /// The safeguards flagged the chat, which takes no more turns.
     static let chatFlagged = "CHAT_FLAGGED"
     static let queueFull = "QUEUE_FULL"
+    /// The turn does not fit the model's context window.
+    static let contextTooLarge = "CONTEXT_TOO_LARGE"
+    /// The chat is too large to store.
+    static let threadTooLarge = "THREAD_TOO_LARGE"
+    static let modelUnavailable = "MODEL_UNAVAILABLE"
     static let upstreamRefused = "UPSTREAM_REFUSED"
     /// The request needs the chat access the client mints, which it lacked
     /// or which expired.

@@ -168,7 +168,9 @@ struct MessageView: View {
         )
     }
 
-    private var streamErrorRetryButton: ErrorMessageView.Retry? {
+    /// resends says the turn never reached the chat service, so retrying
+    /// sends the message again.
+    private func streamErrorRetryButton(resends: Bool) -> ErrorMessageView.Retry? {
         switch streamErrorRetry {
         case .continueResponse:
             return ErrorMessageView.Retry(
@@ -179,7 +181,7 @@ struct MessageView: View {
             }
         case .regenerate:
             return ErrorMessageView.Retry(
-                label: Constants.MessageActions.tryAgainLabel,
+                label: resends ? Constants.MessageActions.resendLabel : Constants.MessageActions.tryAgainLabel,
                 systemImage: Constants.MessageActions.tryAgainSystemImage
             ) {
                 viewModel.retryLastResponse()
@@ -793,16 +795,16 @@ struct MessageView: View {
 
                 // Show an error box if the stream failed, with a button that
                 // continues the partial response or generates it again.
-                if shouldShowStreamError(message: message) {
+                if shouldShowStreamError(message: message), let failure = viewModel.shownFailure {
+                    let presentation = StreamErrorPresentation(failure.error, occurredAt: failure.at)
                     ErrorMessageView(
-                        errorMessage: message.streamError!,
+                        presentation: presentation,
+                        details: failure.error.message,
+                        occurredAt: failure.at,
                         isDarkMode: isDarkMode,
-                        isRequestError: message.isRequestError,
-                        isRateLimitError: message.isRateLimitError,
-                        isHourlyLimit: message.isHourlyLimitError,
-                        isConnectionError: message.isConnectionError,
-                        onUpgrade: (message.isRateLimitError && !message.isHourlyLimitError) ? { viewModel.showRateLimitPaywall = true } : nil,
-                        retry: streamErrorRetryButton
+                        onUpgrade: { viewModel.showRateLimitPaywall = true },
+                        onUnlock: { Task { await viewModel.reattemptPasskeyRecovery() } },
+                        retry: streamErrorRetryButton(resends: presentation.resends)
                     )
                     .padding(.top, message.content.isEmpty && message.thoughts == nil ? 0 : 8)
                 }
@@ -2108,30 +2110,41 @@ struct ErrorMessageView: View {
         let action: () -> Void
     }
 
-    let errorMessage: String
+    let presentation: StreamErrorPresentation
+    /// The chat service's own description of the error.
+    let details: String
+    /// When the error happened, from which a wait it asks for counts.
+    let occurredAt: Date?
     let isDarkMode: Bool
-    var isRequestError: Bool = false
-    var isRateLimitError: Bool = false
-    var isHourlyLimit: Bool = false
-    var isConnectionError: Bool = false
     var onUpgrade: (() -> Void)? = nil
+    var onUnlock: (() -> Void)? = nil
     var retry: Retry? = nil
 
+    @State private var shownAt = Date()
+    @State private var showsDetails = false
+
     private var accentColor: Color {
-        isRateLimitError ? .orange : (isRequestError ? .red : .orange)
+        switch presentation.kind {
+        case .rateLimit, .busy, .queueFull: return .orange
+        default: return .red
+        }
     }
 
     private var headerIcon: String {
-        if isRateLimitError { return "gauge.with.dots.needle.67percent" }
-        if isConnectionError { return "wifi.exclamationmark" }
-        return "exclamationmark.triangle"
+        switch presentation.kind {
+        case .rateLimit: return "gauge.with.dots.needle.67percent"
+        case .connection: return "wifi.exclamationmark"
+        case .key: return "key.slash"
+        default: return "exclamationmark.triangle"
+        }
     }
 
-    private var headerText: String {
-        if isHourlyLimit { return "Hourly Limit Reached" }
-        if isRateLimitError { return "Daily Rate Limit Reached" }
-        if isConnectionError { return "Connection Lost" }
-        return "Something Went Wrong"
+    private var retryAt: Date? {
+        presentation.retryAfter.map { (occurredAt ?? shownAt).addingTimeInterval(TimeInterval($0)) }
+    }
+
+    private var secondaryTextColor: Color {
+        isDarkMode ? .white.opacity(0.7) : .black.opacity(0.7)
     }
 
     var body: some View {
@@ -2141,31 +2154,43 @@ struct ErrorMessageView: View {
                     .foregroundColor(accentColor)
                     .font(.system(size: 16))
 
-                Text(headerText)
+                Text(presentation.title)
                     .font(.subheadline.weight(.medium))
                     .foregroundColor(isDarkMode ? .white : .black)
 
                 Spacer()
+
+                if !details.isEmpty {
+                    Button {
+                        withAnimation { showsDetails.toggle() }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                            .rotationEffect(.degrees(showsDetails ? 180 : 0))
+                            .foregroundColor(secondaryTextColor)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .accessibilityLabel(showsDetails ? "Hide error details" : "Show error details")
+                }
+            }
+            .accessibilityElement(children: .contain)
+
+            Text(presentation.suggestion)
+                .font(.subheadline)
+                .foregroundColor(secondaryTextColor)
+                .multilineTextAlignment(.leading)
+
+            if showsDetails {
+                Text(details)
+                    .font(.caption.monospaced())
+                    .foregroundColor(secondaryTextColor)
+                    .multilineTextAlignment(.leading)
+                    .textSelection(.enabled)
             }
 
-            if isHourlyLimit {
-                Text("You've reached your hourly usage limit. Please try again in a little while — it resets at the top of the hour.")
-                    .font(.subheadline)
-                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.7))
-                    .multilineTextAlignment(.leading)
-            } else if isRateLimitError {
-                Text(Constants.API.dailyRateLimitMessage)
-                    .font(.subheadline)
-                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.7))
-                    .multilineTextAlignment(.leading)
-            } else {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.7))
-                    .multilineTextAlignment(.leading)
-            }
-
-            if let onUpgrade = onUpgrade, isRateLimitError, !isHourlyLimit {
+            if let onUpgrade, presentation.offersUpgrade {
                 Button(action: onUpgrade) {
                     Text("Upgrade to Premium")
                         .font(.subheadline.weight(.medium))
@@ -2180,20 +2205,25 @@ struct ErrorMessageView: View {
                 .buttonStyle(PlainButtonStyle())
             }
 
-            if let retry {
-                Button(action: retry.action) {
-                    Label(retry.label, systemImage: retry.systemImage)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundColor(isDarkMode ? .white : .black)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(accentColor.opacity(0.5), lineWidth: 1)
+            if let onUnlock, presentation.offersUnlock {
+                outlinedButton(label: "Unlock", systemImage: "key", action: onUnlock)
+            }
+
+            if let retry, presentation.offersRetry {
+                if let retryAt, retryAt > Date() {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let seconds = Int(ceil(retryAt.timeIntervalSince(context.date)))
+                        outlinedButton(
+                            label: seconds > 0 ? "\(retry.label) in \(seconds)s" : retry.label,
+                            systemImage: retry.systemImage,
+                            action: retry.action
                         )
-                        .contentShape(RoundedRectangle(cornerRadius: 8))
+                        .disabled(seconds > 0)
+                        .opacity(seconds > 0 ? 0.5 : 1)
+                    }
+                } else {
+                    outlinedButton(label: retry.label, systemImage: retry.systemImage, action: retry.action)
                 }
-                .buttonStyle(PlainButtonStyle())
             }
         }
         .padding()
@@ -2206,6 +2236,22 @@ struct ErrorMessageView: View {
                         .stroke(accentColor.opacity(0.3), lineWidth: 1)
                 )
         )
+    }
+
+    private func outlinedButton(label: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(label, systemImage: systemImage)
+                .font(.subheadline.weight(.medium))
+                .foregroundColor(isDarkMode ? .white : .black)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(accentColor.opacity(0.5), lineWidth: 1)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 }
 
