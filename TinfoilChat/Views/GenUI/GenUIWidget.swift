@@ -2,12 +2,11 @@
 //  GenUIWidget.swift
 //  TinfoilChat
 //
-//  Generative UI widget abstraction. Mirrors the webapp's `GenUIWidget` so
-//  widget definitions, tool-schema generation, runtime rendering, and the
-//  prompt-hint block stay in lockstep across platforms.
+//  Generative UI widget abstraction. Mirrors the webapp's `GenUIWidget`:
+//  how a widget decodes the arguments of the tool call that names it and
+//  renders them. The chat service declares the tools to the model.
 
 import Foundation
-import OpenAI
 import SwiftUI
 
 /// Where a widget renders.
@@ -59,10 +58,7 @@ struct GenUIResolution: Equatable {
 /// `GenUIWidget` which adds typed `Args` decoding.
 protocol AnyGenUIWidget {
     var name: String { get }
-    var description: String { get }
-    var schema: JSONSchema { get }
     var surface: GenUIWidgetSurface { get }
-    var promptHint: String { get }
 
     /// Returns true if `rawArgs` parse + validate against the widget's
     /// schema. Used to decide whether to show a real widget or a parse
@@ -186,14 +182,7 @@ enum GenUIArgumentValidationError: Equatable {
 enum GenUIRetryState: Equatable {
     case generating
     case requestFailed
-    case invalidOutput(GenUIRetryInvalidOutput)
     case staleOrigin
-}
-
-enum GenUIRetryInvalidOutput: Equatable {
-    case invalidArguments(GenUIArgumentValidationError)
-    case incompleteResponse
-    case refusal
 }
 
 enum GenUIArgumentValidator {
@@ -206,87 +195,6 @@ enum GenUIArgumentValidator {
             return .invalidJSONObject
         }
         return widget.argumentValidationError(rawArgs: rawArgs)
-    }
-}
-
-/// Helper for declaring an OpenAI function-tool JSON Schema in Swift using
-/// the fork's `JSONSchema` type. Mirrors the shape Zod produces in the
-/// webapp.
-enum GenUISchema {
-    static func object(
-        properties: [String: JSONSchema],
-        required: [String] = [],
-        description: String? = nil
-    ) -> JSONSchema {
-        var fields: [JSONSchemaField] = [.type(.object), .properties(properties)]
-        if !required.isEmpty {
-            fields.append(.required(required))
-        }
-        if let description {
-            fields.append(.description(description))
-        }
-        return JSONSchema(fields: fields)
-    }
-
-    static func string(description: String? = nil, enumValues: [String]? = nil) -> JSONSchema {
-        var fields: [JSONSchemaField] = [.type(.string)]
-        if let description { fields.append(.description(description)) }
-        if let enumValues { fields.append(.enumValues(enumValues)) }
-        return JSONSchema(fields: fields)
-    }
-
-    static func number(
-        description: String? = nil,
-        minimum: Double? = nil,
-        maximum: Double? = nil,
-        exclusiveMinimum: Double? = nil
-    ) -> JSONSchema {
-        var fields: [JSONSchemaField] = [.type(.number)]
-        if let description { fields.append(.description(description)) }
-        if let minimum { fields.append(.minimum(minimum)) }
-        if let maximum { fields.append(.maximum(maximum)) }
-        if let exclusiveMinimum { fields.append(.exclusiveMinimum(exclusiveMinimum)) }
-        return JSONSchema(fields: fields)
-    }
-
-    static func integer(description: String? = nil) -> JSONSchema {
-        var fields: [JSONSchemaField] = [.type(.integer)]
-        if let description { fields.append(.description(description)) }
-        return JSONSchema(fields: fields)
-    }
-
-    static func boolean(description: String? = nil) -> JSONSchema {
-        var fields: [JSONSchemaField] = [.type(.boolean)]
-        if let description { fields.append(.description(description)) }
-        return JSONSchema(fields: fields)
-    }
-
-    static func array(items: JSONSchema, description: String? = nil, minItems: Int? = nil, maxItems: Int? = nil) -> JSONSchema {
-        var fields: [JSONSchemaField] = [.type(.array), .items(items)]
-        if let description { fields.append(.description(description)) }
-        if let minItems { fields.append(.minItems(minItems)) }
-        if let maxItems { fields.append(.maxItems(maxItems)) }
-        return JSONSchema(fields: fields)
-    }
-
-    /// `string | number` union — used by widgets like StatCards / SportsData.
-    static func stringOrNumber(description: String? = nil) -> JSONSchema {
-        var fields: [JSONSchemaField] = [.type(.types(["string", "number"]))]
-        if let description { fields.append(.description(description)) }
-        return JSONSchema(fields: fields)
-    }
-
-    /// Object whose values are `string | number` and whose property names
-    /// are unconstrained. Mirrors the webapp's
-    /// `z.record(z.string(), z.union([z.string(), z.number()]))` shape used
-    /// by chart-row arrays.
-    static func openObjectOfStringOrNumber(description: String? = nil) -> JSONSchema {
-        var fields: [JSONSchemaField] = [
-            .type(.object),
-            .additionalProperties(stringOrNumber()),
-        ]
-        if let description { fields.append(.description(description)) }
-        return JSONSchema(fields: fields)
     }
 }
 

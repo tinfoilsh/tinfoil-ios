@@ -3,7 +3,6 @@
 //  TinfoilChat
 //
 
-import OpenAI
 import SwiftUI
 
 struct MessageComposeWidget: GenUIWidget {
@@ -21,35 +20,6 @@ struct MessageComposeWidget: GenUIWidget {
     }
 
     let name = "render_message_compose"
-    let description = "Draft a message or email with one or more tone variants. Includes Copy and (for email) Open in Mail. Use when proposing a reply, message, or email draft to send."
-    let promptHint = "a draft message or email with optional tone variants and Copy / Open in Mail"
-
-    var schema: JSONSchema {
-        let variant = GenUISchema.object(
-            properties: [
-                "label": GenUISchema.string(description: "Short variant label, e.g. \"Formal\", \"Concise\", \"Apologetic\""),
-                "subject": GenUISchema.string(),
-                "body": GenUISchema.string(),
-            ],
-            required: ["label", "body"]
-        )
-        return GenUISchema.object(
-            properties: [
-                "channel": GenUISchema.string(
-                    description: "email (shows subject + \"Open in Mail\") or message (body only)",
-                    enumValues: ["email", "message"]
-                ),
-                "to": GenUISchema.string(description: "Recipient — used for mailto:"),
-                "title": GenUISchema.string(description: "Card title, e.g. \"Draft reply to Alice\""),
-                "variants": GenUISchema.array(
-                    items: variant,
-                    description: "One or more message drafts to offer. First variant is selected by default.",
-                    minItems: 1
-                ),
-            ],
-            required: ["variants"]
-        )
-    }
 
     @MainActor
     func renderInline(args: Args, context: GenUIRenderContext) -> AnyView? {

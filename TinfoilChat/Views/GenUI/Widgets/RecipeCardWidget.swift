@@ -3,7 +3,6 @@
 //  TinfoilChat
 //
 
-import OpenAI
 import SwiftUI
 
 private let recipeScaleOptions: [Double] = [1, 2, 3]
@@ -66,44 +65,6 @@ struct RecipeCardWidget: GenUIWidget {
     }
 
     let name = "render_recipe_card"
-    let description = "Display a cookable recipe card with ingredients and step-by-step instructions. Use when presenting a recipe, cooking procedure, or multi-step preparation with ingredients."
-    let promptHint = "a cookable recipe card with ingredients and steps"
-
-    var schema: JSONSchema {
-        let ingredient = GenUISchema.object(
-            properties: [
-                "quantity": GenUISchema.string(),
-                "item": GenUISchema.string(),
-                "note": GenUISchema.string(),
-            ],
-            required: ["item"]
-        )
-        let step = GenUISchema.object(
-            properties: [
-                "title": GenUISchema.string(),
-                "content": GenUISchema.string(),
-            ],
-            required: ["content"]
-        )
-        return GenUISchema.object(
-            properties: [
-                "title": GenUISchema.string(),
-                "description": GenUISchema.string(),
-                "image": GenUISchema.string(),
-                "cuisine": GenUISchema.string(),
-                "difficulty": GenUISchema.string(enumValues: ["easy", "medium", "hard"]),
-                "servings": GenUISchema.stringOrNumber(),
-                "prepTime": GenUISchema.string(),
-                "cookTime": GenUISchema.string(),
-                "totalTime": GenUISchema.string(),
-                "ingredients": GenUISchema.array(items: ingredient),
-                "steps": GenUISchema.array(items: step),
-                "sourceUrl": GenUISchema.string(),
-                "source": GenUISchema.string(),
-            ],
-            required: ["title"]
-        )
-    }
 
     @MainActor
     func renderInline(args: Args, context: GenUIRenderContext) -> AnyView? {

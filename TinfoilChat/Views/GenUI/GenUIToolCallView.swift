@@ -94,8 +94,6 @@ struct GenUIToolCallView: View {
         switch retryState {
         case .requestFailed:
             return "Couldn't retry this widget"
-        case .invalidOutput:
-            return "The retry didn't return a valid widget"
         case .staleOrigin:
             return "This widget changed before retry completed"
         case .generating, .none:
@@ -111,17 +109,7 @@ struct GenUIToolCallView: View {
             return "Reload the conversation and try again from the latest version."
         case .generating:
             return "Generating component"
-        case .invalidOutput, .none:
-            if case .invalidOutput(let outputError) = retryState {
-                switch outputError {
-                case .invalidArguments(let retryValidationError):
-                    return validationDetail(retryValidationError)
-                case .incompleteResponse:
-                    return "The model stopped before returning a complete widget. Try again."
-                case .refusal:
-                    return "The model declined to regenerate this widget. Try again."
-                }
-            }
+        case .none:
             return validationDetail(validationError)
         }
     }

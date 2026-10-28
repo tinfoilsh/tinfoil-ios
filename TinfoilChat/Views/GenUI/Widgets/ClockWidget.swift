@@ -7,11 +7,8 @@
 //  widget.
 
 import AVFoundation
-import OpenAI
 import SwiftUI
 import UIKit
-
-private let maxTimerSeconds: Double = 604_800
 
 struct ClockWidget: GenUIWidget {
     enum ClockMode: String, Decodable {
@@ -34,41 +31,6 @@ struct ClockWidget: GenUIWidget {
     }
 
     let name = "render_clock"
-    let description = """
-        Display either a live analog clock (mode "clock") or an interactive \
-        countdown timer (mode "timer"). Use "clock" for the current time in a \
-        time zone. Use "timer" for "set a 5 minute timer", reminders, breaks, \
-        workouts, cooking, etc.
-        """
-    let promptHint = "a live analog clock OR a countdown timer — pass mode \"clock\" with optional timeZone for time display, or mode \"timer\" with durationSeconds (or target ISO date) for countdowns"
-
-    var schema: JSONSchema {
-        GenUISchema.object(
-            properties: [
-                "mode": GenUISchema.string(
-                    description: "What to display. \"clock\" shows the current time as an analog face. \"timer\" counts down from a duration or to a target time. Defaults to \"clock\".",
-                    enumValues: ["clock", "timer"]
-                ),
-                "label": GenUISchema.string(description: "Short label, e.g. \"New York\" for a clock or \"Tea\" for a timer."),
-                "title": GenUISchema.string(description: "Main title (timer mode)"),
-                "description": GenUISchema.string(description: "Optional description"),
-                "timeZone": GenUISchema.string(description: "Clock mode only. IANA time zone, e.g. \"America/New_York\". Defaults to local."),
-                "showSeconds": GenUISchema.boolean(description: "Clock mode: include the second hand (default true)."),
-                "showDate": GenUISchema.boolean(description: "Clock mode: include date line (default true)."),
-                "durationSeconds": GenUISchema.number(
-                    description: "Timer mode. Duration in seconds. Prefer this for requests like \"set a 5 minute timer\".",
-                    maximum: maxTimerSeconds,
-                    exclusiveMinimum: 0
-                ),
-                "target": GenUISchema.string(description: "Timer mode. ISO date-time when the timer should end, e.g. \"2026-12-31T23:59:59Z\". Use when an exact end time is known."),
-                "completedMessage": GenUISchema.string(description: "Timer mode. Message shown when the timer finishes."),
-                "alarmMode": GenUISchema.string(
-                    description: "Timer mode. Alarm behavior when done. \"sound\" beeps; \"flash\" stays silent and flashes visually. Defaults to sound.",
-                    enumValues: ["sound", "flash"]
-                ),
-            ]
-        )
-    }
 
     @MainActor
     func renderInline(args: Args, context: GenUIRenderContext) -> AnyView? {
