@@ -144,6 +144,8 @@ enum HarnessErrorCode {
     /// The chat is too large to store.
     static let threadTooLarge = "THREAD_TOO_LARGE"
     static let modelUnavailable = "MODEL_UNAVAILABLE"
+    /// The chats could not be indexed for search.
+    static let searchIndexFailed = "SEARCH_INDEX_FAILED"
     static let upstreamRefused = "UPSTREAM_REFUSED"
     /// The request needs the chat access the client mints, which it lacked
     /// or which expired.

@@ -417,7 +417,27 @@ struct ChatSidebar: View {
 
     @ViewBuilder
     private var chatSearchStatusRow: some View {
-        if chatSearch.isIndexing {
+        if let failure = chatSearch.failure {
+            VStack(spacing: 8) {
+                Text(failure.message)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                if failure.canRetry {
+                    Button("Try again") { chatSearch.retry(account: viewModel.account) }
+                        .font(.caption.weight(.medium))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .padding(.horizontal, 16)
+        } else if chatSearch.unreadable > 0 && !chatSearch.isSearching {
+            Text(chatSearch.unreadable == 1 ? "1 matching chat couldn't be opened." : "\(chatSearch.unreadable) matching chats couldn't be opened.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+        } else if chatSearch.isIndexing {
             HStack(spacing: 8) {
                 ProgressView()
                     .progressViewStyle(CircularProgressViewStyle())
