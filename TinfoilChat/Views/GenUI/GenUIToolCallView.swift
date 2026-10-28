@@ -5,9 +5,7 @@
 //  Renders a single GenUI tool call inline in the chat. Mirrors the
 //  webapp's `GenUIToolCallRenderer`: while streaming, shows a tracer
 //  placeholder; once the assistant turn completes, swaps in the real
-//  widget. Input-surface widgets render through `GenUIInputAreaView`
-//  inside `MessageInputView` and produce a compact stamp here once
-//  resolved.
+//  widget.
 
 import SwiftUI
 
@@ -25,7 +23,6 @@ struct GenUIToolCallView: View {
     let toolCall: GenUIToolCall
     let isStreaming: Bool
     let isDarkMode: Bool
-    let resolution: GenUIResolution?
     let retryState: GenUIRetryState?
     let onRetry: (() -> Void)?
 
@@ -36,23 +33,6 @@ struct GenUIToolCallView: View {
 
         if isStreaming || retryState == .generating {
             return AnyView(streamingPlaceholder)
-        }
-
-        // Input-surface widgets only show inline once they've been
-        // resolved; the live UI lives in the input area.
-        if widget?.surface == .input {
-            if let widget, let resolution, case .valid(let data) = parsedResult,
-               let resolvedView = widget.renderResolved(
-                rawArgs: data,
-                resolution: resolution,
-                context: context
-               ) {
-                return AnyView(resolvedView)
-            }
-            if case .invalid(let validationError) = parsedResult, widget != nil {
-                return AnyView(parseFailureCard(validationError: validationError))
-            }
-            return AnyView(EmptyView())
         }
 
         if let widget, case .valid(let data) = parsedResult,

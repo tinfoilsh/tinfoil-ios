@@ -101,25 +101,12 @@ func freeRequestsRemainingText(_ remaining: Int) -> String {
 
 private struct RateLimitNoticeBackground: ViewModifier {
     let color: Color
-    let isIntegrated: Bool
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if isIntegrated {
-            content
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .background(color)
-        } else {
-            content
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.Dimensions.cornerRadiusSmall, style: .continuous)
-                        .fill(color)
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal)
-                .padding(.top, 8)
-        }
+        content
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .background(color)
     }
 }
 
@@ -355,7 +342,7 @@ struct MessageInputView: View {
 
     @ViewBuilder
     var body: some View {
-        inputContent
+        standardInputContent
             .onAppear {
                 messageTextHasNonWhitespace = hasNonWhitespaceContent(messageText)
                 handleMessageEditSessionChange(viewModel.messageEditSession)
@@ -512,7 +499,7 @@ struct MessageInputView: View {
 
     /// Small label shown with the input when remaining free requests are low
     @ViewBuilder
-    private func rateLimitLabel(isIntegrated: Bool) -> some View {
+    private var rateLimitLabel: some View {
         if let rl = viewModel.rateLimit, rl.kind == .hourly, rl.exhausted {
             HStack {
                 Text("Hourly limit reached")
@@ -531,7 +518,7 @@ struct MessageInputView: View {
                 .foregroundColor(.orange)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .modifier(RateLimitNoticeBackground(color: Color.orange.opacity(0.08), isIntegrated: isIntegrated))
+                .modifier(RateLimitNoticeBackground(color: Color.orange.opacity(0.08)))
                 .transition(.opacity)
         } else if let rl = viewModel.rateLimit, let remaining = rl.remaining, remaining <= Constants.RateLimit.warningThreshold {
             let isOutOfRequests = remaining <= 0
@@ -542,8 +529,7 @@ struct MessageInputView: View {
                 .padding(.vertical, 5)
                 .modifier(
                     RateLimitNoticeBackground(
-                        color: isOutOfRequests ? Color.orange.opacity(0.08) : Color.secondary.opacity(0.06),
-                        isIntegrated: isIntegrated
+                        color: isOutOfRequests ? Color.orange.opacity(0.08) : Color.secondary.opacity(0.06)
                     )
                 )
                 .transition(.opacity)
@@ -573,53 +559,6 @@ struct MessageInputView: View {
     /// against the model's budget.
     private var contextUsage: ContextUsage {
         viewModel.currentChat?.contextUsage ?? ContextUsage(percentage: 0, usedTokens: 0, limitTokens: 0)
-    }
-
-    /// When the latest assistant message ends in an input-surface
-    /// GenUI tool call, the chat input is replaced by the widget.
-    private var pendingInputToolCall: PendingInputToolCall? {
-        viewModel.currentChat?.pendingInputToolCall()
-    }
-
-    @ViewBuilder
-    private var inputContent: some View {
-        if isEditingMessage {
-            standardInputContent
-        } else if let pending = pendingInputToolCall {
-            genUIInputContainer(pending: pending)
-        } else {
-            standardInputContent
-        }
-    }
-
-    @ViewBuilder
-    private func genUIInputContainer(pending: PendingInputToolCall) -> some View {
-        VStack(spacing: 8) {
-            rateLimitLabel(isIntegrated: false)
-
-            GenUIInputAreaView(
-                pending: pending,
-                isDarkMode: isDarkMode,
-                onResolve: { resultText in
-                    viewModel.resolveGenUIToolCall(resultText: resultText)
-                },
-                onCancel: nil
-            )
-            .frame(maxWidth: .infinity)
-        }
-        .padding(.top, 10)
-        .padding(.bottom, max(inputBottomPadding, 12))
-        .frame(maxWidth: .infinity)
-        .background {
-            UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28)
-                .fill(.thickMaterial)
-                .ignoresSafeArea(edges: .bottom)
-        }
-        .overlay(alignment: .top) {
-            Rectangle()
-                .frame(height: 1)
-                .foregroundColor(GenUIStyle.borderColor(isDarkMode))
-        }
     }
 
     @ViewBuilder
@@ -672,7 +611,7 @@ struct MessageInputView: View {
                 // controller's view, which UIKit warns against for hosted cells.
                 GlassEffectContainer {
                 VStack(spacing: 0) {
-                rateLimitLabel(isIntegrated: true)
+                rateLimitLabel
 
                 // Attachment preview bar
                 if !viewModel.pendingAttachments.isEmpty {
@@ -705,7 +644,7 @@ struct MessageInputView: View {
             // Older iOS with material effect
             VStack(spacing: 4) {
                 VStack(spacing: 0) {
-                rateLimitLabel(isIntegrated: true)
+                rateLimitLabel
 
                 // Attachment preview bar
                 if !viewModel.pendingAttachments.isEmpty {

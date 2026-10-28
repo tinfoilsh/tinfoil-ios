@@ -9,56 +9,15 @@
 import Foundation
 import SwiftUI
 
-/// Where a widget renders.
-///
-/// - `inline`: inside the assistant message body in the chat scroll.
-/// - `input`: replaces the `MessageInputView` until the user resolves it.
-/// - `artifact`: compact inline summary plus a dedicated artifact surface
-///   (reserved for future widgets; currently treated like `inline`).
-enum GenUIWidgetSurface {
-    case inline
-    case input
-    case artifact
-}
-
-/// Read-only context passed to inline-surface widgets.
+/// Read-only context passed to widgets as they render in a reply.
 struct GenUIRenderContext {
     let isDarkMode: Bool
-}
-
-/// Context passed to input-surface widgets. The widget calls `resolve` to
-/// submit a synthetic user message and `cancel` to dismiss without
-/// answering.
-struct GenUIInputContext {
-    let toolCallId: String
-    let isDarkMode: Bool
-    let resolve: (_ resultText: String, _ resultData: JSONValue?) -> Void
-    let cancel: (() -> Void)?
-}
-
-/// A single resolved choice for an input-surface widget. Mirrors the data
-/// the webapp passes to `widget.renderResolved(args, resolution)`. The
-/// canonical persisted shape lives on `TimelineToolCallBlock` (block-level
-/// `resolvedAt` + inner `resolution { text, data }`); see
-/// `TimelineToolCalls` for serialization helpers. This struct is the
-/// in-memory view used by widget render code.
-struct GenUIResolution: Equatable {
-    let text: String
-    let data: JSONValue?
-    let resolvedAt: Date
-
-    init(text: String, data: JSONValue?, resolvedAt: Date = Date()) {
-        self.text = text
-        self.data = data
-        self.resolvedAt = resolvedAt
-    }
 }
 
 /// Erased widget protocol used by the registry. Concrete widgets conform via
 /// `GenUIWidget` which adds typed `Args` decoding.
 protocol AnyGenUIWidget {
     var name: String { get }
-    var surface: GenUIWidgetSurface { get }
 
     /// Returns true if `rawArgs` parse + validate against the widget's
     /// schema. Used to decide whether to show a real widget or a parse
@@ -67,18 +26,9 @@ protocol AnyGenUIWidget {
 
     func argumentValidationError(rawArgs: Data) -> GenUIArgumentValidationError?
 
-    /// Inline render. Widgets with `surface == .input` return `nil`.
+    /// The widget as it renders in the reply.
     @MainActor
     func renderInline(rawArgs: Data, context: GenUIRenderContext) -> AnyView?
-
-    /// Input-area render. Widgets with `surface == .inline` return `nil`.
-    @MainActor
-    func renderInputArea(rawArgs: Data, context: GenUIInputContext) -> AnyView?
-
-    /// Compact stamp shown after the user resolves an input-surface widget.
-    /// Returning `nil` means the widget leaves no trace.
-    @MainActor
-    func renderResolved(rawArgs: Data, resolution: GenUIResolution, context: GenUIRenderContext) -> AnyView?
 }
 
 /// Typed widget definition. Implementations decode the streamed JSON into
@@ -89,25 +39,11 @@ protocol GenUIWidget: AnyGenUIWidget {
 
     @MainActor
     func renderInline(args: Args, context: GenUIRenderContext) -> AnyView?
-
-    @MainActor
-    func renderInputArea(args: Args, context: GenUIInputContext) -> AnyView?
-
-    @MainActor
-    func renderResolved(args: Args, resolution: GenUIResolution, context: GenUIRenderContext) -> AnyView?
 }
 
 extension GenUIWidget {
-    var surface: GenUIWidgetSurface { .inline }
-
     @MainActor
     func renderInline(args: Args, context: GenUIRenderContext) -> AnyView? { nil }
-
-    @MainActor
-    func renderInputArea(args: Args, context: GenUIInputContext) -> AnyView? { nil }
-
-    @MainActor
-    func renderResolved(args: Args, resolution: GenUIResolution, context: GenUIRenderContext) -> AnyView? { nil }
 
     func canRender(rawArgs: Data) -> Bool {
         return argumentValidationError(rawArgs: rawArgs) == nil
@@ -128,18 +64,6 @@ extension GenUIWidget {
     func renderInline(rawArgs: Data, context: GenUIRenderContext) -> AnyView? {
         guard let args = decodeArgs(rawArgs) else { return nil }
         return renderInline(args: args, context: context)
-    }
-
-    @MainActor
-    func renderInputArea(rawArgs: Data, context: GenUIInputContext) -> AnyView? {
-        guard let args = decodeArgs(rawArgs) else { return nil }
-        return renderInputArea(args: args, context: context)
-    }
-
-    @MainActor
-    func renderResolved(rawArgs: Data, resolution: GenUIResolution, context: GenUIRenderContext) -> AnyView? {
-        guard let args = decodeArgs(rawArgs) else { return nil }
-        return renderResolved(args: args, resolution: resolution, context: context)
     }
 
     private func decodeArgs(_ data: Data) -> Args? {

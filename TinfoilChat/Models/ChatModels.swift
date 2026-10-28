@@ -250,6 +250,11 @@ enum JSONValue: Codable, Equatable, Sendable {
         return nil
     }
 
+    var numberValue: Double? {
+        if case .number(let value) = self { return value }
+        return nil
+    }
+
     init(from decoder: Decoder) throws {
         if let object = try? decoder.container(keyedBy: DynamicCodingKey.self) {
             var values: [String: JSONValue] = [:]
@@ -397,12 +402,6 @@ struct Message: Identifiable, Equatable {
     /// iOS hasn't shipped yet).
     @MainActor var hasUnsupportedGenUI: Bool {
         toolCalls.contains { GenUIRegistry.widget(named: $0.name) == nil }
-    }
-
-    /// Resolution for the given tool-call id, read from the timeline.
-    func genUIResolution(for toolCallId: String) -> GenUIResolution? {
-        guard let timeline else { return nil }
-        return TimelineToolCalls.resolution(in: timeline, toolCallId: toolCallId)
     }
 
     static let longMessageAttachmentThreshold = 1200

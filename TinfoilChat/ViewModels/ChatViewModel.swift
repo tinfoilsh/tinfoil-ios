@@ -1271,11 +1271,6 @@ class ChatViewModel: ObservableObject {
         return true
     }
 
-    /// A widget's answer is sent as the user's next message.
-    func resolveGenUIToolCall(resultText: String) {
-        _ = sendMessage(text: resultText)
-    }
-
     /// Asks the control plane again whether the hourly cap lifted.
     func checkRateLimit() async {
         guard let session else { return }
