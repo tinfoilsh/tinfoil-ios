@@ -1721,9 +1721,10 @@ struct CollapsibleThinkingBox: View {
                         .font(.subheadline)
                         .foregroundColor(isDarkMode ? .white.opacity(0.7) : Color.black.opacity(0.6))
                 } else {
-                    Text("Thinking")
-                        .font(.system(size: 16))
-                        .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
+                    // A finished thought the chat service timed no duration for.
+                    Text("Thought")
+                        .font(.subheadline)
+                        .foregroundColor(isDarkMode ? .white.opacity(0.7) : Color.black.opacity(0.6))
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
