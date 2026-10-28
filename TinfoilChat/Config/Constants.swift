@@ -638,6 +638,9 @@ enum Constants {
         static let imageCompressionQuality: CGFloat = 0.85
         static let maxFileSizeBytes = SharedImportConfiguration.maximumDocumentSizeBytes
         static let previewThumbnailSize: CGFloat = 60
+        /// The longest side of the preview a picked image shows while it
+        /// uploads.
+        static let thumbnailMaxDimension = 300
         static let previewMaxWidth: CGFloat = 200
         static let messageThumbnailSize: CGFloat = 80
         static let messageThumbnailColumns: Int = 3

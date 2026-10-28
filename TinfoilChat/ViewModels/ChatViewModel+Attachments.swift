@@ -1,4 +1,6 @@
 import Foundation
+import ImageIO
+import UIKit
 import UniformTypeIdentifiers
 import VisionKit
 
@@ -51,6 +53,9 @@ extension ChatViewModel {
                 try Task.checkCancellation()
                 let file = try await load()
                 try Task.checkCancellation()
+                if type == .image, let thumbnail = await Self.previewThumbnail(of: file.data), publication.isCurrent {
+                    pendingImageThumbnails[attachmentId] = thumbnail
+                }
                 guard let session else { throw Self.uploadInterrupted }
                 let uploaded = try await session.upload(file.data, fileName: fileName, mimeType: file.mimeType)
                 try Task.checkCancellation()
@@ -92,6 +97,22 @@ extension ChatViewModel {
         } else {
             attachmentProcessingStore.start(id: attachmentId, operation: process)
         }
+    }
+
+    /// A picked image's preview, made on the device so it shows while the
+    /// image uploads: a PNG no longer on either side than the preview
+    /// thumbnail takes, drawn upright.
+    nonisolated static func previewThumbnail(of data: Data) async -> String? {
+        await Task.detached(priority: .userInitiated) {
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: Constants.Attachments.thumbnailMaxDimension,
+            ]
+            guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            return UIImage(cgImage: thumbnail).pngData()?.base64EncodedString()
+        }.value
     }
 
     private static func mimeType(of handle: ManagedStagedFile) -> String {
