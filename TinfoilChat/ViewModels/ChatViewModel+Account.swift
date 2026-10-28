@@ -247,10 +247,6 @@ extension ChatViewModel {
         EncryptionService.shared.getKey()
     }
 
-    func reloadEncryptionKey() {
-        Task { await keyChanged() }
-    }
-
     func initializeExistingEncryptionKeyIfAvailable() async {
         guard currentUserId != nil, EncryptionService.shared.hasEncryptionKey() else { return }
         let operationTask = Task {

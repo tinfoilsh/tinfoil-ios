@@ -211,10 +211,8 @@ struct CloudSyncSettingsView: View {
                 return
             }
             // Turning cloud sync on loads the account with the key; with
-            // cloud sync already on, the key it now holds is loaded here.
-            if settings.isCloudSyncEnabled {
-                viewModel.reloadEncryptionKey()
-            } else {
+            // cloud sync already on, the view model loaded the key it set.
+            if !settings.isCloudSyncEnabled {
                 settings.isCloudSyncEnabled = true
             }
         case .some(.manualSetupRequired):
