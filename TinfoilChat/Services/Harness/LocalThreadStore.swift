@@ -56,7 +56,7 @@ actor DeviceThreadStore: LocalThreadStore {
             .appendingPathComponent("harness", isDirectory: true)
             .appendingPathComponent(safe, isDirectory: true)
         if !FileManager.default.fileExists(atPath: url.path) {
-            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.completeUnlessOpen])
         }
         return url
     }
@@ -185,13 +185,15 @@ actor DeviceThreadStore: LocalThreadStore {
         return try JSONDecoder().decode(Entry.self, from: try await encryptor.decryptData(envelope))
     }
 
+    /// A chat's file opens only while the device is unlocked; a write begun
+    /// before it locks still finishes.
     private func write(_ id: String, _ entry: Entry) async throws {
         guard let directory else {
             memory[id] = entry
             return
         }
         let sealed = try JSONEncoder().encode(try await encryptor.encryptData(try JSONEncoder().encode(entry)))
-        try sealed.write(to: file(directory, id), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try sealed.write(to: file(directory, id), options: [.atomic, .completeFileProtectionUnlessOpen])
     }
 
     /// The summaries of every chat, read from the files once. A chat whose

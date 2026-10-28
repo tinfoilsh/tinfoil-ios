@@ -48,7 +48,7 @@ final class ChatListCache: Sendable {
     func write(_ snapshot: ChatListSnapshot, projectId: String?) async {
         guard let url = file(projectId), let data = try? JSONEncoder().encode(snapshot),
               let envelope = try? await encryptor.encryptData(data), let sealed = try? JSONEncoder().encode(envelope) else { return }
-        try? sealed.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try? sealed.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
     }
 
     func clear() {
