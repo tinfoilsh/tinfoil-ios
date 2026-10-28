@@ -932,9 +932,8 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// run of it is left, so the reply is stored with it.
     func saveTemporary() async throws {
         guard let threadId = open.id, open.temporary, moving[threadId] == nil else { return }
-        while controller.deviceRuns[threadId] != nil || (open.id == threadId && running) {
-            try await Task.sleep(for: .milliseconds(200))
-        }
+        await runsEnded(threadId)
+        try Task.checkCancellation()
         guard open.id == threadId else { return }
         try requireIdle(threadId)
         let cloud = account.cloud && !open.local
@@ -948,6 +947,16 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
                 list.deviceEdits.add(saved.summary)
             }
             if open.id == threadId { _ = try await openChat(threadId, local: !cloud) }
+        }
+    }
+
+    /// Waits until no run of the chat is left: no device run reads it, and
+    /// the view, while it shows the chat, runs nothing.
+    private func runsEnded(_ threadId: String) async {
+        let changes = Publishers.CombineLatest3(controller.$view, controller.$deviceRuns, $open).values
+        for await (view, runs, shown) in changes {
+            let running = [.submitting, .streaming, .queued].contains(view.status)
+            if runs[threadId] == nil, !(shown.id == threadId && running) { return }
         }
     }
 
