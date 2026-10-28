@@ -58,6 +58,9 @@ struct RunOptions {
     var rejoined = false
     /// The view the run was started for, which a rejoin keeps.
     var version: Int?
+    /// What a rejoined run continues from while the view shows another
+    /// chat: the run's own state, whose cursor it resumes after.
+    var state: ChatState?
     /// The run started before this stream: one followed by its id is, unless
     /// a stream that only queued it is rejoined.
     var started: Bool?
@@ -211,7 +214,7 @@ final class RunController: ObservableObject {
         let follower = UUID()
         let version = options.version ?? generation
         let attached = { [weak self] in version == self?.generation }
-        let initial = Outcome(runId: body.runId, threadId: body.threadId, started: options.started ?? (body.runId != nil), state: view)
+        let initial = Outcome(runId: body.runId, threadId: body.threadId, started: options.started ?? (body.runId != nil), state: options.state ?? view)
         let task = Task { [weak self] () -> Outcome in
             var outcome = initial
             guard let self else { return outcome }
@@ -305,6 +308,7 @@ final class RunController: ObservableObject {
             again.rejoined = true
             again.started = outcome.started
             again.version = version
+            again.state = attached() ? nil : outcome.state
             return await run(.follow, follow, options: again)
         }
         if attached() {
