@@ -94,13 +94,6 @@ extension ChatViewModel {
             Self.logger.error("Failed to load the encryption key: \(error, privacy: .public)")
         }
         guard isCurrentSignIn(token, userId: userId) else { return }
-        if !CloudKeyAuthorizationStore.shared.hasAuthorizedCurrentPrimaryKey(userId: userId) {
-            let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
-            guard isCurrentSignIn(token, userId: userId) else { return }
-            if validation.canWrite {
-                _ = CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated, userId: userId)
-            }
-        }
         // A local key that mismatches the enclave's registered key can never
         // open the account's chats. Converge silently via passkey when
         // possible; otherwise prompt the user to recover.
@@ -146,7 +139,6 @@ extension ChatViewModel {
         cancelMessageEdit()
         cancelAudioRecording()
         clearPendingAttachments()
-        let signingOutUserId = currentUserId
         isAccountTeardownInProgress = true
         clearProjectState()
         signInTask?.cancel()
@@ -157,7 +149,6 @@ extension ChatViewModel {
         await accountOperationTracker.closeAndWait()
         session?.account.dispose()
         session = nil
-        CloudKeyAuthorizationStore.shared.clearAuthorization(userId: signingOutUserId)
         passkeySetupFailure = nil
         await passkeyManager.reset()
         activeStorageTab = .cloud
@@ -283,7 +274,7 @@ extension ChatViewModel {
         do {
             switch mode {
             case .recoverExisting:
-                _ = try await CloudKeyAuthorizationStore.shared.applyPrimaryKeyWithValidation(key)
+                try await CloudKeyAuthorizationStore.shared.applyPrimaryKeyWithValidation(key)
                 try ensureCurrentAccount(operationUserId)
             case .explicitStartFresh:
                 // Stage the key in memory so the enclave handshake runs
@@ -302,7 +293,6 @@ extension ChatViewModel {
                     if !remoteRegistrationCommitted { EncryptionService.shared.discardStagedKeyState() }
                     throw error
                 }
-                _ = CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh)
             }
             try ensureCurrentAccount(operationUserId)
             await keyChanged()

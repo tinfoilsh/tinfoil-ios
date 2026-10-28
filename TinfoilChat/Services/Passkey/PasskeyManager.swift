@@ -509,12 +509,9 @@ final class PasskeyManager: ObservableObject {
     /// Auto-generate a key and create a passkey for a brand new user.
     @discardableResult
     private func attemptNewUserPasskeySetup(
-        authorizationMode: CloudKeyAuthorizationMode = .validated
+        createdVia: KeyOrigin = .passkey
     ) async -> PasskeyBackupResult {
         guard let user = userInfo() else { return .failure(.registerFailed) }
-        let createdVia: KeyOrigin = authorizationMode == .explicitStartFresh
-            ? .startFresh
-            : .passkey
 
         let result = await PasskeyKeyFlow.registerNewKeyWithPasskey(
             user: user,
@@ -526,10 +523,6 @@ final class PasskeyManager: ObservableObject {
             do {
                 try await applyFreshCek(cek: cek)
                 guard canMutateAccountKey else { throw CancellationError() }
-                guard CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: authorizationMode) else {
-                    EncryptionService.shared.clearKey()
-                    throw CloudKeyAuthorizationError.authorizationUnavailable
-                }
                 persistEnclaveKeyId(keyIdHex)
                 activatePasskey()
                 return .success
@@ -716,7 +709,7 @@ final class PasskeyManager: ObservableObject {
     }
 
     func startFreshWithNewKey() async -> PasskeyBackupResult {
-        let result = await attemptNewUserPasskeySetup(authorizationMode: .explicitStartFresh)
+        let result = await attemptNewUserPasskeySetup(createdVia: .startFresh)
         if case .success = result {
             showPasskeyRecoveryChoice = false
             Self.clearRecoveryRetryContext(&pendingLegacyRecovery)
@@ -1530,8 +1523,7 @@ final class PasskeyManager: ObservableObject {
         }
 
         guard canMutateAccountKey else { throw CancellationError() }
-        let mode = try await CloudKeyAuthorizationStore.shared
-            .authorizeCurrentPrimaryKeyAfterValidation(rollbackTo: bytes)
+        try await CloudKeyAuthorizationStore.shared.validateCurrentPrimaryKey(rollingBackTo: bytes)
         guard canMutateAccountKey else {
             try EncryptionService.shared.replaceKeyBundle(
                 primary: bytes.primary,
@@ -1539,7 +1531,6 @@ final class PasskeyManager: ObservableObject {
             )
             throw CancellationError()
         }
-        _ = mode
     }
 
     private func applyFreshCek(cek: Data) async throws {
@@ -1565,12 +1556,7 @@ final class PasskeyManager: ObservableObject {
     }
 
     private func ensureCurrentPrimaryKeyAuthorized() async -> Bool {
-        if CloudKeyAuthorizationStore.shared.hasAuthorizedCurrentPrimaryKey() {
-            return true
-        }
-        let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
-        guard validation.canWrite else { return false }
-        return CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated)
+        await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey().canWrite
     }
 
     private func userInfo() -> PasskeyUserInfo? {

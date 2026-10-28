@@ -1,12 +1,9 @@
-import ClerkKit
-import CryptoKit
 import Foundation
 
 typealias CloudKeySnapshot = (primary: String?, alternatives: [String])
 
-enum CloudKeyAuthorizationMode: String, Codable {
+enum CloudKeyAuthorizationMode {
     case validated
-    case explicitStartFresh
 }
 
 enum CloudKeyAuthorizationError: LocalizedError {
@@ -26,85 +23,27 @@ enum CloudKeyAuthorizationError: LocalizedError {
     }
 }
 
-private struct CloudKeyAuthorizationRecord: Codable {
-    let fingerprint: String
-    let mode: CloudKeyAuthorizationMode
-}
-
+/// Puts a key in place only once the registry accepts it, and registers
+/// the held key where the registry has none. Whether a key may open the
+/// account's chats is read from the registry each time, never kept.
 @MainActor
 final class CloudKeyAuthorizationStore {
     static let shared = CloudKeyAuthorizationStore()
 
     private init() {}
 
-    func currentMode(userId: String? = nil) -> CloudKeyAuthorizationMode? {
-        guard let resolvedUserId = resolveUserId(userId),
-              let record = loadRecord(userId: resolvedUserId),
-              let currentFingerprint = currentPrimaryKeyFingerprint(),
-              record.fingerprint == currentFingerprint else {
-            return nil
-        }
-
-        return record.mode
+    /// `.validated` once the chat service accepted the held key for the
+    /// account's chats on its last load, as the account reports it live.
+    func currentMode() -> CloudKeyAuthorizationMode? {
+        KeyRegistry.shared.keyAccepted ? .validated : nil
     }
 
-    func hasAuthorizedCurrentPrimaryKey(userId: String? = nil) -> Bool {
-        currentMode(userId: userId) != nil
-    }
-
-    func authorizeCurrentPrimaryKey(
-        mode: CloudKeyAuthorizationMode,
-        userId: String? = nil
-    ) -> Bool {
-        guard let resolvedUserId = resolveUserId(userId),
-              let currentFingerprint = currentPrimaryKeyFingerprint() else {
-            return false
-        }
-
-        let record = CloudKeyAuthorizationRecord(
-            fingerprint: currentFingerprint,
-            mode: mode
-        )
-
-        do {
-            let data = try JSONEncoder().encode(record)
-            UserDefaults.standard.set(data, forKey: storageKey(userId: resolvedUserId))
-            return true
-        } catch {
-            UserDefaults.standard.removeObject(forKey: storageKey(userId: resolvedUserId))
-            return false
-        }
-    }
-
-    func clearAuthorization(userId: String? = nil) {
-        guard let resolvedUserId = resolveUserId(userId) else { return }
-        UserDefaults.standard.removeObject(forKey: storageKey(userId: resolvedUserId))
-    }
-
-    func applyPrimaryKeyWithValidation(
-        _ key: String,
-        successMode: CloudKeyAuthorizationMode = .validated,
-        failureMode: CloudKeyAuthorizationMode? = nil
-    ) async throws -> CloudKeyAuthorizationMode {
-        return try await applyAndValidate(
-            stageKeys: {
-                try await EncryptionService.shared.setKey(key, persist: false)
-            },
-            successMode: successMode,
-            failureMode: failureMode
-        )
-    }
-
-    /// Stage a new key in memory, ask the enclave to confirm it, and only
+    /// Stage a new key in memory, ask the registry to confirm it, and only
     /// then write it to the Keychain. On failure the staged key is dropped
-    /// so a key the enclave rejects is never persisted locally.
-    private func applyAndValidate(
-        stageKeys: () async throws -> Void,
-        successMode: CloudKeyAuthorizationMode,
-        failureMode: CloudKeyAuthorizationMode?
-    ) async throws -> CloudKeyAuthorizationMode {
+    /// so a key the registry rejects is never persisted locally.
+    func applyPrimaryKeyWithValidation(_ key: String) async throws {
         do {
-            try await stageKeys()
+            try await EncryptionService.shared.setKey(key, persist: false)
         } catch let stageError {
             EncryptionService.shared.discardStagedKeyState()
             throw stageError
@@ -112,36 +51,18 @@ final class CloudKeyAuthorizationStore {
 
         let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
         guard validation.canWrite else {
-            if let failureMode {
-                return try commitStagedKey(mode: failureMode)
-            }
             EncryptionService.shared.discardStagedKeyState()
             throw CloudKeyAuthorizationError.validationFailed(
                 validation.message ?? CloudKeyPreflightValidator.mismatchMessage
             )
         }
 
-        return try commitStagedKey(mode: successMode)
-    }
-
-    /// Persist the staged key (the enclave accepted it, or the caller
-    /// explicitly chose to proceed) and stamp the local mode hint.
-    private func commitStagedKey(
-        mode: CloudKeyAuthorizationMode
-    ) throws -> CloudKeyAuthorizationMode {
         do {
             try EncryptionService.shared.persistCurrentKeyState()
         } catch {
             EncryptionService.shared.discardStagedKeyState()
             throw CloudKeyAuthorizationError.authorizationUnavailable
         }
-        // The mode hint is best-effort local state: failing to stamp
-        // it (e.g. no resolvable user id during a session blip) must
-        // never destroy the key the enclave just accepted and the
-        // Keychain just persisted. Without the hint, writes stay
-        // gated until a later preflight validation re-stamps it.
-        _ = authorizeCurrentPrimaryKey(mode: mode)
-        return mode
     }
 
     /// Make the current (staged or persisted) primary CEK the enclave's
@@ -207,54 +128,16 @@ final class CloudKeyAuthorizationStore {
         try await KeyRegistry.shared.migrateAll(keys: keys, target: target)
     }
 
-    func authorizeCurrentPrimaryKeyAfterValidation(
-        rollbackTo previousKeys: CloudKeySnapshot,
-        successMode: CloudKeyAuthorizationMode = .validated,
-        failureMode: CloudKeyAuthorizationMode? = nil
-    ) async throws -> CloudKeyAuthorizationMode {
+    /// Keeps the key just set when the registry accepts it, and otherwise
+    /// puts the previous keys back.
+    func validateCurrentPrimaryKey(rollingBackTo previousKeys: CloudKeySnapshot) async throws {
         let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
         guard validation.canWrite else {
-            if let failureMode {
-                guard authorizeCurrentPrimaryKey(mode: failureMode) else {
-                    try rollbackToPreviousKeys(previousKeys)
-                    throw CloudKeyAuthorizationError.authorizationUnavailable
-                }
-                return failureMode
-            }
-
             try rollbackToPreviousKeys(previousKeys)
             throw CloudKeyAuthorizationError.validationFailed(
                 validation.message ?? CloudKeyPreflightValidator.mismatchMessage
             )
         }
-
-        guard authorizeCurrentPrimaryKey(mode: successMode) else {
-            try rollbackToPreviousKeys(previousKeys)
-            throw CloudKeyAuthorizationError.authorizationUnavailable
-        }
-        return successMode
-    }
-
-    private func resolveUserId(_ userId: String?) -> String? {
-        userId ?? Clerk.shared.user?.id
-    }
-
-    private func storageKey(userId: String) -> String {
-        Constants.StorageKeys.Secret.cloudKeyAuthorization(userId: userId)
-    }
-
-    private func loadRecord(userId: String) -> CloudKeyAuthorizationRecord? {
-        guard let data = UserDefaults.standard.data(forKey: storageKey(userId: userId)) else {
-            return nil
-        }
-
-        return try? JSONDecoder().decode(CloudKeyAuthorizationRecord.self, from: data)
-    }
-
-    private func currentPrimaryKeyFingerprint() -> String? {
-        guard let key = EncryptionService.shared.getKey() else { return nil }
-        let digest = SHA256.hash(data: Data(key.utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     private func rollbackToPreviousKeys(_ previousKeys: CloudKeySnapshot) throws {
@@ -265,7 +148,6 @@ final class CloudKeyAuthorizationStore {
             )
         } catch let rollbackError {
             EncryptionService.shared.clearKey()
-            clearAuthorization()
             throw CloudKeyAuthorizationError.rollbackFailed(underlying: rollbackError)
         }
     }
