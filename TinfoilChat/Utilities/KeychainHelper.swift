@@ -36,6 +36,8 @@ protocol KeychainStore: AnyObject, Sendable {
     func load(for key: String, service: String?) throws -> Data?
     @discardableResult
     func delete(for key: String, service: String?) -> Bool
+    /// The keys of every item of a service.
+    func keys(service: String?) throws -> [String]
 }
 
 /// A helper class for secure storage in the iOS Keychain
@@ -119,11 +121,33 @@ class KeychainHelper: KeychainStore, @unchecked Sendable {
         return status == errSecSuccess || status == errSecItemNotFound
     }
 
+    /// The keys of every item of a service, read without their data.
+    /// - Parameter service: Optional service name, defaults to bundle identifier
+    func keys(service: String?) throws -> [String] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.service(service),
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return [] }
+        guard status == errSecSuccess, let items = result as? [[String: Any]] else {
+            throw KeychainError(status: status)
+        }
+        return items.compactMap { $0[kSecAttrAccount as String] as? String }
+    }
+
     private func baseQuery(for key: String, service: String?) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service ?? Bundle.main.bundleIdentifier ?? "com.tinfoil.chat",
+            kSecAttrService as String: Self.service(service),
             kSecAttrAccount as String: key
         ]
+    }
+
+    private static func service(_ service: String?) -> String {
+        service ?? Bundle.main.bundleIdentifier ?? "com.tinfoil.chat"
     }
 }

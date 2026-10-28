@@ -85,4 +85,9 @@ final class MemoryKeychain: KeychainStore, @unchecked Sendable {
         items[Item(service, key)] = nil
         return true
     }
+
+    func keys(service: String?) throws -> [String] {
+        if let failure { throw failure }
+        return items.keys.filter { $0.service == service }.map(\.key)
+    }
 }

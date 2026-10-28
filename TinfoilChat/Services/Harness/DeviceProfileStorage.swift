@@ -15,11 +15,11 @@ final class DeviceProfileStorage: ProfileStorage {
         self.defaults = defaults
     }
 
-    /// The first read imports the settings the previous client kept, once;
-    /// afterwards only the local profile is read. A stored profile that
-    /// cannot be decoded is logged and shown as empty, without an import;
-    /// a keychain that cannot be read, as while the device is locked,
-    /// fails the read.
+    /// The first read imports the settings the previous client kept, once,
+    /// and removes its profile once the import is kept; afterwards only the
+    /// local profile is read. A stored profile that cannot be decoded is
+    /// logged and shown as empty, without an import; a keychain that cannot
+    /// be read, as while the device is locked, fails the read.
     func loadLocalProfile() throws -> ProfileFields {
         if let data = try keychain.load(for: Constants.Harness.Profile.localProfileKey, service: service) {
             guard let profile = Self.object(data) else {
@@ -30,7 +30,12 @@ final class DeviceProfileStorage: ProfileStorage {
         }
         let imported = try PreviousClientSettings.profile(keychain: keychain, defaults: defaults)
         if !imported.isEmpty {
-            do { try write(imported) } catch { Self.logger.error("Failed to keep the imported settings: \(error, privacy: .public)") }
+            do {
+                try write(imported)
+                keychain.delete(for: Constants.Harness.Profile.previousProfileKey, service: service)
+            } catch {
+                Self.logger.error("Failed to keep the imported settings: \(error, privacy: .public)")
+            }
         }
         return imported
     }
