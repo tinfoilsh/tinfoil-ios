@@ -193,6 +193,12 @@ extension Components.Schemas.TitleState: OpenValue {}
 extension Components.Schemas.AttachmentKind: OpenValue {}
 extension Components.Schemas.RateLimit.KindPayload: OpenValue {}
 
+extension Array where Element == HarnessMessage {
+    /// The messages a chat shows: a message whose role this client does not
+    /// know is left out, as the protocol says.
+    var shown: [HarnessMessage] { filter { $0.role.value1 != nil } }
+}
+
 extension ErrorAction {
     /// The action an error asks for. One this client does not know, as a
     /// later harness may ask for, fails the request: the client shows the

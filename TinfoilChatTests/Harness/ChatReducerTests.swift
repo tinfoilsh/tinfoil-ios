@@ -80,6 +80,20 @@ struct ChatReducerTests {
         #expect(state.snapshot.thread?.titleState.value1 == nil)
     }
 
+    @Test func aMessageOfARoleThisClientDoesNotKnowIsLeftOut() throws {
+        let messages: [[String: Any]] = [
+            ["id": "u", "role": "user", "createdAt": "", "content": "hi"],
+            ["id": "n", "role": "narrator", "createdAt": "", "content": "meanwhile"],
+            ["id": "a", "role": "assistant", "createdAt": "", "timeline": []],
+        ]
+        let streamed = try Self.reduce([Self.started(), ["type": "MESSAGES_SNAPSHOT", "messages": messages, "hasOlder": false]])
+        #expect(streamed.messages.map(\.id) == ["u", "a"])
+        var window = Self.thread
+        window.merge(["revision": "1", "presetId": NSNull(), "messages": messages, "hasOlder": false]) { $1 }
+        let loaded = ChatState(thread: try ThreadWindow(jsonObject: window))
+        #expect(loaded.messages.map(\.id) == ["u", "a"])
+    }
+
     @Test func aPatchTheProtocolDoesNotNameFailsTheStream() throws {
         let state = try Self.reduce([Self.started(), Self.snapshot()])
         let patch = try HarnessProtocolFixtures.frame(

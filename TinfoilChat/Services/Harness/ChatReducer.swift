@@ -167,6 +167,7 @@ enum ChatReducer {
         _ messages: [HarnessMessage],
         hasOlder: Bool
     ) -> (messages: [HarnessMessage], hasOlder: Bool) {
+        let messages = messages.shown
         guard let first = messages.first,
               let start = view.messages.firstIndex(where: { $0.id == first.id }),
               start > 0 else {

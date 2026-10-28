@@ -890,7 +890,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         while state.hasOlder {
             let page = try await storeOf(threadId).older(threadId, before: state.messages.first?.id)
             guard shown() else { return }
-            let earlier = page.messages.filter { message in !state.messages.contains { $0.id == message.id } }
+            let earlier = page.messages.shown.filter { message in !state.messages.contains { $0.id == message.id } }
             controller.updateView { $0.messages = earlier + $0.messages; $0.hasOlder = page.hasOlder }
             if earlier.isEmpty { return }
         }
