@@ -186,6 +186,57 @@ struct ChatListTests {
         #expect(list.cloudListed.last?.id == "b")
     }
 
+    @Test func aProjectsChatsAreListedApartPageByPage() async throws {
+        let (list, transport) = await makeList()
+        let firstPage = (0..<ChatList.pageSize).map { summary("p\($0)", projectId: "p") }
+        await transport.push(ListPage.json(firstPage, pinned: [], next: "c2"))
+        list.listProject("p")
+        let project = try #require(list.project)
+        var waited = 0
+        while project.cloudListed.isEmpty, waited < 100 {
+            try await Task.sleep(for: .milliseconds(10))
+            waited += 1
+        }
+        #expect(project.cloudListed == firstPage)
+        await transport.push(ListPage.json([summary("b", projectId: "p")], next: ""))
+        await project.loadMore()?.value
+        #expect(project.cloudListed == firstPage + [summary("b", projectId: "p")])
+        let requests = await transport.requests.filter { $0.route == .list }
+        #expect(requests.map { $0.json["projectId"] as? String } == ["p", "p"])
+        #expect(requests.map { $0.json["cursor"] as? String } == [nil, "c2"])
+        list.listProject(nil)
+        #expect(list.project == nil)
+    }
+
+    @Test func aProjectsListShowsTheChangesMadeThroughTheList() async throws {
+        let (list, transport) = await makeList()
+        await transport.push(ListPage.json([summary("a", projectId: "p"), summary("b", projectId: "p"), summary("r")], pinned: []))
+        try await list.refresh()
+        await transport.push(ListPage.json([summary("a", projectId: "p"), summary("b", projectId: "p")], pinned: []))
+        list.listProject("p")
+        let project = try #require(list.project)
+        var waited = 0
+        while project.cloudListed.isEmpty, waited < 100 {
+            try await Task.sleep(for: .milliseconds(10))
+            waited += 1
+        }
+        let undoTitle = list.preview("a", ThreadPatch(title: "Renamed"))
+        #expect(project.cloudListed.first { $0.id == "a" }?.title == "Renamed")
+        undoTitle()
+        #expect(project.cloudListed.first { $0.id == "a" }?.title == "Chat")
+        let undoRemoval = list.previewRemoval("b")
+        #expect(project.cloudListed.map(\.id) == ["a"])
+        undoRemoval()
+        #expect(project.cloudListed.map(\.id) == ["a", "b"])
+        // A chat moved into the project joins its list, and one moved out
+        // leaves it.
+        list.cloud.replace(summary("r", projectId: "p"))
+        list.cloud.replace(summary("a"))
+        #expect(project.cloudListed.map(\.id) == ["r", "b"])
+        list.cloud.remove("b")
+        #expect(project.cloudListed.map(\.id) == ["r"])
+    }
+
     @Test func anEditDuringAReloadKeepsTheEditAndEndsTheLoad() async throws {
         let (list, transport) = await makeList()
         await transport.push(ListPage.json([summary("a")], pinned: []))

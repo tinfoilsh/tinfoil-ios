@@ -131,10 +131,21 @@ extension ChatViewModel {
         isViewingProjectChat = true
     }
 
-    /// The stored chats of the active project, the latest active first.
+    /// The stored chats of the active project, the latest active first, as
+    /// the project's own list loads them.
     var activeProjectChats: [ChatListSummary] {
-        guard let projectId = activeProject?.id else { return [] }
-        return cloudSidebarSummaries.filter { $0.projectId == projectId && !$0.isTemporary && !$0.isBlankChat }
+        guard let projectId = activeProject?.id, let session, let listed = session.list.project else { return [] }
+        return newestFirst(listed.cloudListed.map { ChatViewMapping.chat($0, local: false) }, in: session)
+            .filter { $0.projectId == projectId && !$0.isTemporary && !$0.isBlankChat }
+            .map(ChatListSummary.init)
+    }
+
+    var isLoadingProjectChats: Bool { session?.list.project?.loading == true }
+    var hasMoreProjectChats: Bool { session?.list.project?.nextCursor != nil }
+    var isLoadingMoreProjectChats: Bool { session?.list.project?.loadingMore == true }
+
+    func loadMoreProjectChats() async {
+        await session?.list.project?.loadMore()?.value
     }
 
     func updateActiveProject(name: String? = nil, color: String? = nil, description: String? = nil, systemInstructions: String? = nil) async {

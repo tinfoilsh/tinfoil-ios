@@ -237,7 +237,10 @@ class ChatViewModel: ObservableObject {
 
     @Published var projects: [Project] = []
     @Published var activeProject: Project? {
-        didSet { session?.setProject(activeProject?.id) }
+        didSet {
+            session?.setProject(activeProject?.id)
+            session?.list.listProject(activeProject?.id)
+        }
     }
     @Published var projectDocuments: [ProjectDocument] = []
     @Published var isLoadingProjects: Bool = false
@@ -1048,8 +1051,6 @@ class ChatViewModel: ObservableObject {
     private func buildChats() -> [Chat] {
         guard let session else { return [] }
         let listsCloud = session.account.cloud && !session.account.keyLocked
-        let openId = session.open.id
-        let shownRun = session.running ? session.state.runId : nil
         var listed: [Chat] = []
         if listsCloud {
             let cloud = session.list.cloudListed
@@ -1057,8 +1058,20 @@ class ChatViewModel: ObservableObject {
             listed += (cloud + pins).map { ChatViewMapping.chat($0, local: false) }
         }
         listed += session.list.deviceListed.map { ChatViewMapping.chat($0, local: true) }
+        let sorted = newestFirst(listed, in: session)
+        guard hasChatAccess else { return sorted }
+        let newChats = session.account.cloud ? [Self.newChatRow(local: false), Self.newChatRow(local: true)] : [Self.newChatRow(local: true)]
+        return newChats + sorted
+    }
+
+    /// Listed chats, the latest active first. A run this app streams is
+    /// active before the list next reports it, and the open chat is as
+    /// recent as the latest message it shows.
+    func newestFirst(_ listed: [Chat], in session: ChatSession) -> [Chat] {
+        let openId = session.open.id
+        let shownRun = session.running ? session.state.runId : nil
         let shownActivity = session.state.messages.compactMap { ChatAccessCache.date(of: $0.createdAt) }.max()
-        let sorted = listed.map { chat in
+        return listed.map { chat in
             var chat = chat
             if chat.activeRun == nil, let runId = session.controller.deviceRuns[chat.id]?.run?.runId ?? (chat.id == openId ? shownRun : nil) {
                 chat.activeRun = ActiveRun(runId: runId, expiresAt: "", instance: "")
@@ -1066,9 +1079,6 @@ class ChatViewModel: ObservableObject {
             if chat.id == openId, let shownActivity, shownActivity > chat.lastActivity { chat.activityAt = shownActivity }
             return chat
         }.sorted { $0.lastActivity > $1.lastActivity }
-        guard hasChatAccess else { return sorted }
-        let newChats = session.account.cloud ? [Self.newChatRow(local: false), Self.newChatRow(local: true)] : [Self.newChatRow(local: true)]
-        return newChats + sorted
     }
 
     /// The row atop a chat list that starts a new chat stored there.
