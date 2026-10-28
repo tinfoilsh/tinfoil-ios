@@ -222,13 +222,15 @@ extension ChatViewModel {
     }
 
     /// A chat on this device moves to the cloud first, as a project's chats
-    /// are stored.
+    /// are stored; when the move into the project fails, it returns to the
+    /// device as it was.
     private func updateChatProject(chatId: String, projectId: String?) async {
         guard let session, canUseProjects else { return }
+        var original: DeviceChatCopy?
         do {
             if session.list.isOnDevice(chatId) {
                 guard projectId != nil else { return }
-                try await session.moveToCloud(chatId)
+                original = try await session.moveToCloud(chatId)
             }
             _ = try await session.update(chatId, ThreadPatch(projectId: Nullable(projectId)))
             if session.open.id == chatId {
@@ -242,6 +244,13 @@ extension ChatViewModel {
             }
             session.list.reload()
         } catch {
+            if let original {
+                do {
+                    try await session.moveToDevice(chatId, original: original)
+                } catch {
+                    Self.logger.error("Failed to return a chat to this device after it failed to join a project: \(error, privacy: .public)")
+                }
+            }
             session.report(error)
         }
     }
