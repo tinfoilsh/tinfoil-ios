@@ -923,7 +923,7 @@ class ChatViewModel: ObservableObject {
             last = shown[shown.count - 1]
         }
         last.streamError = error.message
-        last.isRateLimitError = error.code == HarnessErrorCode.quotaExhausted || error.code == HarnessErrorCode.rateLimited
+        last.isRateLimitError = error.code == HarnessErrorCode.quotaExhausted
         last.isHourlyLimitError = error.kind == "hourly"
         shown[shown.count - 1] = last
         return shown
