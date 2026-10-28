@@ -51,6 +51,7 @@ extension ChatViewModel {
         }
     }
 
+    /// Creates a project and opens it.
     @discardableResult
     func createProject(name: String? = nil, color: String? = nil) async -> Project? {
         guard let session, canUseProjects else { return nil }
@@ -65,6 +66,7 @@ extension ChatViewModel {
             ))
             guard self.session === session else { return nil }
             projects.insert(created, at: 0)
+            await enterProject(projectId: created.id)
             return created
         } catch {
             projectError = error.localizedDescription
