@@ -432,6 +432,7 @@ struct CloudSyncOnboardingView: View {
                             .font(.system(.caption, design: .monospaced))
                             .foregroundColor(.primary)
                             .lineLimit(1)
+                            .concealedWhileCaptured()
 
                         Spacer()
 

@@ -412,6 +412,15 @@ enum Constants {
         static let warningThresholdPercent = 80
     }
 
+    /// The cover shown while the app is not active, and the placeholder
+    /// over keys while the screen is recorded or shared.
+    enum Privacy {
+        static let coverLogoHeight: CGFloat = 48
+        static let concealedLabel = "Hidden"
+        static let concealedAccessibilityLabel = "Hidden while the screen is recorded or shared"
+        static let concealedLabelMinimumScale: CGFloat = 0.5
+    }
+
     enum CloudSync {
         static let clipboardExpirationSeconds: TimeInterval = 300
         static let attentionBadgeSize: CGFloat = 8

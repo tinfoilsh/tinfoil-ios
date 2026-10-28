@@ -61,6 +61,7 @@ struct EncryptionKeyInputView: View {
                             Group {
                                 if isKeyVisible {
                                     TextField("key_abcdef...", text: $keyInput)
+                                        .concealedWhileCaptured()
                                 } else {
                                     SecureField("key_abcdef...", text: $keyInput)
                                 }

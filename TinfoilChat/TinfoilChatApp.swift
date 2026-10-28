@@ -121,6 +121,8 @@ struct TinfoilChatApp: App {
 // MARK: - AppDelegate
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        PrivacyCover.shared.install()
+
         // Configure RevenueCat
         RevenueCatManager.shared.configure(apiKey: "appl_NsqQinGVxyvuivFgGKjKcIqHlsk")
 
