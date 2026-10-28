@@ -1096,6 +1096,7 @@ class ChatViewModel: ObservableObject {
     func createNewChat(modelType: ModelType? = nil, isLocalOnly: Bool? = nil, projectId: String? = nil, focusInput: Bool = true) {
         guard let session else { return }
         cancelMessageEdit()
+        cancelAudioRecording()
         clearPendingAttachments()
         let projectId = projectId ?? activeProject?.id
         let local: Bool
@@ -1127,6 +1128,7 @@ class ChatViewModel: ObservableObject {
         guard let session else { return false }
         if session.open.id == id, session.open.loadingId == nil { return true }
         cancelMessageEdit()
+        cancelAudioRecording()
         clearPendingAttachments()
         Task {
             do {
@@ -1220,6 +1222,7 @@ class ChatViewModel: ObservableObject {
 
     func toggleTemporaryMode() {
         guard let session else { return }
+        cancelAudioRecording()
         if isTemporaryMode {
             if let previous = previousChatIdBeforeTemporary {
                 previousChatIdBeforeTemporary = nil
