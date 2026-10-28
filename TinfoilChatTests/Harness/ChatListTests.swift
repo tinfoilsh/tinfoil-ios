@@ -165,6 +165,27 @@ struct ChatListTests {
         #expect(list.cloudListed.last?.id == "b")
     }
 
+    @Test func onlyAPageAfterThoseListedShowsAsLoadingMore() async throws {
+        let (list, transport) = await makeList()
+        await transport.push(ListPage.json(fullPage, pinned: [], next: "c2"))
+        await transport.hold()
+        let reload = list.reload()
+        await transport.arrived()
+        #expect(list.loading)
+        #expect(!list.loadingMore)
+        await transport.release()
+        await reload.value
+        await transport.push(ListPage.json([summary("b")], next: ""))
+        await transport.hold()
+        let load = list.loadMore()
+        await transport.arrived()
+        #expect(list.loadingMore)
+        await transport.release()
+        await load?.value
+        #expect(!list.loadingMore)
+        #expect(list.cloudListed.last?.id == "b")
+    }
+
     @Test func anEditDuringAReloadKeepsTheEditAndEndsTheLoad() async throws {
         let (list, transport) = await makeList()
         await transport.push(ListPage.json([summary("a")], pinned: []))

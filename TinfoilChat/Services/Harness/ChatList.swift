@@ -72,6 +72,8 @@ final class ChatList: ObservableObject {
     @Published private(set) var deviceListed: [ThreadSummary] = []
     @Published private(set) var nextCursor: String?
     @Published private(set) var loading = false
+    /// A page after those listed is loading, as Load More asked.
+    @Published private(set) var loadingMore = false
     @Published private(set) var error: String?
 
     private let account: HarnessAccount
@@ -200,8 +202,13 @@ final class ChatList: ObservableObject {
 
     @discardableResult
     func loadMore() -> Task<Void, Never>? {
-        guard let nextCursor else { return nil }
-        return reload(after: nextCursor)
+        guard let nextCursor, !loadingMore else { return nil }
+        loadingMore = true
+        let load = reload(after: nextCursor)
+        return Task {
+            await load.value
+            loadingMore = false
+        }
     }
 
     /// Reads the chats this device keeps again, as they change.

@@ -1093,7 +1093,7 @@ class ChatViewModel: ObservableObject {
     }
 
     var hasMoreChats: Bool { session?.list.nextCursor != nil }
-    var isLoadingMore: Bool { session?.list.loading == true }
+    var isLoadingMore: Bool { session?.list.loadingMore == true }
     var chatListError: String? { session?.list.error }
 
     /// Reads again what the chat list failed to read.
