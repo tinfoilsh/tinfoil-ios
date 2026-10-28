@@ -191,9 +191,20 @@ struct MessageTableView: UIViewRepresentable {
         }
 
         if messageCountChanged || (chatIdChanged && !isIdConversion) {
+            // Messages loaded before those shown keep the reader in place: the
+            // message that was first stays at the top.
+            let firstShownIndex = chatIdChanged ? nil : context.coordinator.lastFirstMessageId.flatMap { firstId in
+                messages.firstIndex { $0.id == firstId }
+            }
             context.coordinator.lastMessageCount = messages.count
             context.coordinator.heightCache.removeAll()
             tableView.reloadData()
+            if let firstShownIndex, firstShownIndex > 0 {
+                DispatchQueue.main.async {
+                    guard tableView.numberOfRows(inSection: 0) > firstShownIndex else { return }
+                    tableView.scrollToRow(at: IndexPath(row: firstShownIndex, section: 0), at: .top, animated: false)
+                }
+            }
         } else if usesStreamingLayout && !messages.isEmpty {
             // During streaming, update the last message wrapper directly
             if let lastMessage = messages.last,
@@ -329,6 +340,12 @@ struct MessageTableView: UIViewRepresentable {
             }
         }
 
+        context.coordinator.lastFirstMessageId = messages.first?.id
+        context.coordinator.updateEarlierMessagesHeader(
+            shown: viewModel.hasEarlierMessages,
+            loading: viewModel.isLoadingEarlierMessages
+        )
+
         if context.coordinator.lastScrollToUserTrigger != scrollToUserTrigger {
             context.coordinator.lastScrollToUserTrigger = scrollToUserTrigger
             context.coordinator.shouldScrollToUserMessageAfterLayout = true
@@ -390,6 +407,7 @@ struct MessageTableView: UIViewRepresentable {
         var lastScrollTrigger: UUID?
         var lastScrollToUserTrigger: UUID?
         var lastMessageCount: Int = 0
+        var lastFirstMessageId: String?
         var lastUsesStreamingLayout: Bool = false
         var cellReuseIdentifierSuffix: String = ""
         var lastKeyboardHeight: CGFloat = 0
@@ -812,6 +830,36 @@ struct MessageTableView: UIViewRepresentable {
 
         /// Scrolls so the user's message sits at the top of the visible area,
         /// with the assistant response streaming in below it.
+        /// Shows, above the messages, the button that loads those before them
+        /// while the chat has older messages than it shows.
+        func updateEarlierMessagesHeader(shown: Bool, loading: Bool) {
+            guard let tableView else { return }
+            guard shown else {
+                if tableView.tableHeaderView != nil { tableView.tableHeaderView = nil }
+                return
+            }
+            let button = (tableView.tableHeaderView as? UIButton) ?? makeEarlierMessagesButton(width: tableView.bounds.width)
+            button.configuration?.title = loading ? "Loading earlier messages…" : "Load earlier messages"
+            button.configuration?.showsActivityIndicator = loading
+            button.isEnabled = !loading
+            if tableView.tableHeaderView !== button { tableView.tableHeaderView = button }
+        }
+
+        private func makeEarlierMessagesButton(width: CGFloat) -> UIButton {
+            var configuration = UIButton.Configuration.plain()
+            configuration.baseForegroundColor = .secondaryLabel
+            configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+                var attributes = attributes
+                attributes.font = UIFont.preferredFont(forTextStyle: .subheadline)
+                return attributes
+            }
+            let button = UIButton(configuration: configuration, primaryAction: UIAction { [weak self] _ in
+                self?.parent.viewModel.loadEarlierMessages()
+            })
+            button.frame = CGRect(x: 0, y: 0, width: width, height: Constants.UI.earlierMessagesHeaderHeight)
+            return button
+        }
+
         func scrollToUserMessage(animated: Bool) {
             guard let tableView = tableView else { return }
 

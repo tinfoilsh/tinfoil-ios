@@ -45,6 +45,8 @@ enum Constants {
 
     enum UI {
         static let scrollToBottomButtonSize: CGFloat = 27
+        /// The row above a chat's messages that loads those before them.
+        static let earlierMessagesHeaderHeight: CGFloat = 44
         static let tableMaximumColumnWidthRatio: CGFloat = 0.5
         static let tableCellHorizontalPadding: CGFloat = 12
         static let tableDividerThickness: CGFloat = 1

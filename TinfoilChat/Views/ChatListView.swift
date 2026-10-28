@@ -25,6 +25,9 @@ struct ChatListView: View {
     @State private var scrollTrigger = UUID()
     @State private var scrollToUserTrigger = UUID()
     @State private var tableOpacity = 1.0
+    /// The first message shown, by which messages loaded before it are told
+    /// apart from messages added after the last.
+    @State private var shownFirstMessageId: String?
 
     private var isCurrentChatReadOnly: Bool {
         viewModel.isCurrentChatSafeguardFlagged
@@ -199,6 +202,13 @@ struct ChatListView: View {
             keyboardHeight = 0
         }
         .onChange(of: messages.count) { oldCount, newCount in
+            let previousFirstId = shownFirstMessageId
+            shownFirstMessageId = messages.first?.id
+            // Messages loaded before those shown leave the reader in place.
+            if oldCount > 0, let previousFirstId, messages.first?.id != previousFirstId,
+               messages.contains(where: { $0.id == previousFirstId }) {
+                return
+            }
             if newCount > oldCount {
                 let newMessages = messages.suffix(newCount - oldCount)
                 let hasUserMessage = newMessages.contains { $0.role == .user }

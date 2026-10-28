@@ -179,6 +179,7 @@ class ChatViewModel: ObservableObject {
     @Published var isScrollInteractionActive: Bool = false
     @Published var isAtBottom: Bool = true
     @Published var scrollToBottomTrigger: UUID = UUID()
+    @Published private(set) var isLoadingEarlierMessages = false
     @Published var scrollToUserMessageTrigger: UUID = UUID()
     @Published var imageViewerImages: [Attachment] = []
     @Published var imageViewerIndex: Int = 0
@@ -750,6 +751,26 @@ class ChatViewModel: ObservableObject {
     /// A reply of the open chat is being generated.
     var isLoading: Bool {
         session?.running == true
+    }
+
+    /// The open chat starts with older messages than those shown.
+    var hasEarlierMessages: Bool {
+        guard let session else { return false }
+        return session.state.hasOlder && session.open.loadingId == nil
+    }
+
+    /// Loads the open chat's messages before those shown.
+    func loadEarlierMessages() {
+        guard let session, !isLoadingEarlierMessages, hasEarlierMessages else { return }
+        isLoadingEarlierMessages = true
+        Task {
+            defer { isLoadingEarlierMessages = false }
+            do {
+                try await session.older()
+            } catch {
+                Self.logger.error("Failed to load earlier messages: \(error, privacy: .public)")
+            }
+        }
     }
 
     /// The full image of an attachment of the open chat, which the chat keeps
