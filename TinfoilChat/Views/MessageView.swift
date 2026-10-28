@@ -182,7 +182,7 @@ struct MessageView: View {
                 label: Constants.MessageActions.tryAgainLabel,
                 systemImage: Constants.MessageActions.tryAgainSystemImage
             ) {
-                viewModel.regenerateLastResponse()
+                viewModel.retryLastResponse()
             }
         case nil:
             return nil

@@ -1200,23 +1200,29 @@ class ChatViewModel: ObservableObject {
         Task { do { try await session.cancel() } catch { session.report(error) } }
     }
 
+    /// Generates the chat's last reply again, or answers its last message
+    /// when it has no reply.
     func regenerateLastResponse() {
-        guard let session, canGenerateInCurrentChat else { return }
-        let messages = session.state.messages
-        guard let index = messages.lastIndex(where: { $0.role == .assistant }) ?? messages.indices.last else { return }
+        guard let session, canGenerateInCurrentChat, let index = session.state.messages.indices.last else { return }
         Task { await session.regenerate(at: index, options: turnOptions) }
     }
 
+    /// Continues a reply whose run failed from what it streamed. Anything
+    /// else is retried: a reply whose stream dropped may still be running.
     func continueLastResponse() {
         guard let session, canGenerateInCurrentChat else { return }
-        let messages = session.state.messages
-        guard let index = messages.lastIndex(where: { $0.role == .assistant }) else { return }
+        let state = session.state
+        guard state.status == .error, state.failedRun != nil, let index = state.messages.indices.last,
+              state.messages[index].role == .assistant else {
+            retryLastResponse()
+            return
+        }
         Task { await session.continueReply(at: index, options: turnOptions) }
     }
 
     /// Tries the failed reply again, or reconnects to a dropped one.
     func retryLastResponse() {
-        guard let session else { return }
+        guard let session, canGenerateInCurrentChat else { return }
         Task { await session.retry(options: turnOptions) }
     }
 
