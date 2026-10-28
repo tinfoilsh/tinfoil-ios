@@ -1251,8 +1251,39 @@ class ChatViewModel: ObservableObject {
     }
 
     func openSearchResult(_ chat: Chat) {
-        exitProject()
-        _ = selectChat(id: chat.id, isLocalOnly: chat.isLocalOnly)
+        openChatInItsContext(id: chat.id, projectId: chat.projectId, isLocalOnly: chat.isLocalOnly)
+    }
+
+    /// Opens a chat found outside the open context, as a favorite or a
+    /// search result: a project chat opens in its project, so it keeps the
+    /// project's documents and instructions, and any other chat leaves the
+    /// open project.
+    private func openChatInItsContext(id: String, projectId: String?, isLocalOnly: Bool) {
+        guard let session, PremiumProjectPolicy.includesChat(projectId: projectId, hasPremiumAccess: hasPremiumAccess) else { return }
+        guard let projectId else {
+            if activeProject != nil { leaveProjectContext() }
+            _ = selectChat(id: id, isLocalOnly: isLocalOnly)
+            return
+        }
+        guard activeProject?.id != projectId else {
+            _ = selectChat(id: id, isLocalOnly: false)
+            isViewingProjectChat = true
+            return
+        }
+        let shown = (session.opened, session.open.id, session.open.loadingId)
+        Task {
+            guard await loadActiveProject(projectId: projectId) else {
+                if let message = projectError {
+                    projectError = nil
+                    actionFailure = ChatActionFailure(title: "Couldn't Open Chat", message: message)
+                }
+                return
+            }
+            // A chat the user opened while the project loaded stays open.
+            guard self.session === session, (session.opened, session.open.id, session.open.loadingId) == shown else { return }
+            _ = selectChat(id: id, isLocalOnly: false)
+            isViewingProjectChat = true
+        }
     }
 
     /// Deletes a chat. Deleting the open chat opens the chat listed first in
