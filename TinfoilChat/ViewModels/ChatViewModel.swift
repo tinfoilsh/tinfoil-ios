@@ -1244,10 +1244,7 @@ class ChatViewModel: ObservableObject {
     }
 
     func openSummaryChat(id: String, projectId: String?, isLocalOnly: Bool) {
-        if let projectId, activeProject?.id != projectId, let project = projects.first(where: { $0.id == projectId }) {
-            activeProject = project
-        }
-        _ = selectChat(id: id, isLocalOnly: isLocalOnly)
+        openChatInItsContext(id: id, projectId: projectId, isLocalOnly: isLocalOnly)
     }
 
     func openSearchResult(_ chat: Chat) {
