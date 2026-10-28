@@ -81,9 +81,7 @@ struct ChatSidebar: View {
             source = viewModel.localSidebarSummaries
         }
         // Temporary and project chats are never listed in the root chat
-        // sidebar. Chats that failed to decrypt are hidden entirely; they
-        // stay in storage so re-decryption can recover them once the
-        // right key is active, at which point they reappear here.
+        // sidebar.
         return source.filter(isRootSidebarChat)
     }
 
@@ -517,7 +515,6 @@ struct ChatSidebar: View {
                 editingTitle: $editingTitle,
                 createdTimeString: chat.isBlankChat ? "" : relativeTimeString(from: chat.createdAt),
                 updatedTimeString: chat.isBlankChat ? "" : updatedTimeString(for: chat),
-                isSyncing: chat.pendingSave,
                 isGenerating: viewModel.isChatStreaming(chat.id),
                 isPinned: viewModel.isChatPinned(chat.id),
                 projectColor: chat.projectId.flatMap { projectColors[$0] },
@@ -690,7 +687,6 @@ struct ChatSidebar: View {
             editingTitle: $editingTitle,
             createdTimeString: relativeTimeString(from: chat.createdAt),
             updatedTimeString: updatedTimeString(for: summary),
-            isSyncing: chat.pendingSave,
             isGenerating: viewModel.isChatStreaming(chat.id),
             isPinned: true,
             showPinnedIndicator: false,
@@ -1191,7 +1187,6 @@ struct ChatListItem: View {
     @Binding var editingTitle: String
     let createdTimeString: String
     let updatedTimeString: String
-    var isSyncing: Bool = false
     var isGenerating: Bool = false
     var isPinned: Bool = false
     var showPinnedIndicator: Bool = true
@@ -1293,10 +1288,6 @@ struct ChatListItem: View {
                                 ProgressView()
                                     .scaleEffect(0.6)
                                     .frame(width: 12, height: 12)
-                            } else if isSyncing {
-                                Image(systemName: "icloud.and.arrow.up")
-                                    .font(.caption2)
-                                    .foregroundColor(.blue)
                             }
                         }
                     } else {
@@ -1362,8 +1353,6 @@ struct ChatListItem: View {
             components.append(Constants.ChatFork.sidebarSpinnerLabel)
         } else if isGenerating {
             components.append("Generating response")
-        } else if isSyncing {
-            components.append("Syncing with cloud")
         }
         return components.joined(separator: ", ")
     }
