@@ -166,6 +166,14 @@ enum Constants {
         static let maxWidthFraction: CGFloat = 0.6
     }
 
+    enum Streaming {
+        /// Minimum interval between redraws of the chat while a reply streams.
+        /// Redrawing on every token makes SwiftUI rebuild the transcript's
+        /// markdown each time, which stalls scrolling; 100 ms is not perceived
+        /// as a delay.
+        static let uiUpdateInterval: TimeInterval = 0.1
+    }
+
     enum StreamingBuffer {
         static let initialMultiplier: CGFloat = 50.0
         static let multiplierIncrement: CGFloat = 10.0

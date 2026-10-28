@@ -288,6 +288,14 @@ class ChatViewModel: ObservableObject {
     /// The open chat's rows, which keep their ids while a turn replaces its
     /// messages, as the chat table expects.
     private var rows = ChatRows()
+    /// A reply streams a token at a time, and each change of the session
+    /// redraws every view of the chat. Changes publish on the next turn of the
+    /// main actor, and while a reply streams at most every uiUpdateInterval; a
+    /// change to what the table lays out publishes at once.
+    private var publishEvaluation: Task<Void, Never>?
+    private var trailingPublish: Task<Void, Never>?
+    private var nextPublishAt = Date.distantPast
+    private var publishedLayout: SessionLayout?
     /// Whether the account changed since a session was opened for it.
     private var sessionUserId: String?? = nil
 
@@ -343,6 +351,11 @@ class ChatViewModel: ObservableObject {
         }
         session?.account.dispose()
         sessionCancellables = []
+        publishEvaluation?.cancel()
+        publishEvaluation = nil
+        trailingPublish?.cancel()
+        trailingPublish = nil
+        publishedLayout = nil
         rows = ChatRows()
         session = nil
         verification = VerificationInfo(isVerifying: true)
@@ -362,10 +375,7 @@ class ChatViewModel: ObservableObject {
         ProfileManager.shared.bind(account)
         KeyRegistry.shared.bind(account)
         await LinkMetadataService.shared.bind(account)
-        session.objectWillChange.sink { [weak self] _ in
-            self?.sessionGeneration += 1
-            self?.objectWillChange.send()
-        }.store(in: &sessionCancellables)
+        session.objectWillChange.sink { [weak self] _ in self?.sessionChanged() }.store(in: &sessionCancellables)
         account.$rateLimit.receive(on: RunLoop.main).sink { [weak self] limit in self?.rateLimit = limit.flatMap(RateLimitInfo.init) }.store(in: &sessionCancellables)
         account.$profile.receive(on: RunLoop.main).sink { [weak self] _ in self?.applyProfileSettings() }.store(in: &sessionCancellables)
         account.$session.receive(on: RunLoop.main).sink { [weak self] _ in self?.applySessionModels() }.store(in: &sessionCancellables)
@@ -606,6 +616,59 @@ class ChatViewModel: ObservableObject {
     private var isSafeguardGenerationBlocked: Bool {
         guard authManager?.isAuthenticated == true else { return false }
         return !safeguardsHaveLoaded || isCurrentChatSafeguardFlagged
+    }
+
+    // MARK: - Publishing the session
+
+    /// What the chat table lays out: a change to it publishes at once.
+    private struct SessionLayout: Equatable {
+        let chatId: String?
+        let loadingId: String?
+        let failedId: String?
+        let status: ChatState.Status
+        let messageCount: Int
+        let lastMessageId: String?
+
+        @MainActor init(_ session: ChatSession) {
+            chatId = session.open.id
+            loadingId = session.open.loadingId
+            failedId = session.open.failedId
+            status = session.state.status
+            messageCount = session.state.messages.count
+            lastMessageId = session.state.messages.last?.id
+        }
+    }
+
+    private func sessionChanged() {
+        // What the views show is rebuilt on its next read, while the views
+        // redraw when the change publishes.
+        sessionGeneration += 1
+        guard publishEvaluation == nil else { return }
+        publishEvaluation = Task { @MainActor [weak self] in
+            self?.publishEvaluation = nil
+            self?.publishSessionChange(force: false)
+        }
+    }
+
+    private func publishSessionChange(force: Bool) {
+        let layout = session.map(SessionLayout.init)
+        let now = Date()
+        if !force, session?.state.status == .streaming, layout == publishedLayout, now < nextPublishAt {
+            guard trailingPublish == nil else { return }
+            let delay = nextPublishAt.timeIntervalSince(now)
+            trailingPublish = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(delay * Double(NSEC_PER_SEC)))
+                guard !Task.isCancelled, let self else { return }
+                self.trailingPublish = nil
+                self.publishSessionChange(force: true)
+            }
+            return
+        }
+        trailingPublish?.cancel()
+        trailingPublish = nil
+        publishedLayout = layout
+        nextPublishAt = now.addingTimeInterval(Constants.Streaming.uiUpdateInterval)
+        objectWillChange.send()
     }
 
     // MARK: - The open chat as the views show it
