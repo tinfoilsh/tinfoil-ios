@@ -734,10 +734,8 @@ struct MessageView: View {
                                 .equatable()
                                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                            // Render any GenUI tool calls that came from a
-                            // session that didn't persist segments (e.g.
-                            // older saved messages or messages synced from
-                            // a client that doesn't emit segments).
+                            // Widgets of a reply with no segments to place
+                            // them in.
                             ForEach(message.toolCalls) { toolCall in
                                 genUIToolCallView(toolCall)
                             }

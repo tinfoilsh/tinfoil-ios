@@ -215,12 +215,9 @@ struct ChatListView: View {
                 }
             }
         }
-        // Keyed off the chat id: reassigning the same chat (e.g. the disk
-        // reload after a stream's backup completes) must not read as a chat
-        // switch, since this handler force-scrolls to the bottom. Timestamps
-        // are unsuitable as the key because createdAt loses sub-millisecond
-        // precision through the cloud sync ISO8601 round-trip, making
-        // reloaded copies of the same chat compare unequal.
+        // Keyed off the chat id: the open chat is rebuilt with every change
+        // to it, which must not read as a chat switch, since this handler
+        // force-scrolls to the bottom.
         .onChange(of: viewModel.currentChat?.id) { _, _ in
             userHasScrolled = false
             viewModel.isScrollInteractionActive = false
