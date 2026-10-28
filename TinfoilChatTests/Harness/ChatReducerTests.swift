@@ -68,7 +68,16 @@ struct ChatReducerTests {
             ]],
         ])
         #expect(state.snapshot.thread?.title == "Cats")
-        #expect(state.snapshot.thread?.titleState == .generated)
+        #expect(state.snapshot.thread?.titleState.value1 == .generated)
+    }
+
+    @Test func aTitleStateThisClientDoesNotKnowIsKept() throws {
+        let state = try Self.reduce([
+            Self.started(), Self.snapshot(),
+            ["type": "STATE_DELTA", "delta": [["op": "replace", "path": "/thread/titleState", "value": "translated"]]],
+        ])
+        #expect(state.snapshot.thread?.titleState == Components.Schemas.TitleState(raw: "translated"))
+        #expect(state.snapshot.thread?.titleState.value1 == nil)
     }
 
     @Test func aPatchTheProtocolDoesNotNameFailsTheStream() throws {
@@ -127,7 +136,7 @@ struct ChatReducerTests {
     @Test func textAfterASealedReplyStartsANewBlock() throws {
         let before = try Self.reduce([Self.started("r1"), Self.snapshot(), Self.text("first"), Self.finished("r1")])
         var sealed = before
-        sealed.messages[0].timeline?.append(TimelineBlock(id: "tool", _type: .toolCall, toolCallId: "tool", name: "web_search"))
+        sealed.messages[0].timeline?.append(TimelineBlock(id: "tool", _type: .named(.toolCall), toolCallId: "tool", name: "web_search"))
         let continued = try Self.reduce([Self.started("r2", messageId: "m"), Self.text("second")], into: sealed)
         #expect(Self.blocks(continued).map(\.content) == ["first", nil, "second"])
     }
@@ -204,8 +213,8 @@ struct ChatReducerTests {
     @Test func aMessagesSnapshotKeepsTheOlderPagesTheViewLoaded() throws {
         var view = ChatState()
         view.messages = [
-            HarnessMessage(id: "old", role: .user, createdAt: "", content: "old"),
-            HarnessMessage(id: "m1", role: .user, createdAt: "", content: "first"),
+            HarnessMessage(id: "old", role: .named(.user), createdAt: "", content: "old"),
+            HarnessMessage(id: "m1", role: .named(.user), createdAt: "", content: "first"),
         ]
         view.hasOlder = true
         let state = try Self.reduce([

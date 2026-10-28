@@ -40,7 +40,7 @@ struct KeyState: Equatable, Sendable {
                 bundleVersion: $0.bundleVersion, createdAt: $0.createdAt, updatedAt: $0.updatedAt
             )
         }
-        createdVia = wire.createdVia?.rawValue
+        createdVia = wire.createdVia.flatMap { $0.value1?.rawValue ?? $0.value2 }
         createdAt = wire.createdAt
         hasData = wire.hasData ?? false
     }

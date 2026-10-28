@@ -479,10 +479,14 @@ struct RateLimitInfo: Equatable {
     var tokensRemaining: Int? = nil
     var kind: Kind = .freeDaily
 
-    /// The quota the chat service reports, when it reports one.
+    /// The quota the chat service reports, when it reports one of a kind
+    /// this client knows.
     init?(_ limit: HarnessRateLimit) {
-        guard let kind = limit.kind else { return nil }
-        self.kind = kind == .hourly ? .hourly : .freeDaily
+        switch limit.kind?.value1 {
+        case .freeDaily: kind = .freeDaily
+        case .hourly: kind = .hourly
+        case ._empty_, nil: return nil
+        }
         maxRequests = limit.maxRequests ?? 0
         remaining = limit.remaining
         resetsAt = limit.resetsAt ?? ""

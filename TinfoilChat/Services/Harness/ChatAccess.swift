@@ -59,9 +59,9 @@ struct URLSessionControlPlane: ControlPlaneTransport {
 /// reports a free key's. A missing or zero maximum leaves that dimension
 /// unlimited.
 enum ControlPlaneQuota {
-    static func rateLimit(of value: Any?, kind: HarnessRateLimit.KindPayload) -> HarnessRateLimit {
+    static func rateLimit(of value: Any?, kind: RateLimitKind) -> HarnessRateLimit {
         let raw = value as? [String: Any] ?? [:]
-        var limit = HarnessRateLimit(kind: kind)
+        var limit = HarnessRateLimit(kind: .named(kind))
         if let maxRequests = raw["max_requests"] as? Int, maxRequests > 0, let remaining = raw["remaining"] as? Int {
             limit.maxRequests = maxRequests
             limit.remaining = remaining
@@ -86,7 +86,7 @@ actor ChatAccessCache {
     struct Credential: Sendable {
         let key: String
         let expiresAt: Date
-        let kind: HarnessRateLimit.KindPayload
+        let kind: RateLimitKind
     }
 
     private let controlPlane: ControlPlaneTransport
@@ -172,7 +172,7 @@ actor ChatAccessCache {
     private func mint(identity: String, generation: Int) async throws -> Credential {
         var answer = try await controlPlane.get(Constants.API.SessionToken.chatPath, identity: identity)
         try superseded(generation)
-        var kind = HarnessRateLimit.KindPayload.hourly
+        var kind = RateLimitKind.hourly
         // Only a missing subscription falls back to the free key: a capped or
         // suspended subscriber must not be downgraded around its limit.
         if answer.status == Constants.Harness.ChatAccess.subscriptionRequiredStatus {

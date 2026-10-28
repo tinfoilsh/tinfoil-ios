@@ -139,7 +139,7 @@ struct ChatSessionTests {
         #expect(session.open.id == threadId)
         #expect(session.open.model == "kimi-k3")
         #expect(session.state.messages.map(\.id) == ["u1", "a1"])
-        #expect(session.state.snapshot.thread?.titleState == .generated)
+        #expect(session.state.snapshot.thread?.titleState.value1 == .generated)
 
         var renamed = stored
         renamed["title"] = .string("Dogs")

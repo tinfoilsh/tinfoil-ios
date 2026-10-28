@@ -231,7 +231,7 @@ final class HarnessAccount: ObservableObject {
     /// reported, until the access is minted again with the control plane's
     /// count.
     func reportUsage(_ usage: Components.Schemas.RunMetadata.UsagePayload?) {
-        guard !disposed, var limit = rateLimit, limit.kind == .hourly, let usage else { return }
+        guard !disposed, var limit = rateLimit, limit.kind?.value1 == .hourly, let usage else { return }
         func spend(_ budget: Components.Schemas.TokenBudget?, _ tokens: Int) -> Components.Schemas.TokenBudget? {
             guard let budget, tokens > 0 else { return budget }
             return Components.Schemas.TokenBudget(max: budget.max, used: budget.used + tokens, remaining: max(0, budget.remaining - tokens))

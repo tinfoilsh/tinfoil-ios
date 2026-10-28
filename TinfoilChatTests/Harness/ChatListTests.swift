@@ -4,7 +4,7 @@ import Testing
 
 private func summary(_ id: String, title: String = "Chat", pinned: Bool = false, projectId: String? = nil, at: String = "2026-01-01T00:00:00Z") -> ThreadSummary {
     ThreadSummary(
-        id: id, title: title, titleState: .generated, createdAt: at, updatedAt: at, activityAt: at, projectId: projectId,
+        id: id, title: title, titleState: .named(.generated), createdAt: at, updatedAt: at, activityAt: at, projectId: projectId,
         model: "auto", webSearchEnabled: true, pinned: pinned, contextUsage: nil, activeRun: nil, messageCount: 1, flagged: nil
     )
 }
@@ -87,7 +87,7 @@ struct ChatListTests {
         try await list.refresh()
         let undo = list.preview("a", ThreadPatch(title: "New", pinned: true))
         #expect(list.cloudListed.first?.title == "New")
-        #expect(list.cloudListed.first?.titleState == .manual)
+        #expect(list.cloudListed.first?.titleState.value1 == .manual)
         #expect(list.pinnedListed.map(\.id) == ["a"])
         undo()
         #expect(list.cloudListed.first?.title == "Old")

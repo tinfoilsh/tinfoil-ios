@@ -64,7 +64,7 @@ enum LegacyDeviceChats {
     /// attachments the chat service converted them into, which keep their
     /// ids; the converted chat holds the copy models read.
     private static func originals(of row: [String: Any], in thread: StoredThread) -> Originals {
-        let images = Dictionary(thread.attachments.filter { $0.kind == .image }.map { ($0.id, $0.mimeType) }, uniquingKeysWith: { first, _ in first })
+        let images = Dictionary(thread.attachments.filter { $0.kind.value1 == .image }.map { ($0.id, $0.mimeType) }, uniquingKeysWith: { first, _ in first })
         var originals: Originals = [:]
         for message in row["messages"] as? [[String: Any]] ?? [] {
             for old in message["attachments"] as? [[String: Any]] ?? [] {

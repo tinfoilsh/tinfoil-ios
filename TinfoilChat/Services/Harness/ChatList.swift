@@ -305,7 +305,7 @@ final class ChatList: ObservableObject {
         guard patch.title != nil || patch.pinned != nil else { return {} }
         func changed(_ summary: ThreadSummary, titleOnly: Bool = false) -> ThreadSummary {
             var next = summary
-            if let title = patch.title { next.title = title; next.titleState = .manual }
+            if let title = patch.title { next.title = title; next.titleState = .named(.manual) }
             if !titleOnly, let pinned = patch.pinned { next.pinned = pinned }
             return next
         }

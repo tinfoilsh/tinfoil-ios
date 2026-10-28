@@ -47,7 +47,7 @@ final class ChatRows {
             }
         }
         bindReplacedIds(messages)
-        if running, let last = messages.last, last.role == .user {
+        if running, let last = messages.last, last.role.value1 == .user {
             let shownId = shownIds[last.id] ?? last.id
             if awaited?.shownId != shownId {
                 awaited = Awaited(shownId: shownId, content: last.content ?? "", replyRowId: UUID().uuidString.lowercased(), replyShownAt: Date())
@@ -93,7 +93,7 @@ final class ChatRows {
     /// the message sent, once the harness stores it under its own id, and the
     /// reply, which fills the row it was awaited in.
     private func bindReplacedIds(_ messages: [HarnessMessage]) {
-        guard let awaited, let userIndex = messages.lastIndex(where: { $0.role == .user }) else { return }
+        guard let awaited, let userIndex = messages.lastIndex(where: { $0.role.value1 == .user }) else { return }
         let user = messages[userIndex]
         if user.id != awaited.shownId, shownIds[user.id] == nil, (user.content ?? "") == awaited.content,
            !messages.contains(where: { (shownIds[$0.id] ?? $0.id) == awaited.shownId }) {
@@ -101,13 +101,13 @@ final class ChatRows {
         }
         guard (shownIds[user.id] ?? user.id) == awaited.shownId, messages.indices.contains(userIndex + 1) else { return }
         let reply = messages[userIndex + 1]
-        guard reply.role == .assistant else { return }
+        guard reply.role.value1 == .assistant else { return }
         if shownIds[reply.id] == nil { shownIds[reply.id] = awaited.replyRowId }
         self.awaited = nil
     }
 
     private func awaitsReply(_ messages: [HarnessMessage]) -> Bool {
-        guard let awaited, let last = messages.last, last.role == .user else { return false }
+        guard let awaited, let last = messages.last, last.role.value1 == .user else { return false }
         return (shownIds[last.id] ?? last.id) == awaited.shownId
     }
 

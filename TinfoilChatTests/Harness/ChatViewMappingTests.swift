@@ -110,6 +110,42 @@ struct ChatViewMappingTests {
         #expect(shown.attachments.first?.processingState == .completed)
     }
 
+    @Test func aBlockOfATypeThisClientDoesNotKnowIsLeftOut() throws {
+        let wire = try Self.reply([
+            ["id": "x", "type": "diagram", "content": "<svg/>"],
+            ["id": "c", "type": "content", "content": "Done."],
+        ])
+        let shown = ChatViewMapping.message(wire)
+        #expect(shown.content == "Done.")
+        #expect(shown.segments == [.text("Done.")])
+    }
+
+    @Test func aToolStatusThisClientDoesNotKnowShowsAsCompleted() throws {
+        let wire = try Self.reply([
+            ["id": "s", "type": "tool_call", "toolCallId": "s", "name": "web_search", "arguments": "{}", "complete": true,
+             "display": ["query": "cats", "status": "cached", "sources": []]],
+        ])
+        #expect(ChatViewMapping.message(wire, streaming: true).webSearches?.first?.status == .completed)
+    }
+
+    @Test func anAttachmentOfAKindThisClientDoesNotKnowShowsAsAFile() throws {
+        let wire = try Self.message([
+            "id": "u", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Watch",
+            "attachments": [["id": "a", "kind": "video", "fileName": "cat.mp4", "mimeType": "video/mp4", "size": 12]],
+        ])
+        #expect(ChatViewMapping.message(wire).attachments.first?.type == .document)
+    }
+
+    @Test func aTitleOfAStateThisClientDoesNotKnowShowsAsItIs() throws {
+        let summary = try ThreadSummary(jsonObject: [
+            "id": "t", "title": "New Chat", "titleState": "translated", "activityAt": "2026-01-01T00:00:00Z",
+            "model": "auto", "webSearchEnabled": true, "pinned": false, "messageCount": 2,
+        ])
+        let chat = ChatViewMapping.chat(summary, local: false)
+        #expect(chat.title == "New Chat")
+        #expect(chat.titleState == .manual)
+    }
+
     @Test func aChatWaitingForItsTitleShowsTheDefaultOne() throws {
         var summary = try ThreadSummary(jsonObject: [
             "id": "t", "title": "New Chat", "titleState": "placeholder", "activityAt": "2026-01-01T00:00:00Z",
@@ -127,7 +163,7 @@ struct ChatViewMappingTests {
         #expect(chat.contextUsage == ContextUsage(percentage: 10, usedTokens: 10, limitTokens: 100))
         #expect(chat.activeRun?.runId == "r")
         summary.title = "Cats"
-        summary.titleState = .generated
+        summary.titleState = .named(.generated)
         chat = ChatViewMapping.chat(summary, local: true)
         #expect(chat.title == "Cats")
         #expect(chat.isLocalOnly)

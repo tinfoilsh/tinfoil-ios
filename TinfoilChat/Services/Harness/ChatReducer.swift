@@ -100,7 +100,7 @@ enum ChatReducer {
             ) { blocks in
                 blocks.append(TimelineBlock(
                     id: start.toolCallId,
-                    _type: .toolCall,
+                    _type: .named(.toolCall),
                     toolCallId: start.toolCallId,
                     name: start.toolCallName,
                     arguments: "",
@@ -198,8 +198,7 @@ enum ChatReducer {
                 case "/thread/title":
                     next.thread?.title = replace.value
                 case "/thread/titleState":
-                    guard let titleState = Components.Schemas.TitleState(rawValue: replace.value) else { throw invalidPatch() }
-                    next.thread?.titleState = titleState
+                    next.thread?.titleState = Components.Schemas.TitleState(raw: replace.value)
                 default:
                     throw invalidPatch()
                 }
@@ -266,7 +265,7 @@ enum ChatReducer {
         } else {
             var timeline: [TimelineBlock] = []
             change(&timeline)
-            messages.append(HarnessMessage(id: id, role: .assistant, createdAt: createdAt ?? "", timeline: timeline))
+            messages.append(HarnessMessage(id: id, role: .named(.assistant), createdAt: createdAt ?? "", timeline: timeline))
         }
         return messages
     }
@@ -279,7 +278,7 @@ enum ChatReducer {
     ) -> [HarnessMessage]? {
         for (index, message) in messages.enumerated() {
             guard var timeline = message.timeline,
-                  let at = timeline.firstIndex(where: { $0._type == .toolCall && ($0.toolCallId ?? $0.id) == toolCallId }) else {
+                  let at = timeline.firstIndex(where: { $0._type.value1 == .toolCall && ($0.toolCallId ?? $0.id) == toolCallId }) else {
                 continue
             }
             change(&timeline[at])
@@ -298,23 +297,23 @@ enum ChatReducer {
         timestamp: String?,
         thinking: Bool
     ) -> [HarnessMessage] {
-        let type: TimelineBlock._TypePayload = thinking ? .thinking : .content
+        let type: TimelineBlock._TypePayload.Value1Payload = thinking ? .thinking : .content
         let sealed = state.sealed[id] ?? 0
         let at = millis(of: timestamp)
         return withReply(state.messages, id: id, createdAt: timestamp) { blocks in
             // Reasoning that arrives after the reply's text began is the tail
             // of the reasoning before that text, as the harness keeps it.
             if thinking, blocks.count - 2 >= sealed, blocks.count >= 2,
-               blocks[blocks.count - 1]._type == .content, blocks[blocks.count - 2]._type == .thinking {
+               blocks[blocks.count - 1]._type.value1 == .content, blocks[blocks.count - 2]._type.value1 == .thinking {
                 blocks[blocks.count - 2].content = (blocks[blocks.count - 2].content ?? "") + delta
                 return
             }
-            if let last = blocks.last, last._type == type, blocks.count > sealed {
+            if let last = blocks.last, last._type.value1 == type, blocks.count > sealed {
                 blocks[blocks.count - 1].content = (last.content ?? "") + delta
                 if thinking { thoughtUntil(&blocks[blocks.count - 1], at) }
                 return
             }
-            var block = TimelineBlock(id: "\(id)_\(type.rawValue)_\(blocks.count)", _type: type, content: delta)
+            var block = TimelineBlock(id: "\(id)_\(type.rawValue)_\(blocks.count)", _type: .named(type), content: delta)
             if thinking, let at {
                 block.startedAt = at
                 block.endedAt = at
@@ -335,7 +334,7 @@ enum ChatReducer {
     /// The leading blocks of a continued reply that new text does not extend.
     private static func sealOf(_ messages: [HarnessMessage], _ id: String) -> [String: Int] {
         let blocks = messages.first { $0.id == id }?.timeline ?? []
-        return [id: blocks.count - (blocks.last?._type == .content ? 1 : 0)]
+        return [id: blocks.count - (blocks.last?._type.value1 == .content ? 1 : 0)]
     }
 
     private static func withoutQueued(_ queue: [QueueItem], _ runId: String?) -> [QueueItem] {

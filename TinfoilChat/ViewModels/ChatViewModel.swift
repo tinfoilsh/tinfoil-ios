@@ -706,7 +706,7 @@ class ChatViewModel: ObservableObject {
             failedId = session.open.failedId
             failed = session.open.failure != nil
             firstTurn = session.isNewChatsFirstTurn
-            titled = session.state.snapshot.thread?.titleState == .generated
+            titled = session.state.snapshot.thread?.titleState.value1 == .generated
             status = session.state.status
             messageCount = session.state.messages.count
             lastMessageId = session.state.messages.last?.id
@@ -790,8 +790,8 @@ class ChatViewModel: ObservableObject {
     /// spaced out, when haptics are on.
     private func tickStreamingHaptic(at now: Date) {
         guard SettingsManager.shared.hapticFeedbackEnabled, let state = session?.state, state.status == .streaming,
-              let reply = state.messages.last, reply.role == .assistant else { return }
-        let length = reply.timeline?.reduce(0) { $1._type == .content ? $0 + ($1.content?.utf8.count ?? 0) : $0 } ?? 0
+              let reply = state.messages.last, reply.role.value1 == .assistant else { return }
+        let length = reply.timeline?.reduce(0) { $1._type.value1 == .content ? $0 + ($1.content?.utf8.count ?? 0) : $0 } ?? 0
         var tick = hapticReply?.id == reply.id ? hapticReply! : (id: reply.id, ticks: 0, lastAt: .distantPast, length: 0)
         defer { hapticReply = tick }
         guard length > tick.length else { return }
@@ -927,14 +927,14 @@ class ChatViewModel: ObservableObject {
     /// The latest summary of the reasoning the reply is thinking through.
     var thinkingSummary: String {
         guard let state = session?.state, state.status == .streaming,
-              let last = state.messages.last, last.role == .assistant,
-              let block = last.timeline?.last, block._type == .thinking else { return "" }
+              let last = state.messages.last, last.role.value1 == .assistant,
+              let block = last.timeline?.last, block._type.value1 == .thinking else { return "" }
         return state.summaries[block.id] ?? ""
     }
 
     var webSearchSummary: String {
         guard let state = session?.state, state.status == .streaming,
-              let last = state.messages.last, let block = last.timeline?.last, block._type == .toolCall else { return "" }
+              let last = state.messages.last, let block = last.timeline?.last, block._type.value1 == .toolCall else { return "" }
         if block.name == "web_search", let query = block.display?.query { return "Searching the web: \(query)" }
         if block.name == "web_fetch", let url = block.display?.url ?? block.display?.sources.first?.url { return "Reading \(url)" }
         return ""
@@ -1518,7 +1518,7 @@ class ChatViewModel: ObservableObject {
         guard let session, canGenerateInCurrentChat else { return }
         let state = session.state
         let failed = (state.status == .error && state.failedRun != nil) || session.hasUnfinishedReply
-        guard failed, let index = state.messages.indices.last, state.messages[index].role == .assistant else {
+        guard failed, let index = state.messages.indices.last, state.messages[index].role.value1 == .assistant else {
             retryLastResponse()
             return
         }

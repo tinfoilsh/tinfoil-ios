@@ -240,53 +240,149 @@ extension Components {
         ///
         ///
         /// - Remark: Generated from `#/components/schemas/ErrorAction`.
-        internal enum ErrorAction: String, Codable, Hashable, Sendable, CaseIterable {
-            case reauthenticate = "reauthenticate"
-            case reload = "reload"
-            case retry = "retry"
-            case wait = "wait"
-            case unlock = "unlock"
-            case revise = "revise"
-            case stop = "stop"
+        internal struct ErrorAction: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ErrorAction/value1`.
+            internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                case reauthenticate = "reauthenticate"
+                case reload = "reload"
+                case retry = "retry"
+                case wait = "wait"
+                case unlock = "unlock"
+                case revise = "revise"
+                case stop = "stop"
+            }
+            /// - Remark: Generated from `#/components/schemas/ErrorAction/value1`.
+            internal var value1: Components.Schemas.ErrorAction.Value1Payload?
+            /// - Remark: Generated from `#/components/schemas/ErrorAction/value2`.
+            internal var value2: Swift.String?
+            /// Creates a new `ErrorAction`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            ///   - value2:
+            internal init(
+                value1: Components.Schemas.ErrorAction.Value1Payload? = nil,
+                value2: Swift.String? = nil
+            ) {
+                self.value1 = value1
+                self.value2 = value2
+            }
+            internal init(from decoder: any Swift.Decoder) throws {
+                var errors: [any Swift.Error] = []
+                do {
+                    self.value1 = try decoder.decodeFromSingleValueContainer()
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value2 = try decoder.decodeFromSingleValueContainer()
+                } catch {
+                    errors.append(error)
+                }
+                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                    [
+                        self.value1,
+                        self.value2
+                    ],
+                    type: Self.self,
+                    codingPath: decoder.codingPath,
+                    errors: errors
+                )
+            }
+            internal func encode(to encoder: any Swift.Encoder) throws {
+                try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                    self.value1,
+                    self.value2
+                ])
+            }
         }
+        /// A client handles a code it does not know by the error's action.
+        ///
         /// - Remark: Generated from `#/components/schemas/ErrorCode`.
-        internal enum ErrorCode: String, Codable, Hashable, Sendable, CaseIterable {
-            case alreadyApplied = "ALREADY_APPLIED"
-            case archiveTooLarge = "ARCHIVE_TOO_LARGE"
-            case attachmentTooLarge = "ATTACHMENT_TOO_LARGE"
-            case attachmentUnsupported = "ATTACHMENT_UNSUPPORTED"
-            case attachmentsUnavailable = "ATTACHMENTS_UNAVAILABLE"
-            case badRequest = "BAD_REQUEST"
-            case chatFlagged = "CHAT_FLAGGED"
-            case contextTooLarge = "CONTEXT_TOO_LARGE"
-            case credentialRequired = "CREDENTIAL_REQUIRED"
-            case importInvalid = "IMPORT_INVALID"
-            case importTooLarge = "IMPORT_TOO_LARGE"
-            case keyMismatch = "KEY_MISMATCH"
-            case keyRequired = "KEY_REQUIRED"
-            case maxTurns = "MAX_TURNS"
-            case missingAttachment = "MISSING_ATTACHMENT"
-            case modelUnavailable = "MODEL_UNAVAILABLE"
-            case payloadTooLarge = "PAYLOAD_TOO_LARGE"
-            case projectsRequireCloud = "PROJECTS_REQUIRE_CLOUD"
-            case queueFull = "QUEUE_FULL"
-            case quotaExhausted = "QUOTA_EXHAUSTED"
-            case rateLimited = "RATE_LIMITED"
-            case recordUnsupported = "RECORD_UNSUPPORTED"
-            case requestTimeout = "REQUEST_TIMEOUT"
-            case revisionConflict = "REVISION_CONFLICT"
-            case runInFlight = "RUN_IN_FLIGHT"
-            case runLogFull = "RUN_LOG_FULL"
-            case runNotFound = "RUN_NOT_FOUND"
-            case searchIndexFailed = "SEARCH_INDEX_FAILED"
-            case syncOutcomeUnknown = "SYNC_OUTCOME_UNKNOWN"
-            case tempSpaceBusy = "TEMP_SPACE_BUSY"
-            case threadExists = "THREAD_EXISTS"
-            case threadNotFound = "THREAD_NOT_FOUND"
-            case threadTooLarge = "THREAD_TOO_LARGE"
-            case toolUnavailable = "TOOL_UNAVAILABLE"
-            case unauthenticated = "UNAUTHENTICATED"
-            case upstreamRefused = "UPSTREAM_REFUSED"
+        internal struct ErrorCode: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ErrorCode/value1`.
+            internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                case alreadyApplied = "ALREADY_APPLIED"
+                case archiveTooLarge = "ARCHIVE_TOO_LARGE"
+                case attachmentTooLarge = "ATTACHMENT_TOO_LARGE"
+                case attachmentUnsupported = "ATTACHMENT_UNSUPPORTED"
+                case attachmentsUnavailable = "ATTACHMENTS_UNAVAILABLE"
+                case badRequest = "BAD_REQUEST"
+                case chatFlagged = "CHAT_FLAGGED"
+                case contextTooLarge = "CONTEXT_TOO_LARGE"
+                case credentialRequired = "CREDENTIAL_REQUIRED"
+                case importInvalid = "IMPORT_INVALID"
+                case importTooLarge = "IMPORT_TOO_LARGE"
+                case keyMismatch = "KEY_MISMATCH"
+                case keyRequired = "KEY_REQUIRED"
+                case maxTurns = "MAX_TURNS"
+                case missingAttachment = "MISSING_ATTACHMENT"
+                case modelUnavailable = "MODEL_UNAVAILABLE"
+                case payloadTooLarge = "PAYLOAD_TOO_LARGE"
+                case projectsRequireCloud = "PROJECTS_REQUIRE_CLOUD"
+                case queueFull = "QUEUE_FULL"
+                case quotaExhausted = "QUOTA_EXHAUSTED"
+                case rateLimited = "RATE_LIMITED"
+                case recordUnsupported = "RECORD_UNSUPPORTED"
+                case requestTimeout = "REQUEST_TIMEOUT"
+                case revisionConflict = "REVISION_CONFLICT"
+                case runInFlight = "RUN_IN_FLIGHT"
+                case runLogFull = "RUN_LOG_FULL"
+                case runNotFound = "RUN_NOT_FOUND"
+                case searchIndexFailed = "SEARCH_INDEX_FAILED"
+                case syncOutcomeUnknown = "SYNC_OUTCOME_UNKNOWN"
+                case tempSpaceBusy = "TEMP_SPACE_BUSY"
+                case threadExists = "THREAD_EXISTS"
+                case threadNotFound = "THREAD_NOT_FOUND"
+                case threadTooLarge = "THREAD_TOO_LARGE"
+                case toolUnavailable = "TOOL_UNAVAILABLE"
+                case unauthenticated = "UNAUTHENTICATED"
+                case upstreamRefused = "UPSTREAM_REFUSED"
+            }
+            /// - Remark: Generated from `#/components/schemas/ErrorCode/value1`.
+            internal var value1: Components.Schemas.ErrorCode.Value1Payload?
+            /// - Remark: Generated from `#/components/schemas/ErrorCode/value2`.
+            internal var value2: Swift.String?
+            /// Creates a new `ErrorCode`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            ///   - value2:
+            internal init(
+                value1: Components.Schemas.ErrorCode.Value1Payload? = nil,
+                value2: Swift.String? = nil
+            ) {
+                self.value1 = value1
+                self.value2 = value2
+            }
+            internal init(from decoder: any Swift.Decoder) throws {
+                var errors: [any Swift.Error] = []
+                do {
+                    self.value1 = try decoder.decodeFromSingleValueContainer()
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value2 = try decoder.decodeFromSingleValueContainer()
+                } catch {
+                    errors.append(error)
+                }
+                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                    [
+                        self.value1,
+                        self.value2
+                    ],
+                    type: Self.self,
+                    codingPath: decoder.codingPath,
+                    errors: errors
+                )
+            }
+            internal func encode(to encoder: any Swift.Encoder) throws {
+                try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                    self.value1,
+                    self.value2
+                ])
+            }
         }
         /// - Remark: Generated from `#/components/schemas/Session`.
         internal struct Session: Codable, Hashable, Sendable {
@@ -517,11 +613,62 @@ extension Components {
             internal var description: Swift.String
             /// - Remark: Generated from `#/components/schemas/SessionModel/BadgesPayload`.
             internal struct BadgesPayloadPayload: Codable, Hashable, Sendable {
+                /// A client shows no badge of a kind it does not know.
+                ///
                 /// - Remark: Generated from `#/components/schemas/SessionModel/BadgesPayload/kind`.
-                internal enum KindPayload: String, Codable, Hashable, Sendable, CaseIterable {
-                    case experimental = "experimental"
-                    case deprecated = "deprecated"
+                internal struct KindPayload: Codable, Hashable, Sendable {
+                    /// - Remark: Generated from `#/components/schemas/SessionModel/BadgesPayload/kind/value1`.
+                    internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case experimental = "experimental"
+                        case deprecated = "deprecated"
+                    }
+                    /// - Remark: Generated from `#/components/schemas/SessionModel/BadgesPayload/kind/value1`.
+                    internal var value1: Components.Schemas.SessionModel.BadgesPayloadPayload.KindPayload.Value1Payload?
+                    /// - Remark: Generated from `#/components/schemas/SessionModel/BadgesPayload/kind/value2`.
+                    internal var value2: Swift.String?
+                    /// Creates a new `KindPayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - value1:
+                    ///   - value2:
+                    internal init(
+                        value1: Components.Schemas.SessionModel.BadgesPayloadPayload.KindPayload.Value1Payload? = nil,
+                        value2: Swift.String? = nil
+                    ) {
+                        self.value1 = value1
+                        self.value2 = value2
+                    }
+                    internal init(from decoder: any Swift.Decoder) throws {
+                        var errors: [any Swift.Error] = []
+                        do {
+                            self.value1 = try decoder.decodeFromSingleValueContainer()
+                        } catch {
+                            errors.append(error)
+                        }
+                        do {
+                            self.value2 = try decoder.decodeFromSingleValueContainer()
+                        } catch {
+                            errors.append(error)
+                        }
+                        try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                            [
+                                self.value1,
+                                self.value2
+                            ],
+                            type: Self.self,
+                            codingPath: decoder.codingPath,
+                            errors: errors
+                        )
+                    }
+                    internal func encode(to encoder: any Swift.Encoder) throws {
+                        try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                            self.value1,
+                            self.value2
+                        ])
+                    }
                 }
+                /// A client shows no badge of a kind it does not know.
+                ///
                 /// - Remark: Generated from `#/components/schemas/SessionModel/BadgesPayload/kind`.
                 internal var kind: Components.Schemas.SessionModel.BadgesPayloadPayload.KindPayload
                 /// - Remark: Generated from `#/components/schemas/SessionModel/BadgesPayload/label`.
@@ -531,7 +678,7 @@ extension Components {
                 /// Creates a new `BadgesPayloadPayload`.
                 ///
                 /// - Parameters:
-                ///   - kind:
+                ///   - kind: A client shows no badge of a kind it does not know.
                 ///   - label:
                 ///   - tooltip:
                 internal init(
@@ -754,12 +901,63 @@ extension Components {
         ///
         /// - Remark: Generated from `#/components/schemas/RateLimit`.
         internal struct RateLimit: Codable, Hashable, Sendable {
+            /// A client shows no quota of a kind it does not know.
+            ///
             /// - Remark: Generated from `#/components/schemas/RateLimit/kind`.
-            internal enum KindPayload: String, Codable, Hashable, Sendable, CaseIterable {
-                case freeDaily = "free_daily"
-                case hourly = "hourly"
-                case _empty_ = ""
+            internal struct KindPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/RateLimit/kind/value1`.
+                internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case freeDaily = "free_daily"
+                    case hourly = "hourly"
+                    case _empty_ = ""
+                }
+                /// - Remark: Generated from `#/components/schemas/RateLimit/kind/value1`.
+                internal var value1: Components.Schemas.RateLimit.KindPayload.Value1Payload?
+                /// - Remark: Generated from `#/components/schemas/RateLimit/kind/value2`.
+                internal var value2: Swift.String?
+                /// Creates a new `KindPayload`.
+                ///
+                /// - Parameters:
+                ///   - value1:
+                ///   - value2:
+                internal init(
+                    value1: Components.Schemas.RateLimit.KindPayload.Value1Payload? = nil,
+                    value2: Swift.String? = nil
+                ) {
+                    self.value1 = value1
+                    self.value2 = value2
+                }
+                internal init(from decoder: any Swift.Decoder) throws {
+                    var errors: [any Swift.Error] = []
+                    do {
+                        self.value1 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    do {
+                        self.value2 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                        [
+                            self.value1,
+                            self.value2
+                        ],
+                        type: Self.self,
+                        codingPath: decoder.codingPath,
+                        errors: errors
+                    )
+                }
+                internal func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                        self.value1,
+                        self.value2
+                    ])
+                }
             }
+            /// A client shows no quota of a kind it does not know.
+            ///
             /// - Remark: Generated from `#/components/schemas/RateLimit/kind`.
             internal var kind: Components.Schemas.RateLimit.KindPayload?
             /// - Remark: Generated from `#/components/schemas/RateLimit/maxRequests`.
@@ -775,7 +973,7 @@ extension Components {
             /// Creates a new `RateLimit`.
             ///
             /// - Parameters:
-            ///   - kind:
+            ///   - kind: A client shows no quota of a kind it does not know.
             ///   - maxRequests:
             ///   - remaining:
             ///   - resetsAt:
@@ -2554,11 +2752,60 @@ extension Components {
                 case annotations
             }
         }
+        /// How a chat came by its title. A client shows the title of a state it does not know as it is.
+        ///
         /// - Remark: Generated from `#/components/schemas/TitleState`.
-        internal enum TitleState: String, Codable, Hashable, Sendable, CaseIterable {
-            case placeholder = "placeholder"
-            case generated = "generated"
-            case manual = "manual"
+        internal struct TitleState: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/TitleState/value1`.
+            internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                case placeholder = "placeholder"
+                case generated = "generated"
+                case manual = "manual"
+            }
+            /// - Remark: Generated from `#/components/schemas/TitleState/value1`.
+            internal var value1: Components.Schemas.TitleState.Value1Payload?
+            /// - Remark: Generated from `#/components/schemas/TitleState/value2`.
+            internal var value2: Swift.String?
+            /// Creates a new `TitleState`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            ///   - value2:
+            internal init(
+                value1: Components.Schemas.TitleState.Value1Payload? = nil,
+                value2: Swift.String? = nil
+            ) {
+                self.value1 = value1
+                self.value2 = value2
+            }
+            internal init(from decoder: any Swift.Decoder) throws {
+                var errors: [any Swift.Error] = []
+                do {
+                    self.value1 = try decoder.decodeFromSingleValueContainer()
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value2 = try decoder.decodeFromSingleValueContainer()
+                } catch {
+                    errors.append(error)
+                }
+                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                    [
+                        self.value1,
+                        self.value2
+                    ],
+                    type: Self.self,
+                    codingPath: decoder.codingPath,
+                    errors: errors
+                )
+            }
+            internal func encode(to encoder: any Swift.Encoder) throws {
+                try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                    self.value1,
+                    self.value2
+                ])
+            }
         }
         /// How much of the model's window the chat's last prompt filled.
         ///
@@ -3048,10 +3295,59 @@ extension Components {
                 case attachments
             }
         }
+        /// Who wrote a message. A client leaves out a message whose role it does not know.
+        ///
         /// - Remark: Generated from `#/components/schemas/Role`.
-        internal enum Role: String, Codable, Hashable, Sendable, CaseIterable {
-            case user = "user"
-            case assistant = "assistant"
+        internal struct Role: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/Role/value1`.
+            internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                case user = "user"
+                case assistant = "assistant"
+            }
+            /// - Remark: Generated from `#/components/schemas/Role/value1`.
+            internal var value1: Components.Schemas.Role.Value1Payload?
+            /// - Remark: Generated from `#/components/schemas/Role/value2`.
+            internal var value2: Swift.String?
+            /// Creates a new `Role`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            ///   - value2:
+            internal init(
+                value1: Components.Schemas.Role.Value1Payload? = nil,
+                value2: Swift.String? = nil
+            ) {
+                self.value1 = value1
+                self.value2 = value2
+            }
+            internal init(from decoder: any Swift.Decoder) throws {
+                var errors: [any Swift.Error] = []
+                do {
+                    self.value1 = try decoder.decodeFromSingleValueContainer()
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value2 = try decoder.decodeFromSingleValueContainer()
+                } catch {
+                    errors.append(error)
+                }
+                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                    [
+                        self.value1,
+                        self.value2
+                    ],
+                    type: Self.self,
+                    codingPath: decoder.codingPath,
+                    errors: errors
+                )
+            }
+            internal func encode(to encoder: any Swift.Encoder) throws {
+                try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                    self.value1,
+                    self.value2
+                ])
+            }
         }
         /// - Remark: Generated from `#/components/schemas/MessageUsage`.
         internal struct MessageUsage: Codable, Hashable, Sendable {
@@ -3082,12 +3378,63 @@ extension Components {
         internal struct Block: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/Block/id`.
             internal var id: Swift.String
+            /// A client leaves out a block of a type it does not know.
+            ///
             /// - Remark: Generated from `#/components/schemas/Block/type`.
-            internal enum _TypePayload: String, Codable, Hashable, Sendable, CaseIterable {
-                case content = "content"
-                case thinking = "thinking"
-                case toolCall = "tool_call"
+            internal struct _TypePayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/Block/type/value1`.
+                internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case content = "content"
+                    case thinking = "thinking"
+                    case toolCall = "tool_call"
+                }
+                /// - Remark: Generated from `#/components/schemas/Block/type/value1`.
+                internal var value1: Components.Schemas.Block._TypePayload.Value1Payload?
+                /// - Remark: Generated from `#/components/schemas/Block/type/value2`.
+                internal var value2: Swift.String?
+                /// Creates a new `_TypePayload`.
+                ///
+                /// - Parameters:
+                ///   - value1:
+                ///   - value2:
+                internal init(
+                    value1: Components.Schemas.Block._TypePayload.Value1Payload? = nil,
+                    value2: Swift.String? = nil
+                ) {
+                    self.value1 = value1
+                    self.value2 = value2
+                }
+                internal init(from decoder: any Swift.Decoder) throws {
+                    var errors: [any Swift.Error] = []
+                    do {
+                        self.value1 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    do {
+                        self.value2 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                        [
+                            self.value1,
+                            self.value2
+                        ],
+                        type: Self.self,
+                        codingPath: decoder.codingPath,
+                        errors: errors
+                    )
+                }
+                internal func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                        self.value1,
+                        self.value2
+                    ])
+                }
             }
+            /// A client leaves out a block of a type it does not know.
+            ///
             /// - Remark: Generated from `#/components/schemas/Block/type`.
             internal var _type: Components.Schemas.Block._TypePayload
             /// - Remark: Generated from `#/components/schemas/Block/content`.
@@ -3130,7 +3477,7 @@ extension Components {
             ///
             /// - Parameters:
             ///   - id:
-            ///   - _type:
+            ///   - _type: A client leaves out a block of a type it does not know.
             ///   - content:
             ///   - toolCallId:
             ///   - name:
@@ -3207,12 +3554,63 @@ extension Components {
             internal var query: Swift.String?
             /// - Remark: Generated from `#/components/schemas/ToolDisplay/url`.
             internal var url: Swift.String?
+            /// A client shows a status it does not know as completed.
+            ///
             /// - Remark: Generated from `#/components/schemas/ToolDisplay/status`.
-            internal enum StatusPayload: String, Codable, Hashable, Sendable, CaseIterable {
-                case running = "running"
-                case completed = "completed"
-                case failed = "failed"
+            internal struct StatusPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/ToolDisplay/status/value1`.
+                internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case running = "running"
+                    case completed = "completed"
+                    case failed = "failed"
+                }
+                /// - Remark: Generated from `#/components/schemas/ToolDisplay/status/value1`.
+                internal var value1: Components.Schemas.ToolDisplay.StatusPayload.Value1Payload?
+                /// - Remark: Generated from `#/components/schemas/ToolDisplay/status/value2`.
+                internal var value2: Swift.String?
+                /// Creates a new `StatusPayload`.
+                ///
+                /// - Parameters:
+                ///   - value1:
+                ///   - value2:
+                internal init(
+                    value1: Components.Schemas.ToolDisplay.StatusPayload.Value1Payload? = nil,
+                    value2: Swift.String? = nil
+                ) {
+                    self.value1 = value1
+                    self.value2 = value2
+                }
+                internal init(from decoder: any Swift.Decoder) throws {
+                    var errors: [any Swift.Error] = []
+                    do {
+                        self.value1 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    do {
+                        self.value2 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                        [
+                            self.value1,
+                            self.value2
+                        ],
+                        type: Self.self,
+                        codingPath: decoder.codingPath,
+                        errors: errors
+                    )
+                }
+                internal func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                        self.value1,
+                        self.value2
+                    ])
+                }
             }
+            /// A client shows a status it does not know as completed.
+            ///
             /// - Remark: Generated from `#/components/schemas/ToolDisplay/status`.
             internal var status: Components.Schemas.ToolDisplay.StatusPayload
             /// - Remark: Generated from `#/components/schemas/ToolDisplay/SourcesPayload`.
@@ -3253,7 +3651,7 @@ extension Components {
             /// - Parameters:
             ///   - query:
             ///   - url:
-            ///   - status:
+            ///   - status: A client shows a status it does not know as completed.
             ///   - sources:
             internal init(
                 query: Swift.String? = nil,
@@ -3333,11 +3731,60 @@ extension Components {
                 case urlCitation = "url_citation"
             }
         }
+        /// What an attachment holds. A client shows an attachment of a kind it does not know as a file.
+        ///
         /// - Remark: Generated from `#/components/schemas/AttachmentKind`.
-        internal enum AttachmentKind: String, Codable, Hashable, Sendable, CaseIterable {
-            case image = "image"
-            case document = "document"
-            case audio = "audio"
+        internal struct AttachmentKind: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/AttachmentKind/value1`.
+            internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                case image = "image"
+                case document = "document"
+                case audio = "audio"
+            }
+            /// - Remark: Generated from `#/components/schemas/AttachmentKind/value1`.
+            internal var value1: Components.Schemas.AttachmentKind.Value1Payload?
+            /// - Remark: Generated from `#/components/schemas/AttachmentKind/value2`.
+            internal var value2: Swift.String?
+            /// Creates a new `AttachmentKind`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            ///   - value2:
+            internal init(
+                value1: Components.Schemas.AttachmentKind.Value1Payload? = nil,
+                value2: Swift.String? = nil
+            ) {
+                self.value1 = value1
+                self.value2 = value2
+            }
+            internal init(from decoder: any Swift.Decoder) throws {
+                var errors: [any Swift.Error] = []
+                do {
+                    self.value1 = try decoder.decodeFromSingleValueContainer()
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value2 = try decoder.decodeFromSingleValueContainer()
+                } catch {
+                    errors.append(error)
+                }
+                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                    [
+                        self.value1,
+                        self.value2
+                    ],
+                    type: Self.self,
+                    codingPath: decoder.codingPath,
+                    errors: errors
+                )
+            }
+            internal func encode(to encoder: any Swift.Encoder) throws {
+                try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                    self.value1,
+                    self.value2
+                ])
+            }
         }
         /// An attachment's metadata, thumbnail and any text it holds inline.
         ///
@@ -4381,21 +4828,123 @@ extension Components {
         ///
         /// - Remark: Generated from `#/components/schemas/Profile`.
         internal struct Profile: Codable, Hashable, Sendable {
+            /// A client applies its own default for a value it does not know, and keeps the value.
+            ///
             /// - Remark: Generated from `#/components/schemas/Profile/themeMode`.
-            internal enum ThemeModePayload: String, Codable, Hashable, Sendable, CaseIterable {
-                case light = "light"
-                case dark = "dark"
-                case system = "system"
+            internal struct ThemeModePayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/Profile/themeMode/value1`.
+                internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case light = "light"
+                    case dark = "dark"
+                    case system = "system"
+                }
+                /// - Remark: Generated from `#/components/schemas/Profile/themeMode/value1`.
+                internal var value1: Components.Schemas.Profile.ThemeModePayload.Value1Payload?
+                /// - Remark: Generated from `#/components/schemas/Profile/themeMode/value2`.
+                internal var value2: Swift.String?
+                /// Creates a new `ThemeModePayload`.
+                ///
+                /// - Parameters:
+                ///   - value1:
+                ///   - value2:
+                internal init(
+                    value1: Components.Schemas.Profile.ThemeModePayload.Value1Payload? = nil,
+                    value2: Swift.String? = nil
+                ) {
+                    self.value1 = value1
+                    self.value2 = value2
+                }
+                internal init(from decoder: any Swift.Decoder) throws {
+                    var errors: [any Swift.Error] = []
+                    do {
+                        self.value1 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    do {
+                        self.value2 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                        [
+                            self.value1,
+                            self.value2
+                        ],
+                        type: Self.self,
+                        codingPath: decoder.codingPath,
+                        errors: errors
+                    )
+                }
+                internal func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                        self.value1,
+                        self.value2
+                    ])
+                }
             }
+            /// A client applies its own default for a value it does not know, and keeps the value.
+            ///
             /// - Remark: Generated from `#/components/schemas/Profile/themeMode`.
             internal var themeMode: Components.Schemas.Profile.ThemeModePayload?
+            /// A client applies its own default for a value it does not know, and keeps the value.
+            ///
             /// - Remark: Generated from `#/components/schemas/Profile/chatFont`.
-            internal enum ChatFontPayload: String, Codable, Hashable, Sendable, CaseIterable {
-                case system = "system"
-                case serif = "serif"
-                case mono = "mono"
-                case dyslexic = "dyslexic"
+            internal struct ChatFontPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/Profile/chatFont/value1`.
+                internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case system = "system"
+                    case serif = "serif"
+                    case mono = "mono"
+                    case dyslexic = "dyslexic"
+                }
+                /// - Remark: Generated from `#/components/schemas/Profile/chatFont/value1`.
+                internal var value1: Components.Schemas.Profile.ChatFontPayload.Value1Payload?
+                /// - Remark: Generated from `#/components/schemas/Profile/chatFont/value2`.
+                internal var value2: Swift.String?
+                /// Creates a new `ChatFontPayload`.
+                ///
+                /// - Parameters:
+                ///   - value1:
+                ///   - value2:
+                internal init(
+                    value1: Components.Schemas.Profile.ChatFontPayload.Value1Payload? = nil,
+                    value2: Swift.String? = nil
+                ) {
+                    self.value1 = value1
+                    self.value2 = value2
+                }
+                internal init(from decoder: any Swift.Decoder) throws {
+                    var errors: [any Swift.Error] = []
+                    do {
+                        self.value1 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    do {
+                        self.value2 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                        [
+                            self.value1,
+                            self.value2
+                        ],
+                        type: Self.self,
+                        codingPath: decoder.codingPath,
+                        errors: errors
+                    )
+                }
+                internal func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                        self.value1,
+                        self.value2
+                    ])
+                }
             }
+            /// A client applies its own default for a value it does not know, and keeps the value.
+            ///
             /// - Remark: Generated from `#/components/schemas/Profile/chatFont`.
             internal var chatFont: Components.Schemas.Profile.ChatFontPayload?
             /// - Remark: Generated from `#/components/schemas/Profile/language`.
@@ -4469,8 +5018,8 @@ extension Components {
             /// Creates a new `Profile`.
             ///
             /// - Parameters:
-            ///   - themeMode:
-            ///   - chatFont:
+            ///   - themeMode: A client applies its own default for a value it does not know, and keeps the value.
+            ///   - chatFont: A client applies its own default for a value it does not know, and keeps the value.
             ///   - language:
             ///   - nickname:
             ///   - profession:
@@ -4585,21 +5134,123 @@ extension Components {
         }
         /// - Remark: Generated from `#/components/schemas/ProfileView`.
         internal struct ProfileView: Codable, Hashable, Sendable {
+            /// A client applies its own default for a value it does not know, and keeps the value.
+            ///
             /// - Remark: Generated from `#/components/schemas/ProfileView/themeMode`.
-            internal enum ThemeModePayload: String, Codable, Hashable, Sendable, CaseIterable {
-                case light = "light"
-                case dark = "dark"
-                case system = "system"
+            internal struct ThemeModePayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/ProfileView/themeMode/value1`.
+                internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case light = "light"
+                    case dark = "dark"
+                    case system = "system"
+                }
+                /// - Remark: Generated from `#/components/schemas/ProfileView/themeMode/value1`.
+                internal var value1: Components.Schemas.ProfileView.ThemeModePayload.Value1Payload?
+                /// - Remark: Generated from `#/components/schemas/ProfileView/themeMode/value2`.
+                internal var value2: Swift.String?
+                /// Creates a new `ThemeModePayload`.
+                ///
+                /// - Parameters:
+                ///   - value1:
+                ///   - value2:
+                internal init(
+                    value1: Components.Schemas.ProfileView.ThemeModePayload.Value1Payload? = nil,
+                    value2: Swift.String? = nil
+                ) {
+                    self.value1 = value1
+                    self.value2 = value2
+                }
+                internal init(from decoder: any Swift.Decoder) throws {
+                    var errors: [any Swift.Error] = []
+                    do {
+                        self.value1 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    do {
+                        self.value2 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                        [
+                            self.value1,
+                            self.value2
+                        ],
+                        type: Self.self,
+                        codingPath: decoder.codingPath,
+                        errors: errors
+                    )
+                }
+                internal func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                        self.value1,
+                        self.value2
+                    ])
+                }
             }
+            /// A client applies its own default for a value it does not know, and keeps the value.
+            ///
             /// - Remark: Generated from `#/components/schemas/ProfileView/themeMode`.
             internal var themeMode: Components.Schemas.ProfileView.ThemeModePayload?
+            /// A client applies its own default for a value it does not know, and keeps the value.
+            ///
             /// - Remark: Generated from `#/components/schemas/ProfileView/chatFont`.
-            internal enum ChatFontPayload: String, Codable, Hashable, Sendable, CaseIterable {
-                case system = "system"
-                case serif = "serif"
-                case mono = "mono"
-                case dyslexic = "dyslexic"
+            internal struct ChatFontPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/ProfileView/chatFont/value1`.
+                internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case system = "system"
+                    case serif = "serif"
+                    case mono = "mono"
+                    case dyslexic = "dyslexic"
+                }
+                /// - Remark: Generated from `#/components/schemas/ProfileView/chatFont/value1`.
+                internal var value1: Components.Schemas.ProfileView.ChatFontPayload.Value1Payload?
+                /// - Remark: Generated from `#/components/schemas/ProfileView/chatFont/value2`.
+                internal var value2: Swift.String?
+                /// Creates a new `ChatFontPayload`.
+                ///
+                /// - Parameters:
+                ///   - value1:
+                ///   - value2:
+                internal init(
+                    value1: Components.Schemas.ProfileView.ChatFontPayload.Value1Payload? = nil,
+                    value2: Swift.String? = nil
+                ) {
+                    self.value1 = value1
+                    self.value2 = value2
+                }
+                internal init(from decoder: any Swift.Decoder) throws {
+                    var errors: [any Swift.Error] = []
+                    do {
+                        self.value1 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    do {
+                        self.value2 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                        [
+                            self.value1,
+                            self.value2
+                        ],
+                        type: Self.self,
+                        codingPath: decoder.codingPath,
+                        errors: errors
+                    )
+                }
+                internal func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                        self.value1,
+                        self.value2
+                    ])
+                }
             }
+            /// A client applies its own default for a value it does not know, and keeps the value.
+            ///
             /// - Remark: Generated from `#/components/schemas/ProfileView/chatFont`.
             internal var chatFont: Components.Schemas.ProfileView.ChatFontPayload?
             /// - Remark: Generated from `#/components/schemas/ProfileView/language`.
@@ -4675,8 +5326,8 @@ extension Components {
             /// Creates a new `ProfileView`.
             ///
             /// - Parameters:
-            ///   - themeMode:
-            ///   - chatFont:
+            ///   - themeMode: A client applies its own default for a value it does not know, and keeps the value.
+            ///   - chatFont: A client applies its own default for a value it does not know, and keeps the value.
             ///   - language:
             ///   - nickname:
             ///   - profession:
@@ -4994,12 +5645,61 @@ extension Components {
                 case updatedAt
             }
         }
+        /// How the account's key was set up. A client treats an origin it does not know as unknown.
+        ///
         /// - Remark: Generated from `#/components/schemas/KeyOrigin`.
-        internal enum KeyOrigin: String, Codable, Hashable, Sendable, CaseIterable {
-            case passkey = "passkey"
-            case manual = "manual"
-            case recovery = "recovery"
-            case startFresh = "start_fresh"
+        internal struct KeyOrigin: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/KeyOrigin/value1`.
+            internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                case passkey = "passkey"
+                case manual = "manual"
+                case recovery = "recovery"
+                case startFresh = "start_fresh"
+            }
+            /// - Remark: Generated from `#/components/schemas/KeyOrigin/value1`.
+            internal var value1: Components.Schemas.KeyOrigin.Value1Payload?
+            /// - Remark: Generated from `#/components/schemas/KeyOrigin/value2`.
+            internal var value2: Swift.String?
+            /// Creates a new `KeyOrigin`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            ///   - value2:
+            internal init(
+                value1: Components.Schemas.KeyOrigin.Value1Payload? = nil,
+                value2: Swift.String? = nil
+            ) {
+                self.value1 = value1
+                self.value2 = value2
+            }
+            internal init(from decoder: any Swift.Decoder) throws {
+                var errors: [any Swift.Error] = []
+                do {
+                    self.value1 = try decoder.decodeFromSingleValueContainer()
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value2 = try decoder.decodeFromSingleValueContainer()
+                } catch {
+                    errors.append(error)
+                }
+                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                    [
+                        self.value1,
+                        self.value2
+                    ],
+                    type: Self.self,
+                    codingPath: decoder.codingPath,
+                    errors: errors
+                )
+            }
+            internal func encode(to encoder: any Swift.Encoder) throws {
+                try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                    self.value1,
+                    self.value2
+                ])
+            }
         }
         /// - Remark: Generated from `#/components/schemas/KeyRef`.
         internal struct KeyRef: Codable, Hashable, Sendable {
@@ -5175,12 +5875,63 @@ extension Components {
         ///
         /// - Remark: Generated from `#/components/schemas/ResealReport`.
         internal struct ResealReport: Codable, Hashable, Sendable {
+            /// A client treats a status it does not know as running.
+            ///
             /// - Remark: Generated from `#/components/schemas/ResealReport/status`.
-            internal enum StatusPayload: String, Codable, Hashable, Sendable, CaseIterable {
-                case running = "running"
-                case complete = "complete"
-                case failed = "failed"
+            internal struct StatusPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/ResealReport/status/value1`.
+                internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case running = "running"
+                    case complete = "complete"
+                    case failed = "failed"
+                }
+                /// - Remark: Generated from `#/components/schemas/ResealReport/status/value1`.
+                internal var value1: Components.Schemas.ResealReport.StatusPayload.Value1Payload?
+                /// - Remark: Generated from `#/components/schemas/ResealReport/status/value2`.
+                internal var value2: Swift.String?
+                /// Creates a new `StatusPayload`.
+                ///
+                /// - Parameters:
+                ///   - value1:
+                ///   - value2:
+                internal init(
+                    value1: Components.Schemas.ResealReport.StatusPayload.Value1Payload? = nil,
+                    value2: Swift.String? = nil
+                ) {
+                    self.value1 = value1
+                    self.value2 = value2
+                }
+                internal init(from decoder: any Swift.Decoder) throws {
+                    var errors: [any Swift.Error] = []
+                    do {
+                        self.value1 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    do {
+                        self.value2 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                        [
+                            self.value1,
+                            self.value2
+                        ],
+                        type: Self.self,
+                        codingPath: decoder.codingPath,
+                        errors: errors
+                    )
+                }
+                internal func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                        self.value1,
+                        self.value2
+                    ])
+                }
             }
+            /// A client treats a status it does not know as running.
+            ///
             /// - Remark: Generated from `#/components/schemas/ResealReport/status`.
             internal var status: Components.Schemas.ResealReport.StatusPayload
             /// - Remark: Generated from `#/components/schemas/ResealReport/migrated`.
@@ -5196,7 +5947,7 @@ extension Components {
             /// Creates a new `ResealReport`.
             ///
             /// - Parameters:
-            ///   - status:
+            ///   - status: A client treats a status it does not know as running.
             ///   - migrated:
             ///   - remaining:
             ///   - blocked:

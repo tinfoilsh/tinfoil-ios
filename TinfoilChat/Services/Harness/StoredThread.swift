@@ -34,7 +34,7 @@ struct StoredThread: Equatable, Sendable {
         return StoredThread(fields: [
             "id": .string(id),
             "title": .string(Constants.Harness.placeholderTitle),
-            "titleState": .string(Components.Schemas.TitleState.placeholder.rawValue),
+            "titleState": .string(Components.Schemas.TitleState.Value1Payload.placeholder.rawValue),
             "createdAt": created,
             "updatedAt": created,
             "model": .string(""),
@@ -67,7 +67,7 @@ struct StoredThread: Equatable, Sendable {
 
     var title: String { fields["title"]?.stringValue ?? "" }
     var titleState: Components.Schemas.TitleState {
-        fields["titleState"]?.stringValue.flatMap(Components.Schemas.TitleState.init(rawValue:)) ?? .placeholder
+        fields["titleState"]?.stringValue.map(Components.Schemas.TitleState.init(raw:)) ?? .named(.placeholder)
     }
     var createdAt: String? { fields["createdAt"]?.stringValue }
     var updatedAt: String? {
