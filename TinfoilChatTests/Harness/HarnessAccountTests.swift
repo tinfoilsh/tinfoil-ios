@@ -79,6 +79,22 @@ struct HarnessAccountTests {
         #expect(!account.readsHeldKey)
     }
 
+    @Test func settingsThisDeviceHoldsShowBeforeTheSessionLoads() async throws {
+        let settings = MemoryProfileStorage()
+        settings.local = ["language": "French", "reasoningEffort": "high"]
+        let (signedOut, transport) = makeAccount(userId: nil, answers: [], settings: settings)
+        #expect(signedOut.profileReady)
+        #expect(signedOut.keyReady)
+        #expect(signedOut.profile["language"] as? String == "French")
+        #expect(signedOut.effectiveProfile.reasoningEffort == "high")
+        #expect(await transport.requests.isEmpty)
+
+        let (withoutSync, _) = makeAccount(userId: "user-1", answers: [], settings: settings, cloudSync: false)
+        #expect(withoutSync.profileReady)
+        #expect(!withoutSync.keyReady)
+        #expect(withoutSync.profile["language"] as? String == "French")
+    }
+
     @Test func settingsThatFailedForAnotherReasonLoadOnTheNextRefresh() async throws {
         let (account, _) = makeAccount(userId: "user-1", answers: [
             Answers.json(sessionAnswer), Answers.refusal(503, code: "UPSTREAM_UNAVAILABLE", action: "retry"),

@@ -82,7 +82,16 @@ final class HarnessAccount: ObservableObject {
         self.settings = settings
         self.cloudSync = cloudSync
         cloud = userId != nil && cloudSync
-        profile = cloud ? settings.cloudProfileCache(userId: userId) : [:]
+        if cloud {
+            profile = settings.cloudProfileCache(userId: userId)
+        } else if let local = try? settings.loadLocalProfile() {
+            // The settings this device holds show, and turns can use them,
+            // before the session loads.
+            profileSource = .local
+            keyReady = userId == nil
+            profileReady = true
+            showProfile(local)
+        }
     }
 
     func dispose() {
