@@ -1920,14 +1920,6 @@ struct TextShimmerAnimation: ViewModifier {
     }
 }
 
-struct MessageActionsView: View {
-    @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
-    
-    var body: some View {
-        EmptyView() // Placeholder - replace with actual content when needed
-    }
-}
-
 struct UnsupportedGenUINoticeView: View {
     let isDarkMode: Bool
 

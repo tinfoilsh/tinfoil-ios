@@ -8,7 +8,6 @@ import SwiftUI
 private let sportsLiveAccent = Color.red
 private let sportsLiveBackgroundOpacity: Double = 0.12
 private let sportsRowAltBackgroundOpacity: Double = 0.04
-private let sportsLeaderHighlightOpacity: Double = 0.08
 
 private func sportsIsLive(_ status: String?) -> Bool {
     guard let status, !status.isEmpty else { return false }
@@ -64,12 +63,6 @@ private struct SportsDataView: View {
     let isDarkMode: Bool
 
     private var isLive: Bool { sportsIsLive(args.status) }
-
-    private var leadingScore: Double? {
-        guard let home = args.home?.score?.numericValue,
-              let away = args.away?.score?.numericValue else { return nil }
-        return max(home, away)
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
