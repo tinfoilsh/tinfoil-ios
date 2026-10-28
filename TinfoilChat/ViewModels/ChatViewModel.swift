@@ -1146,7 +1146,7 @@ class ChatViewModel: ObservableObject {
     }
 
     func createNewRootChat() {
-        exitProject()
+        leaveProjectContext()
         createNewChat()
     }
 
