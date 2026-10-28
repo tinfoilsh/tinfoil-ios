@@ -750,12 +750,7 @@ struct CloudSyncOnboardingView: View {
 
     private func copyKeyToClipboard() {
         guard let key = generatedKey else { return }
-        UIPasteboard.general.setItems(
-            [[UIPasteboard.typeAutomatic: key]],
-            options: [
-                .expirationDate: Date().addingTimeInterval(Constants.CloudSync.clipboardExpirationSeconds)
-            ]
-        )
+        SensitiveClipboard.copy(key)
         isCopied = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             isCopied = false

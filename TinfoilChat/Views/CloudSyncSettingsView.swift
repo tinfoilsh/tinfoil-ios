@@ -158,7 +158,7 @@ struct CloudSyncSettingsView: View {
                                 Spacer()
                                 
                                 Button(action: {
-                                    UIPasteboard.general.string = key
+                                    SensitiveClipboard.copy(key)
                                     copiedToClipboard = true
                                     
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
@@ -797,12 +797,7 @@ private struct BackupEncryptionKeySheet: View {
     }
 
     private func copyKey(_ key: String) {
-        UIPasteboard.general.setItems(
-            [[UIPasteboard.typeAutomatic: key]],
-            options: [
-                .expirationDate: Date().addingTimeInterval(Constants.CloudSync.clipboardExpirationSeconds)
-            ]
-        )
+        SensitiveClipboard.copy(key)
         isCopied = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             isCopied = false
