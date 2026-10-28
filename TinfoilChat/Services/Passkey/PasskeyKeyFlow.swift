@@ -5,25 +5,26 @@
 //  High-level passkey + key registry glue. Mirrors the webapp's
 //  `services/passkey/passkey-key-storage.ts`.
 //
-//  The enclave wire (see `internal/server/types.go`) exposes only
-//  `register-key`, `add-bundle`, `remove-bundle` and `current` for
-//  key management. There is no "list bundles" endpoint, so this
-//  layer's contract is:
+//  The chat service's key registry (`KeyRegistry`, /v1/keys/*) exposes
+//  `register`, `add-bundle`, `remove-bundle` and `current` for key
+//  management. `current` lists every bundle of the current key, so
+//  this layer's contract is:
 //
 //    - registerNewKeyWithPasskey: create a passkey, generate a fresh
 //      CEK, wrap it under the passkey-PRF KEK, register the key +
-//      initial bundle with the enclave. Treats a 409 from the enclave
-//      as "remote key already exists, fall through to unlock".
+//      initial bundle with the registry. Treats the registry's key
+//      mismatch refusal as "remote key already exists, fall through
+//      to unlock".
 //
 //    - unlockFromServer: authenticate a passkey against the bundles
-//      reported by `keyCurrent()`, derive the KEK, unwrap the bundle,
-//      and verify the key_id binding before adopting anything.
+//      `current` reports, derive the KEK, unwrap the bundle, and
+//      verify the key_id binding before adopting anything.
 //
 //    - addBundleForCurrentKey: enroll a brand-new passkey for an
 //      existing key (multi-device flow).
 //
-//  The CEK is held only in memory at the call site and zeroed by
-//  callers when the session ends.
+//  The CEK is held only in memory at the call site until the caller
+//  stores it in the Keychain.
 //
 
 import ClerkKit
@@ -156,7 +157,7 @@ enum PasskeyKeyFlow {
             cek: cek,
             createdVia: createdVia
         )
-        // A 409 means another device won the register race, so the
+        // A key mismatch means another device won the register race, so the
         // documented contract is to fall through to a normal unlock
         // against whichever key landed (its passkey may already be in
         // this device's iCloud Keychain). Start-fresh is excluded: the
@@ -218,7 +219,7 @@ enum PasskeyKeyFlow {
                 }
             } catch {
                 // Fall through with '*': correct for the no-key case,
-                // and fails closed (409) when a key actually exists.
+                // and fails closed (key mismatch) when a key actually exists.
             }
         }
 

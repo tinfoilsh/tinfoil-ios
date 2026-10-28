@@ -107,7 +107,7 @@ extension ChatViewModel {
         }
         await passkeyManager.checkPasskeyStateForExistingKey()
         guard isCurrentSignIn(token, userId: userId) else { return }
-        startLegacyMigration(token: token, userId: userId)
+        registerHeldKey(token: token, userId: userId)
         await keyChanged()
         guard isCurrentSignIn(token, userId: userId) else { return }
         if SettingsManager.shared.isCloudSyncEnabled, let saved = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.cloudSyncActiveTab).flatMap(ChatStorageTab.init(rawValue:)) {
@@ -144,8 +144,8 @@ extension ChatViewModel {
         signInTask?.cancel()
         signInTask = nil
         activeSignInToken = nil
-        legacyMigrationTask?.cancel()
-        legacyMigrationTask = nil
+        heldKeyRegistrationTask?.cancel()
+        heldKeyRegistrationTask = nil
         await accountOperationTracker.closeAndWait()
         session?.account.dispose()
         session = nil
@@ -206,10 +206,10 @@ extension ChatViewModel {
 
     /// A held key the registry does not know becomes the account's, and
     /// rows older keys sealed are resealed under it by the harness.
-    func startLegacyMigration(token: AccountOperationFence.Token, userId: String) {
-        let previousTask = legacyMigrationTask
+    func registerHeldKey(token: AccountOperationFence.Token, userId: String) {
+        let previousTask = heldKeyRegistrationTask
         previousTask?.cancel()
-        legacyMigrationTask = Task { [weak self] in
+        heldKeyRegistrationTask = Task { [weak self] in
             await previousTask?.value
             guard let self, isCurrentSignIn(token, userId: userId) else { return }
             do {
@@ -266,7 +266,7 @@ extension ChatViewModel {
         // A v1 user activating their key on a fresh device has legacy cloud
         // data but no registered key. Re-kick migration now that a key is
         // active so adoption happens in-session.
-        startLegacyMigration(token: currentAccountOperationToken(userId: operationUserId), userId: operationUserId)
+        registerHeldKey(token: currentAccountOperationToken(userId: operationUserId), userId: operationUserId)
     }
 
     private func performSetEncryptionKey(_ key: String, mode: CloudKeyActivationMode, operationUserId: String) async throws {
@@ -380,7 +380,7 @@ extension ChatViewModel {
         guard currentUserId == operationUserId else { return .recoveryFailed }
         switch result {
         case .success, .newUserSetupDone:
-            startLegacyMigration(token: currentAccountOperationToken(userId: operationUserId), userId: operationUserId)
+            registerHeldKey(token: currentAccountOperationToken(userId: operationUserId), userId: operationUserId)
             await keyChanged()
         default:
             break
@@ -403,7 +403,7 @@ extension ChatViewModel {
         let result = await operationTask.value
         guard currentUserId == operationUserId else { return .failure(.userCancelled) }
         guard case .success = result else { return result }
-        startLegacyMigration(token: currentAccountOperationToken(userId: operationUserId), userId: operationUserId)
+        registerHeldKey(token: currentAccountOperationToken(userId: operationUserId), userId: operationUserId)
         return .success
     }
 

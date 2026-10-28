@@ -237,7 +237,7 @@ class ChatViewModel: ObservableObject {
     var isAppPresentationReady = false
     var needsSignInWhenPresentationReady = false
     var signInTask: Task<Void, Never>?
-    var legacyMigrationTask: Task<Void, Never>?
+    var heldKeyRegistrationTask: Task<Void, Never>?
     var accountOperationFence = AccountOperationFence()
     let accountOperationTracker = AccountOperationTracker()
     var activeSignInToken: AccountOperationFence.Token?

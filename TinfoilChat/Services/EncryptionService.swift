@@ -26,11 +26,10 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     private let keychainLock = NSLock()
 
     /// Primary key staged in memory but not yet written to the Keychain.
-    /// Set by `setKey(_:persist:)` with `persist: false` so the enclave
-    /// handshake runs against the new key while the Keychain still holds
-    /// the previous one. Committed by `persistCurrentKeyState()` only
-    /// after the enclave accepts it, or dropped by
-    /// `discardStagedKeyState()` on failure.
+    /// Set by `setKey(_:persist:)` with `persist: false` so the registry
+    /// checks the new key while the Keychain still holds the previous one.
+    /// Committed by `persistCurrentKeyState()` only after the registry
+    /// accepts it, or dropped by `discardStagedKeyState()` on failure.
     private var _stagedPrimaryKey: String?
 
     private var stagedPrimaryKey: String? {
@@ -65,9 +64,9 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     /// Set encryption key from alphanumeric string.
     ///
     /// When `persist` is false the key is staged in memory (so the
-    /// enclave wire and `getKey()` use it) but not written to the
+    /// registry requests and `getKey()` use it) but not written to the
     /// Keychain. Callers must follow up with `persistCurrentKeyState()`
-    /// once the enclave accepts the key, or `discardStagedKeyState()` to
+    /// once the registry accepts the key, or `discardStagedKeyState()` to
     /// roll back.
     func setKey(_ keyString: String, persist: Bool = true) async throws {
         let (normalizedKey, _) = try normalizeKeyInput(keyString)
@@ -122,9 +121,8 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         return bytes
     }
 
-    /// Set the primary key from a fresh CEK provided as raw 32 bytes,
-    /// e.g. one minted server-side by the enclave or recovered from a
-    /// passkey bundle. Encodes the bytes back into the alphanumeric
+    /// Set the primary key from a CEK provided as raw 32 bytes, e.g. one
+    /// freshly generated or recovered from a passkey bundle. Encodes the bytes back into the alphanumeric
     /// keychain format so the rest of the app keeps working unchanged.
     func setKeyBytes(_ bytes: Data) async throws {
         try await setKey(encodeKeyFromBytes(bytes))
@@ -175,7 +173,7 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     }
 
     /// Commit a key staged via `setKey(_:persist:false)` to the Keychain.
-    /// No-op when nothing is staged. Call this only after the enclave has
+    /// No-op when nothing is staged. Call this only after the registry has
     /// accepted the key.
     func persistCurrentKeyState() throws {
         guard let staged = stagedPrimaryKey else { return }

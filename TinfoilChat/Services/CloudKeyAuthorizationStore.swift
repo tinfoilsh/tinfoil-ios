@@ -65,21 +65,21 @@ final class CloudKeyAuthorizationStore {
         }
     }
 
-    /// Make the current (staged or persisted) primary CEK the enclave's
-    /// authoritative key for an explicit "start fresh". When existing
-    /// cloud data sits under a different key, the steady-state write guard
-    /// blocks the new key; the only way past it is register-key with
-    /// created_via=start_fresh, which atomically drops the old rows and
-    /// rebinds the user to this CEK.
+    /// Make the current (staged or persisted) primary CEK the registry's
+    /// key for an explicit "start fresh". When existing cloud data sits
+    /// under a different key, the chat service refuses the new key; the
+    /// only way past it is registering with created_via=start_fresh,
+    /// which atomically drops the old rows and rebinds the user to this
+    /// CEK.
     ///
-    /// No-op only when the enclave's registered key already IS this CEK
-    /// (matching key id) — a prior ceremony that registered it must not
-    /// be wiped again. Every other state registers, including an empty
-    /// remote and unregistered legacy data: start-fresh still needs the
-    /// enclave-side key row, or every subsequent push is rejected as a
-    /// stale key. Throws when the enclave can't be reached so the caller
+    /// No-op only when the registry's key already IS this CEK (matching
+    /// key id) — a prior ceremony that registered it must not be wiped
+    /// again. Every other state registers, including an empty remote and
+    /// unregistered legacy data: start-fresh still needs the registry's
+    /// key, or the chat service refuses every stored chat request under
+    /// it. Throws when the registry can't be reached so the caller
     /// surfaces "try again" instead of stranding a local-only key the
-    /// enclave never accepted.
+    /// registry never accepted.
     func registerStartFreshKeyIfNeeded() async throws {
         let cek = try EncryptionService.shared.getKeyBytesOrThrow()
         let keyB64 = cek.base64EncodedString()

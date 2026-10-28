@@ -175,7 +175,7 @@ final class PasskeyManager: ObservableObject {
     /// Called after successful recovery/fresh-start to resume the sign-in flow.
     var onRecoveryComplete: (() -> Void)?
 
-    /// Called when the periodic sync check detects that another
+    /// Called when the periodic key check detects that another
     /// device started fresh and applied a new CEK to the enclave's
     /// key registry. The consumer should retry decryption of failed
     /// chats.
@@ -207,7 +207,7 @@ final class PasskeyManager: ObservableObject {
 
     /// Remote keyId the user explicitly skipped, persisted so the
     /// recovery sheet stays dismissed across app launches (matching the
-    /// webapp). The periodic sync check must not re-surface the sheet
+    /// webapp). The periodic key check must not re-surface the sheet
     /// for this keyId; a genuinely new keyId (another start_fresh) is
     /// not suppressed.
     private var dismissedRecoveryKeyId: String? {
@@ -560,7 +560,7 @@ final class PasskeyManager: ObservableObject {
     }
 
     /// Dismiss the recovery-choice sheet and remember which keyId the
-    /// user skipped so the periodic sync check stops re-presenting it.
+    /// user skipped so the periodic key check stops re-presenting it.
     func dismissRecoveryChoice() {
         // Only persist a concrete keyId. Skipping a sheet with no pending
         // keyId must not clear an existing skip, or the periodic check
@@ -994,7 +994,7 @@ final class PasskeyManager: ObservableObject {
     /// credentialId on the new wire — each passkey's wrapped CEK is
     /// stable for the lifetime of that passkey. The only thing that
     /// can drift across devices is the key_id itself (start_fresh
-    /// wipes), which the periodic sync check already handles.
+    /// wipes), which the periodic key check already handles.
     func updatePasskeyBackup() async {}
 
     // MARK: - Private Helpers
@@ -1573,8 +1573,8 @@ final class PasskeyManager: ObservableObject {
         )
     }
 
-    /// The enclave key_id is the SHA-256 of the local CEK — it's
-    /// safe to cache locally and lets the periodic sync check
+    /// The registry's key_id is derived from the local CEK by HKDF —
+    /// it's safe to cache locally and lets the periodic key check
     /// detect a remote `start_fresh` rotation. The credential id is
     /// persisted separately by `PasskeyService` after a successful
     /// WebAuthn ceremony, gated on `.platform` attachment.
@@ -1591,9 +1591,9 @@ final class PasskeyManager: ObservableObject {
         UserDefaults.standard.string(forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId)
     }
 
-    // MARK: - Periodic Sync Check
+    // MARK: - Periodic Key Check
 
-    /// Periodically calls `/v1/key/current` and detects when another
+    /// Periodically calls `/v1/keys/current` and detects when another
     /// device wiped + re-registered the user's key. When the keyId
     /// changes, the local CEK is invalidated and a fresh recovery
     /// flow is required.
