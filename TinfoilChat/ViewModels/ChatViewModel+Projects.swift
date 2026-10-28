@@ -23,6 +23,16 @@ extension ChatViewModel {
         isViewingProjectChat = false
     }
 
+    /// Projects need a subscription. Once it ends, the open project chat's
+    /// reply stops, and the project is left for a new chat.
+    private func revokeProjectAccess() {
+        guard let session, activeProject != nil || currentChat?.projectId != nil else { return }
+        if session.running { cancelGeneration() }
+        shouldExpandProjectsInSidebar = false
+        leaveProjectContext()
+        createNewChat(focusInput: false)
+    }
+
     func loadProjects() async {
         guard let session else { return }
         projectListLoadGeneration += 1
@@ -31,6 +41,7 @@ extension ChatViewModel {
             projects = []
             projectError = nil
             isLoadingProjects = false
+            if !hasPremiumAccess { revokeProjectAccess() }
             return
         }
         isLoadingProjects = true
