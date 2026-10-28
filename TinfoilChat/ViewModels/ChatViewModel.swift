@@ -245,12 +245,7 @@ class ChatViewModel: ObservableObject {
     @Published var readyForAccountActionsUserId: String? {
         didSet { if readyForAccountActionsUserId != nil { passkeyManager.resumeAccountOperations() } }
     }
-    @Published var rateLimit: RateLimitInfo? {
-        didSet {
-            guard let rateLimit, authManager?.hasActiveSubscription != true else { return }
-            if rateLimit.exhausted, rateLimit.kind == .freeDaily { showRateLimitPaywall = true }
-        }
-    }
+    @Published var rateLimit: RateLimitInfo?
 
     @Published var authManager: AuthManager? {
         didSet {
