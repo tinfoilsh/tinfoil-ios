@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import OSLog
 import UIKit
 import UniformTypeIdentifiers
@@ -87,7 +88,7 @@ enum HarnessProjects {
 
     static func uploadDocument(_ account: HarnessAccount, projectId: String, file: Data, fileName: String, mimeType: String) async throws -> Components.Schemas.ProjectDocument {
         let prepared = try await HarnessUploads.prepare(file, fileName: fileName, mimeType: mimeType, groups: account.session?.composer.projectDocuments ?? [])
-        return try await account.upload(.projectDocumentUpload, file: prepared.data, fileName: fileName, mimeType: prepared.mimeType, fields: ["projectId": projectId])
+        return try await account.upload(.projectDocumentUpload, file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, fields: ["projectId": projectId])
     }
 
     static func deleteDocument(_ account: HarnessAccount, projectId: String, documentId: String) async throws {
@@ -266,10 +267,14 @@ enum HarnessUploads {
     /// A file of a type no group names uploads as text, which the harness
     /// reads when its contents are text.
     private static let textExtension = ".txt"
+    /// An image the harness cannot decode, as a HEIC photo, uploads as JPEG.
+    private static let jpegExtension = ".jpg"
+    private static let jpegMimeType = "image/jpeg"
     static let imageQuality: CGFloat = 0.85
 
     struct Prepared {
         let data: Data
+        let fileName: String
         let mimeType: String
     }
 
@@ -310,28 +315,69 @@ enum HarnessUploads {
         )
     }
 
-    /// The file as it uploads. Only an image's upload copy is scaled; text
-    /// extraction and image descriptions belong to the harness.
+    /// The image type a file's bytes hold, read from its contents rather
+    /// than its name, which a picker or another app may have chosen.
+    static func imageType(of data: Data) -> UTType? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let identifier = CGImageSourceGetType(source) as String?,
+              let type = UTType(identifier), type.conforms(to: .image), CGImageSourceGetCount(source) > 0 else { return nil }
+        return type
+    }
+
+    /// The file name with its extension replaced.
+    private static func renamed(_ fileName: String, extension ext: String) -> String {
+        let base = (fileName as NSString).deletingPathExtension
+        return (base.isEmpty ? fileName : base) + ext
+    }
+
+    /// The file as it uploads. The harness reads an image by the extension
+    /// of its name: an image of a type it decodes is named for its type
+    /// when its name names none, and one of a type it cannot decode, as a
+    /// HEIC photo, uploads as a JPEG. An image's upload copy is scaled
+    /// when larger than its group takes; text extraction and image
+    /// descriptions belong to the harness.
     static func prepare(_ data: Data, fileName: String, mimeType: String, groups: [Components.Schemas.FileGroup]) async throws -> Prepared {
+        var fileName = fileName
+        var mimeType = mimeType
+        if let images = groups.first(where: { $0.imageMaxSide != nil }), let type = imageType(of: data) {
+            let named = [type.preferredFilenameExtension].compactMap { $0 } + (type.tags[.filenameExtension] ?? [])
+            guard let decoded = named.map({ "." + $0.lowercased() }).first(where: images.accept.contains) else {
+                let converted = renamed(fileName, extension: jpegExtension)
+                guard let jpeg = await jpeg(data, maxSide: images.imageMaxSide) else {
+                    throw HarnessError(code: "ATTACHMENT_UNSUPPORTED", message: "\(fileName) could not be read as an image.", action: .revise, status: 415)
+                }
+                _ = try check(jpeg, fileName: converted, groups: groups)
+                return Prepared(data: jpeg, fileName: converted, mimeType: jpegMimeType)
+            }
+            if !images.accept.contains(fileExtension(of: fileName)) { fileName = renamed(fileName, extension: decoded) }
+            mimeType = type.preferredMIMEType ?? mimeType
+        }
         let group = try check(data, fileName: fileName, groups: groups)
-        guard let maxSide = group.imageMaxSide else { return Prepared(data: data, mimeType: mimeType) }
-        return await Task.detached(priority: .userInitiated) {
-            guard let image = UIImage(data: data) else { return Prepared(data: data, mimeType: mimeType) }
+        guard let maxSide = group.imageMaxSide else { return Prepared(data: data, fileName: fileName, mimeType: mimeType) }
+        guard let resized = await jpeg(data, maxSide: maxSide, onlyWhenLarger: true), resized.count <= group.maxBytes else {
+            return Prepared(data: data, fileName: fileName, mimeType: mimeType)
+        }
+        return Prepared(data: resized, fileName: fileName, mimeType: jpegMimeType)
+    }
+
+    /// An image as a JPEG no longer on either side than `maxSide`, drawn
+    /// upright over white. With `onlyWhenLarger`, nil for an image that
+    /// already fits.
+    private static func jpeg(_ data: Data, maxSide: Int?, onlyWhenLarger: Bool = false) async -> Data? {
+        await Task.detached(priority: .userInitiated) {
+            guard let image = UIImage(data: data) else { return nil }
             let longest = max(image.size.width * image.scale, image.size.height * image.scale)
-            let scale = min(1, CGFloat(maxSide) / longest)
-            if scale == 1 { return Prepared(data: data, mimeType: mimeType) }
+            let scale = maxSide.map { min(1, CGFloat($0) / longest) } ?? 1
+            if onlyWhenLarger, scale == 1 { return nil }
             let size = CGSize(width: max(1, floor(image.size.width * image.scale * scale)), height: max(1, floor(image.size.height * image.scale * scale)))
             let format = UIGraphicsImageRendererFormat()
             format.scale = 1
-            let resized = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            let drawn = UIGraphicsImageRenderer(size: size, format: format).image { context in
                 UIColor.white.setFill()
                 context.fill(CGRect(origin: .zero, size: size))
                 image.draw(in: CGRect(origin: .zero, size: size))
             }
-            guard let jpeg = resized.jpegData(compressionQuality: imageQuality), jpeg.count <= group.maxBytes else {
-                return Prepared(data: data, mimeType: mimeType)
-            }
-            return Prepared(data: jpeg, mimeType: "image/jpeg")
+            return drawn.jpegData(compressionQuality: imageQuality)
         }.value
     }
 
@@ -343,7 +389,7 @@ enum HarnessUploads {
     @MainActor
     static func upload(_ account: HarnessAccount, data: Data, fileName: String, mimeType: String) async throws -> Components.Schemas.Attachment {
         let prepared = try await prepare(data, fileName: fileName, mimeType: mimeType, groups: account.session?.composer.attachments ?? [])
-        let uploaded: Uploaded = try await account.upload(.attachmentUpload, file: prepared.data, fileName: fileName, mimeType: prepared.mimeType, keyless: true)
+        let uploaded: Uploaded = try await account.upload(.attachmentUpload, file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, keyless: true)
         return uploaded.attachment
     }
 }
