@@ -4,12 +4,16 @@ import OSLog
 extension ChatViewModel {
     // MARK: - Signing in and out
 
+    /// Signs the account in once the app shows and the identity provider
+    /// has confirmed who is signed in. A sign-in of the same account that
+    /// is still running loads it.
     func handleSignIn() {
         guard let userId = currentUserId else { return }
-        guard isAppPresentationReady else {
+        guard isAppPresentationReady, authManager?.isLoading == false else {
             needsSignInWhenPresentationReady = true
             return
         }
+        if let activeSignInToken, signInTask != nil, accountOperationFence.isCurrent(activeSignInToken, currentUserId: userId) { return }
         signInTask?.cancel()
         let token = accountOperationFence.begin(userId: userId)
         activeSignInToken = token
@@ -40,6 +44,7 @@ extension ChatViewModel {
     private func finishSignIn(_ token: AccountOperationFence.Token, userId: String) {
         guard isCurrentSignIn(token, userId: userId) else { return }
         if activeSignInToken == token { activeSignInToken = nil }
+        signInTask = nil
         readyForAccountActionsUserId = userId
     }
 
@@ -121,9 +126,10 @@ extension ChatViewModel {
     }
 
     /// The content key was set, recovered or rotated: the account's chats and
-    /// settings load again with it.
+    /// settings load again with it. The key the account already read its
+    /// settings with changes nothing, so the list and the open chat stay.
     func keyChanged() async {
-        guard let session else { return }
+        guard let session, !session.account.readsHeldKey else { return }
         session.account.invalidateKey()
         session.list.clearCloud()
         if !session.open.onDevice { session.newChat(local: false) }
@@ -242,7 +248,7 @@ extension ChatViewModel {
     }
 
     func initializeExistingEncryptionKeyIfAvailable() async {
-        guard let operationUserId = currentUserId, EncryptionService.shared.hasEncryptionKey() else { return }
+        guard currentUserId != nil, EncryptionService.shared.hasEncryptionKey() else { return }
         let operationTask = Task {
             guard !Task.isCancelled else { return }
             _ = try? await EncryptionService.shared.initialize()
@@ -253,8 +259,6 @@ extension ChatViewModel {
         }
         defer { accountOperationTracker.end(operationToken) }
         await operationTask.value
-        guard currentUserId == operationUserId else { return }
-        await keyChanged()
     }
 
     /// Sets the content key, recovering the account's data with it or

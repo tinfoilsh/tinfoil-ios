@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import OSLog
 import UIKit
@@ -48,6 +49,9 @@ final class HarnessAccount: ObservableObject {
     private var profileVersion = 0
     private var profileWrites: Task<Void, Never>?
     private var profileSource: ProfileSource?
+    /// A digest of the content key the settings last loaded with, or were
+    /// asked for with, empty for no key; nil once the key changed.
+    private var profileKey: Data?
     private var storedProfile: ProfileFields = [:]
     private var unsavedProfile: [ProfileFields] = []
     private var changeTokens: ChangeTokens?
@@ -111,6 +115,7 @@ final class HarnessAccount: ObservableObject {
         changeTokens = nil
         keyGeneration += 1
         profileVersion += 1
+        profileKey = nil
         keyReady = false
         keyLocked = false
         profileReady = false
@@ -121,6 +126,19 @@ final class HarnessAccount: ObservableObject {
     /// and while the key is refused.
     private func keptProfile() -> ProfileFields {
         cloud ? settings.cloudProfileCache(userId: userId) : [:]
+    }
+
+    /// The settings were read, or are being read, with the content key this
+    /// device holds now, so nothing the key opens needs loading again.
+    /// Settings this device holds read no key.
+    var readsHeldKey: Bool {
+        !cloud || profileKey == heldKeyDigest()
+    }
+
+    private func heldKeyDigest() -> Data {
+        guard var bytes = keyBytes() else { return Data() }
+        defer { bytes.resetBytes(in: 0..<bytes.count) }
+        return Data(SHA256.hash(data: bytes))
     }
 
     // MARK: - Requests
@@ -274,6 +292,7 @@ final class HarnessAccount: ObservableObject {
         if !background {
             keyLocked = false
             error = nil
+            profileKey = heldKeyDigest()
         }
         do {
             let merging = settings.pendingProfileMerge == userId

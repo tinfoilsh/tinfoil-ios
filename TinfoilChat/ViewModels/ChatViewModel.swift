@@ -349,6 +349,9 @@ class ChatViewModel: ObservableObject {
         rows = ChatRows()
         session = nil
         verification = VerificationInfo(isVerifying: true)
+        // The account's settings load with its key as the session opens,
+        // before its sign-in runs.
+        if let userId { EncryptionService.shared.bind(userId: userId) }
         let account: HarnessAccount
         do {
             account = try Self.makeAccount(userId: userId, authManager: authManager)
