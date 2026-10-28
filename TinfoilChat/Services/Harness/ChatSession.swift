@@ -427,8 +427,8 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         if let id = open.id, moving[id] != nil { return false }
         patch { $0.failure = nil }
         attachments.rememberSent(fields.attachments)
-        let key: String?
-        do { key = try threads.runKey() } catch { report(error); return false }
+        // A turn the key could not be read for is not shown as sent.
+        do { _ = try threads.runKey() } catch { report(error); return false }
         if open.id == nil, open.model.isEmpty { patch { $0.model = pickedModel } }
         let settings = turnSettings()
         let choice = presetChoice()
@@ -463,6 +463,9 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
                 }
             }
             do {
+                // Each attempt reads the key it is sent with, so a retry after
+                // the key changed carries the current one.
+                let key = try threads.runKey()
                 guard let turn = try await threads.prepareTurn(threadId, defaults: defaults, fields: fields, key: key, settings: settings), shown() else {
                     unapply()
                     return false
