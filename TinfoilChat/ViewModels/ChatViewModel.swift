@@ -347,8 +347,12 @@ class ChatViewModel: ObservableObject {
         let userId = currentUserId
         if case .some(let opened) = sessionUserId, opened == userId, session != nil { return }
         sessionUserId = .some(userId)
+        // The chat a signed-out caller had open stays open once it is the
+        // account's.
+        var keptOpenChatId: String?
         if let previous = session, previous.account.userId == nil, userId != nil {
             memoryChats = await Self.deviceChats(of: previous.device)
+            keptOpenChatId = previous.open.id.flatMap { id in memoryChats.contains { $0.thread.id == id } ? id : nil }
         }
         session?.account.dispose()
         sessionCancellables = []
@@ -397,6 +401,7 @@ class ChatViewModel: ObservableObject {
         await migrateMemoryChats(into: store)
         session.newChat(local: activeStorageTab == .local)
         session.list.reloadDevice()
+        if let keptOpenChatId { selectChat(id: keptOpenChatId, isLocalOnly: true) }
         do {
             try await account.refresh(credentials: true)
             guard self.session === session else { return }
