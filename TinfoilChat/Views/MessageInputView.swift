@@ -827,7 +827,6 @@ struct MessageInputView: View {
                 .foregroundColor(.secondary)
                 .frame(width: 24, height: 24)
         }
-        .disabled(viewModel.isProcessingAttachment)
         .accessibilityLabel("Add to chat")
         .accessibleHitTarget()
         .padding(.leading, 8)

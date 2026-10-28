@@ -7,10 +7,6 @@ import VisionKit
 extension ChatViewModel {
     // MARK: - Attachments
 
-    var isProcessingAttachment: Bool {
-        pendingAttachments.contains { $0.processingState == .processing }
-    }
-
     /// An upload the change of account stopped before the chat service
     /// converted the file.
     static let uploadInterrupted = HarnessError(
