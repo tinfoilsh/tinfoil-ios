@@ -210,6 +210,9 @@ struct ChatListView: View {
                     if hasUserMessage && viewModel.isLoading {
                         scrollToUserTrigger = UUID()
                     } else {
+                        // A chat's messages arriving after it opened stay
+                        // hidden until the scroll to the end has placed them.
+                        if wasInitialLoad { tableOpacity = 0 }
                         scrollTrigger = UUID()
                     }
                 }
