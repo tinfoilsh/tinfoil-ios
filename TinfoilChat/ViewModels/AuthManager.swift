@@ -499,6 +499,7 @@ class AuthManager: ObservableObject {
         }
         EncryptionService.shared.clearKey()
         await DeviceEncryptionService.shared.clearKey()
+        SharedImportCoordinator.shared.discardPendingImports()
         cancelSubscriptionExpiration()
         localUserData = nil
         isAuthenticated = false

@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 struct SharedImportAttachmentBatch {
     enum Admission {
@@ -21,6 +22,7 @@ extension ChatViewModel: SharedImportAttachmentReceiving {}
 @MainActor
 final class SharedImportCoordinator {
     static let shared = SharedImportCoordinator()
+    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "SharedImport")
 
     private let storeProvider: () throws -> SharedImportStore
     private let managedFileStore: ManagedFileStore
@@ -72,5 +74,15 @@ final class SharedImportCoordinator {
     func acknowledge(requestID: UUID) {
         guard let store = try? storeProvider() else { return }
         store.removeRequest(id: requestID)
+    }
+
+    /// Discards the shares not yet imported, so they do not reach the next
+    /// account to open the app.
+    func discardPendingImports() {
+        do {
+            try storeProvider().removeAllRequests()
+        } catch {
+            Self.logger.error("Failed to discard pending shares: \(error, privacy: .public)")
+        }
     }
 }

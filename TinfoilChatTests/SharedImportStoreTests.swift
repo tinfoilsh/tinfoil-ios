@@ -50,6 +50,26 @@ struct SharedImportStoreTests {
         #expect(fixture.store.pendingRequests().isEmpty)
     }
 
+    @Test("Removes every pending share")
+    func removesEveryPendingShare() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
+        for name in ["first.txt", "second.txt"] {
+            try fixture.store.enqueue(
+                data: Data(name.utf8),
+                typeIdentifier: UTType.plainText.identifier,
+                originalFileName: name
+            )
+        }
+        #expect(fixture.store.pendingRequests().count == 2)
+
+        try fixture.store.removeAllRequests()
+
+        #expect(fixture.store.pendingRequests().isEmpty)
+        let remaining = try FileManager.default.contentsOfDirectory(atPath: fixture.inboxURL.path)
+        #expect(remaining == [SharedImportConfiguration.enqueueLockFileName])
+    }
+
     @Test("Persists data without an intermediate source file")
     func persistsDataRepresentation() throws {
         let fixture = try makeFixture()

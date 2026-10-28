@@ -340,6 +340,21 @@ struct SharedImportStore {
         try? fileManager.removeItem(at: directoryURL(for: id))
     }
 
+    /// Removes every pending share, and any a share left half written, as
+    /// when the account they were shared for signs out.
+    func removeAllRequests() throws {
+        try withExclusiveEnqueueLock {
+            let entries = try fileManager.contentsOfDirectory(
+                at: inboxURL,
+                includingPropertiesForKeys: nil,
+                options: []
+            )
+            for url in entries where url.lastPathComponent != SharedImportConfiguration.enqueueLockFileName {
+                try fileManager.removeItem(at: url)
+            }
+        }
+    }
+
     static func sanitizedFileName(_ fileName: String) -> String {
         let lastPathComponent = URL(fileURLWithPath: fileName).lastPathComponent
         let allowedCharacters = CharacterSet.alphanumerics.union(
