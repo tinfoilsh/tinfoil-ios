@@ -192,4 +192,20 @@ struct ChatSessionTests {
         #expect(session.controller.pending?.input.content == "hello")
         #expect(try await session.device.get(session.open.id!)?.messages.count == 1)
     }
+
+    @Test func anUploadIsTheAttachmentTheHarnessConvertedItTo() async throws {
+        let sessionAnswer: [String: Any] = [
+            "protocol": ["version": 1, "minimum": 1], "user": ["id": "", "anonymous": true], "rateLimit": ["kind": NSNull()],
+            "models": [], "auto": ["default": "", "levels": []], "defaultModel": "gpt-oss-120b", "widgets": [], "profileDefaults": [:],
+            "composer": ["attachments": [["accept": [".txt"], "maxBytes": 1000]], "projectDocuments": [], "pasteAsFileChars": 1000, "dictationMaxSeconds": 60],
+            "presets": [], "features": [:],
+        ]
+        let converted: [String: Any] = ["id": "att_1", "kind": "document", "fileName": "notes.txt", "mimeType": "text/plain", "textContent": "Notes"]
+        let fixture = Fixture(answers: [Answers.json(sessionAnswer), Answers.json(["attachment": converted])])
+        try await fixture.account.refresh()
+        let attachment = try await fixture.session.upload(Data("Notes".utf8), fileName: "notes.txt", mimeType: "text/plain")
+        #expect(attachment.id == "att_1")
+        #expect(attachment.textContent == "Notes")
+        #expect(await fixture.transport.requests.last?.route == .attachmentUpload)
+    }
 }

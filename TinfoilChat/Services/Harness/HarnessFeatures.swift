@@ -334,11 +334,16 @@ enum HarnessUploads {
         }.value
     }
 
+    private struct Uploaded: Decodable {
+        let attachment: Components.Schemas.Attachment
+    }
+
     /// Converts a file into an attachment the next turn sends.
     @MainActor
     static func upload(_ account: HarnessAccount, data: Data, fileName: String, mimeType: String) async throws -> Components.Schemas.Attachment {
         let prepared = try await prepare(data, fileName: fileName, mimeType: mimeType, groups: account.session?.composer.attachments ?? [])
-        return try await account.upload(.attachmentUpload, file: prepared.data, fileName: fileName, mimeType: prepared.mimeType, keyless: true)
+        let uploaded: Uploaded = try await account.upload(.attachmentUpload, file: prepared.data, fileName: fileName, mimeType: prepared.mimeType, keyless: true)
+        return uploaded.attachment
     }
 }
 
