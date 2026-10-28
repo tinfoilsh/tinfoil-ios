@@ -1389,8 +1389,31 @@ class ChatViewModel: ObservableObject {
     /// The open chat is temporary: it lives in memory and is never stored.
     var isTemporaryMode: Bool { session?.open.temporary == true }
 
-    func toggleTemporaryMode() {
+    /// The open temporary chat is being kept, once its reply is stored with it.
+    @Published private(set) var isSavingTemporaryChat = false
+
+    private func saveTemporaryChat() {
         guard let session else { return }
+        isSavingTemporaryChat = true
+        Task {
+            defer { isSavingTemporaryChat = false }
+            do {
+                try await session.saveTemporary()
+                previousChatIdBeforeTemporary = nil
+            } catch {
+                reportActionFailure("Couldn't Save Chat", error)
+            }
+        }
+    }
+
+    func toggleTemporaryMode() {
+        guard let session, !isSavingTemporaryChat else { return }
+        // A temporary chat with messages is kept, where new chats are stored,
+        // and stays open.
+        if isTemporaryMode, !session.state.messages.isEmpty {
+            saveTemporaryChat()
+            return
+        }
         cancelAudioRecording()
         if isTemporaryMode {
             if let previous = previousChatIdBeforeTemporary {

@@ -176,6 +176,26 @@ struct ChatSessionTests {
         #expect(!session.hasUnfinishedReply)
     }
 
+    @Test func aTemporaryChatIsKeptOnceItsReplyIsStored() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        session.newChat()
+        session.setTemporary(true)
+        await fixture.transport.push { request in
+            let turn = request.json
+            return Answers.events(deviceRun(id: turn["threadId"] as! String, question: "hello", questionId: turn["clientRequestId"] as! String))(request)
+        }
+        #expect(await session.send(TurnFields(kind: .send, content: "hello")))
+        let threadId = try #require(session.open.id)
+        #expect(try await session.device.get(threadId) == nil)
+
+        try await session.saveTemporary()
+        #expect(!session.open.temporary)
+        #expect(session.open.id == threadId)
+        #expect(try await session.device.get(threadId)?.messages.count == 2)
+        #expect(session.state.messages.count == 2)
+    }
+
     @Test func aStoredChatIsNamedByItsKey() async throws {
         let window: [String: Any] = summary().merging([
             "revision": "rev-1", "presetId": NSNull(), "flagged": false,
