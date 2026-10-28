@@ -32,6 +32,14 @@ struct ChatNavigationRequest: Equatable {
     let destination: ChatNavigationDestination
 }
 
+/// An action on a chat that failed outside the open chat's turn, as renaming
+/// or deleting a chat in the list, which an alert explains.
+struct ChatActionFailure: Identifiable, Equatable {
+    let id = UUID()
+    let title: String
+    let message: String
+}
+
 /// The rows atop the cloud and local chat lists that stand for a new chat.
 enum NewChatRow {
     static let cloudId = "new-chat-cloud"
@@ -192,6 +200,7 @@ class ChatViewModel: ObservableObject {
     @Published var imageViewerIndex: Int = 0
     @Published var showImageViewer: Bool = false
     @Published var showRateLimitPaywall: Bool = false
+    @Published var actionFailure: ChatActionFailure?
     @Published var verifierView: VerifierView?
     @Published var shouldShowKeyImport: Bool = false
     @Published private(set) var isPasskeyRecoverySkipped: Bool = false
@@ -1223,6 +1232,17 @@ class ChatViewModel: ObservableObject {
         for (id, original) in originals { session?.attachments.keepOriginal(id, original) }
     }
 
+    /// An action on a chat failed outside the open chat's turn: an alert
+    /// explains it, rather than the open chat's last reply.
+    func reportActionFailure(_ title: String, _ cause: Error) {
+        guard !(cause is CancellationError), let account, !account.disposed else { return }
+        if let error = cause as? HarnessError {
+            account.reportRateLimit(error.detail.rateLimit)
+            HarnessAccount.noteAuthenticationRequired(error)
+        }
+        actionFailure = ChatActionFailure(title: title, message: cause.localizedDescription)
+    }
+
     func openSummaryChat(id: String, projectId: String?, isLocalOnly: Bool) {
         if let projectId, activeProject?.id != projectId, let project = projects.first(where: { $0.id == projectId }) {
             activeProject = project
@@ -1242,7 +1262,7 @@ class ChatViewModel: ObservableObject {
                 try await session.remove(id)
                 if session.open.id == nil { createNewChat(focusInput: false) }
             } catch {
-                session.report(error)
+                reportActionFailure("Couldn't Delete Chat", error)
             }
         }
     }
@@ -1264,7 +1284,7 @@ class ChatViewModel: ObservableObject {
         guard let session else { return }
         let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
-        do { _ = try await session.update(id, ThreadPatch(title: title)) } catch { session.report(error) }
+        do { _ = try await session.update(id, ThreadPatch(title: title)) } catch { reportActionFailure("Couldn't Rename Chat", error) }
     }
 
     func canPinChat(_ chat: Chat) -> Bool {
@@ -1290,7 +1310,7 @@ class ChatViewModel: ObservableObject {
     private func toggleChatPin(id: String) {
         guard let session else { return }
         let pinned = !isChatPinned(id)
-        Task { do { _ = try await session.update(id, ThreadPatch(pinned: pinned)) } catch { session.report(error) } }
+        Task { do { _ = try await session.update(id, ThreadPatch(pinned: pinned)) } catch { reportActionFailure("Couldn't Update Favorites", error) } }
     }
 
     // MARK: - Temporary chats
@@ -1326,7 +1346,7 @@ class ChatViewModel: ObservableObject {
     func setPromptPreset(_ presetId: String?) {
         guard let session else { return }
         Task {
-            do { try await session.selectPreset(presetId) } catch { session.report(error) }
+            do { try await session.selectPreset(presetId) } catch { reportActionFailure("Couldn't Change Prompt", error) }
             showOpenChatModel()
         }
     }
@@ -1432,12 +1452,12 @@ class ChatViewModel: ObservableObject {
 
     func removeQueuedMessage(id: String) {
         guard let session else { return }
-        Task { do { try await session.removeQueued(id) } catch { session.report(error) } }
+        Task { do { try await session.removeQueued(id) } catch { reportActionFailure("Couldn't Remove Message", error) } }
     }
 
     func sendQueuedMessageNow(id: String) {
         guard let session else { return }
-        Task { do { try await session.sendQueued(id) } catch { session.report(error) } }
+        Task { do { try await session.sendQueued(id) } catch { reportActionFailure("Couldn't Send Message", error) } }
     }
 
     // MARK: - Message actions

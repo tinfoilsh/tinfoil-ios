@@ -130,6 +130,14 @@ struct ChatContainer: View {
                 showAuthView = true
             }
         }
+        .alert(viewModel.actionFailure?.title ?? "", isPresented: Binding(
+            get: { viewModel.actionFailure != nil },
+            set: { if !$0 { viewModel.actionFailure = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(viewModel.actionFailure?.message ?? "")
+        }
         .sheet(isPresented: $viewModel.showVerifierSheet) {
             if let verifierView = viewModel.verifierView {
                 verifierView

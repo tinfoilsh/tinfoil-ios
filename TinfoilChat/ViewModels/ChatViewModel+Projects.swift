@@ -251,7 +251,7 @@ extension ChatViewModel {
                     Self.logger.error("Failed to return a chat to this device after it failed to join a project: \(error, privacy: .public)")
                 }
             }
-            session.report(error)
+            reportActionFailure("Couldn't Move Chat", error)
         }
     }
 }
