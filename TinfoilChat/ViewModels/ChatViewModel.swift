@@ -285,6 +285,9 @@ class ChatViewModel: ObservableObject {
     private var sessionGeneration = 0
     private var shownChat: (generation: Int, chat: Chat?)?
     private var shownChats: (generation: Int, chats: [Chat])?
+    /// The open chat's rows, which keep their ids while a turn replaces its
+    /// messages, as the chat table expects.
+    private var rows = ChatRows()
     /// Whether the account changed since a session was opened for it.
     private var sessionUserId: String?? = nil
 
@@ -340,6 +343,7 @@ class ChatViewModel: ObservableObject {
         }
         session?.account.dispose()
         sessionCancellables = []
+        rows = ChatRows()
         session = nil
         verification = VerificationInfo(isVerifying: true)
         isClientInitializing = true
@@ -702,8 +706,11 @@ class ChatViewModel: ObservableObject {
         let state = session.state
         let open = session.open
         let running = session.running
-        let messages = state.messages.enumerated().map { index, message -> Message in
-            var view = ChatViewMapping.message(message, streaming: running && index == state.messages.count - 1, summaries: state.summaries)
+        let choice = session.presetChoice()
+        let model = choice.model ?? (open.model.isEmpty ? session.pickedModel : open.model)
+        let replyModelName = findSelectableModel(id: model)?.responseDisplayName
+        let messages = rows.rows(chatId: open.id, messages: state.messages, running: running, summaries: state.summaries, replyModelName: replyModelName).map { message -> Message in
+            var view = message
             if open.onDevice, !view.attachments.isEmpty {
                 // An image the previous client stored without a thumbnail
                 // shows its bytes; others load them when opened.
@@ -716,9 +723,7 @@ class ChatViewModel: ObservableObject {
             }
             return view
         }
-        let shownMessages = Self.withError(messages, state: state, failure: open.failure)
-        let choice = session.presetChoice()
-        let model = choice.model ?? (open.model.isEmpty ? session.pickedModel : open.model)
+        let shownMessages = Self.withError(messages, state: state, failure: open.failure, replyRowId: rows.awaitedReplyRowId(state.messages))
         let webSearch = open.webSearch ?? choice.webSearchEnabled
         let summary = state.snapshot.thread ?? open.loadingId.flatMap { loading in
             (open.local ? session.list.deviceListed : session.list.cloudListed + session.list.pinnedListed).first { $0.id == loading }
@@ -745,13 +750,14 @@ class ChatViewModel: ObservableObject {
     }
 
     /// A run's error shows on the reply it ended, as the message cards show
-    /// errors.
-    private static func withError(_ messages: [Message], state: ChatState, failure: HarnessErrorBody?) -> [Message] {
+    /// errors; a turn that ended before its reply started shows it in the row
+    /// the reply waited in.
+    private static func withError(_ messages: [Message], state: ChatState, failure: HarnessErrorBody?, replyRowId: String?) -> [Message] {
         guard let error = failure ?? (state.status == .error ? state.error : nil), !messages.isEmpty else { return messages }
         var shown = messages
         var last = shown[shown.count - 1]
         if last.role == .user {
-            var reply = Message(role: .assistant, content: "", timestamp: Date())
+            var reply = Message(id: replyRowId ?? UUID().uuidString.lowercased(), role: .assistant, content: "", timestamp: Date())
             reply.modelDisplayName = nil
             shown.append(reply)
             last = shown[shown.count - 1]

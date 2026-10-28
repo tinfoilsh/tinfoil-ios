@@ -14,9 +14,11 @@ enum ChatViewMapping {
     /// A message as the view shows it, with the latest summary of each
     /// thinking block's reasoning. A reply thinks only in its last block:
     /// reasoning ends once the reply goes on to text or a tool call.
-    static func message(_ wire: HarnessMessage, streaming: Bool = false, summaries: [String: String] = [:]) -> Message {
+    /// shownAs is the id the message's row was first shown with, when a turn
+    /// replaced the message's own.
+    static func message(_ wire: HarnessMessage, streaming: Bool = false, summaries: [String: String] = [:], shownAs id: String? = nil) -> Message {
         let role: MessageRole = wire.role == .user ? .user : .assistant
-        var message = Message(id: wire.id, role: role, content: wire.content ?? "", timestamp: ChatAccessCache.date(of: wire.createdAt) ?? .distantPast)
+        var message = Message(id: id ?? wire.id, role: role, content: wire.content ?? "", timestamp: ChatAccessCache.date(of: wire.createdAt) ?? .distantPast)
         message.modelDisplayName = wire.modelDisplayName
         message.isError = wire.isError
         message.annotations = wire.annotations?.compactMap { annotation in
