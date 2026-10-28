@@ -97,7 +97,9 @@ class ProfileManager: ObservableObject {
     @Published private(set) var customPromptPresets: [SyncedPromptPreset] = ProfileDefaults.customPromptPresets
     @Published private(set) var favoritePromptPresetIds: [String] = ProfileDefaults.favoritePromptPresetIds
     @Published private(set) var defaultPromptPresetId: String = ProfileDefaults.defaultPromptPresetId
-    @Published private(set) var syncError: String?
+    @Published private(set) var webSearchAvailable: Bool = ProfileDefaults.webSearchAvailable
+    @Published private(set) var piiCheckEnabled: Bool = ProfileDefaults.piiCheckEnabled
+    @Published private(set) var genUIEnabled: Bool = ProfileDefaults.genUIEnabled
 
     private weak var account: HarnessAccount?
     private var cancellable: AnyCancellable?
@@ -130,36 +132,22 @@ class ProfileManager: ObservableObject {
         customPromptPresets = (profile.customPromptPresets ?? []).map(SyncedPromptPreset.init)
         favoritePromptPresetIds = profile.favoritePromptPresetIds ?? ProfileDefaults.favoritePromptPresetIds
         defaultPromptPresetId = profile.defaultPromptPresetId ?? ProfileDefaults.defaultPromptPresetId
-        // The toggles Settings keeps follow the profile only where it holds
-        // them: a profile not loaded yet leaves them as they were.
-        let settings = SettingsManager.shared
-        settings.isApplyingSharedProfile = true
-        defer { settings.isApplyingSharedProfile = false }
-        if let webSearchAvailable = profile.webSearchAvailable, settings.webSearchAvailable != webSearchAvailable {
-            settings.webSearchAvailable = webSearchAvailable
-        }
-        if let piiCheckEnabled = profile.piiCheckEnabled, settings.piiCheckEnabled != piiCheckEnabled {
-            settings.piiCheckEnabled = piiCheckEnabled
-        }
-        if let genUIEnabled = profile.genUIEnabled, settings.genUIEnabled != genUIEnabled {
-            settings.genUIEnabled = genUIEnabled
-        }
-        if let language = profile.language, settings.selectedLanguage != language { settings.selectedLanguage = language }
+        webSearchAvailable = profile.webSearchAvailable ?? ProfileDefaults.webSearchAvailable
+        piiCheckEnabled = profile.piiCheckEnabled ?? ProfileDefaults.piiCheckEnabled
+        genUIEnabled = profile.genUIEnabled ?? ProfileDefaults.genUIEnabled
     }
 
     /// Saves a change to the profile. The change shows at once through the
     /// account's session; one the chat service refuses is taken back, and
-    /// reported here.
+    /// logged here.
     private func save(_ patch: ProfileFields) {
         guard let account else { return }
         Task {
             do {
                 try await account.updateProfile(patch)
-                syncError = nil
             } catch {
                 guard !(error is CancellationError) else { return }
                 Self.logger.error("Failed to save the profile: \(error, privacy: .public)")
-                syncError = error.localizedDescription
             }
         }
     }
@@ -176,23 +164,22 @@ class ProfileManager: ObservableObject {
         save(["language": language])
     }
 
-    /// A toggle Settings shares with the profile.
-    enum SharedSetting: String {
-        case webSearchAvailable
-        case piiCheckEnabled
-        case genUIEnabled
+    func setWebSearchAvailable(_ available: Bool) {
+        guard available != webSearchAvailable else { return }
+        webSearchAvailable = available
+        save(["webSearchAvailable": available])
     }
 
-    /// A shared toggle changed in Settings.
-    func sharedSettingDidChange(_ setting: SharedSetting) {
-        let settings = SettingsManager.shared
-        let value: Bool
-        switch setting {
-        case .webSearchAvailable: value = settings.webSearchAvailable
-        case .piiCheckEnabled: value = settings.piiCheckEnabled
-        case .genUIEnabled: value = settings.genUIEnabled
-        }
-        save([setting.rawValue: value])
+    func setPIICheckEnabled(_ enabled: Bool) {
+        guard enabled != piiCheckEnabled else { return }
+        piiCheckEnabled = enabled
+        save(["piiCheckEnabled": enabled])
+    }
+
+    func setGenUIEnabled(_ enabled: Bool) {
+        guard enabled != genUIEnabled else { return }
+        genUIEnabled = enabled
+        save(["genUIEnabled": enabled])
     }
 
     var personalizationDraft: PersonalizationDraft {

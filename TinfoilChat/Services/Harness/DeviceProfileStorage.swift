@@ -139,6 +139,8 @@ enum PreviousClientSettings {
         if let level = defaults.object(forKey: settings.autoIntelligence) { fields["autoIntelligence"] = "\(level)" }
         if let effort = defaults.string(forKey: settings.reasoningEffort) { fields["reasoningEffort"] = effort }
         if defaults.object(forKey: settings.thinkingEnabled) != nil { fields["thinkingEnabled"] = defaults.bool(forKey: settings.thinkingEnabled) }
+        // Clients before the web search setting kept one web search toggle
+        // for every chat, which new chats start with.
         if defaults.object(forKey: settings.webSearchEnabled) != nil { fields["webSearchEnabled"] = defaults.bool(forKey: settings.webSearchEnabled) }
         if defaults.object(forKey: settings.webSearchAvailable) != nil { fields["webSearchAvailable"] = defaults.bool(forKey: settings.webSearchAvailable) }
         if defaults.object(forKey: settings.piiCheckEnabled) != nil { fields["piiCheckEnabled"] = defaults.bool(forKey: settings.piiCheckEnabled) }

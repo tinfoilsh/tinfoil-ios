@@ -23,82 +23,15 @@ class SettingsManager: ObservableObject {
         }
     }
     
-    @Published var selectedLanguage: String {
-        didSet {
-            UserDefaults.standard.set(selectedLanguage, forKey: Constants.StorageKeys.Settings.selectedLanguage)
-        }
-    }
-    
-    // Personalization settings
-    @Published var isPersonalizationEnabled: Bool {
-        didSet {
-            UserDefaults.standard.set(isPersonalizationEnabled, forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled)
-        }
-    }
-    
-    @Published var nickname: String {
-        didSet {
-            UserDefaults.standard.set(nickname, forKey: Constants.StorageKeys.UserPrefs.nickname)
-        }
-    }
-    
-    @Published var profession: String {
-        didSet {
-            UserDefaults.standard.set(profession, forKey: Constants.StorageKeys.UserPrefs.profession)
-        }
-    }
-    
-    @Published var selectedTraits: [String] {
-        didSet {
-            UserDefaults.standard.set(selectedTraits, forKey: Constants.StorageKeys.UserPrefs.traits)
-        }
-    }
-    
-    @Published var additionalContext: String {
-        didSet {
-            UserDefaults.standard.set(additionalContext, forKey: Constants.StorageKeys.UserPrefs.additionalContext)
-        }
-    }
-    
-    // While true, setting-change observers skip notifying ProfileManager. This
-    // is set while a synced profile is being applied, both to avoid redundant
-    // sync callbacks and to prevent re-entering ProfileManager.shared while its
-    // singleton is still being initialized (applyProfile runs inside init).
-    var isApplyingSharedProfile = false
-
-    @Published var webSearchAvailable: Bool {
-        didSet {
-            UserDefaults.standard.set(webSearchAvailable, forKey: Constants.StorageKeys.Settings.webSearchAvailable)
-            if !isApplyingSharedProfile {
-                ProfileManager.shared.sharedSettingDidChange(.webSearchAvailable)
-            }
-        }
-    }
-
-    @Published var piiCheckEnabled: Bool {
-        didSet {
-            UserDefaults.standard.set(piiCheckEnabled, forKey: Constants.StorageKeys.Settings.piiCheckEnabled)
-            if !isApplyingSharedProfile {
-                ProfileManager.shared.sharedSettingDidChange(.piiCheckEnabled)
-            }
-        }
-    }
-
-    // Generative UI toggle. When off, no render_* tool capabilities are sent.
-    @Published var genUIEnabled: Bool {
-        didSet {
-            UserDefaults.standard.set(genUIEnabled, forKey: Constants.StorageKeys.Settings.genUIEnabled)
-            if !isApplyingSharedProfile {
-                ProfileManager.shared.sharedSettingDidChange(.genUIEnabled)
-            }
-        }
-    }
+    /// While true, turning cloud sync off is not announced: clearing the
+    /// settings is not the user's change.
+    private var isClearingSettings = false
 
     // Cloud sync toggle
     @Published var isCloudSyncEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isCloudSyncEnabled, forKey: Constants.StorageKeys.Settings.cloudSyncEnabled)
-            if isCloudSyncEnabled != oldValue, !isApplyingSharedProfile {
+            if isCloudSyncEnabled != oldValue, !isClearingSettings {
                 NotificationCenter.default.post(name: .cloudSyncSettingChanged, object: nil)
             }
         }
@@ -121,43 +54,6 @@ class SettingsManager: ObservableObject {
     private init() {
         // Initialize with stored values or defaults if not present
         self.hapticFeedbackEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.hapticFeedbackEnabled) as? Bool ?? true
-        self.selectedLanguage = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.selectedLanguage) ?? ProfileDefaults.language
-        
-        // Initialize personalization settings
-        self.isPersonalizationEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled) as? Bool ?? ProfileDefaults.isUsingPersonalization
-        self.nickname = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.nickname) ?? ProfileDefaults.nickname
-        self.profession = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.profession) ?? ProfileDefaults.profession
-        self.additionalContext = UserDefaults.standard.string(forKey: Constants.StorageKeys.UserPrefs.additionalContext) ?? ProfileDefaults.additionalContext
-        
-        if let traitsData = UserDefaults.standard.array(forKey: Constants.StorageKeys.UserPrefs.traits) as? [String] {
-            self.selectedTraits = traitsData
-        } else {
-            self.selectedTraits = ProfileDefaults.traits
-        }
-        
-        if let storedValue = UserDefaults.standard.object(
-            forKey: Constants.StorageKeys.Settings.webSearchAvailable
-        ) as? Bool {
-            self.webSearchAvailable = storedValue
-        } else if let legacyValue = UserDefaults.standard.object(
-            forKey: Constants.StorageKeys.Settings.webSearchEnabled
-        ) as? Bool {
-            self.webSearchAvailable = legacyValue
-            UserDefaults.standard.set(
-                legacyValue,
-                forKey: Constants.StorageKeys.Settings.webSearchAvailable
-            )
-        } else {
-            self.webSearchAvailable = ProfileDefaults.webSearchAvailable
-        }
-        UserDefaults.standard.removeObject(
-            forKey: Constants.StorageKeys.Settings.webSearchEnabled
-        )
-
-        self.piiCheckEnabled = Self.loadPIICheckEnabled(from: .standard)
-
-        // Initialize Generative UI setting (defaults to on)
-        self.genUIEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.genUIEnabled) as? Bool ?? ProfileDefaults.genUIEnabled
 
         // Initialize cloud sync setting
         // If no explicit value has been stored, auto-enable for existing users who already have an encryption key
@@ -176,15 +72,6 @@ class SettingsManager: ObservableObject {
         // Ensure defaults are saved if they weren't present
         if UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.hapticFeedbackEnabled) == nil {
             UserDefaults.standard.set(true, forKey: Constants.StorageKeys.Settings.hapticFeedbackEnabled)
-        }
-        if UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.selectedLanguage) == nil {
-            UserDefaults.standard.set(ProfileDefaults.language, forKey: Constants.StorageKeys.Settings.selectedLanguage)
-        }
-        if UserDefaults.standard.object(forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled) == nil {
-            UserDefaults.standard.set(
-                ProfileDefaults.isUsingPersonalization,
-                forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled
-            )
         }
     }
 
@@ -209,37 +96,12 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.cloudSyncEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.localOnlyModeEnabled)
 
-        // Reset in-memory state to defaults. The resets are not the user's
-        // changes: none is written to the account's profile, which the
-        // teardown clears.
-        isApplyingSharedProfile = true
-        defer { isApplyingSharedProfile = false }
+        // Reset in-memory state to defaults.
+        isClearingSettings = true
+        defer { isClearingSettings = false }
         hapticFeedbackEnabled = true
-        selectedLanguage = ProfileDefaults.language
-        isPersonalizationEnabled = ProfileDefaults.isUsingPersonalization
-        nickname = ProfileDefaults.nickname
-        profession = ProfileDefaults.profession
-        selectedTraits = ProfileDefaults.traits
-        additionalContext = ProfileDefaults.additionalContext
-        webSearchAvailable = ProfileDefaults.webSearchAvailable
-        piiCheckEnabled = ProfileDefaults.piiCheckEnabled
-        genUIEnabled = ProfileDefaults.genUIEnabled
         isCloudSyncEnabled = false
         isLocalOnlyModeEnabled = false
-    }
-
-    static func loadPIICheckEnabled(from defaults: UserDefaults) -> Bool {
-        defaults.object(forKey: Constants.StorageKeys.Settings.piiCheckEnabled) as? Bool
-            ?? ProfileDefaults.piiCheckEnabled
-    }
-
-    // Reset all personalization settings
-    func resetPersonalization() {
-        nickname = ProfileDefaults.nickname
-        profession = ProfileDefaults.profession
-        selectedTraits = ProfileDefaults.traits
-        additionalContext = ProfileDefaults.additionalContext
-        isPersonalizationEnabled = ProfileDefaults.isUsingPersonalization
     }
 }
 
@@ -534,7 +396,10 @@ struct SettingsView: View {
         Section {
             Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
                 .tint(Color.accentPrimary)
-            Toggle(isOn: $settings.genUIEnabled) {
+            Toggle(isOn: Binding(
+                get: { profileManager.genUIEnabled },
+                set: { profileManager.setGenUIEnabled($0) }
+            )) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Generative UI")
                     Text("Let the AI render interactive widgets like charts and timelines. When off, no tool capabilities are sent to the model.")
@@ -543,7 +408,10 @@ struct SettingsView: View {
                 }
             }
             .tint(Color.accentPrimary)
-            Toggle(isOn: $settings.webSearchAvailable) {
+            Toggle(isOn: Binding(
+                get: { profileManager.webSearchAvailable },
+                set: { profileManager.setWebSearchAvailable($0) }
+            )) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Web Search")
                     Text("Show web search controls and allow chats to search the web.")
@@ -552,8 +420,11 @@ struct SettingsView: View {
                 }
             }
             .tint(Color.accentPrimary)
-            if settings.webSearchAvailable {
-                Toggle(isOn: $settings.piiCheckEnabled) {
+            if profileManager.webSearchAvailable {
+                Toggle(isOn: Binding(
+                    get: { profileManager.piiCheckEnabled },
+                    set: { profileManager.setPIICheckEnabled($0) }
+                )) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Automatic PII Blocking")
                         Text("Block web search queries containing personal information.")
@@ -970,16 +841,6 @@ struct SettingsView: View {
                     }
                     .accessibilityLabel("Close")
                 }
-            }
-        }
-        .onAppear {
-            // Mirror the profile language for legacy settings consumers.
-            settings.selectedLanguage = ProfileManager.shared.language
-        }
-        // Keep UI settings in sync with ProfileManager when remote changes arrive
-        .onReceive(ProfileManager.shared.$language) { newValue in
-            if !newValue.isEmpty && settings.selectedLanguage != newValue {
-                settings.selectedLanguage = newValue
             }
         }
         .sheet(isPresented: $showAuthView) {

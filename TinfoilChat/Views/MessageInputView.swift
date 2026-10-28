@@ -1539,7 +1539,6 @@ private final class FloatingRecordingBubbleView: UIView {
 struct AddToSheetView: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @EnvironmentObject private var authManager: AuthManager
-    @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var profileManager = ProfileManager.shared
     let isDarkMode: Bool
     let contextUsage: ContextUsage?
@@ -1599,7 +1598,7 @@ struct AddToSheetView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
 
-                if settings.webSearchAvailable {
+                if profileManager.webSearchAvailable {
                     Toggle(isOn: Binding(
                         get: { viewModel.isWebSearchEnabled },
                         set: { viewModel.setWebSearchEnabled($0) }
