@@ -347,6 +347,12 @@ extension ChatViewModel {
         return succeeded
     }
 
+    /// Clears a skipped passkey recovery and runs it again, for the
+    /// "unlock" actions of the sidebar, an error card and Settings. A key
+    /// that must be set up or recovered by hand opens the onboarding sheet,
+    /// as signing in does, and a key the passkey unlocked loads the
+    /// account again.
+    @discardableResult
     func reattemptPasskeyRecovery() async -> PasskeyRecoveryResult? {
         guard let operationUserId = currentUserId else { return nil }
         let operationTask = Task { [passkeyManager] in
@@ -360,7 +366,18 @@ extension ChatViewModel {
         defer { accountOperationTracker.end(operationToken) }
         let result = await operationTask.value
         guard currentUserId == operationUserId else { return nil }
-        if case .success = result { await keyChanged() }
+        switch result {
+        case .manualSetupRequired:
+            cloudSyncOnboardingMode = .setup
+            showCloudSyncOnboarding = true
+        case .manualRecoveryRequired:
+            cloudSyncOnboardingMode = .recovery
+            showCloudSyncOnboarding = true
+        case .success, .newUserSetupDone:
+            handleSignIn()
+        default:
+            break
+        }
         return result
     }
 
