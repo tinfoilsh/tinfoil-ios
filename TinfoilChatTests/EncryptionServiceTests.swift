@@ -51,6 +51,22 @@ struct EncryptionServiceTests {
         #expect(service.getKey() == nil)
     }
 
+    @Test func replacedKeyIsKeptUnlessStartingFresh() async throws {
+        let (service, _, cleanup) = try makeService()
+        defer { cleanup() }
+        let first = service.generateKey()
+        let second = service.generateKey()
+        service.bind(userId: "user-a")
+
+        try await service.setKey(first)
+        try await service.setKey(second)
+        #expect(try service.getAllKeys().alternatives == [first])
+
+        try await service.setKey(service.generateKey(), persist: false)
+        try service.persistCurrentKeyState(discardingHistory: true)
+        #expect(try service.getAllKeys().alternatives.isEmpty)
+    }
+
     @Test func keyIsNotStoredWithoutAnAccount() async throws {
         let (service, _, cleanup) = try makeService()
         defer { cleanup() }

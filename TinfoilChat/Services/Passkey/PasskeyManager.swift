@@ -521,7 +521,7 @@ final class PasskeyManager: ObservableObject {
         switch result {
         case .success(let cek, let keyIdHex, _, _):
             do {
-                try await applyFreshCek(cek: cek)
+                try await applyFreshCek(cek: cek, discardingHistory: createdVia == .startFresh)
                 guard canMutateAccountKey else { throw CancellationError() }
                 persistEnclaveKeyId(keyIdHex)
                 activatePasskey()
@@ -1533,12 +1533,14 @@ final class PasskeyManager: ObservableObject {
         }
     }
 
-    private func applyFreshCek(cek: Data) async throws {
+    /// Puts a key the registry just registered in place. A start-fresh
+    /// discards the keys it replaces, as the registry deleted their rows.
+    private func applyFreshCek(cek: Data, discardingHistory: Bool) async throws {
         guard canMutateAccountKey else { throw CancellationError() }
         let bytes = try await snapshotCurrentKeys()
         guard canMutateAccountKey else { throw CancellationError() }
         do {
-            try await EncryptionService.shared.setKeyBytes(cek)
+            try await EncryptionService.shared.setKeyBytes(cek, discardingHistory: discardingHistory)
             guard canMutateAccountKey else {
                 throw CancellationError()
             }

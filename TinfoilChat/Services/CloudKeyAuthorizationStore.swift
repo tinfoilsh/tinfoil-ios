@@ -107,14 +107,21 @@ final class CloudKeyAuthorizationStore {
     /// account whose rows predate the registry registers the key as the
     /// one that recovers them; an account without rows, as entered by hand.
     /// The harness reseals only under the registered key, and owns the
-    /// resealing once asked.
+    /// resealing once asked. Once no row sealed under another key remains,
+    /// the keys the held one replaced are dropped.
     func registerHeldKeyIfNeeded() async throws {
         let held = try EncryptionService.shared.getAllKeys()
         guard let primary = held.primary, let primaryBytes = try? EncryptionService.shared.getAlternativeKeyBytes(primary) else { return }
         let current = try await KeyRegistry.shared.current()
         let target = primaryBytes.base64EncodedString()
         if let keyId = current.keyId {
-            guard current.hasData, keyId == (try? ContentKeyBundle.deriveKeyIdHex(cek: primaryBytes)) else { return }
+            guard keyId == (try? ContentKeyBundle.deriveKeyIdHex(cek: primaryBytes)) else { return }
+            guard current.hasData else {
+                if !held.alternatives.isEmpty, try EncryptionService.shared.getAllKeys().primary == primary {
+                    try EncryptionService.shared.clearKeyHistory()
+                }
+                return
+            }
         } else {
             _ = try await KeyRegistry.shared.register(key: target, ifMatch: KeyRegistry.noKey, createdVia: current.hasData ? .recovery : .manual)
             guard current.hasData else { return }

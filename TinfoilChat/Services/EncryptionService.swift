@@ -119,7 +119,11 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     /// Keychain. Callers must follow up with `persistCurrentKeyState()`
     /// once the registry accepts the key, or `discardStagedKeyState()` to
     /// roll back.
-    func setKey(_ keyString: String, persist: Bool = true) async throws {
+    ///
+    /// The replaced key joins the history, unless `discardingHistory`,
+    /// which drops it and every older one, as a start-fresh does once the
+    /// registry deleted the rows they sealed.
+    func setKey(_ keyString: String, persist: Bool = true, discardingHistory: Bool = false) async throws {
         let (normalizedKey, _) = try normalizeKeyInput(keyString)
 
         guard persist else {
@@ -127,9 +131,7 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
             return
         }
 
-        let previousKey = try loadKeyFromKeychain()
-        try saveKeyToKeychain(normalizedKey)
-        try updateKeyHistory(withNewKey: normalizedKey, previousKey: previousKey)
+        try store(normalizedKey, discardingHistory: discardingHistory)
         stagedPrimaryKey = nil
     }
     
@@ -174,10 +176,11 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     }
 
     /// Set the primary key from a CEK provided as raw 32 bytes, e.g. one
-    /// freshly generated or recovered from a passkey bundle. Encodes the bytes back into the alphanumeric
-    /// keychain format so the rest of the app keeps working unchanged.
-    func setKeyBytes(_ bytes: Data) async throws {
-        try await setKey(encodeKeyFromBytes(bytes))
+    /// freshly generated or recovered from a passkey bundle. Encodes the
+    /// bytes back into the alphanumeric keychain format so the rest of the
+    /// app keeps working unchanged.
+    func setKeyBytes(_ bytes: Data, discardingHistory: Bool = false) async throws {
+        try await setKey(encodeKeyFromBytes(bytes), discardingHistory: discardingHistory)
     }
 
     /// Encode raw CEK bytes into the canonical `key_<base36>` string
@@ -226,15 +229,19 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
 
     /// Commit a key staged via `setKey(_:persist:false)` to the Keychain.
     /// No-op when nothing is staged. Call this only after the registry has
-    /// accepted the key.
-    func persistCurrentKeyState() throws {
+    /// accepted the key. `discardingHistory` is as for `setKey`.
+    func persistCurrentKeyState(discardingHistory: Bool = false) throws {
         guard let staged = stagedPrimaryKey else { return }
 
-        let previousKey = try loadKeyFromKeychain()
-        try saveKeyToKeychain(staged)
-        try updateKeyHistory(withNewKey: staged, previousKey: previousKey)
+        try store(staged, discardingHistory: discardingHistory)
 
         stagedPrimaryKey = nil
+    }
+
+    /// Drop the keys the primary replaced, once no row sealed under one
+    /// remains.
+    func clearKeyHistory() throws {
+        try saveKeyHistory([])
     }
 
     /// Drop a staged key without persisting it, so the persisted Keychain
@@ -277,6 +284,16 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         }
         let normalizedKey = "key_" + processedKey
         return (normalizedKey, keyData)
+    }
+
+    private func store(_ key: String, discardingHistory: Bool) throws {
+        let previousKey = try loadKeyFromKeychain()
+        try saveKeyToKeychain(key)
+        if discardingHistory {
+            try saveKeyHistory([])
+        } else {
+            try updateKeyHistory(withNewKey: key, previousKey: previousKey)
+        }
     }
 
     private func updateKeyHistory(withNewKey newKey: String, previousKey: String?) throws {

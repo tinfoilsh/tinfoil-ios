@@ -290,7 +290,7 @@ extension ChatViewModel {
                     try ensureCurrentAccount(operationUserId)
                     try await CloudKeyAuthorizationStore.shared.registerStartFreshKeyIfNeeded()
                     remoteRegistrationCommitted = true
-                    try EncryptionService.shared.persistCurrentKeyState()
+                    try EncryptionService.shared.persistCurrentKeyState(discardingHistory: true)
                 } catch {
                     if !remoteRegistrationCommitted { EncryptionService.shared.discardStagedKeyState() }
                     throw error
