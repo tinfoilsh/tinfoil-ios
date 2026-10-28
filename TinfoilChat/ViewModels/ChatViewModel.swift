@@ -629,6 +629,8 @@ class ChatViewModel: ObservableObject {
         let failed: Bool
         /// A new chat took its id with the turn it is sending.
         let firstTurn: Bool
+        /// The chat service titled the chat.
+        let titled: Bool
         let status: ChatState.Status
         let messageCount: Int
         let lastMessageId: String?
@@ -639,6 +641,7 @@ class ChatViewModel: ObservableObject {
             failedId = session.open.failedId
             failed = session.open.failure != nil
             firstTurn = session.isNewChatsFirstTurn
+            titled = session.state.snapshot.thread?.titleState == .generated
             status = session.state.status
             messageCount = session.state.messages.count
             lastMessageId = session.state.messages.last?.id
@@ -695,10 +698,12 @@ class ChatViewModel: ObservableObject {
     }
 
     /// VoiceOver hears a reply start, finish or fail in the chat on screen,
-    /// as the web app's live region announces it.
+    /// as the web app's live region announces it, and a haptic marks a reply
+    /// finishing or failing and the chat taking its title.
     private func announceGenerationStatus(from previous: SessionLayout?, to next: SessionLayout?) {
-        guard let previous, let next, previous.chatId == next.chatId || (previous.chatId == nil && next.firstTurn),
-              previous.status != next.status else { return }
+        guard let previous, let next, previous.chatId == next.chatId || (previous.chatId == nil && next.firstTurn) else { return }
+        if previous.chatId == next.chatId, !previous.titled, next.titled { HapticFeedback.trigger(.success) }
+        guard previous.status != next.status else { return }
         let running: Set<ChatState.Status> = [.submitting, .queued, .streaming]
         let wasRunning = running.contains(previous.status), isRunning = running.contains(next.status)
         if !wasRunning, isRunning {
@@ -706,8 +711,12 @@ class ChatViewModel: ObservableObject {
             AccessibilityAnnouncer.announce(Constants.Accessibility.generatingResponse)
         } else if wasRunning, next.status == .error || next.failed {
             AccessibilityAnnouncer.announce(Constants.Accessibility.responseFailed)
+            HapticFeedback.trigger(.error)
         } else if wasRunning, next.status == .idle {
-            if !stopAnnounced { AccessibilityAnnouncer.announce(Constants.Accessibility.responseComplete) }
+            if !stopAnnounced {
+                AccessibilityAnnouncer.announce(Constants.Accessibility.responseComplete)
+                HapticFeedback.trigger(.success)
+            }
             stopAnnounced = false
         }
     }
