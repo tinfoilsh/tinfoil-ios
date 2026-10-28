@@ -124,7 +124,6 @@ class ChatViewModel: ObservableObject {
 
     @Published var activeStorageTab: ChatStorageTab = .cloud
     @Published private(set) var messageEditSession: MessageEditSession?
-    @Published var isTemporaryMode: Bool = false
     private var previousChatIdBeforeTemporary: String?
     @Published private(set) var forkingChatId: String?
     private var previousOpenChatId: String?
@@ -1111,7 +1110,6 @@ class ChatViewModel: ObservableObject {
         } else {
             local = activeStorageTab == .local
         }
-        isTemporaryMode = false
         session.newChat(local: local)
         session.setProject(projectId)
         if let modelType { currentModel = modelType }
@@ -1130,7 +1128,6 @@ class ChatViewModel: ObservableObject {
         if session.open.id == id, session.open.loadingId == nil { return true }
         cancelMessageEdit()
         clearPendingAttachments()
-        isTemporaryMode = false
         Task {
             do {
                 _ = try await session.openChat(id, local: isLocalOnly)
@@ -1218,10 +1215,12 @@ class ChatViewModel: ObservableObject {
 
     // MARK: - Temporary chats
 
+    /// The open chat is temporary: it lives in memory and is never stored.
+    var isTemporaryMode: Bool { session?.open.temporary == true }
+
     func toggleTemporaryMode() {
         guard let session else { return }
         if isTemporaryMode {
-            isTemporaryMode = false
             session.newChat(local: activeStorageTab == .local)
             if let previous = previousChatIdBeforeTemporary {
                 previousChatIdBeforeTemporary = nil
@@ -1233,7 +1232,6 @@ class ChatViewModel: ObservableObject {
             clearPendingAttachments()
             session.newChat(local: true)
             session.setTemporary(true)
-            isTemporaryMode = true
             shouldFocusInput = true
         }
     }
