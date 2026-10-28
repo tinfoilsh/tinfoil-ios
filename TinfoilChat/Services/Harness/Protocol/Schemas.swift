@@ -5171,6 +5171,57 @@ extension Components {
                 case hasData = "has_data"
             }
         }
+        /// Where a reseal stands: the rows resealed so far, the rows still to try, and the rows no given key opens.
+        ///
+        /// - Remark: Generated from `#/components/schemas/ResealReport`.
+        internal struct ResealReport: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ResealReport/status`.
+            internal enum StatusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case running = "running"
+                case complete = "complete"
+                case failed = "failed"
+            }
+            /// - Remark: Generated from `#/components/schemas/ResealReport/status`.
+            internal var status: Components.Schemas.ResealReport.StatusPayload
+            /// - Remark: Generated from `#/components/schemas/ResealReport/migrated`.
+            internal var migrated: Swift.Int
+            /// - Remark: Generated from `#/components/schemas/ResealReport/remaining`.
+            internal var remaining: Swift.Int
+            /// - Remark: Generated from `#/components/schemas/ResealReport/blocked`.
+            internal var blocked: Swift.Int
+            /// The reseal's time or the account's credential ran out before every row was tried; a later call continues it.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ResealReport/partial`.
+            internal var partial: Swift.Bool
+            /// Creates a new `ResealReport`.
+            ///
+            /// - Parameters:
+            ///   - status:
+            ///   - migrated:
+            ///   - remaining:
+            ///   - blocked:
+            ///   - partial: The reseal's time or the account's credential ran out before every row was tried; a later call continues it.
+            internal init(
+                status: Components.Schemas.ResealReport.StatusPayload,
+                migrated: Swift.Int,
+                remaining: Swift.Int,
+                blocked: Swift.Int,
+                partial: Swift.Bool
+            ) {
+                self.status = status
+                self.migrated = migrated
+                self.remaining = remaining
+                self.blocked = blocked
+                self.partial = partial
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case status
+                case migrated
+                case remaining
+                case blocked
+                case partial
+            }
+        }
         /// One line of a device import.
         ///
         /// - Remark: Generated from `#/components/schemas/ImportLine`.
