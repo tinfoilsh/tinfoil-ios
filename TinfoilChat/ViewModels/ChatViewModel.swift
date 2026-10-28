@@ -857,6 +857,13 @@ class ChatViewModel: ObservableObject {
     /// Why the open chat cannot take a turn, which the composer explains.
     var sendBlock: SendBlock? { session?.sendBlock }
 
+    /// The chat service is still opening, or the open chat still waits for
+    /// the account's settings or key. A prompt asked for from outside the
+    /// app waits for this, as sending does.
+    var isConnecting: Bool {
+        session == nil || verification.isVerifying || sendBlock == .loading
+    }
+
     var canSendInCurrentContext: Bool {
         guard canGenerateInCurrentChat else { return false }
         if activeProject != nil || currentChat?.projectId != nil { return hasPremiumAccess }

@@ -234,6 +234,10 @@ struct ContentView: View {
             guard !isLoading, !intentCoordinator.pendingActions.isEmpty else { return }
             performPendingIntentActionsIfReady()
         }
+        .onChange(of: chatViewModel.isConnecting) { _, isConnecting in
+            guard !isConnecting, !intentCoordinator.pendingActions.isEmpty else { return }
+            performPendingIntentActionsIfReady()
+        }
         .onChange(of: authManager.hasActiveSubscription) { _, hasSubscription in
             refreshHomeScreenQuickActions()
             // Update available models when subscription status changes
@@ -304,10 +308,12 @@ struct ContentView: View {
     private func canPerform(intentAction: AppIntentCoordinator.Action) -> Bool {
         switch intentAction {
         case .askQuestion:
-            // Signed-out users cannot get a fresh chat from createNewChat, so
-            // their single chat must finish streaming before the next prompt,
-            // otherwise sendMessage's isLoading guard would drop it.
-            return chatViewModel.hasChatAccess || !chatViewModel.isLoading
+            // The prompt is sent once the chat service has opened, or it
+            // would be dropped. Signed-out users cannot get a fresh chat from
+            // createNewChat, so their single chat must finish streaming
+            // before the next prompt, otherwise sendMessage's isLoading guard
+            // would drop it.
+            return !chatViewModel.isConnecting && (chatViewModel.hasChatAccess || !chatViewModel.isLoading)
         case .newChat, .startDictation, .showProjects, .showFavorites:
             return true
         }
