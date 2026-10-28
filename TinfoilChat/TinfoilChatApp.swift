@@ -131,6 +131,13 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             // Disable PII collection for privacy
             // For more information, visit: https://docs.sentry.io/platforms/apple/data-management/data-collected/
             options.sendDefaultPii = false
+            // A failed request's event carries its headers, which include the
+            // chat access token; breadcrumbs carry the URLs of images a reply
+            // names; trace headers would tag requests to the chat service
+            // with an id Sentry's events share.
+            options.enableCaptureFailedRequests = false
+            options.enableNetworkBreadcrumbs = false
+            options.tracePropagationTargets = []
 
             // Configure profiling. Visit https://docs.sentry.io/platforms/apple/profiling/ to learn more.
             options.configureProfiling = { profileOptions in
