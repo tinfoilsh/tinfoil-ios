@@ -104,6 +104,21 @@ struct LegacyStoragePurgeTests {
         #expect(Set(keychain.items.keys) == [MemoryKeychain.Item(nil, "chat-recovery-user-cache-secret-user-b")])
     }
 
+    /// The account's cloud settings go as it signs out, with no account
+    /// bound any more to name it.
+    @MainActor
+    @Test func signingOutRemovesTheAccountsCloudSettings() {
+        let userId = "LegacyStoragePurgeTests-\(UUID().uuidString)"
+        let storage = DeviceProfileStorage()
+        defer { storage.clearCloudProfileCache(userId: userId) }
+        storage.saveCloudProfileCache(["nickname": "Al"], userId: userId)
+        #expect(!storage.cloudProfileCache(userId: userId).isEmpty)
+
+        ChatViewModel.wipeDeviceChats(userId: userId)
+
+        #expect(storage.cloudProfileCache(userId: userId).isEmpty)
+    }
+
     @MainActor
     @Test func passkeyStorageKeepsOnlyTheCredentialId() throws {
         let (defaults, cleanup) = try makeDefaults()

@@ -173,12 +173,14 @@ extension ChatViewModel {
         Self.wipeDeviceChats(userId: userId)
     }
 
-    /// Removes what this device kept for the account: its chats, run
-    /// receipt and prompt cache secret, and what older clients kept for it.
+    /// Removes what this device kept for the account: its chats, cloud
+    /// settings, run receipt and prompt cache secret, and what older clients
+    /// kept for it.
     static func wipeDeviceChats(userId: String) {
         if let directory = try? DeviceThreadStore.directory(userId: userId) {
             try? FileManager.default.removeItem(at: directory)
         }
+        DeviceProfileStorage().clearCloudProfileCache(userId: userId)
         LegacyDeviceChats.wipe(userId: userId)
         PromptCacheSecret.forget(userId: userId)
         RunReceiptStore(userId: userId).clear()
