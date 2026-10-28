@@ -1121,12 +1121,18 @@ class ChatViewModel: ObservableObject {
 
     // MARK: - Chats
 
+    /// Shows the chats of the cloud or of this device, and opens the tab's
+    /// most recent chat, or a new chat stored there.
     func switchStorageTab(to tab: ChatStorageTab) {
-        guard tab == .cloud || SettingsManager.shared.isLocalOnlyModeEnabled else { return }
+        guard tab != activeStorageTab, tab == .cloud || SettingsManager.shared.isLocalOnlyModeEnabled else { return }
         activeStorageTab = tab
         UserDefaults.standard.set(tab.rawValue, forKey: Constants.StorageKeys.Settings.cloudSyncActiveTab)
-        if let session, session.open.id == nil || currentChat?.isBlankChat == true {
-            session.newChat(local: tab == .local)
+        let local = tab == .local
+        let listed = local ? localSidebarSummaries : cloudSidebarSummaries
+        if currentChat?.isBlankChat == false, let recent = listed.first(where: { isRootSidebarChat($0) && !$0.isBlankChat }) {
+            _ = selectChat(id: recent.id, isLocalOnly: local)
+        } else {
+            createNewChat(isLocalOnly: local, focusInput: false)
         }
     }
 
