@@ -49,8 +49,9 @@ final class HarnessAccount: ObservableObject {
     private var profileVersion = 0
     private var profileWrites: Task<Void, Never>?
     private var profileSource: ProfileSource?
-    /// A digest of the content key the settings last loaded with, or were
-    /// asked for with, empty for no key; nil once the key changed.
+    /// A digest of the content key the account was opened with, or its
+    /// settings last loaded or were asked for with, empty for no key; nil
+    /// once the key changed.
     private var profileKey: Data?
     private var storedProfile: ProfileFields = [:]
     private var unsavedProfile: [ProfileFields] = []
@@ -84,6 +85,7 @@ final class HarnessAccount: ObservableObject {
         cloud = userId != nil && cloudSync
         if cloud {
             profile = settings.cloudProfileCache(userId: userId)
+            profileKey = heldKeyDigest()
         } else if let local = try? settings.loadLocalProfile() {
             // The settings this device holds show, and turns can use them,
             // before the session loads.
@@ -143,8 +145,8 @@ final class HarnessAccount: ObservableObject {
         !profileReady && !keyLocked && error != nil
     }
 
-    /// The settings were read, or are being read, with the content key this
-    /// device holds now, so nothing the key opens needs loading again.
+    /// The account was opened, or its settings read, with the content key
+    /// this device holds now, so nothing the key opens needs loading again.
     /// Settings this device holds read no key.
     var readsHeldKey: Bool {
         !cloud || profileKey == heldKeyDigest()

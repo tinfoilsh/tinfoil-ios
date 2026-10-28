@@ -57,7 +57,9 @@ struct HarnessAccountTests {
     @Test func settingsReadWithTheHeldKeyNeedNoReloadUntilTheKeyChanges() async throws {
         let key = HeldKey()
         let (account, _) = makeAccount(userId: "user-1", answers: [Answers.json(sessionAnswer), Answers.json(["language": "French"])], key: key)
-        #expect(!account.readsHeldKey)
+        // An account opened with the key held reads with it before its
+        // settings have loaded.
+        #expect(account.readsHeldKey)
         try await account.refresh()
         #expect(account.keyReady)
         #expect(account.readsHeldKey)
@@ -65,6 +67,15 @@ struct HarnessAccountTests {
         #expect(!account.readsHeldKey)
         key.bytes = Data(repeating: 7, count: 32)
         account.invalidateKey()
+        #expect(!account.readsHeldKey)
+    }
+
+    @Test func aKeySetAfterTheAccountOpenedWithoutOneLoadsItAgain() async throws {
+        let key = HeldKey()
+        key.bytes = nil
+        let (account, _) = makeAccount(userId: "user-1", answers: [], key: key)
+        #expect(account.readsHeldKey)
+        key.bytes = Data(repeating: 7, count: 32)
         #expect(!account.readsHeldKey)
     }
 
