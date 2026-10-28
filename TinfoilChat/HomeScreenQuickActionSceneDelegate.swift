@@ -65,10 +65,8 @@ final class HomeScreenQuickActionSceneDelegate: NSObject, UIWindowSceneDelegate 
         case Constants.HomeScreenQuickActions.newChat:
             action = .newChat
         case Constants.HomeScreenQuickActions.projects:
-            guard PremiumProjectPolicy.hasAccess(
-                isAuthenticated: UserDefaults.standard.bool(forKey: Constants.StorageKeys.Auth.state),
-                hasActiveSubscription: UserDefaults.standard.bool(forKey: Constants.StorageKeys.Auth.subscription)
-            ) else { return false }
+            // Offered only with Premium; the projects open only if the
+            // account still has it once the action runs.
             action = .showProjects
         case Constants.HomeScreenQuickActions.favorites:
             action = .showFavorites

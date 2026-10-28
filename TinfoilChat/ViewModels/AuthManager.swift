@@ -8,6 +8,7 @@
 import SwiftUI
 import ClerkKit
 import Combine
+import OSLog
 import Sentry
 
 enum SubscriptionAccessPolicy {
@@ -44,6 +45,49 @@ enum SubscriptionAccessPolicy {
         guard isActive(status: status, expiresAt: expiresAt, now: now),
               let expirationDate = expirationDate(from: expiresAt) else { return nil }
         return expirationDate
+    }
+}
+
+/// The signed-in user's details as last seen, kept between launches in the
+/// keychain, on this device only. Older versions kept them, and whether the
+/// user subscribed, in the defaults; the first read moves the details and
+/// drops the rest.
+struct CachedUserDataStore {
+    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Auth")
+
+    let keychain: KeychainStore
+    let defaults: UserDefaults
+    private let key = Constants.StorageKeys.Auth.userData
+
+    func load() -> Data? {
+        defaults.removeObject(forKey: Constants.StorageKeys.Auth.subscription)
+        do {
+            let stored = try keychain.load(for: key, service: nil)
+            let previous = defaults.data(forKey: key)
+            if stored == nil, let previous {
+                try keychain.save(previous, for: key, service: nil)
+            }
+            defaults.removeObject(forKey: key)
+            return stored ?? previous
+        } catch {
+            // The copy older versions kept stays until it can be moved.
+            Self.logger.error("Failed to read the signed-in user's details: \(error, privacy: .public)")
+            return defaults.data(forKey: key)
+        }
+    }
+
+    func save(_ data: Data) {
+        do {
+            try keychain.save(data, for: key, service: nil)
+        } catch {
+            Self.logger.error("Failed to keep the signed-in user's details: \(error, privacy: .public)")
+        }
+    }
+
+    func clear() {
+        keychain.delete(for: key, service: nil)
+        defaults.removeObject(forKey: key)
+        defaults.removeObject(forKey: Constants.StorageKeys.Auth.subscription)
     }
 }
 
@@ -134,8 +178,8 @@ class AuthManager: ObservableObject {
     
     // UserDefaults keys
     private let authStateKey = Constants.StorageKeys.Auth.state
-    private let userDataKey = Constants.StorageKeys.Auth.userData
-    private let subscriptionKey = Constants.StorageKeys.Auth.subscription
+
+    private let userDataStore = CachedUserDataStore(keychain: KeychainHelper.shared, defaults: .standard)
 
     private func applySubscriptionAccess(_ isActive: Bool) {
         let shouldRefreshCredentials = SubscriptionAccessPolicy.requiresCredentialRefresh(
@@ -231,13 +275,12 @@ class AuthManager: ObservableObject {
     }
     
     private func loadCachedAuthState() {
-        if let userData = UserDefaults.standard.data(forKey: userDataKey),
+        if let userData = userDataStore.load(),
            let decodedUserData = try? JSONSerialization.jsonObject(with: userData) as? [String: Any] {
             localUserData = decodedUserData
         }
         
         isAuthenticated = UserDefaults.standard.bool(forKey: authStateKey)
-        hasActiveSubscription = UserDefaults.standard.bool(forKey: subscriptionKey)
         updateSubscriptionAccess(
             status: localUserData?["subscription_status"] as? String,
             expiresAt: localUserData?["subscription_expires_at"] as? String
@@ -247,16 +290,17 @@ class AuthManager: ObservableObject {
     
     private func saveAuthState() {
         UserDefaults.standard.set(isAuthenticated, forKey: authStateKey)
-        UserDefaults.standard.set(hasActiveSubscription, forKey: subscriptionKey)
-        
-        if let userData = localUserData {
-            if let encodedData = try? JSONSerialization.data(withJSONObject: userData) {
-                UserDefaults.standard.set(encodedData, forKey: userDataKey)
-            }
-        } else {
-            UserDefaults.standard.removeObject(forKey: userDataKey)
+        saveUserData()
+    }
+
+    private func saveUserData() {
+        guard let userData = localUserData else {
+            userDataStore.clear()
+            return
         }
-        
+        if let encodedData = try? JSONSerialization.data(withJSONObject: userData) {
+            userDataStore.save(encodedData)
+        }
     }
     
     func setClerk(_ clerk: Clerk) {
@@ -461,8 +505,7 @@ class AuthManager: ObservableObject {
 
         // Clear saved auth state
         UserDefaults.standard.removeObject(forKey: authStateKey)
-        UserDefaults.standard.removeObject(forKey: userDataKey)
-        UserDefaults.standard.removeObject(forKey: subscriptionKey)
+        userDataStore.clear()
     }
     
     func signOut() async {
@@ -532,14 +575,7 @@ class AuthManager: ObservableObject {
                     }
                 }
 
-                // Update UserDefaults
-                if let userData = localUserData,
-                   let encodedData = try? JSONSerialization.data(withJSONObject: userData) {
-                    UserDefaults.standard.set(encodedData, forKey: userDataKey)
-                }
-
-                // Save subscription state
-                UserDefaults.standard.set(hasActiveSubscription, forKey: subscriptionKey)
+                if localUserData != nil { saveUserData() }
 
                 return true
             }
