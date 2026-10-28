@@ -1175,6 +1175,8 @@ class ChatViewModel: ObservableObject {
         attachmentError = nil
         acknowledgeSharedImports(in: acknowledged)
         let fields = TurnFields(kind: .send, content: content, attachments: sent.isEmpty ? nil : sent, options: turnOptions)
+        // A message queued behind a reply keeps the keyboard up for the next.
+        if !session.running { dismissKeyboard() }
         scrollToBottomTrigger = UUID()
         Task { await session.send(fields) }
         return true
@@ -1191,6 +1193,7 @@ class ChatViewModel: ObservableObject {
     /// when it has no reply.
     func regenerateLastResponse() {
         guard let session, canGenerateInCurrentChat, let index = session.state.messages.indices.last else { return }
+        dismissKeyboard()
         Task { await session.regenerate(at: index, options: turnOptions) }
     }
 
@@ -1204,13 +1207,20 @@ class ChatViewModel: ObservableObject {
             retryLastResponse()
             return
         }
+        dismissKeyboard()
         Task { await session.continueReply(at: index, options: turnOptions) }
     }
 
     /// Tries the failed reply again, or reconnects to a dropped one.
     func retryLastResponse() {
         guard let session, canGenerateInCurrentChat else { return }
+        dismissKeyboard()
         Task { await session.retry(options: turnOptions) }
+    }
+
+    /// A turn the user starts puts the keyboard away.
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     func removeQueuedMessage(id: String) {
@@ -1264,6 +1274,7 @@ class ChatViewModel: ObservableObject {
         messageEditSession = nil
         let messageId = session.state.messages[index].id
         let content = newContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        dismissKeyboard()
         Task {
             if session.running { try? await session.cancel() }
             await session.send(TurnFields(kind: .edit, content: content, messageId: messageId, options: turnOptions))
