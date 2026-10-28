@@ -22,9 +22,6 @@ struct KeyState: Equatable, Sendable {
     /// key id, data predates the registry, and a fresh key would strand it.
     let hasData: Bool
 
-    /// An account without a key.
-    static let none = KeyState(keyId: nil, etag: nil, bundles: [:], createdVia: nil, createdAt: nil, hasData: false)
-
     init(keyId: String?, etag: String?, bundles: [String: Bundle], createdVia: String?, createdAt: String?, hasData: Bool) {
         self.keyId = keyId
         self.etag = etag
@@ -159,11 +156,7 @@ final class KeyRegistry {
     /// The current key and its bundles. An account without a key is an
     /// ordinary state, not a failure.
     func current() async throws -> KeyState {
-        do {
-            return KeyState(try await post(.keysCurrent, EmptyBody()) as Components.Schemas.KeyCurrent)
-        } catch let error as HarnessError where error.status == Constants.Harness.Keys.notFoundStatus {
-            return .none
-        }
+        KeyState(try await post(.keysCurrent, EmptyBody()) as Components.Schemas.KeyCurrent)
     }
 
     /// Registers a key, as the account's first or in place of the current

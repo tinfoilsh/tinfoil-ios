@@ -177,9 +177,10 @@ enum HarnessTransfers {
     }
 
     /// A request the harness refused, or that failed before it was sent,
-    /// changed nothing. A server error may come after the change committed.
+    /// changed nothing. A server error may come after the change committed,
+    /// and so may a request whose connection failed.
     private static func isRefusal(_ error: Error) -> Bool {
-        guard let error = error as? HarnessError else { return false }
+        guard let error = error as? HarnessError, error.code != HarnessErrorCode.connection else { return false }
         return error.status == nil || error.status! < Constants.Harness.ChatAccess.serverErrorStatus
     }
 

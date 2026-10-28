@@ -51,6 +51,16 @@ struct HarnessErrorBody: Equatable, Sendable {
         message: "The chat service sent a response this client cannot read.",
         action: .stop
     )
+
+    /// Why a request failed when its answer did not come from the harness:
+    /// a refusal the enclave did not seal says nothing this client may show
+    /// or act on, and whether the request took effect is unknown, as when
+    /// the connection drops.
+    static let unsealedRefusal = HarnessErrorBody(
+        code: HarnessErrorCode.connection,
+        message: "The chat service could not be reached. Check your connection and try again.",
+        action: .retry
+    )
 }
 
 extension HarnessErrorBody: Decodable {

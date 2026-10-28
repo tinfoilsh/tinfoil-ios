@@ -131,12 +131,12 @@ final class MemoryProfileStorage: ProfileStorage, @unchecked Sendable {
 /// The JSON answers a scripted transport gives.
 enum Answers {
     static func json(_ status: Int, _ body: String) -> ScriptedTransport.Answer {
-        { _ in .collected(status: status, headers: ["content-type": "application/json"], body: Data(body.utf8)) }
+        { _ in .collected(status: status, headers: ["content-type": "application/json"], sealed: true, body: Data(body.utf8)) }
     }
 
     static func json(_ object: [String: Any]) -> ScriptedTransport.Answer {
         let body = try! JSONSerialization.data(withJSONObject: object)
-        return { _ in .collected(status: 200, headers: ["content-type": "application/json"], body: body) }
+        return { _ in .collected(status: 200, headers: ["content-type": "application/json"], sealed: true, body: body) }
     }
 
     static func events(_ frames: [[String: Any]]) -> ScriptedTransport.Answer {
@@ -145,7 +145,7 @@ enum Answers {
             let data = try! JSONSerialization.data(withJSONObject: frame)
             text += "id: \(index)\ndata: \(String(decoding: data, as: UTF8.self))\n\n"
         }
-        return { _ in .collected(status: 200, headers: ["content-type": "text/event-stream"], body: Data(text.utf8)) }
+        return { _ in .collected(status: 200, headers: ["content-type": "text/event-stream"], sealed: true, body: Data(text.utf8)) }
     }
 
     static func refusal(_ status: Int, code: String, action: String) -> ScriptedTransport.Answer {

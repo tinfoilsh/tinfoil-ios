@@ -15,6 +15,10 @@ struct HarnessRequest: Sendable {
 struct HarnessResponse: Sendable {
     let status: Int
     let headers: [String: String]
+    /// Whether the enclave sealed the answer. Every answer the harness
+    /// gives is; one that is not came from whatever stands in front of the
+    /// enclave.
+    let sealed: Bool
     let body: AsyncThrowingStream<Data, Error>
 
     var isSuccess: Bool { (200..<300).contains(status) }
@@ -28,8 +32,8 @@ struct HarnessResponse: Sendable {
         return data
     }
 
-    static func collected(status: Int, headers: [String: String], body: Data) -> HarnessResponse {
-        HarnessResponse(status: status, headers: headers, body: AsyncThrowingStream { continuation in
+    static func collected(status: Int, headers: [String: String], sealed: Bool, body: Data) -> HarnessResponse {
+        HarnessResponse(status: status, headers: headers, sealed: sealed, body: AsyncThrowingStream { continuation in
             continuation.yield(body)
             continuation.finish()
         })
@@ -87,7 +91,8 @@ final class SealedTransport: HarnessTransport {
                     headers: request.headers,
                     body: request.body
                 )
-                return HarnessResponse(status: response.statusCode, headers: Self.headers(of: response), body: stream)
+                let sealed = response.value(forHTTPHeaderField: EHBPProtocol.responseNonceHeader) != nil
+                return HarnessResponse(status: response.statusCode, headers: Self.headers(of: response), sealed: sealed, body: stream)
             } catch let error as EHBPError where error.code == .keyConfigMismatch {
                 // The enclave rotated its key since it was verified; the
                 // request is sealed again, once, to the key verified now.

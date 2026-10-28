@@ -54,11 +54,11 @@ private struct Input: Encodable {
 @Suite("Harness client")
 struct HarnessClientTests {
     private static func json(_ status: Int, _ body: String) -> ScriptedTransport.Answer {
-        { _ in .collected(status: status, headers: ["content-type": "application/json"], body: Data(body.utf8)) }
+        { _ in .collected(status: status, headers: ["content-type": "application/json"], sealed: true, body: Data(body.utf8)) }
     }
 
     private static func events(_ text: String) -> ScriptedTransport.Answer {
-        { _ in .collected(status: 200, headers: ["content-type": "text/event-stream"], body: Data(text.utf8)) }
+        { _ in .collected(status: 200, headers: ["content-type": "text/event-stream"], sealed: true, body: Data(text.utf8)) }
     }
 
     private static func refusal(_ status: Int, code: String, action: String) -> ScriptedTransport.Answer {
@@ -121,6 +121,15 @@ struct HarnessClientTests {
         let credentials = ScriptedCredentials(identities: ["jwt"], access: [.success("key")])
         let error = await Self.failure { let _: Ok = try await Self.client(transport, credentials).post(.get, Input(threadId: "t")) }
         #expect(error == HarnessError(HarnessErrorBody.invalidResponse, status: 502))
+    }
+
+    @Test func aRefusalTheEnclaveDidNotSealIsALostConnectionTheClientDoesNotActOn() async throws {
+        let envelope = #"{"error":{"code":"UNAUTHENTICATED","message":"Sign in again","action":"reauthenticate"}}"#
+        let transport = ScriptedTransport([{ _ in .collected(status: 401, headers: ["content-type": "application/json"], sealed: false, body: Data(envelope.utf8)) }])
+        let credentials = ScriptedCredentials(identities: ["jwt", "jwt-2"], access: [.success("key"), .success("key")])
+        let error = await Self.failure { let _: Ok = try await Self.client(transport, credentials).post(.get, Input(threadId: "t")) }
+        #expect(error == HarnessError(HarnessErrorBody.unsealedRefusal, status: nil))
+        #expect(await transport.requests.count == 1)
     }
 
     @Test func anAnswerThatIsNotTheProtocolsIsOneTheClientCannotRead() async throws {
@@ -229,7 +238,7 @@ struct HarnessClientTests {
             continuation.yield(Data("id: 0\ndata: {\"type\":\"RUN_STARTED\",\"threadId\":\"t\",\"runId\":\"r\",\"instance\":\"i\"}\n\n".utf8))
             continuation.onTermination = { _ in Task { await ended.raise() } }
         }
-        let transport = ScriptedTransport([{ _ in HarnessResponse(status: 200, headers: ["content-type": "text/event-stream"], body: body) }])
+        let transport = ScriptedTransport([{ _ in HarnessResponse(status: 200, headers: ["content-type": "text/event-stream"], sealed: true, body: body) }])
         let credentials = ScriptedCredentials(identities: ["jwt"], access: [.success("k")])
         var seen = 0
         for try await _ in try await Self.client(transport, credentials).events(.turn, Input(threadId: "t")) {
