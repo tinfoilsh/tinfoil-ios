@@ -13,6 +13,10 @@ extension ChatViewModel {
             needsSignInWhenPresentationReady = true
             return
         }
+        // A key a passkey recovered, or one another device rotated to and
+        // this one applied, loads the account again.
+        passkeyManager.onRecoveryComplete = { [weak self] in self?.handleSignIn() }
+        passkeyManager.onKeyRefreshedFromBackup = { [weak self] in Task { @MainActor in self?.handleSignIn() } }
         if let activeSignInToken, signInTask != nil, accountOperationFence.isCurrent(activeSignInToken, currentUserId: userId) { return }
         signInTask?.cancel()
         let token = accountOperationFence.begin(userId: userId)
