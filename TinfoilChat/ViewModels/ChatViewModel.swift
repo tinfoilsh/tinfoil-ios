@@ -632,6 +632,8 @@ class ChatViewModel: ObservableObject {
         let loadingId: String?
         let failedId: String?
         let failed: Bool
+        /// A new chat took its id with the turn it is sending.
+        let firstTurn: Bool
         let status: ChatState.Status
         let messageCount: Int
         let lastMessageId: String?
@@ -641,6 +643,7 @@ class ChatViewModel: ObservableObject {
             loadingId = session.open.loadingId
             failedId = session.open.failedId
             failed = session.open.failure != nil
+            firstTurn = session.isNewChatsFirstTurn
             status = session.state.status
             messageCount = session.state.messages.count
             lastMessageId = session.state.messages.last?.id
@@ -690,7 +693,8 @@ class ChatViewModel: ObservableObject {
     /// VoiceOver hears a reply start, finish or fail in the chat on screen,
     /// as the web app's live region announces it.
     private func announceGenerationStatus(from previous: SessionLayout?, to next: SessionLayout?) {
-        guard let previous, let next, previous.chatId == next.chatId, previous.status != next.status else { return }
+        guard let previous, let next, previous.chatId == next.chatId || (previous.chatId == nil && next.firstTurn),
+              previous.status != next.status else { return }
         let running: Set<ChatState.Status> = [.submitting, .queued, .streaming]
         let wasRunning = running.contains(previous.status), isRunning = running.contains(next.status)
         if !wasRunning, isRunning {
@@ -729,6 +733,11 @@ class ChatViewModel: ObservableObject {
     /// A reply of the open chat is being generated.
     var isLoading: Bool {
         session?.running == true
+    }
+
+    /// The open chat was blank until the turn it is sending gave it its id.
+    var isNewChatsFirstTurn: Bool {
+        session?.isNewChatsFirstTurn == true
     }
 
     /// Whether the given chat has a response currently being generated,
@@ -1187,7 +1196,6 @@ class ChatViewModel: ObservableObject {
         let fields = TurnFields(kind: .send, content: content, attachments: sent.isEmpty ? nil : sent, options: turnOptions)
         // A message queued behind a reply keeps the keyboard up for the next.
         if !session.running { dismissKeyboard() }
-        scrollToBottomTrigger = UUID()
         Task { await session.send(fields) }
         return true
     }

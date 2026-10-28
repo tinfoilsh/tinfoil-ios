@@ -218,7 +218,11 @@ struct ChatListView: View {
         // Keyed off the chat id: the open chat is rebuilt with every change
         // to it, which must not read as a chat switch, since this handler
         // force-scrolls to the bottom.
-        .onChange(of: viewModel.currentChat?.id) { _, _ in
+        .onChange(of: viewModel.currentChat?.id) { oldId, _ in
+            // A new chat's first message gives the chat its id: the same
+            // conversation stays on screen, positioned by the message count
+            // change that came with it.
+            if oldId?.isEmpty ?? true, viewModel.isNewChatsFirstTurn { return }
             userHasScrolled = false
             viewModel.isScrollInteractionActive = false
 

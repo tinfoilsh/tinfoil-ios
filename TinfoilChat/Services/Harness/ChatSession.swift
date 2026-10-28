@@ -83,6 +83,10 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     var state: ChatState { controller.view }
     var running: Bool { [.submitting, .streaming, .queued].contains(state.status) }
 
+    /// The open chat is a new chat whose first turn gave it its id, and is
+    /// not stored yet: the conversation on screen is the one that was blank.
+    var isNewChatsFirstTurn: Bool { open.id != nil && open.unsaved == open.id }
+
     private func patch(_ change: (inout OpenChat) -> Void) {
         var next = open
         change(&next)
