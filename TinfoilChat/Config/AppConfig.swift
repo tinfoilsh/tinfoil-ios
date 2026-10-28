@@ -70,10 +70,12 @@ struct ModelType: Identifiable, Hashable, Equatable {
         self.model = model
     }
 
+    private static let autoDescription = "Routes to the best model for the chosen intelligence level"
+
     /// The entry that has the router choose a model for each turn.
     static let auto = ModelType(Components.Schemas.SessionModel(
         id: AutoModel.id, label: "Auto", shortLabel: "Auto", icon: "",
-        description: "Routes to the best model for the chosen intelligence level",
+        description: autoDescription,
         badges: [], reasoning: nil, deprecated: false, auto: true
     ))
 
@@ -102,8 +104,11 @@ struct ModelType: Identifiable, Hashable, Equatable {
 
     var description: String { model.description }
 
-    /// Short blurb for the model picker.
-    var pickerDescription: String { model.description }
+    /// Short blurb for the model picker. The chat service offers Auto
+    /// without one, so Auto describes itself.
+    var pickerDescription: String {
+        isAuto && model.description.isEmpty ? Self.autoDescription : model.description
+    }
 
     // Full model name
     var fullName: String { model.label }
