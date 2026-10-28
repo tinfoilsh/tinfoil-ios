@@ -651,40 +651,6 @@ struct PasskeyCompositionTests {
         ) == key)
     }
 
-    @Test func oldPRFCacheRecordReconstructsTinfoilProfile() throws {
-        let oldRecord = try JSONSerialization.data(withJSONObject: [
-            "credentialId": "AQID",
-            "prfOutput": Data(repeating: 7, count: 32).base64EncodedString(),
-            "isPlatformAuthenticator": true,
-        ], options: [.sortedKeys])
-
-        let decoded = try TinfoilPasskeyCacheMigration.decodeCachedRecord(oldRecord)
-
-        #expect(decoded.credentialId == "AQID")
-        #expect(decoded.prfOutput == Data(repeating: 7, count: 32))
-        #expect(decoded.profile == TinfoilPasskeyProfile.current)
-    }
-
-    @Test func priorGenericCacheRecordDropsPresentationName() throws {
-        let oldRecord = try JSONSerialization.data(withJSONObject: [
-            "profile": [
-                "version": 1,
-                "relyingPartyId": "tinfoil.sh",
-                "relyingPartyName": "Tinfoil Chat",
-                "prfSalt": TinfoilPasskeyProfile.prfSalt.base64EncodedString(),
-                "hkdfInfo": TinfoilPasskeyProfile.hkdfInfo.base64EncodedString(),
-            ],
-            "credentialId": "AQID",
-            "prfOutput": Data(repeating: 9, count: 32).base64EncodedString(),
-        ], options: [.sortedKeys])
-
-        let decoded = try TinfoilPasskeyCacheMigration.decodeCachedRecord(oldRecord)
-
-        #expect(decoded.profile == TinfoilPasskeyProfile.current)
-        #expect(decoded.credentialId == "AQID")
-        #expect(decoded.prfOutput == Data(repeating: 9, count: 32))
-    }
-
     @Test func bundleInventoryVerificationUsesLocalAndRemoteKeyIds() {
         let state = currentKeyState(keyId: "current-key", credentialIds: ["AQ"])
 

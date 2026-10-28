@@ -213,62 +213,33 @@ enum GenericKeyEnvelope {
     }
 }
 
-/// Decodes pre-kit PRF cache formats. Passed to the kit's Keychain
-/// storage adapter as its `decodeCachedRecord` fallback, which runs
-/// only when the stored payload is not a canonical `CachedPRFResult`.
-enum TinfoilPasskeyCacheMigration {
-    private struct LegacyCacheEntry: Codable {
-        let credentialId: String
-        let prfOutput: Data
-        let isPlatformAuthenticator: Bool?
+/// What the passkey kit keeps on this device: only the id of the passkey
+/// made here, which the recovery prompt offers first. The PRF output a
+/// ceremony returns is never kept, as it would unwrap the content key
+/// without the passkey.
+@MainActor
+final class LocalCredentialPasskeyStorage: PasskeyKeyStorage {
+    private let defaults: UserDefaults
+    private let credentialIdKey: String
+
+    init(defaults: UserDefaults = .standard, credentialIdKey: String = Constants.StorageKeys.Secret.passkeyEnclaveCredentialId) {
+        self.defaults = defaults
+        self.credentialIdKey = credentialIdKey
     }
 
-    private struct PreviousCacheEntry: Codable {
-        struct Profile: Codable {
-            let version: Int
-            let relyingPartyId: String
-            let relyingPartyName: String
-            let prfSalt: Data
-            let hkdfInfo: Data
-        }
+    func loadCachedPRFResult() throws -> CachedPRFResult? { nil }
 
-        let profile: Profile
-        let credentialId: String
-        let prfOutput: Data
+    func saveCachedPRFResult(_ result: CachedPRFResult) throws {}
+
+    func loadLocalCredentialId() throws -> String? {
+        defaults.string(forKey: credentialIdKey)
     }
 
-    static func decodeCachedRecord(_ data: Data) throws -> CachedPRFResult {
-        if let previous = try? JSONDecoder().decode(PreviousCacheEntry.self, from: data) {
-            guard previous.profile.version == TinfoilPasskeyProfile.version,
-                  previous.profile.relyingPartyId == Constants.Passkey.rpId,
-                  previous.profile.relyingPartyName == Constants.Passkey.rpName,
-                  previous.profile.prfSalt == TinfoilPasskeyProfile.prfSalt,
-                  previous.profile.hkdfInfo == TinfoilPasskeyProfile.hkdfInfo else {
-                throw PasskeyKeyError.invalidInput(
-                    diagnostic: "cached passkey profile mismatch"
-                )
-            }
-            return CachedPRFResult(
-                profile: TinfoilPasskeyProfile.current,
-                credentialId: previous.credentialId,
-                prfOutput: previous.prfOutput
-            )
-        }
-        let legacy = try JSONDecoder().decode(LegacyCacheEntry.self, from: data)
-        return CachedPRFResult(
-            profile: TinfoilPasskeyProfile.current,
-            credentialId: legacy.credentialId,
-            prfOutput: legacy.prfOutput
-        )
+    func saveLocalCredentialId(_ credentialId: String) throws {
+        defaults.set(credentialId, forKey: credentialIdKey)
     }
 
-    @MainActor
-    static func makeStorage() -> KeychainPasskeyKeyStorage {
-        KeychainPasskeyKeyStorage(
-            service: Constants.Passkey.rpId,
-            account: Constants.Passkey.prfCacheKeychainAccount,
-            localCredentialIdKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId,
-            decodeCachedRecord: decodeCachedRecord
-        )
+    func clear() throws {
+        defaults.removeObject(forKey: credentialIdKey)
     }
 }

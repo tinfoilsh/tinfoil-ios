@@ -250,7 +250,7 @@ final class PasskeyManager: ObservableObject {
         setDismissedRecoveryKeyId(nil)
         onRecoveryComplete = nil
         onKeyRefreshedFromBackup = nil
-        passkeyService.clearCachedPrfResult()
+        passkeyService.clearLocalCredential()
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Secret.passkeyEnclaveKeyId)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Secret.passkeyEnclaveCredentialId)
     }

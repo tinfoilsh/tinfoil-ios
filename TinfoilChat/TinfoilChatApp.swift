@@ -23,6 +23,7 @@ struct TinfoilChatApp: App {
 
     init() {
         StorageKeysMigration.migrateIfNeeded()
+        LegacyStoragePurge.purgeIfNeeded()
         #if DEBUG
         _isReplayingOnboarding = State(initialValue: ProcessInfo.processInfo.arguments.contains(
             Constants.Onboarding.replayLaunchArgument

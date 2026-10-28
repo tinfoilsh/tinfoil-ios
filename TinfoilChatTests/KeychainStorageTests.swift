@@ -41,7 +41,7 @@ struct KeychainStorageTests {
         let profile = try storage.loadLocalProfile()
 
         #expect(profile["selectedModel"] as? String == "gpt-oss-120b")
-        #expect(keychain.items[Constants.Harness.Profile.localProfileKey] != nil)
+        #expect(keychain.items[MemoryKeychain.Item(Constants.Harness.Profile.keychainService, Constants.Harness.Profile.localProfileKey)] != nil)
     }
 
     private func previousClientDefaults() throws -> (UserDefaults, String) {
@@ -52,26 +52,37 @@ struct KeychainStorageTests {
     }
 }
 
-/// Keychain items in memory, by key, which fails every read and write with
-/// `failure` when one is set.
+/// Keychain items in memory, by service and key, which fails every request
+/// with `failure` when one is set.
 final class MemoryKeychain: KeychainStore, @unchecked Sendable {
-    var items: [String: Data] = [:]
+    struct Item: Hashable {
+        let service: String?
+        let key: String
+
+        init(_ service: String?, _ key: String) {
+            self.service = service
+            self.key = key
+        }
+    }
+
+    var items: [Item: Data] = [:]
     var failure: KeychainError?
     private(set) var saves = 0
 
     func save(_ data: Data, for key: String, service: String?) throws {
         if let failure { throw failure }
         saves += 1
-        items[key] = data
+        items[Item(service, key)] = data
     }
 
     func load(for key: String, service: String?) throws -> Data? {
         if let failure { throw failure }
-        return items[key]
+        return items[Item(service, key)]
     }
 
     func delete(for key: String, service: String?) -> Bool {
-        items[key] = nil
+        guard failure == nil else { return false }
+        items[Item(service, key)] = nil
         return true
     }
 }

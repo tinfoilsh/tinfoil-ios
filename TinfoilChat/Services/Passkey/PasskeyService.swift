@@ -54,20 +54,17 @@ enum PasskeyError: LocalizedError {
 final class PasskeyService {
     static let shared = PasskeyService()
 
-    private let storage: KeychainPasskeyKeyStorage
     private let presentationAnchorProvider: TinfoilPasskeyPresentationAnchorProvider
     private let keyManagerResult: Result<PasskeyKeyManager, Error>
 
     private init() {
-        let storage = TinfoilPasskeyCacheMigration.makeStorage()
         let presentationAnchorProvider = TinfoilPasskeyPresentationAnchorProvider()
-        self.storage = storage
         self.presentationAnchorProvider = presentationAnchorProvider
         do {
             keyManagerResult = .success(try PasskeyKeyManager(
                 profile: TinfoilPasskeyProfile.current,
                 relyingPartyName: Constants.Passkey.rpName,
-                storage: storage,
+                storage: LocalCredentialPasskeyStorage(),
                 presentationAnchorProvider: presentationAnchorProvider
             ))
         } catch {
@@ -147,15 +144,6 @@ final class PasskeyService {
         }
     }
 
-    func cachedPRFResult(for credentialIds: [String]? = nil) -> CachedPRFResult? {
-        guard let result = try? storage.loadCachedPRFResult(),
-              result.profile == TinfoilPasskeyProfile.current else {
-            return nil
-        }
-        guard let credentialIds else { return result }
-        return credentialIds.contains(result.credentialId) ? result : nil
-    }
-
     func evaluateCredential(
         credentialIds: [String],
         preferredCredentialId: String? = nil,
@@ -174,7 +162,8 @@ final class PasskeyService {
         }
     }
 
-    func clearCachedPrfResult() {
+    /// Forgets the id of the passkey made on this device.
+    func clearLocalCredential() {
         if case .success(let keyManager) = keyManagerResult {
             keyManager.clearLocalState()
         }

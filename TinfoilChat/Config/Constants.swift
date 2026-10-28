@@ -516,6 +516,7 @@ enum Constants {
     enum Passkey {
         static let rpId = "tinfoil.sh"
         static let rpName = "Tinfoil Chat"
+        /// Where older versions kept the passkey's PRF output.
         static let prfCacheKeychainAccount = "sh.tinfoil.passkey-prf-cache"
         static let syncCheckIntervalSeconds: TimeInterval = 30
     }
