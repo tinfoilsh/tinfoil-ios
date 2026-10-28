@@ -486,15 +486,9 @@ struct MessageView: View {
             ),
             isDarkMode: isDarkMode,
             resolution: message.genUIResolution(for: toolCall.id),
-            retryState: viewModel.genUIRetryState(
-                messageId: message.id,
-                toolCallId: toolCall.id
-            ),
+            retryState: viewModel.genUIRetryState(toolCallId: toolCall.id),
             onRetry: (isRenderingStream || !viewModel.canGenerateInCurrentChat) ? nil : {
-                viewModel.retryGenUIToolCall(
-                    messageId: message.id,
-                    toolCallId: toolCall.id
-                )
+                viewModel.retryGenUIToolCall(toolCallId: toolCall.id)
             }
         )
         .frame(maxWidth: .infinity, alignment: .leading)

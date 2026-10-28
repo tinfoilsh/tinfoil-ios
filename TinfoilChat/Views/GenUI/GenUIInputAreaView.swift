@@ -54,7 +54,7 @@ extension Chat {
 struct GenUIInputAreaView: View {
     let pending: PendingInputToolCall
     let isDarkMode: Bool
-    let onResolve: (_ toolCallId: String, _ resultText: String, _ resultData: JSONValue?) -> Void
+    let onResolve: (_ resultText: String) -> Void
     let onCancel: ((String) -> Void)?
 
     var body: some View {
@@ -62,8 +62,8 @@ struct GenUIInputAreaView: View {
         let context = GenUIInputContext(
             toolCallId: pending.toolCallId,
             isDarkMode: isDarkMode,
-            resolve: { resultText, resultData in
-                onResolve(pending.toolCallId, resultText, resultData)
+            resolve: { resultText, _ in
+                onResolve(resultText)
             },
             cancel: onCancel.map { handler in { handler(pending.toolCallId) } }
         )

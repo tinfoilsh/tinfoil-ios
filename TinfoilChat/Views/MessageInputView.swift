@@ -600,12 +600,8 @@ struct MessageInputView: View {
             GenUIInputAreaView(
                 pending: pending,
                 isDarkMode: isDarkMode,
-                onResolve: { toolCallId, resultText, resultData in
-                    viewModel.resolveGenUIToolCall(
-                        toolCallId: toolCallId,
-                        resultText: resultText,
-                        resultData: resultData
-                    )
+                onResolve: { resultText in
+                    viewModel.resolveGenUIToolCall(resultText: resultText)
                 },
                 onCancel: nil
             )

@@ -91,7 +91,7 @@ extension ChatViewModel {
         do {
             _ = try await EncryptionService.shared.initialize()
         } catch {
-            syncErrors.append(error.localizedDescription)
+            Self.logger.error("Failed to load the encryption key: \(error, privacy: .public)")
         }
         guard isCurrentSignIn(token, userId: userId) else { return }
         if !CloudKeyAuthorizationStore.shared.hasAuthorizedCurrentPrimaryKey(userId: userId) {
@@ -122,7 +122,6 @@ extension ChatViewModel {
         } else if !SettingsManager.shared.isCloudSyncEnabled {
             activeStorageTab = .local
         }
-        lastSyncDate = Date()
         if currentChat == nil || currentChat?.id.isEmpty == true { createNewChat(focusInput: false) }
         finishSignIn(token, userId: userId)
     }
@@ -150,7 +149,6 @@ extension ChatViewModel {
         let signingOutUserId = currentUserId
         isAccountTeardownInProgress = true
         clearProjectState()
-        isSyncing = false
         signInTask?.cancel()
         signInTask = nil
         activeSignInToken = nil
@@ -307,8 +305,6 @@ extension ChatViewModel {
                 _ = CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh)
             }
             try ensureCurrentAccount(operationUserId)
-            showEncryptionSetup = false
-            isFirstTimeUser = false
             await keyChanged()
             try ensureCurrentAccount(operationUserId)
             if passkeyManager.passkeyActive {
@@ -317,7 +313,6 @@ extension ChatViewModel {
             }
         } catch {
             guard currentUserId == operationUserId else { throw CancellationError() }
-            if !(error is CancellationError) { syncErrors.append(error.localizedDescription) }
             throw error
         }
     }

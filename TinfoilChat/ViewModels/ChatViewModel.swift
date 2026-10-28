@@ -156,7 +156,6 @@ class ChatViewModel: ObservableObject {
     var isVerifying: Bool { verification.isVerifying }
     var isVerified: Bool { verification.isVerified }
     var verificationError: String? { verification.error }
-    @Published var isClientInitializing: Bool = false
 
     // MARK: - UI state
 
@@ -172,12 +171,9 @@ class ChatViewModel: ObservableObject {
     @Published var showCloudSyncOnboarding: Bool = false
     @Published var cloudSyncOnboardingMode: CloudSyncOnboardingMode = .setup
     @Published var passkeySetupFailure: PasskeyFlowFailure?
-    @Published var shouldOpenCloudSync: Bool = false
     @Published var shouldExpandProjectsInSidebar: Bool = false
     @Published private(set) var navigationRequest: ChatNavigationRequest?
     @Published var isViewingProjectChat: Bool = false
-    @Published var scrollTargetMessageId: String? = nil
-    @Published var scrollTargetOffset: CGFloat = 0
     @Published var shouldFocusInput: Bool = false
     var focusInputAfterDismiss = false
     @Published var isScrollInteractionActive: Bool = false
@@ -189,16 +185,8 @@ class ChatViewModel: ObservableObject {
     @Published var showImageViewer: Bool = false
     @Published var showRateLimitPaywall: Bool = false
     @Published var verifierView: VerifierView?
-    @Published var isFirstTimeUser: Bool = false
-    @Published var showEncryptionSetup: Bool = false
     @Published var shouldShowKeyImport: Bool = false
     @Published private(set) var isPasskeyRecoverySkipped: Bool = false
-
-    // MARK: - Sync and errors
-
-    @Published var isSyncing: Bool = false
-    @Published var lastSyncDate: Date?
-    @Published var syncErrors: [String] = []
 
     // MARK: - Audio
 
@@ -269,12 +257,7 @@ class ChatViewModel: ObservableObject {
             if authManager !== oldValue { speechPlayer.stop() }
             bindSafeguardsStore()
             cancelMessageEdit()
-            if authManager?.isAuthenticated == true, let userId = currentUserId {
-                lastSyncDate = UserDefaults.standard.object(forKey: Constants.StorageKeys.Sync.lastSyncDate(userId: userId)) as? Date
-            } else {
-                lastSyncDate = nil
-                clearProjectState()
-            }
+            if currentUserId == nil { clearProjectState() }
         }
     }
 
@@ -363,13 +346,11 @@ class ChatViewModel: ObservableObject {
         rows = ChatRows()
         session = nil
         verification = VerificationInfo(isVerifying: true)
-        isClientInitializing = true
         let account: HarnessAccount
         do {
             account = try Self.makeAccount(userId: userId, authManager: authManager)
         } catch {
             verification = VerificationInfo(error: error.localizedDescription)
-            isClientInitializing = false
             return
         }
         let directory = userId.flatMap { try? DeviceThreadStore.directory(userId: $0) }
@@ -415,7 +396,6 @@ class ChatViewModel: ObservableObject {
             // service cannot be reached.
             if !account.cloud { await account.refreshProfile() }
         }
-        isClientInitializing = false
         account.watchChanges()
         Task { await upgradeOlderDeviceChats(session) }
     }
@@ -937,8 +917,6 @@ class ChatViewModel: ObservableObject {
         }.sorted { $0.lastActivity > $1.lastActivity }
     }
 
-    var localChats: [Chat] { chats.filter(\.isLocalOnly) }
-
     var cloudSidebarSummaries: [ChatListSummary] {
         chats.filter { !$0.isLocalOnly }.map(ChatListSummary.init)
     }
@@ -960,22 +938,6 @@ class ChatViewModel: ObservableObject {
     func loadMoreChats() async {
         guard let session, let cursor = session.list.nextCursor else { return }
         try? await session.list.refresh(after: cursor)
-    }
-
-    func performFullSync() async {
-        guard let session else { return }
-        isSyncing = true
-        defer { isSyncing = false }
-        do {
-            try await session.account.refresh()
-            try await session.list.refresh()
-            session.list.reloadDevice()
-            await loadProjects()
-            lastSyncDate = Date()
-            if let userId = currentUserId { UserDefaults.standard.set(lastSyncDate, forKey: Constants.StorageKeys.Sync.lastSyncDate(userId: userId)) }
-        } catch {
-            syncErrors.append(error.localizedDescription)
-        }
     }
 
     // MARK: - Navigation
@@ -1102,7 +1064,7 @@ class ChatViewModel: ObservableObject {
         createNewChat(focusInput: false)
     }
 
-    func clearAllChatsFromDevice(userId: String? = nil) async {
+    func clearAllChatsFromDevice() async {
         guard let session else { return }
         _ = try? await session.device.deleteAll()
         session.list.reloadDevice()
@@ -1311,7 +1273,7 @@ class ChatViewModel: ObservableObject {
     }
 
     /// A widget's answer is sent as the user's next message.
-    func resolveGenUIToolCall(toolCallId: String, resultText: String, resultData: JSONValue?) {
+    func resolveGenUIToolCall(resultText: String) {
         _ = sendMessage(text: resultText)
     }
 
@@ -1323,7 +1285,7 @@ class ChatViewModel: ObservableObject {
 
     /// Asks the chat service for new arguments for a widget call that
     /// could not be rendered.
-    func retryGenUIToolCall(messageId: String, toolCallId: String) {
+    func retryGenUIToolCall(toolCallId: String) {
         guard let session, genUIRetryStates[toolCallId] != .generating else { return }
         genUIRetryStates[toolCallId] = .generating
         Task {
@@ -1343,7 +1305,7 @@ class ChatViewModel: ObservableObject {
 
     @Published private var genUIRetryStates: [String: GenUIRetryState] = [:]
 
-    func genUIRetryState(messageId: String, toolCallId: String) -> GenUIRetryState? {
+    func genUIRetryState(toolCallId: String) -> GenUIRetryState? {
         genUIRetryStates[toolCallId]
     }
 

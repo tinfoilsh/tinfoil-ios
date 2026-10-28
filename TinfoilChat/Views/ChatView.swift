@@ -157,10 +157,9 @@ struct ChatContainer: View {
                 .environmentObject(viewModel)
         }
         .sheet(isPresented: $viewModel.showSidebarSettings, onDismiss: {
-            viewModel.shouldOpenCloudSync = false
             viewModel.focusInputIfPending()
         }) {
-            SettingsView(shouldOpenCloudSync: viewModel.shouldOpenCloudSync)
+            SettingsView()
                 .environment(Clerk.shared)
                 .environmentObject(authManager)
                 .environmentObject(viewModel)

@@ -276,8 +276,6 @@ struct SettingsView: View {
     private static let deleteAllChatsConfirmPhrase = "delete all chats"
     private static let deleteAllProjectsConfirmPhrase = "delete all projects"
 
-    var shouldOpenCloudSync: Bool = false
-    
     // Complete list of languages based on ISO 639-1
     var languages: [String] {
         [ResponseLanguageResolver.systemSelection] + [
@@ -975,9 +973,6 @@ struct SettingsView: View {
             }
         }
         .onAppear {
-            // Auto-navigate to Cloud Sync if requested
-            if shouldOpenCloudSync {
-            }
             // Mirror the profile language for legacy settings consumers.
             settings.selectedLanguage = ProfileManager.shared.language
         }

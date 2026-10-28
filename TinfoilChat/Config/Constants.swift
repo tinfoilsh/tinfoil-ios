@@ -624,9 +624,6 @@ enum Constants {
             static func revisionCheckpoint(userId: String) -> String {
                 "tinfoil-sync-revision-checkpoint-v2-\(userId)"
             }
-            static func lastSyncDate(userId: String) -> String {
-                "tinfoil-sync-last-sync-date-\(userId)"
-            }
             static func paginationToken(userId: String) -> String {
                 "tinfoil-sync-pagination-token-\(userId)"
             }
