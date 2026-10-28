@@ -2,10 +2,6 @@ import Foundation
 
 typealias CloudKeySnapshot = (primary: String?, alternatives: [String])
 
-enum CloudKeyAuthorizationMode {
-    case validated
-}
-
 enum CloudKeyAuthorizationError: LocalizedError {
     case validationFailed(String)
     case rollbackFailed(underlying: Error)
@@ -31,12 +27,6 @@ final class CloudKeyAuthorizationStore {
     static let shared = CloudKeyAuthorizationStore()
 
     private init() {}
-
-    /// `.validated` once the chat service accepted the held key for the
-    /// account's chats on its last load, as the account reports it live.
-    func currentMode() -> CloudKeyAuthorizationMode? {
-        KeyRegistry.shared.keyAccepted ? .validated : nil
-    }
 
     /// Stage a new key in memory, ask the registry to confirm it, and only
     /// then write it to the Keychain. On failure the staged key is dropped

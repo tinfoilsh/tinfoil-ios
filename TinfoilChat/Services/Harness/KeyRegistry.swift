@@ -132,11 +132,6 @@ final class KeyRegistry {
         self.account = account
     }
 
-    /// The harness accepted the held key when the account last loaded.
-    var keyAccepted: Bool {
-        account?.keyReady == true
-    }
-
     private func post<T: Decodable>(_ route: HarnessRoute, _ body: some Encodable) async throws -> T {
         guard let account else { throw HarnessError.unauthenticated }
         return try await account.post(route, body, keyless: true)
