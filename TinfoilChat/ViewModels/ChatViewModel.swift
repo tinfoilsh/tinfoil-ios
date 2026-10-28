@@ -1075,17 +1075,6 @@ class ChatViewModel: ObservableObject {
         createNewChat(focusInput: false)
     }
 
-    func deleteNonLocalChats() async {
-        guard let session, session.account.cloud else { return }
-        do {
-            let _: RawJSON = try await session.account.post(.deleteAll)
-            session.list.clearCloud(confirmedEmpty: true)
-            if session.open.onDevice == false { createNewChat(focusInput: false) }
-        } catch {
-            session.report(error)
-        }
-    }
-
     func clearAllChatsFromDevice(userId: String? = nil) async {
         guard let session else { return }
         _ = try? await session.device.deleteAll()
