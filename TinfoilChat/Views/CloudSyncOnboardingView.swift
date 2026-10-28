@@ -759,21 +759,8 @@ struct CloudSyncOnboardingView: View {
 
     private func saveKeyToFiles() {
         guard let key = generatedKey else { return }
-        let keyContent = key.replacingOccurrences(of: "key_", with: "")
-        let pemContent = """
-        -----BEGIN TINFOIL CHAT ENCRYPTION KEY-----
-        \(keyContent)
-        -----END TINFOIL CHAT ENCRYPTION KEY-----
-        """
-
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        let dateString = dateFormatter.string(from: Date())
-        let fileName = "tinfoil-chat-key-\(dateString).pem"
-
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         do {
-            try pemContent.data(using: .utf8)?.write(to: tempURL)
+            let tempURL = try EncryptionKeyFile.write(key: key)
             let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
             if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                let rootViewController = windowScene.windows.first?.rootViewController {
@@ -785,11 +772,11 @@ struct CloudSyncOnboardingView: View {
                 activityVC.popoverPresentationController?.sourceView = topVC.view
                 activityVC.popoverPresentationController?.sourceRect = CGRect(x: topVC.view.bounds.midX, y: topVC.view.bounds.midY, width: 0, height: 0)
                 activityVC.completionWithItemsHandler = { _, _, _, _ in
-                    try? FileManager.default.removeItem(at: tempURL)
+                    EncryptionKeyFile.remove(tempURL)
                 }
                 topVC.present(activityVC, animated: true)
             } else {
-                try? FileManager.default.removeItem(at: tempURL)
+                EncryptionKeyFile.remove(tempURL)
             }
         } catch {
             #if DEBUG

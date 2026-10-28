@@ -156,6 +156,11 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             for error in ManagedFileStore.shared.sweepOnStartup() {
                 SentrySDK.capture(error: error)
             }
+            do {
+                try EncryptionKeyFile.removeExports()
+            } catch {
+                SentrySDK.capture(error: error)
+            }
         }
 
         // Ignore SIGPIPE so broken streaming connections surface as errors instead of crashes.
