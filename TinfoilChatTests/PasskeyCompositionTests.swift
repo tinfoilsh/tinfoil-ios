@@ -1156,6 +1156,84 @@ struct LegacyPasskeyEnvelopeTests {
 }
 
 @MainActor
+@Suite("Generic key envelope")
+struct GenericKeyEnvelopeTests {
+    private let credentialId = "AQID"
+    private let prfResult = PRFResult(output: Data(repeating: 5, count: 32))
+    private let primaryKey = Data((0..<32).map { UInt8($0 + 1) })
+    private let alternativeKeys = [Data((0..<32).map { UInt8($0 + 60) }), Data((0..<32).map { UInt8($0 + 120) })]
+
+    @Test func readsTheEnvelopeTheWebAppWrites() throws {
+        let bundle = try envelopeBundle(primary: wrap(primaryKey), alternatives: alternativeKeys.map { try wrap($0) })
+
+        let candidates = TinfoilWrappedKeyAdapter.partition([bundle], preferredCredentialId: nil)
+
+        #expect(candidates.legacy.isEmpty)
+        #expect(candidates.credentialIds == [credentialId])
+        let current = try #require(candidates.current.first)
+        #expect(current.alternatives.count == alternativeKeys.count)
+        let unwrapped = try PasskeyKeyFlow.unwrapCurrent(current, prfResult: prfResult)
+        #expect(unwrapped.cek == primaryKey)
+        #expect(unwrapped.legacyAlternativeKeys == alternativeKeys.map(EncryptionService.shared.encodeKeyFromBytes))
+    }
+
+    @Test func refusesAnEnvelopeWrappedForAnotherPasskey() throws {
+        let bundle = try envelopeBundle(primary: wrap(primaryKey), alternatives: [wrap(alternativeKeys[0], credentialId: "Ag")])
+
+        let candidates = TinfoilWrappedKeyAdapter.partition([bundle], preferredCredentialId: nil)
+
+        #expect(candidates.current.isEmpty)
+        #expect(candidates.legacy.isEmpty)
+        #expect(candidates.credentialIds.isEmpty)
+    }
+
+    @Test func refusesAnEnvelopeWithUnexpectedMembers() throws {
+        let bundle = try envelopeBundle(primary: wrap(primaryKey), alternatives: [], extraMember: ",\"note\":\"x\"")
+
+        let candidates = TinfoilWrappedKeyAdapter.partition([bundle], preferredCredentialId: nil)
+
+        #expect(candidates.current.isEmpty)
+        #expect(candidates.legacy.isEmpty)
+    }
+
+    @Test func refusesAnEnvelopeThatNamesTheKeyTwice() throws {
+        let bundle = try envelopeBundle(primary: wrap(primaryKey), alternatives: [wrap(primaryKey)])
+        let current = try #require(TinfoilWrappedKeyAdapter.partition([bundle], preferredCredentialId: nil).current.first)
+
+        #expect(throws: ContentKeyBundleError.self) {
+            try PasskeyKeyFlow.unwrapCurrent(current, prfResult: prfResult)
+        }
+    }
+
+    private func wrap(_ key: Data, credentialId: String? = nil) throws -> WrappedKey {
+        try PasskeyKeyManager(
+            profile: TinfoilPasskeyProfile.current,
+            relyingPartyName: Constants.Passkey.rpName,
+            presentationAnchorProvider: FakePasskeyPresentationAnchorProvider()
+        ).wrapKeyWithPRFResult(keyMaterial: key, credentialId: credentialId ?? self.credentialId, prfResult: prfResult)
+    }
+
+    /// A bundle as web app v1.0.2 stores it: the primary key's IV, and the
+    /// envelope's JSON text, hex, as the wrapped keys.
+    private func envelopeBundle(primary: WrappedKey, alternatives: [WrappedKey], extraMember: String = "") throws -> KeyState.Bundle {
+        let encoder = JSONEncoder()
+        func record(_ wrappedKey: WrappedKey) throws -> String {
+            String(decoding: try encoder.encode(String(decoding: try encodeWrappedKeyRecord(wrappedKey), as: UTF8.self)), as: UTF8.self)
+        }
+        let envelope = "{\"version\":1,\"authorizationMode\":\"validated\",\"primary\":\(try record(primary)),"
+            + "\"alternatives\":[\(try alternatives.map(record).joined(separator: ","))]\(extraMember)}"
+        return KeyState.Bundle(
+            credentialId: credentialId,
+            kekIv: primary.kekIvHex,
+            encryptedKeys: Data(envelope.utf8).hexEncodedString(),
+            bundleVersion: 1,
+            createdAt: nil,
+            updatedAt: nil
+        )
+    }
+}
+
+@MainActor
 private final class FailingPasskeyStorage: PasskeyKeyStorage {
     struct Failure: Error {}
 

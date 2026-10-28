@@ -347,12 +347,9 @@ enum PasskeyKeyFlow {
         if let resolved: PasskeyCandidateRecoveryResult = candidates.resolveSelectedCredential(
             credentialId: evaluated.credentialId,
             current: { candidate in
-                let cek: Data
+                let unwrapped: UnwrappedContentKey
                 do {
-                    cek = try PasskeyService.shared.unwrapKeyWithPRFResult(
-                        wrappedKey: candidate.wrappedKey,
-                        prfResult: evaluated.prfResult
-                    )
+                    unwrapped = try unwrapCurrent(candidate, prfResult: evaluated.prfResult)
                 } catch {
                     PasskeyDiagnostics.failure(
                         "recovery: bundle unwrap failed: \(PasskeyDiagnostics.describe(error))"
@@ -360,14 +357,14 @@ enum PasskeyKeyFlow {
                     return nil
                 }
                 guard let keyIdHex = validatedKeyId(
-                    cek: cek, enclaveKeyId: state.keyId, context: "bundle"
+                    cek: unwrapped.cek, enclaveKeyId: state.keyId, context: "bundle"
                 ) else { return nil }
                 return .current(.success(
-                    cek: cek,
+                    cek: unwrapped.cek,
                     keyIdHex: keyIdHex,
                     credentialId: evaluated.credentialId,
                     createdVia: state.createdVia
-                ), legacyAlternatives: [])
+                ), legacyAlternatives: unwrapped.legacyAlternativeKeys)
             },
             currentEnvelope: { bundle in
                 let unwrapped: UnwrappedContentKey
@@ -480,7 +477,9 @@ enum PasskeyKeyFlow {
         let cek: Data
         var legacyAlternatives: [String] = []
 
-        if candidateSet.legacy.isEmpty {
+        // The kit recovers a single wrapped key by itself; alternatives and
+        // the legacy envelope need the ceremony's PRF output.
+        if candidateSet.legacy.isEmpty, candidateSet.current.allSatisfy({ $0.alternatives.isEmpty }) {
             guard !candidateSet.current.isEmpty else {
                 return (.failure(.noRemoteBundle), [])
             }
@@ -510,13 +509,14 @@ enum PasskeyKeyFlow {
             switch candidateSet.selection(credentialId: evaluated.credentialId) {
             case .current(let current):
                 do {
-                    cek = try PasskeyService.shared.unwrapKeyWithPRFResult(
-                        wrappedKey: current.wrappedKey,
-                        prfResult: evaluated.prfResult
-                    )
+                    let unwrapped = try unwrapCurrent(current, prfResult: evaluated.prfResult)
+                    cek = unwrapped.cek
+                    legacyAlternatives = unwrapped.legacyAlternativeKeys
                     credentialId = evaluated.credentialId
-                } catch let err {
+                } catch let err as PasskeyError {
                     return (.failure(failureFromPasskeyError(err), message: err.localizedDescription), [])
+                } catch {
+                    return (.failure(.bundleDecryptFailed, message: error.localizedDescription), [])
                 }
             case .legacy(let bundle):
                 let unwrapped: UnwrappedContentKey
@@ -563,6 +563,29 @@ enum PasskeyKeyFlow {
         for key in keys {
             try? EncryptionService.shared.addDecryptionKey(key)
         }
+    }
+
+    /// Unwraps a bundle the kit reads with the passkey's PRF output: its
+    /// key, and the alternatives a generic key envelope wraps beside it as
+    /// key strings for the key history. A key named twice fails the bundle.
+    static func unwrapCurrent(
+        _ candidate: TinfoilWrappedKeyAdapter.CandidateSet.Current,
+        prfResult: PRFResult
+    ) throws -> UnwrappedContentKey {
+        let cek = try PasskeyService.shared.unwrapKeyWithPRFResult(
+            wrappedKey: candidate.wrappedKey,
+            prfResult: prfResult
+        )
+        var seen: Set<String> = [EncryptionService.shared.encodeKeyFromBytes(cek)]
+        var alternatives: [String] = []
+        for wrappedKey in candidate.alternatives {
+            let key = EncryptionService.shared.encodeKeyFromBytes(
+                try PasskeyService.shared.unwrapKeyWithPRFResult(wrappedKey: wrappedKey, prfResult: prfResult)
+            )
+            guard seen.insert(key).inserted else { throw ContentKeyBundleError.duplicateKey }
+            alternatives.append(key)
+        }
+        return UnwrappedContentKey(cek: cek, legacyAlternativeKeys: alternatives)
     }
 
     // MARK: - First-time backup: register the existing local CEK

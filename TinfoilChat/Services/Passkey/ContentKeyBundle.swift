@@ -26,6 +26,7 @@ struct WrappedKeyBundle {
 enum ContentKeyBundleError: LocalizedError {
     case wrongCekLength(Int)
     case wrongIvLength(Int)
+    case duplicateKey
 
     var errorDescription: String? {
         switch self {
@@ -33,15 +34,17 @@ enum ContentKeyBundleError: LocalizedError {
             return "CEK must be 32 bytes (got \(got))"
         case .wrongIvLength(let got):
             return "AES-GCM IV must be 12 bytes (got \(got))"
+        case .duplicateKey:
+            return "The passkey bundle names a key more than once"
         }
     }
 }
 
-/// Result of unwrapping a bundle that turned out to carry the legacy
-/// pre-v2 JSON envelope instead of raw CEK bytes. Besides the primary
-/// CEK, the envelope can list historical `key_<base36>` alternatives
-/// that older rows may still be sealed under; callers feed those into
-/// the decrypt-only key history so the migration sweep can unseal them.
+/// Result of unwrapping a bundle. Besides the primary CEK, an envelope
+/// (the legacy pre-v2 JSON envelope or the generic key envelope) can
+/// list historical `key_<base36>` alternatives that older rows may
+/// still be sealed under; callers feed those into the decrypt-only key
+/// history so the migration sweep can unseal them.
 struct UnwrappedContentKey {
     let cek: Data
     let legacyAlternativeKeys: [String]
