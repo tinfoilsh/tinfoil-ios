@@ -421,8 +421,7 @@ final class HarnessAccount: ObservableObject {
     // MARK: - Changes
 
     /// Polls what the harness holds of the account, so a change another
-    /// device made shows here: on a timer, and as the app comes to the
-    /// foreground.
+    /// device made shows here: on a timer, and as the app becomes active.
     func watchChanges() {
         changeWatcher?.cancel()
         changeWatcher = Task { [weak self] in
@@ -433,7 +432,7 @@ final class HarnessAccount: ObservableObject {
             }
         }
         if observers.isEmpty {
-            observers.append(NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            observers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
                 Task { await self?.checkChanges() }
             })
         }

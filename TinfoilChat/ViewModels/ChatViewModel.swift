@@ -311,9 +311,6 @@ class ChatViewModel: ObservableObject {
         currentModel = ModelType.auto
         loadDeviceSettings()
         Task { await openSession() }
-        observers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { await self?.handleDidBecomeActive() }
-        })
         observers.append(NotificationCenter.default.addObserver(forName: .cloudSyncSettingChanged, object: nil, queue: .main) { [weak self] _ in
             Task { await self?.storageModeChanged() }
         })
@@ -492,10 +489,6 @@ class ChatViewModel: ObservableObject {
         await LegacyDeviceChats.upgrade(userId: userId, account: session.account, into: session.device)
         guard self.session === session else { return }
         session.list.reloadDevice()
-    }
-
-    private func handleDidBecomeActive() async {
-        await account?.checkChanges()
     }
 
     /// Cloud sync was turned on or off in Settings.

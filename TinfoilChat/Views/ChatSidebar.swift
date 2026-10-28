@@ -354,7 +354,7 @@ struct ChatSidebar: View {
                     // another device never shows up here.
                     await authManager.fetchSubscriptionStatus()
                     await authManager.safeguards.refresh()
-                    await viewModel.performFullSync()
+                    await viewModel.account?.checkChanges()
                 }
                 .frame(maxHeight: .infinity)
                 .onAppear {

@@ -21,7 +21,6 @@ struct ContentView: View {
     @Environment(\.scenePhase) var scenePhase
     @Environment(\.requestReview) private var requestReview
     @State private var showKeyInputModal = false
-    @State private var lastSyncTime: Date?
 
     private struct SafeguardsRefreshID: Equatable {
         let userId: String?
@@ -193,22 +192,6 @@ struct ContentView: View {
             if newPhase == .active {
                 importSharedAttachmentsIfReady()
                 performPendingIntentActionsIfReady()
-            }
-
-            if newPhase == .active && authManager.isAuthenticated {
-                // Sync when app becomes active if authenticated
-                // Only sync if it's been more than 30 seconds since last sync
-                let shouldSync = lastSyncTime == nil || Date().timeIntervalSince(lastSyncTime!) > 30
-                
-                if shouldSync {
-                    Task {
-                        // Sync chats
-                        await chatViewModel.performFullSync()
-                        await MainActor.run {
-                            lastSyncTime = Date()
-                        }
-                    }
-                }
             }
         }
         .onChange(of: authManager.needsOnboarding) { _, needsOnboarding in

@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import OSLog
 
@@ -90,6 +91,9 @@ final class ChatList: ObservableObject {
     /// turn, so undoing an edit a later one already replaced hands the later
     /// edit the copy to go back to.
     private var previews: [String: [(before: ThreadSummary, after: ThreadSummary)]] = [:]
+    /// Reads the stored chats again as the harness reports a change to them,
+    /// such as one another device made.
+    private var revisionWatch: AnyCancellable?
 
     let cloud: CloudEdits
     let deviceEdits: DeviceEdits
@@ -102,6 +106,7 @@ final class ChatList: ObservableObject {
         deviceEdits = DeviceEdits()
         cloud.list = self
         deviceEdits.list = self
+        revisionWatch = account.$chatRevision.dropFirst().removeDuplicates().sink { [weak self] _ in self?.reload() }
     }
 
     var isCloud: Bool { account.cloud }

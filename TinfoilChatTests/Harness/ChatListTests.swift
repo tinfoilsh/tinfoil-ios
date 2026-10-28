@@ -27,6 +27,11 @@ struct ChatListTests {
     /// A list of an account with cloud sync, whose profile has loaded so its
     /// key is ready.
     private func makeList() async -> (ChatList, ScriptedTransport) {
+        let (list, transport, _) = await makeListAndAccount()
+        return (list, transport)
+    }
+
+    private func makeListAndAccount() async -> (ChatList, ScriptedTransport, HarnessAccount) {
         let transport = ScriptedTransport([Answers.json([:])])
         let credentials = ScriptedCredentials(identities: Array(repeating: "jwt", count: 10), access: Array(repeating: .success("k"), count: 10))
         let client = HarnessClient(credentials: credentials, transport: transport, languages: { [] })
@@ -41,7 +46,7 @@ struct ChatListTests {
         let list = ChatList(account: account, device: DeviceThreadStore(directory: nil), cache: ChatListCache(directory: nil))
         await account.refreshProfile()
         #expect(account.keyReady)
-        return (list, transport)
+        return (list, transport, account)
     }
 
     @Test func readsThePagesOfStoredChatsAndTheirFavorites() async throws {
@@ -56,6 +61,24 @@ struct ChatListTests {
         let requests = await transport.requests.filter { $0.route == .list }
         #expect(requests.map { $0.json["cursor"] as? String } == [nil, "c2"])
         #expect(requests.first?.json["key"] as? String == Data(repeating: 1, count: 32).base64EncodedString())
+    }
+
+    @Test func aChangeTheHarnessReportsListsTheStoredChatsAgain() async throws {
+        let (list, transport, account) = await makeListAndAccount()
+        await transport.push(ListPage.json([summary("a")], pinned: []))
+        try await list.refresh()
+        await transport.push(Answers.json(["chats": "c2", "profile": "p2", "projects": "j2"]))
+        await transport.push(Answers.json([:]))
+        await transport.push(ListPage.json([summary("b"), summary("a")], pinned: []))
+        await account.checkChanges()
+        var waited = 0
+        while list.cloudListed.count < 2, waited < 100 {
+            try await Task.sleep(for: .milliseconds(10))
+            waited += 1
+        }
+        #expect(list.cloudListed.map(\.id) == ["b", "a"])
+        let routes = await transport.requests.map(\.route)
+        #expect(Array(routes.suffix(3)) == [.changes, .profileGet, .list])
     }
 
     @Test func aPreviewShowsAChangeUntilItsStoreRefuses() async throws {
