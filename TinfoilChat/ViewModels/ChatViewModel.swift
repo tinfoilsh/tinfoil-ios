@@ -401,6 +401,8 @@ class ChatViewModel: ObservableObject {
         await migrateMemoryChats(into: store)
         session.newChat(local: activeStorageTab == .local)
         session.list.reloadDevice()
+        // The stored chats listed last time show while the account loads.
+        session.list.reload()
         if let keptOpenChatId { selectChat(id: keptOpenChatId, isLocalOnly: true) }
         do {
             try await account.refresh(credentials: true)
