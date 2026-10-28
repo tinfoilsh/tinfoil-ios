@@ -589,7 +589,6 @@ struct SettingsView: View {
                 NavigationLink {
                     CloudSyncSettingsView(
                         viewModel: chatViewModel,
-                        authManager: authManager,
                         onRequestCloseSettings: { dismiss() }
                     )
                 } label: {
