@@ -193,8 +193,10 @@ extension ChatViewModel {
         }
     }
 
+    /// Deletes every project the account stores. It needs no subscription:
+    /// an account whose subscription ended still deletes its projects.
     func deleteAllProjects() async throws {
-        guard let session, canUseProjects else { return }
+        guard let session else { throw CancellationError() }
         try await HarnessProjects.deleteAll(session.account)
         guard self.session === session else { return }
         projects = []
