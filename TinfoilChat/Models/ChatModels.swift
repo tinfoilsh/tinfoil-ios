@@ -594,7 +594,9 @@ struct RateLimitInfo: Equatable {
     }
 
     var maxRequests: Int
-    var remaining: Int
+    /// The requests left, when the quota counts requests. An hourly plan
+    /// budgets tokens and reports no count until its limit is reached.
+    var remaining: Int?
     var resetsAt: String
     var maxTokens: Int? = nil
     var tokensUsed: Int? = nil
@@ -606,12 +608,18 @@ struct RateLimitInfo: Equatable {
         guard let kind = limit.kind else { return nil }
         self.kind = kind == .hourly ? .hourly : .freeDaily
         maxRequests = limit.maxRequests ?? 0
-        remaining = limit.remaining ?? 0
+        remaining = limit.remaining
         resetsAt = limit.resetsAt ?? ""
         if let input = limit.inputTokens {
             maxTokens = input.max
             tokensUsed = input.used
             tokensRemaining = input.remaining
         }
+    }
+
+    /// Whether the quota is used up: it counts requests and none are left.
+    var exhausted: Bool {
+        guard let remaining else { return false }
+        return remaining <= 0
     }
 }

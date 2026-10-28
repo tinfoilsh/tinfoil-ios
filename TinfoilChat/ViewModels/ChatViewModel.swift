@@ -260,7 +260,7 @@ class ChatViewModel: ObservableObject {
     @Published var rateLimit: RateLimitInfo? {
         didSet {
             guard let rateLimit, authManager?.hasActiveSubscription != true else { return }
-            if rateLimit.remaining <= 0, rateLimit.kind == .freeDaily { showRateLimitPaywall = true }
+            if rateLimit.exhausted, rateLimit.kind == .freeDaily { showRateLimitPaywall = true }
         }
     }
 
@@ -1070,7 +1070,7 @@ class ChatViewModel: ObservableObject {
         guard !content.isEmpty || !pendingAttachments.isEmpty else { return false }
         guard attachmentsAreReadyToSend(pendingAttachments) else { return false }
         if session.running, isMessageQueueFull { return false }
-        if let rateLimit, rateLimit.kind == .freeDaily, rateLimit.remaining <= 0, authManager?.hasActiveSubscription != true {
+        if let rateLimit, rateLimit.kind == .freeDaily, rateLimit.exhausted, authManager?.hasActiveSubscription != true {
             showRateLimitPaywall = true
             return false
         }

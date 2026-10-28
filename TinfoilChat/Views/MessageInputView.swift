@@ -513,7 +513,7 @@ struct MessageInputView: View {
     /// Small label shown with the input when remaining free requests are low
     @ViewBuilder
     private func rateLimitLabel(isIntegrated: Bool) -> some View {
-        if let rl = viewModel.rateLimit, rl.kind == .hourly {
+        if let rl = viewModel.rateLimit, rl.kind == .hourly, rl.exhausted {
             HStack {
                 Text("Hourly limit reached")
                 Button(isCheckingRateLimit ? Constants.RateLimit.checkingLabel : Constants.RateLimit.checkAgainLabel) {
@@ -533,9 +533,9 @@ struct MessageInputView: View {
                 .padding(.vertical, 5)
                 .modifier(RateLimitNoticeBackground(color: Color.orange.opacity(0.08), isIntegrated: isIntegrated))
                 .transition(.opacity)
-        } else if let rl = viewModel.rateLimit, rl.remaining <= Constants.RateLimit.warningThreshold {
-            let isOutOfRequests = rl.remaining <= 0
-            Text(freeRequestsRemainingText(rl.remaining))
+        } else if let rl = viewModel.rateLimit, let remaining = rl.remaining, remaining <= Constants.RateLimit.warningThreshold {
+            let isOutOfRequests = remaining <= 0
+            Text(freeRequestsRemainingText(remaining))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(isOutOfRequests ? .orange : .secondary)
                 .padding(.horizontal, 10)
@@ -547,7 +547,7 @@ struct MessageInputView: View {
                     )
                 )
                 .transition(.opacity)
-                .animation(.easeInOut(duration: 0.25), value: rl.remaining)
+                .animation(.easeInOut(duration: 0.25), value: remaining)
                 .onTapGesture {
                     if isOutOfRequests {
                         viewModel.showRateLimitPaywall = true
