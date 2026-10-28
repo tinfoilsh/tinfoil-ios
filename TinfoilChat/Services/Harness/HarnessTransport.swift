@@ -47,10 +47,6 @@ protocol HarnessTransport: Sendable {
 /// the X25519 key the enclave's attestation endorses, which is verified
 /// again as its freshness ends or as the enclave refuses a key it rotated.
 final class SealedTransport: HarnessTransport {
-    private struct Problem: Decodable {
-        let type: String?
-    }
-
     private let origin: String
     private let handle: EnclaveHandle
     private let session: URLSession
@@ -84,24 +80,20 @@ final class SealedTransport: HarnessTransport {
             let key = try await publicKey()
             try Task.checkCancellation()
             let client = try EHBPClient(baseURL: origin, publicKey: key, session: session)
-            let (stream, response) = try await client.requestStream(
-                method: "POST",
-                path: request.route.rawValue,
-                headers: request.headers,
-                body: request.body
-            )
-            // The enclave may have rotated its key since it was verified. A
-            // refusal of the key is the only answer verified again; every
-            // other is the harness's.
-            if attempt == 0, Self.mayRefuseKey(response) {
-                let body = try await Self.diagnostic(of: stream)
-                if Self.refusesKey(response, body) {
-                    _ = try await verified(again: true)
-                    continue
-                }
-                return .collected(status: response.statusCode, headers: Self.headers(of: response), body: body)
+            do {
+                let (stream, response) = try await client.requestStream(
+                    method: "POST",
+                    path: request.route.rawValue,
+                    headers: request.headers,
+                    body: request.body
+                )
+                return HarnessResponse(status: response.statusCode, headers: Self.headers(of: response), body: stream)
+            } catch let error as EHBPError where error.code == .keyConfigMismatch {
+                // The enclave rotated its key since it was verified; the
+                // request is sealed again, once, to the key verified now.
+                guard attempt == 0 else { break }
+                _ = try await verified(again: true)
             }
-            return HarnessResponse(status: response.statusCode, headers: Self.headers(of: response), body: stream)
         }
         throw HarnessError(
             code: HarnessErrorCode.connection,
@@ -150,30 +142,5 @@ final class SealedTransport: HarnessTransport {
             if let name = name as? String, let value = value as? String { headers[name.lowercased()] = value }
         }
         return headers
-    }
-
-    private static func mayRefuseKey(_ response: HTTPURLResponse) -> Bool {
-        let contentType = response.value(forHTTPHeaderField: "Content-Type")?
-            .split(separator: ";", maxSplits: 1).first?
-            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return response.statusCode == Constants.Harness.keyConfigurationErrorStatus
-            && contentType == Constants.Harness.problemContentType
-            && response.expectedContentLength >= 0
-            && response.expectedContentLength <= Constants.Harness.maximumDiagnosticBytes
-    }
-
-    private static func refusesKey(_ response: HTTPURLResponse, _ body: Data) -> Bool {
-        guard body.count == response.expectedContentLength,
-              let problem = try? JSONDecoder().decode(Problem.self, from: body) else { return false }
-        return problem.type == Constants.Harness.keyConfigurationErrorType
-    }
-
-    private static func diagnostic(of stream: AsyncThrowingStream<Data, Error>) async throws -> Data {
-        var body = Data()
-        for try await chunk in stream {
-            guard body.count + chunk.count <= Constants.Harness.maximumDiagnosticBytes else { return body }
-            body.append(chunk)
-        }
-        return body
     }
 }

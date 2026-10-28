@@ -283,12 +283,6 @@ enum Constants {
         /// connection is given up.
         static let streamIdleTimeoutSeconds: TimeInterval = 120
         static let hpkePublicKeyBytes = 32
-        /// A refusal of the key requests are sealed to, which an enclave whose
-        /// key rotated since it was verified answers with.
-        static let keyConfigurationErrorStatus = 422
-        static let keyConfigurationErrorType = "urn:ietf:params:ehbp:error:key-config"
-        static let problemContentType = "application/problem+json"
-        static let maximumDiagnosticBytes = 4 * 1024
 
         /// How often the harness is asked what changed on other devices.
         static let changePollSeconds: TimeInterval = 20
