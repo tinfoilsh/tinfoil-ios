@@ -292,14 +292,16 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     }
 
     /// Another device changed the open stored chat: it is read again, with
-    /// the earlier pages the view had loaded.
-    func refreshIfChanged() async {
+    /// the earlier pages the view had loaded. Returns whether the chat was
+    /// deleted there, which leaves the list and the view.
+    @discardableResult
+    func refreshIfChanged() async -> Bool {
         guard let revision = account.chatRevision, account.keyReady, !open.onDevice, let id = open.id,
-              open.loadingId == nil, open.unsaved != id, state.status == .idle else { return }
-        if let refreshed = refreshedRevision, refreshed.id == id, refreshed.revision == revision { return }
+              open.loadingId == nil, open.unsaved != id, state.status == .idle else { return false }
+        if let refreshed = refreshedRevision, refreshed.id == id, refreshed.revision == revision { return false }
         let shown = controller.track()
         do {
-            guard var result = try await cloudStore.get(id) else { return }
+            guard var result = try await cloudStore.get(id) else { return false }
             let wanted = state.messages.count
             while result.window.hasOlder, result.window.messages.count < wanted {
                 let older = try await cloudStore.older(id, before: result.window.messages.first?.id)
@@ -307,7 +309,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
                 result.window.messages.insert(contentsOf: older.messages, at: 0)
                 result.window.hasOlder = older.hasOlder
             }
-            guard shown(), state.status == .idle else { return }
+            guard shown(), state.status == .idle else { return false }
             controller.setView(ChatState(thread: result.window))
             refreshedRevision = (id, revision)
             patch {
@@ -317,14 +319,16 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
                 $0.webSearch = nil
             }
         } catch {
-            guard shown() else { return }
+            guard shown() else { return false }
             if (error as? HarnessError)?.code == HarnessErrorCode.threadNotFound {
+                list.cloud.remove(id)
                 reset()
                 patch { $0.notFound = true }
-            } else {
-                report(error)
+                return true
             }
+            report(error)
         }
+        return false
     }
 
     // MARK: - RunControllerDelegate

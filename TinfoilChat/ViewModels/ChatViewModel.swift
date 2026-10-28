@@ -409,7 +409,7 @@ class ChatViewModel: ObservableObject {
             guard loaded != nil, let account else { return }
             Task { await self?.showVerification(of: account) }
         }.store(in: &sessionCancellables)
-        account.$chatRevision.receive(on: RunLoop.main).sink { [weak self] _ in Task { await self?.session?.refreshIfChanged() } }.store(in: &sessionCancellables)
+        account.$chatRevision.receive(on: RunLoop.main).sink { [weak self] _ in Task { await self?.refreshOpenChat() } }.store(in: &sessionCancellables)
         account.$projectRevision.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in Task { await self?.loadProjects() } }.store(in: &sessionCancellables)
         account.$keyReady.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] ready in
             guard ready else { return }
@@ -1316,6 +1316,14 @@ class ChatViewModel: ObservableObject {
                 if wasOpen, stillLeft() { _ = selectChat(id: id, isLocalOnly: local) }
             }
         }
+    }
+
+    /// Reads the open stored chat again after another device changed it. A
+    /// chat deleted there leaves for the chat listed first.
+    private func refreshOpenChat() async {
+        guard let session, await session.refreshIfChanged(), self.session === session,
+              session.open.id == nil, session.open.loadingId == nil else { return }
+        openFirstListedChat(local: false)
     }
 
     /// Opens the chat listed first where the open chat was listed: in the
