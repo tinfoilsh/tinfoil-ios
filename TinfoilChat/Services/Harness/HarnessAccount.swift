@@ -271,16 +271,11 @@ final class HarnessAccount: ObservableObject {
 
     // MARK: - Settings
 
-    /// The members of a profile this client does not read, whose values a
-    /// later harness may extend.
-    private static let unreadProfileMembers = ["themeMode", "chatFont"]
-
     /// The settings shown: the session's defaults under the profile. A
     /// profile this client cannot read shows the defaults, and is reported.
     var effectiveProfile: Components.Schemas.Profile {
         var fields = (try? session?.profileDefaults.jsonObject()) ?? [:]
         fields.merge(profile) { $1 }
-        for member in Self.unreadProfileMembers { fields[member] = nil }
         do {
             return try Components.Schemas.Profile(jsonObject: fields)
         } catch {

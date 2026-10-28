@@ -106,6 +106,14 @@ struct HarnessAccountTests {
         #expect(withoutSync.profile["language"] as? String == "French")
     }
 
+    @Test func aThemeOrFontThisClientDoesNotKnowLeavesTheOtherSettingsShown() async throws {
+        let settings = MemoryProfileStorage()
+        settings.local = ["themeMode": "sepia", "chatFont": "handwritten", "reasoningEffort": "high"]
+        let (account, _) = makeAccount(userId: nil, answers: [], settings: settings)
+        #expect(account.effectiveProfile.reasoningEffort == "high")
+        #expect(account.profile["themeMode"] as? String == "sepia")
+    }
+
     @Test func settingsThatFailedForAnotherReasonLoadOnTheNextRefresh() async throws {
         let (account, _) = makeAccount(userId: "user-1", answers: [
             Answers.json(sessionAnswer), Answers.refusal(503, code: "UPSTREAM_UNAVAILABLE", action: "retry"),
