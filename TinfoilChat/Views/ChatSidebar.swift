@@ -337,6 +337,11 @@ struct ChatSidebar: View {
                                 .sidebarRow(top: 8)
                         }
 
+                        if let shownChatListError {
+                            chatListErrorRow(shownChatListError)
+                                .sidebarRow(top: 8)
+                        }
+
                         chatList(projectColors: projectColors)
                     }
                 }
@@ -411,6 +416,35 @@ struct ChatSidebar: View {
         .onChange(of: chatSearchTerm) { _, term in
             chatSearch.updateTerm(term, account: viewModel.account)
         }
+    }
+
+    /// Why the stored chats could not be listed, shown above the cloud
+    /// list with a retry.
+    private var shownChatListError: String? {
+        guard authManager.isAuthenticated,
+              settings.isCloudSyncEnabled,
+              activeTab == .cloud,
+              !isChatSearchActive else { return nil }
+        return viewModel.chatListError
+    }
+
+    private func chatListErrorRow(_ error: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Could not load chats.")
+                .font(.caption)
+                .fontWeight(.medium)
+            Text(error)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Try again") {
+                viewModel.retryChatList()
+            }
+            .font(.caption)
+            .foregroundColor(.accentColor)
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder

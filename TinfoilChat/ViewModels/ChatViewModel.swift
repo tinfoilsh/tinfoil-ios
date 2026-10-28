@@ -938,9 +938,13 @@ class ChatViewModel: ObservableObject {
     var isLoadingMore: Bool { session?.list.loading == true }
     var chatListError: String? { session?.list.error }
 
+    /// Reads again what the chat list failed to read.
+    func retryChatList() {
+        session?.list.retry()
+    }
+
     func loadMoreChats() async {
-        guard let session, let cursor = session.list.nextCursor else { return }
-        try? await session.list.refresh(after: cursor)
+        await session?.list.loadMore()?.value
     }
 
     // MARK: - Navigation
