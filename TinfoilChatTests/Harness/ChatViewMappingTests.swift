@@ -132,4 +132,13 @@ struct ChatViewMappingTests {
         #expect(chat.title == "Cats")
         #expect(chat.isLocalOnly)
     }
+
+    @Test func aListedRunIsLiveUntilItsDeadline() throws {
+        let deadline = try #require(ChatAccessCache.date(of: "2026-01-01T00:01:00Z"))
+        let listed = ActiveRun(runId: "r", expiresAt: "2026-01-01T00:01:00Z", instance: "i")
+        #expect(listed.isLive(at: deadline.addingTimeInterval(-1)))
+        #expect(!listed.isLive(at: deadline))
+        // A run this app streams is live without a deadline.
+        #expect(ActiveRun(runId: "r", expiresAt: "", instance: "").isLive(at: deadline))
+    }
 }

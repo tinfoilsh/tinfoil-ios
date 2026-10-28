@@ -840,7 +840,9 @@ class ChatViewModel: ObservableObject {
     func isChatStreaming(_ chatId: String) -> Bool {
         guard let session else { return false }
         if session.open.id == chatId { return session.running }
-        return session.controller.deviceRuns[chatId] != nil
+        if session.controller.deviceRuns[chatId] != nil { return true }
+        let now = Date()
+        return chats.contains { $0.id == chatId && $0.activeRun?.isLive(at: now) == true }
     }
 
     var selectedChatId: String? {

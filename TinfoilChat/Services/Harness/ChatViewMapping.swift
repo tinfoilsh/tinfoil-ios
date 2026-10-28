@@ -217,4 +217,11 @@ struct ActiveRun: Equatable, Sendable {
     let runId: String
     let expiresAt: String
     let instance: String
+
+    /// Whether the run may still be streaming: until its deadline, or while
+    /// this app streams it, which names no deadline.
+    func isLive(at now: Date) -> Bool {
+        guard let deadline = ChatAccessCache.date(of: expiresAt) else { return true }
+        return deadline > now
+    }
 }
