@@ -357,7 +357,11 @@ struct ChatSidebar: View {
                     // another device never shows up here.
                     await authManager.fetchSubscriptionStatus()
                     await authManager.safeguards.refresh()
+                    // The list is read again even when nothing changed, as
+                    // after a read that failed.
+                    let listed = viewModel.session?.list.reload()
                     await viewModel.account?.checkChanges()
+                    await listed?.value
                 }
                 .frame(maxHeight: .infinity)
                 .onAppear {
