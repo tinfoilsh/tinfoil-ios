@@ -226,7 +226,8 @@ extension ChatViewModel {
 
     /// A chat on this device moves to the cloud first, as a project's chats
     /// are stored; when the move into the project fails, it returns to the
-    /// device as it was.
+    /// device as it was. The open chat moved out of the open context leaves
+    /// a new chat open in its place.
     private func updateChatProject(chatId: String, projectId: String?) async {
         guard let session, canUseProjects else { return }
         var original: DeviceChatCopy?
@@ -238,12 +239,7 @@ extension ChatViewModel {
             _ = try await session.update(chatId, ThreadPatch(projectId: Nullable(projectId)))
             if session.open.id == chatId {
                 session.setProject(projectId)
-                if let projectId, activeProject?.id != projectId {
-                    _ = await loadActiveProject(projectId: projectId)
-                    isViewingProjectChat = true
-                } else if projectId == nil, activeProject != nil {
-                    leaveProjectContext()
-                }
+                if activeProject?.id != projectId { createNewChat(focusInput: false) }
             }
             session.list.reload()
         } catch {
