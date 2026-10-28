@@ -47,6 +47,7 @@ extension ChatViewModel {
     /// passkey or the user, and loads its chats.
     private func performSignIn(token: AccountOperationFence.Token, userId: String) async {
         guard isCurrentSignIn(token, userId: userId) else { return }
+        EncryptionService.shared.bind(userId: userId)
         isAccountTeardownInProgress = false
         passkeyManager.resumeAccountOperations()
         await openSession()
@@ -149,6 +150,7 @@ extension ChatViewModel {
         await accountOperationTracker.closeAndWait()
         session?.account.dispose()
         session = nil
+        EncryptionService.shared.bind(userId: nil)
         passkeySetupFailure = nil
         await passkeyManager.reset()
         activeStorageTab = .cloud

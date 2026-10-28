@@ -16,16 +16,28 @@ struct EncryptedData: Codable {
     let data: String  // Base64 encoded encrypted data
 }
 
-/// Keeps the account's content key, and the keys it replaced, in the Keychain.
+/// Keeps the account's content key, and the keys it replaced, in the
+/// Keychain. The key is stored with the account it belongs to, and is used
+/// only while that account is the one bound.
 class EncryptionService: ObservableObject, @unchecked Sendable {
     static let shared = EncryptionService()
     private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Keys")
+    static let defaultKeychainService = "sh.tinfoil.chat"
 
     private let keychainKey = "sh.tinfoil.encryptionKey"
-    private let keychainService = "sh.tinfoil.chat"
+    private let keychainService: String
     private let keychainHistoryKey = "key_history"
     private let encryptionKeySetupFlagKey = Constants.StorageKeys.Secret.encryptionKeySetUp
+    private let defaults: UserDefaults
     private let keychainLock = NSLock()
+
+    /// The signed-in account, whose key alone is read and stored.
+    private var _owner: String?
+
+    private var owner: String? {
+        get { keychainLock.withLock { _owner } }
+        set { keychainLock.withLock { _owner = newValue } }
+    }
 
     /// Primary key staged in memory but not yet written to the Keychain.
     /// Set by `setKey(_:persist:)` with `persist: false` so the registry
@@ -39,7 +51,44 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         set { keychainLock.withLock { _stagedPrimaryKey = newValue } }
     }
 
-    private init() {}
+    init(keychainService: String = EncryptionService.defaultKeychainService, defaults: UserDefaults = .standard) {
+        self.keychainService = keychainService
+        self.defaults = defaults
+    }
+
+    // MARK: - Account
+
+    /// Binds the key to the signed-in account, or to none when signed out.
+    /// A key another account stored is removed. A key stored before keys
+    /// recorded their account is adopted by this one: it is the only
+    /// account that can have stored it, as signing out removes the key.
+    func bind(userId: String?) {
+        stagedPrimaryKey = nil
+        owner = userId
+        guard let userId else { return }
+        let stored: StoredKey?
+        do {
+            stored = try loadStoredKey()
+        } catch {
+            Self.logger.error("Failed to read the encryption key's account: \(error, privacy: .public)")
+            return
+        }
+        guard let stored else { return }
+        switch stored.owner {
+        case userId:
+            return
+        case nil:
+            let status = SecItemUpdate(
+                itemQuery(account: keychainKey) as CFDictionary,
+                [kSecAttrGeneric as String: Data(userId.utf8)] as CFDictionary
+            )
+            if status != errSecSuccess {
+                Self.logger.error("Failed to record the encryption key's account: \(status, privacy: .public)")
+            }
+        default:
+            clearKey()
+        }
+    }
 
     // MARK: - Key Generation and Management
 
@@ -96,7 +145,7 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         if (try? loadKeyFromKeychain()) != nil {
             return true
         }
-        return UserDefaults.standard.bool(forKey: encryptionKeySetupFlagKey)
+        return defaults.bool(forKey: encryptionKeySetupFlagKey)
     }
 
     /// Get the primary key and all alternative (fallback) keys as a bundle.
@@ -201,7 +250,7 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         stagedPrimaryKey = nil
         let keyStatus = deleteKeyFromKeychain()
         let historyStatus = deleteKeyHistoryFromKeychain()
-        UserDefaults.standard.removeObject(forKey: encryptionKeySetupFlagKey)
+        defaults.removeObject(forKey: encryptionKeySetupFlagKey)
         let failures = [keyStatus, historyStatus].filter { $0 != errSecSuccess && $0 != errSecItemNotFound }
         for status in failures {
             Self.logger.error("Failed to remove the encryption key from the keychain: \(status, privacy: .public)")
@@ -351,56 +400,69 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     
     // MARK: - Keychain Management
     
+    /// Stores the primary key for the bound account.
     func saveKeyToKeychain(_ key: String) throws {
         keychainLock.lock()
         defer { keychainLock.unlock() }
 
-        let data = key.data(using: .utf8)!
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: keychainKey
-        ]
-
+        guard let owner = _owner else { throw EncryptionError.noAccount }
+        let query = itemQuery(account: keychainKey)
         let attributes: [String: Any] = [
-            kSecValueData as String: data
+            kSecValueData as String: Data(key.utf8),
+            kSecAttrGeneric as String: Data(owner.utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
 
         var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
 
         if status == errSecItemNotFound {
-            var addQuery = query
-            addQuery[kSecValueData as String] = data
-            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-            status = SecItemAdd(addQuery as CFDictionary, nil)
+            status = SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil)
         }
 
         if status != errSecSuccess {
             throw EncryptionError.keychainSaveFailed(status: status)
         }
 
-        UserDefaults.standard.set(true, forKey: encryptionKeySetupFlagKey)
+        defaults.set(true, forKey: encryptionKeySetupFlagKey)
     }
 
-    /// The stored primary key, or nil when none is stored. Throws when
-    /// the Keychain cannot be read, as while the device is locked.
+    /// The bound account's primary key, or nil when none is stored or the
+    /// stored one is another account's. Throws when the Keychain cannot be
+    /// read, as while the device is locked.
     private func loadKeyFromKeychain() throws -> String? {
+        guard let stored = try loadStoredKey() else { return nil }
+        let owner = keychainLock.withLock { _owner }
+        guard let owner, stored.owner == owner else { return nil }
+        return stored.key
+    }
+
+    /// A stored primary key and the account it records, if any.
+    private struct StoredKey {
+        let key: String
+        let owner: String?
+    }
+
+    private func loadStoredKey() throws -> StoredKey? {
         keychainLock.lock()
         defer { keychainLock.unlock() }
 
         var query = itemQuery(account: keychainKey)
         query[kSecReturnData as String] = true
+        query[kSecReturnAttributes as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
 
         if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess, let data = result as? Data else {
+        guard status == errSecSuccess,
+              let item = result as? [String: Any],
+              let data = item[kSecValueData as String] as? Data else {
             throw KeychainError(status: status)
         }
-        return String(data: data, encoding: .utf8)
+        guard let key = String(data: data, encoding: .utf8) else { return nil }
+        let owner = (item[kSecAttrGeneric as String] as? Data).flatMap { String(data: $0, encoding: .utf8) }
+        return StoredKey(key: key, owner: owner)
     }
     
     private func deleteKeyFromKeychain() -> OSStatus {
@@ -418,6 +480,7 @@ enum EncryptionError: LocalizedError {
     case invalidEncryptedData
     case invalidBase64
     case keychainSaveFailed(status: OSStatus)
+    case noAccount
 
     var errorDescription: String? {
         switch self {
@@ -435,6 +498,8 @@ enum EncryptionError: LocalizedError {
             return "Invalid base64 encoding"
         case .keychainSaveFailed(let status):
             return "Failed to save encryption key to keychain (error: \(status))"
+        case .noAccount:
+            return "Sign in to keep an encryption key on this device."
         }
     }
 }
