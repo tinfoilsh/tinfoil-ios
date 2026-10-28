@@ -245,7 +245,12 @@ struct CloudSyncSettingsView: View {
     private var keyLockedRow: some View {
         if viewModel.account?.keyLocked == true {
             VStack(alignment: .leading, spacing: 8) {
-                Label("This device's encryption key doesn't match your cloud data and needs to be recovered.", systemImage: "exclamationmark.circle")
+                Label(
+                    viewModel.getCurrentEncryptionKey() == nil
+                        ? "Sync is paused because your encryption key needs to be recovered."
+                        : "This device's encryption key doesn't match your cloud data and needs to be recovered.",
+                    systemImage: "exclamationmark.circle"
+                )
                     .font(.caption)
                     .foregroundColor(.orange)
                 Button {
