@@ -36,21 +36,15 @@ enum Constants {
 
     enum Config {
         static let configURL = URL(string: "https://api.tinfoil.sh/api/config/mobile")!
-        static let modelsURL = URL(string: "https://api.tinfoil.sh/api/config/models?mobile=true&chat=true")!
-        static let allModelsURL = URL(string: "https://api.tinfoil.sh/api/config/models")!
-        static let systemPromptURL = URL(string: "https://api.tinfoil.sh/api/config/system-prompt")!
 
         enum ErrorDomain {
             static let domain = "Tinfoil"
             static let configNotFoundCode = 1
-            static let configNotFoundDescription = "Configuration file not found"
-            static let configNotFoundRecoverySuggestion = "Please check network connection or try again later."
         }
     }
 
     enum UI {
         static let scrollToBottomButtonSize: CGFloat = 27
-        static let scrollToBottomIconSize: CGFloat = 16
         static let tableMaximumColumnWidthRatio: CGFloat = 0.5
         static let tableCellHorizontalPadding: CGFloat = 12
         static let tableDividerThickness: CGFloat = 1
@@ -121,9 +115,6 @@ enum Constants {
     }
 
     enum Rendering {
-        /// Code blocks larger than this skip JS-based syntax highlighting
-        /// to avoid blocking the main thread via JavaScriptCore.
-        static let maxSyntaxHighlightCharacters = 15_000
         /// Messages larger than this skip LaTeX/table regex parsing
         /// and render as plain markdown.
         static let maxFullParsingCharacters = 50_000
@@ -212,47 +203,21 @@ enum Constants {
     }
 
     enum API {
-        static let successStatusCodes = 200...299
-        static let tooManyRequestsStatusCode = 429
-        static let chatCompletionsEndpoint = "/v1/chat/completions"
         static let baseURL = "https://api.tinfoil.sh"
-        /// Carries the chat id on completion requests so the router's
-        /// safeguards submission can identify the conversation: a continued
-        /// conversation is then counted at most once toward an acceptable
-        /// use policy violation, and a flag can be linked back to the chat.
-        /// The router strips it before the request reaches the model.
-        static let conversationIdHeader = "X-Tinfoil-Conversation-Id"
         /// Read-only recovery endpoint for passkeys registered on the
         /// pre-enclave (v1) webapp. Consulted only when the enclave key
         /// registry has no usable bundle for this device.
         static let legacyPasskeyCredentialsPath = "/api/passkey-credentials/"
-        static let sessionTokenExpiryBufferSeconds: TimeInterval = 300  // 5 minutes
 
         enum SessionToken {
             static let chatPath = "/api/chat/token"
-            static let requestTimeoutSeconds: TimeInterval = 60
-            static let rateLimitFallbackSeconds: TimeInterval = 60
-            static let maximumCooldownSeconds: TimeInterval = 60 * 60
             static let retryAfterHeader = "Retry-After"
-            static let serverDateHeader = "Date"
-            static let httpDateFormat = "EEE, dd MMM yyyy HH:mm:ss z"
-            static let httpDateLocale = "en_US_POSIX"
         }
 
         enum ErrorCode {
-            static let invalidAPIKey = "invalid_api_key"
-            static let missingAPIKey = "missing_api_key"
             /// Wire code returned with a 429 when a subscriber exceeds the
             /// per-account hourly inference-token cap.
             static let hourlyLimitReached = "HOURLY_LIMIT_REACHED"
-            /// OpenAI-style structured codes carried in the error body when
-            /// a request is rejected for quota or rate-limit reasons.
-            static let insufficientQuota = "insufficient_quota"
-            static let rateLimitExceeded = "rate_limit_exceeded"
-        }
-
-        enum ErrorType {
-            static let rateLimit = "rate_limit_error"
         }
     }
 
@@ -379,7 +344,6 @@ enum Constants {
     enum Legal {
         static let termsOfServiceURL = URL(string: "https://tinfoil.sh/terms")!
         static let privacyPolicyURL = URL(string: "https://tinfoil.sh/privacy")!
-        static let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
         static let consentRequiredMessage = "Please confirm that you have read and agree to the Terms of Service and Privacy Policy."
         static let consentAccessibilityLabel = "I have read and agree to the Terms of Service and Privacy Policy"
         static let checkboxSize: CGFloat = 22
@@ -432,10 +396,6 @@ enum Constants {
         static let maxFavorites = 3
         /// Number of prompt suggestions shown on the welcome screen.
         static let homeSuggestionCount = 3
-        /// Name and description given to a legacy custom system prompt when
-        /// it is converted into a library preset.
-        static let migratedCustomPromptName = "My default prompt"
-        static let migratedCustomPromptDescription = "Migrated from the custom system prompt setting"
         /// Label for an unset per-preset model or web search override, shown
         /// in the editor pickers and the detail view.
         static let noOverrideLabel = "No override set"
@@ -447,14 +407,6 @@ enum Constants {
     }
 
     enum Context {
-        /// Approximate characters per token used by the estimation heuristic.
-        static let charsPerToken: Double = 4
-        /// Fraction of the model's context window usable by conversation
-        /// history. The remainder is headroom for the system prompt and the
-        /// model's response. Mirrors the webapp's CONTEXT_WINDOW_USAGE_RATIO.
-        static let contextWindowUsageRatio: Double = 0.8
-        /// Fallback context window size when a model doesn't report one.
-        static let defaultContextWindowTokens = 128_000
         /// Usage percentage at which the context indicator switches to the
         /// warning color.
         static let warningThresholdPercent = 80
@@ -467,10 +419,6 @@ enum Constants {
     }
 
     enum ChatFork {
-        static let titleSuffix = " (fork)"
-        /// The "forking" overlay stays up at least this long so a fast fork
-        /// still reads as an action instead of a flicker.
-        static let overlayMinVisibleSeconds: TimeInterval = 0.6
         static let overlayLabel = "Forking conversation..."
         static let overlayDimOpacity: Double = 0.7
         static let overlayFadeSeconds: TimeInterval = 0.15
@@ -494,7 +442,6 @@ enum Constants {
     }
 
     enum Verification {
-        static let networkRetryDelaySeconds: TimeInterval = 2.0
         static let collapseDelaySeconds: TimeInterval = 3.0
     }
 
@@ -563,7 +510,6 @@ enum Constants {
 
     enum Share {
         static let shareBaseURL = "https://chat.tinfoil.sh"
-        static let shareAPIPath = "/api/shares"
         static let copyFeedbackDurationSeconds: TimeInterval = 2.0
     }
 
@@ -617,28 +563,6 @@ enum Constants {
             static let additionalContext = "tinfoil-user-prefs-additional-context"
             static let customPromptEnabled = "tinfoil-user-prefs-custom-prompt-enabled"
             static let customSystemPrompt = "tinfoil-user-prefs-custom-system-prompt"
-        }
-
-        // MARK: - Sync / Data State
-        enum Sync {
-            static func revisionCheckpoint(userId: String) -> String {
-                "tinfoil-sync-revision-checkpoint-v2-\(userId)"
-            }
-            static func paginationToken(userId: String) -> String {
-                "tinfoil-sync-pagination-token-\(userId)"
-            }
-            static func paginationHasMore(userId: String) -> String {
-                "tinfoil-sync-pagination-has-more-\(userId)"
-            }
-            static func paginationActive(userId: String) -> String {
-                "tinfoil-sync-pagination-active-\(userId)"
-            }
-            static func paginationLoadedFirst(userId: String) -> String {
-                "tinfoil-sync-pagination-loaded-first-\(userId)"
-            }
-            static func paginationAttempted(userId: String) -> String {
-                "tinfoil-sync-pagination-attempted-\(userId)"
-            }
         }
 
         // MARK: - Secret / Sensitive
@@ -703,20 +627,14 @@ enum Constants {
     }
 
     enum Attachments {
-        static let maxConcurrentImageDownloads = 3
-        static let maxImageDimension: CGFloat = 1536
         static let imageCompressionQuality: CGFloat = 0.85
         static let maxFileSizeBytes = SharedImportConfiguration.maximumDocumentSizeBytes
-        static let maxImageSizeBytes = SharedImportConfiguration.maximumImageSizeBytes
         static let previewThumbnailSize: CGFloat = 60
-        static let thumbnailMaxDimension: CGFloat = 300
         static let previewMaxWidth: CGFloat = 200
         static let messageThumbnailSize: CGFloat = 80
         static let messageThumbnailColumns: Int = 3
         static let supportedDocumentExtensions = SharedImportConfiguration.supportedDocumentExtensions
-        static let supportedImageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic"]
         static let defaultImageMimeType = "image/jpeg"
-        static let scannedDocumentPageMimeType = "image/png"
     }
 
     /// Tiles that stand in for a file: an image thumbnail, a miniature
