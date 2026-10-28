@@ -783,8 +783,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/tinfoilsh/tinfoil-swift";
 			requirement = {
-				kind = exactVersion;
-				version = "0.9.0-rc.2";
+				kind = revision;
+				revision = 705ee7df8f62f1793427f7c49e3067b1febf0127;
 			};
 		};
 		99F154672F4F60C500E9174E /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
