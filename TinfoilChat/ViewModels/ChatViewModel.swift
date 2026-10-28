@@ -851,8 +851,11 @@ class ChatViewModel: ObservableObject {
 
     var canGenerateInCurrentChat: Bool {
         guard let session, canUseCurrentChatActions, !isSafeguardGenerationBlocked else { return false }
-        return session.account.profileReady && (session.open.onDevice || session.account.keyReady)
+        return session.sendBlock == nil
     }
+
+    /// Why the open chat cannot take a turn, which the composer explains.
+    var sendBlock: SendBlock? { session?.sendBlock }
 
     var canSendInCurrentContext: Bool {
         guard canGenerateInCurrentChat else { return false }

@@ -41,6 +41,14 @@ private struct Fixture {
 
 private let threadId = "0000000000001_00000000-0000-4000-8000-000000000001"
 
+/// The session the harness opens for a signed-in account.
+private let signedInSession: [String: Any] = [
+    "protocol": ["version": 1, "minimum": 1], "user": ["id": "user-1", "anonymous": false], "rateLimit": ["kind": NSNull()],
+    "models": [], "auto": ["default": "", "levels": []], "defaultModel": "gpt-oss-120b", "widgets": [], "profileDefaults": [:],
+    "composer": ["attachments": [], "projectDocuments": [], "pasteAsFileChars": 1000, "dictationMaxSeconds": 60],
+    "presets": [], "features": [:],
+]
+
 private func summary(id: String = threadId, title: String = "Kept title", titleState: String = "generated", messageCount: Int = 1) -> [String: Any] {
     ["id": id, "title": title, "titleState": titleState, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": NSNull(),
      "activityAt": "2026-01-01T00:00:00Z", "projectId": NSNull(), "model": "kimi-k3", "webSearchEnabled": false, "pinned": false,
@@ -214,6 +222,35 @@ struct ChatSessionTests {
         #expect(session.open.unsaved == nil)
         #expect(session.controller.pending?.input.content == "hello")
         #expect(try await session.device.get(session.open.id!)?.messages.count == 1)
+    }
+
+    @Test func aChatOnThisDeviceSendsWhileTheAccountsKeyIsRefused() async throws {
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(signedInSession), Answers.refusal(409, code: HarnessErrorCode.keyMismatch, action: "unlock")])
+        let session = fixture.session
+        // A chat on this device sends with the settings this device kept,
+        // while a stored chat waits for the account's.
+        session.newChat(local: true)
+        #expect(session.sendBlock == nil)
+        session.newChat(local: false)
+        #expect(session.sendBlock == .loading)
+        try await fixture.account.refresh()
+        #expect(fixture.account.keyLocked)
+        #expect(session.sendBlock == .locked)
+        session.newChat(local: true)
+        #expect(session.sendBlock == nil)
+        session.newChat(local: false)
+        session.setTemporary(true)
+        #expect(session.sendBlock == nil)
+    }
+
+    @Test func aStoredChatWaitsForSettingsThatFailedToLoad() async throws {
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(signedInSession), Answers.refusal(503, code: "UPSTREAM_UNAVAILABLE", action: "retry")])
+        let session = fixture.session
+        try await fixture.account.refresh()
+        session.newChat(local: false)
+        #expect(session.sendBlock == .failed)
+        session.newChat(local: true)
+        #expect(session.sendBlock == nil)
     }
 
     @Test func anAccountSignedOutOfSendsNothingMore() async throws {

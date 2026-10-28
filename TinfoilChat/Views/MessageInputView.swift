@@ -134,6 +134,7 @@ struct MessageInputView: View {
     @State private var textHeight: CGFloat = Layout.defaultHeight
     @State private var messageTextHasNonWhitespace = false
     @State private var isCheckingRateLimit = false
+    @State private var isUnlockingChats = false
     /// Reflects whether the editor has grown beyond a single line, so callers
     /// can hide content that would otherwise be pushed off-screen.
     var isInputExpanded: Binding<Bool>? = nil
@@ -549,6 +550,44 @@ struct MessageInputView: View {
         }
     }
 
+    /// Says why the open chat cannot send: its chats are locked until the
+    /// key is unlocked, the account could not load, or, once there is a
+    /// draft, the chat service is still connecting.
+    @ViewBuilder
+    private var sendBlockNotice: some View {
+        if viewModel.canUseCurrentChatActions, let block = viewModel.sendBlock, block != .loading || hasDraftContent {
+            HStack(spacing: 6) {
+                switch block {
+                case .locked:
+                    Text("Unlock your chats to send messages")
+                    Button(isUnlockingChats ? "Unlocking…" : "Unlock") {
+                        isUnlockingChats = true
+                        Task { @MainActor in
+                            defer { isUnlockingChats = false }
+                            await viewModel.reattemptPasskeyRecovery()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .underline()
+                    .disabled(isUnlockingChats)
+                case .failed:
+                    Text("Couldn't connect to the chat service")
+                    Button("Retry") { viewModel.retryClientSetup() }
+                        .buttonStyle(.plain)
+                        .underline()
+                case .loading:
+                    Text("Connecting…")
+                }
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(block == .loading ? .secondary : .orange)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .modifier(RateLimitNoticeBackground(color: block == .loading ? Color.secondary.opacity(0.06) : Color.orange.opacity(0.08)))
+            .transition(.opacity)
+        }
+    }
+
     /// The indicator is hidden on a blank chat, matching the webapp's
     /// welcome screen behavior.
     private var showContextIndicator: Bool {
@@ -613,6 +652,8 @@ struct MessageInputView: View {
                 VStack(spacing: 0) {
                 rateLimitLabel
 
+                sendBlockNotice
+
                 // Attachment preview bar
                 if !viewModel.pendingAttachments.isEmpty {
                     AttachmentPreviewBar(
@@ -645,6 +686,8 @@ struct MessageInputView: View {
             VStack(spacing: 4) {
                 VStack(spacing: 0) {
                 rateLimitLabel
+
+                sendBlockNotice
 
                 // Attachment preview bar
                 if !viewModel.pendingAttachments.isEmpty {

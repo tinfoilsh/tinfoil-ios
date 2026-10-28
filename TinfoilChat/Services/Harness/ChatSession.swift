@@ -39,6 +39,16 @@ enum OpenChatResult: Equatable {
     case superseded
 }
 
+/// Why the open chat cannot take a turn yet.
+enum SendBlock: Equatable {
+    /// The harness refused the account's key, so its stored chats are locked.
+    case locked
+    /// The account's settings could not load.
+    case failed
+    /// The account's settings, or its key, are still loading.
+    case loading
+}
+
 /// The open chat of an account: which chat is shown, its runs, the stores
 /// its chats live in, and the actions on it.
 @MainActor
@@ -102,6 +112,20 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// The open chat is a new chat whose first turn gave it its id, and is
     /// not stored yet: the conversation on screen is the one that was blank.
     var isNewChatsFirstTurn: Bool { open.id != nil && open.unsaved == open.id }
+
+    /// Why the open chat cannot take a turn, if it cannot. A chat on this
+    /// device sends the settings this device holds, or kept of the
+    /// account's, and reads no key; a stored chat waits for the account's
+    /// settings and its key.
+    var sendBlock: SendBlock? {
+        if open.onDevice {
+            if account.cloud || account.profileReady { return nil }
+        } else {
+            if account.keyLocked { return .locked }
+            if account.profileReady && account.keyReady { return nil }
+        }
+        return account.profileFailed ? .failed : .loading
+    }
 
     private func patch(_ change: (inout OpenChat) -> Void) {
         var next = open
