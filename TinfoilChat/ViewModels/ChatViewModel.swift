@@ -387,6 +387,14 @@ class ChatViewModel: ObservableObject {
         account.$profile.receive(on: RunLoop.main).sink { [weak self] _ in self?.applyProfileSettings() }.store(in: &sessionCancellables)
         account.$session.receive(on: RunLoop.main).sink { [weak self] _ in self?.applySessionModels() }.store(in: &sessionCancellables)
         account.$chatRevision.receive(on: RunLoop.main).sink { [weak self] _ in Task { await self?.session?.refreshIfChanged() } }.store(in: &sessionCancellables)
+        // Chats another device made, renamed or deleted show in the list. The
+        // first revision read comes with the list the session opened with.
+        account.$chatRevision
+            .scan((previous: String?.none, current: String?.none)) { ($0.current, $1) }
+            .filter { $0.previous != nil && $0.previous != $0.current }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.session?.list.reload() }
+            .store(in: &sessionCancellables)
         account.$projectRevision.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in Task { await self?.loadProjects() } }.store(in: &sessionCancellables)
         account.$keyReady.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] ready in
             guard ready else { return }
