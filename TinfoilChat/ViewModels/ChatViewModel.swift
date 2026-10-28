@@ -1097,7 +1097,6 @@ class ChatViewModel: ObservableObject {
         guard let session else { return }
         cancelMessageEdit()
         cancelAudioRecording()
-        clearPendingAttachments()
         let projectId = projectId ?? activeProject?.id
         let local: Bool
         if projectId != nil {
@@ -1111,7 +1110,7 @@ class ChatViewModel: ObservableObject {
         } else {
             local = activeStorageTab == .local
         }
-        session.newChat(local: local)
+        openNewChat(local: local)
         session.setProject(projectId)
         if let modelType { currentModel = modelType }
         session.setModel(currentModel.id)
@@ -1129,20 +1128,41 @@ class ChatViewModel: ObservableObject {
         if session.open.id == id, session.open.loadingId == nil { return true }
         cancelMessageEdit()
         cancelAudioRecording()
-        clearPendingAttachments()
+        let originals = pendingOriginals
         Task {
             do {
                 _ = try await session.openChat(id, local: isLocalOnly)
+                keepPendingOriginals(originals)
                 if let model = session.open.model.isEmpty ? nil : session.open.model, let listed = availableModels.first(where: { $0.id == model }) {
                     currentModel = listed
                 }
                 isWebSearchEnabled = currentChat?.webSearchEnabled ?? isWebSearchEnabled
                 scrollToBottomTrigger = UUID()
             } catch {
+                keepPendingOriginals(originals)
                 session.report(error)
             }
         }
         return true
+    }
+
+    /// Opens a new chat in the session. What the composer holds stays for
+    /// it: the pending attachments are converted apart from any chat.
+    private func openNewChat(local: Bool) {
+        guard let session else { return }
+        let originals = pendingOriginals
+        session.newChat(local: local)
+        keepPendingOriginals(originals)
+    }
+
+    /// The original images of the pending attachments, which the open chat
+    /// holds until a turn sends them, and which opening another chat clears.
+    private var pendingOriginals: Originals {
+        session?.attachments.originalsOf(Array(uploadedAttachments.values)) ?? [:]
+    }
+
+    private func keepPendingOriginals(_ originals: Originals) {
+        for (id, original) in originals { session?.attachments.keepOriginal(id, original) }
     }
 
     func openSummaryChat(id: String, projectId: String?, isLocalOnly: Bool) {
@@ -1226,7 +1246,7 @@ class ChatViewModel: ObservableObject {
         if isTemporaryMode {
             if let previous = previousChatIdBeforeTemporary {
                 previousChatIdBeforeTemporary = nil
-                session.newChat(local: activeStorageTab == .local)
+                openNewChat(local: activeStorageTab == .local)
                 _ = selectChat(id: previous, isLocalOnly: session.list.isOnDevice(previous))
             } else {
                 createNewChat()
@@ -1234,8 +1254,7 @@ class ChatViewModel: ObservableObject {
         } else {
             previousChatIdBeforeTemporary = currentChat?.isBlankChat == false ? session.open.id : nil
             cancelMessageEdit()
-            clearPendingAttachments()
-            session.newChat(local: true)
+            openNewChat(local: true)
             session.setTemporary(true)
             shouldFocusInput = true
         }
