@@ -277,4 +277,17 @@ struct ChatSessionTests {
         #expect(attachment.textContent == "Notes")
         #expect(await fixture.transport.requests.last?.route == .attachmentUpload)
     }
+
+    @Test func aFilePickedBeforeTheSessionLoadsIsCheckedAgainstItOnceItHas() async throws {
+        var opened = signedInSession
+        opened["user"] = ["id": "", "anonymous": true]
+        opened["composer"] = ["attachments": [["accept": [".txt"], "maxBytes": 1000]], "projectDocuments": [], "pasteAsFileChars": 1000, "dictationMaxSeconds": 60]
+        let converted: [String: Any] = ["id": "att_1", "kind": "document", "fileName": "notes.txt", "mimeType": "text/plain", "textContent": "Notes"]
+        let fixture = Fixture(answers: [Answers.json(opened), Answers.json(["attachment": converted])])
+        #expect(fixture.account.session == nil)
+        let attachment = try await fixture.session.upload(Data("Notes".utf8), fileName: "notes.txt", mimeType: "text/plain")
+        #expect(attachment.id == "att_1")
+        #expect(await fixture.transport.requests.map(\.route) == [.session, .attachmentUpload])
+        #expect(fixture.account.session != nil)
+    }
 }

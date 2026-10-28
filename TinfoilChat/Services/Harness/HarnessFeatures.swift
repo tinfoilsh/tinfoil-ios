@@ -87,7 +87,7 @@ enum HarnessProjects {
     }
 
     static func uploadDocument(_ account: HarnessAccount, projectId: String, file: Data, fileName: String, mimeType: String) async throws -> Components.Schemas.ProjectDocument {
-        let prepared = try await HarnessUploads.prepare(file, fileName: fileName, mimeType: mimeType, groups: account.session?.composer.projectDocuments ?? [])
+        let prepared = try await HarnessUploads.prepare(file, fileName: fileName, mimeType: mimeType, groups: try await account.loadedSession().composer.projectDocuments)
         return try await account.upload(.projectDocumentUpload, file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, fields: ["projectId": projectId])
     }
 
@@ -388,7 +388,7 @@ enum HarnessUploads {
     /// Converts a file into an attachment the next turn sends.
     @MainActor
     static func upload(_ account: HarnessAccount, data: Data, fileName: String, mimeType: String) async throws -> Components.Schemas.Attachment {
-        let prepared = try await prepare(data, fileName: fileName, mimeType: mimeType, groups: account.session?.composer.attachments ?? [])
+        let prepared = try await prepare(data, fileName: fileName, mimeType: mimeType, groups: try await account.loadedSession().composer.attachments)
         let uploaded: Uploaded = try await account.upload(.attachmentUpload, file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, keyless: true)
         return uploaded.attachment
     }

@@ -254,6 +254,19 @@ final class HarnessAccount: ObservableObject {
         return session
     }
 
+    /// The session, read now when it has not loaded yet, as when a file is
+    /// picked while the app is still opening.
+    func loadedSession() async throws -> HarnessSession {
+        if let session { return session }
+        let loaded: HarnessSession = try await post(.session, keyless: true)
+        guard !disposed else { throw CancellationError() }
+        if session == nil {
+            session = loaded
+            reportRateLimit(loaded.rateLimit)
+        }
+        return session ?? loaded
+    }
+
     // MARK: - Settings
 
     /// The members of a profile this client does not read, whose values a

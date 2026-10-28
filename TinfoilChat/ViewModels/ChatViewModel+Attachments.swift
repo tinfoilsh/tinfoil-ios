@@ -9,6 +9,14 @@ extension ChatViewModel {
         pendingAttachments.contains { $0.processingState == .processing }
     }
 
+    /// An upload the change of account stopped before the chat service
+    /// converted the file.
+    static let uploadInterrupted = HarnessError(
+        code: HarnessErrorCode.connection,
+        message: "The upload stopped before it finished. Remove the file and attach it again.",
+        action: .retry
+    )
+
     /// Marks the share-inbox requests behind these attachments as handled.
     /// Single funnel for every path that consumes or discards attachments,
     /// so acknowledgment behavior can't drift between them.
@@ -43,7 +51,7 @@ extension ChatViewModel {
                 try Task.checkCancellation()
                 let file = try await load()
                 try Task.checkCancellation()
-                guard let session else { throw CancellationError() }
+                guard let session else { throw Self.uploadInterrupted }
                 let uploaded = try await session.upload(file.data, fileName: fileName, mimeType: file.mimeType)
                 try Task.checkCancellation()
                 guard publication.isCurrent else { return }
@@ -58,9 +66,11 @@ extension ChatViewModel {
                     pendingAttachments[index] = attachment
                 }
                 if let thumbnail = uploaded.thumbnail { pendingImageThumbnails[attachmentId] = thumbnail }
-            } catch is CancellationError {
             } catch {
+                // A row the user removed is gone; one whose upload the
+                // account's change stopped shows as failed.
                 guard publication.isCurrent else { return }
+                let error = error is CancellationError ? Self.uploadInterrupted : error
                 let failure = ManagedFileError(fileName: fileName, error: error)
                 if let onProcessingFailure {
                     pendingAttachments.removeAll { $0.id == attachmentId }
