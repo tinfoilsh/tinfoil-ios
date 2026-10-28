@@ -216,7 +216,7 @@ final class RunController: ObservableObject {
             var outcome = initial
             guard let self else { return outcome }
             do {
-                let frames = try await account.events(route, body.sent(cursors: outcome.state.cursors), threadId: outcome.threadId, lastEventId: body.lastEventId(cursors: outcome.state.cursors))
+                let frames = try await account.events(route, body.sent(cursors: outcome.state.cursors, cacheSecret: PromptCacheSecret.secret(userId: account.userId)), threadId: outcome.threadId, lastEventId: body.lastEventId(cursors: outcome.state.cursors))
                 for try await frame in frames {
                     let shown = attached()
                     if !shown, device == nil { break }
@@ -447,11 +447,18 @@ enum RunBody {
         }
     }
 
-    /// The body as sent. Following a run resumes after the last frame of it
-    /// this client applied, when it applied one.
-    func sent(cursors: [String: Int]) -> some Encodable {
+    /// The body as sent. A turn is scoped to this device's prompt cache, so
+    /// every turn of the account shares it. Following a run resumes after the
+    /// last frame of it this client applied, when it applied one.
+    func sent(cursors: [String: Int], cacheSecret: String?) -> some Encodable {
         switch self {
-        case .turn(let turn): return AnyEncodable(turn)
+        case .turn(var turn):
+            if let cacheSecret {
+                var options = turn.options ?? TurnOptions()
+                options.cacheSecret = cacheSecret
+                turn.options = options
+            }
+            return AnyEncodable(turn)
         case .follow(let key, let threadId, let runId): return AnyEncodable(RunRequest(key: key, threadId: threadId, runId: runId))
         }
     }

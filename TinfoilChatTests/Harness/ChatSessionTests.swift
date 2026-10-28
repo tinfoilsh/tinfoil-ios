@@ -101,6 +101,9 @@ struct ChatSessionTests {
         // A new chat has no copy to send; the harness makes it.
         #expect(turn["thread"] == nil)
         #expect((turn["options"] as? [String: Any])?["model"] as? String == "kimi-k3")
+        // Every turn is scoped to the caller's prompt cache as it is sent.
+        let secret = try #require(PromptCacheSecret.secret(userId: nil))
+        #expect((turn["options"] as? [String: Any])?["cacheSecret"] as? String == secret)
         let opened = try #require(session.open.id)
         #expect(turn["threadId"] as? String == opened)
         #expect(session.open.unsaved == nil)

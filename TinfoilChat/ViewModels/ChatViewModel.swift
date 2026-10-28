@@ -1192,8 +1192,7 @@ class ChatViewModel: ObservableObject {
             thinking: thinkingEnabled,
             webSearch: webSearchAvailable && isWebSearchEnabled,
             piiCheck: account?.effectiveProfile.piiCheckEnabled ?? true,
-            genUI: account?.effectiveProfile.genUIEnabled ?? true,
-            cacheSecret: PromptCacheSecret.secret(userId: currentUserId)
+            genUI: account?.effectiveProfile.genUIEnabled ?? true
         )
     }
 
