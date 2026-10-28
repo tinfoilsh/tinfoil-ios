@@ -240,8 +240,21 @@ class ProfileManager: ObservableObject {
         return "\(PromptPreset.userIdPrefix)\(timestamp)-\(random)"
     }
 
-    private func savePresets() {
-        save(["customPromptPresets": Self.encoded(customPromptPresets)])
+    /// The saved prompts as the profile holds them, each as its client
+    /// wrote it.
+    private var storedPromptPresets: [Any] {
+        account?.profile["customPromptPresets"] as? [Any] ?? []
+    }
+
+    /// The saved prompts with one prompt's fields changed, and a field set
+    /// to nil removed. The other prompts, and the members of the changed one
+    /// this client does not set, stay as the profile holds them.
+    nonisolated static func updatingPreset(_ id: String, in presets: [Any], with fields: [String: Any?]) -> [Any] {
+        presets.map { element in
+            guard var preset = element as? ProfileFields, preset["id"] as? String == id else { return element }
+            for (name, value) in fields { preset[name] = value }
+            return preset
+        }
     }
 
     /// Create a new user preset and return its library representation.
@@ -265,7 +278,7 @@ class ProfileManager: ObservableObject {
             webSearchEnabled: webSearchEnabled
         )
         customPromptPresets.append(preset)
-        savePresets()
+        save(["customPromptPresets": storedPromptPresets + [Self.encoded(preset)]])
         return PromptPreset(from: preset)
     }
 
@@ -279,13 +292,22 @@ class ProfileManager: ObservableObject {
         webSearchEnabled: Bool?
     ) {
         guard let index = customPromptPresets.firstIndex(where: { $0.id == id }) else { return }
+        let updatedAt = Date().timeIntervalSince1970 * 1000
         customPromptPresets[index].name = name
         customPromptPresets[index].description = description
         customPromptPresets[index].systemPrompt = systemPrompt
         customPromptPresets[index].model = model
         customPromptPresets[index].webSearchEnabled = webSearchEnabled
-        customPromptPresets[index].updatedAt = Date().timeIntervalSince1970 * 1000
-        savePresets()
+        customPromptPresets[index].updatedAt = updatedAt
+        let presets = Self.updatingPreset(id, in: storedPromptPresets, with: [
+            "name": name,
+            "description": description,
+            "systemPrompt": systemPrompt,
+            "model": model,
+            "webSearchEnabled": webSearchEnabled,
+            "updatedAt": updatedAt,
+        ])
+        save(["customPromptPresets": presets])
     }
 
     /// Delete a user preset.
@@ -293,7 +315,7 @@ class ProfileManager: ObservableObject {
         customPromptPresets.removeAll { $0.id == id }
         favoritePromptPresetIds.removeAll { $0 == id }
         var patch: ProfileFields = [
-            "customPromptPresets": Self.encoded(customPromptPresets),
+            "customPromptPresets": storedPromptPresets.filter { ($0 as? ProfileFields)?["id"] as? String != id },
             "favoritePromptPresetIds": favoritePromptPresetIds,
         ]
         if defaultPromptPresetId == id {
