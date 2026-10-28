@@ -1255,15 +1255,35 @@ class ChatViewModel: ObservableObject {
         _ = selectChat(id: chat.id, isLocalOnly: chat.isLocalOnly)
     }
 
+    /// Deletes a chat. Deleting the open chat opens the chat listed first in
+    /// its place; one that fails to delete opens again.
     func deleteChat(_ id: String) {
         guard let session else { return }
+        let wasOpen = session.open.id == id
+        let local = session.list.isOnDevice(id)
+        // The session leaves a deleted open chat for a new one; the user may
+        // open another while the deletion is in flight.
+        let stillLeft = { session.opened == id && session.open.id == nil && session.open.loadingId == nil }
         Task {
             do {
                 try await session.remove(id)
-                if session.open.id == nil { createNewChat(focusInput: false) }
+                if wasOpen, stillLeft() { openFirstListedChat(local: local) }
             } catch {
                 reportActionFailure("Couldn't Delete Chat", error)
+                if wasOpen, stillLeft() { _ = selectChat(id: id, isLocalOnly: local) }
             }
+        }
+    }
+
+    /// Opens the chat listed first where the open chat was listed: in the
+    /// open project, or in the list of the chats stored where it was. A new
+    /// chat opens there when none is listed.
+    private func openFirstListedChat(local: Bool) {
+        let listed = activeProject != nil ? activeProjectChats : (local ? localSidebarSummaries : cloudSidebarSummaries).filter { isRootSidebarChat($0) && !$0.isBlankChat }
+        if let first = listed.first {
+            _ = selectChat(id: first.id, isLocalOnly: first.isLocalOnly)
+        } else {
+            createNewChat(isLocalOnly: local, focusInput: false)
         }
     }
 
