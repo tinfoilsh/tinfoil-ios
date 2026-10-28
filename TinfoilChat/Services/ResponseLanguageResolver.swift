@@ -14,17 +14,4 @@ enum ResponseLanguageResolver {
         let selection = normalizedSelection(selection)
         return selection == systemSelection ? systemDisplayName : selection
     }
-
-    static func resolve(
-        profileLanguage: String?,
-        preferredLanguages: [String] = Locale.preferredLanguages
-    ) -> String {
-        let selection = normalizedSelection(profileLanguage)
-
-        guard selection == systemSelection else { return selection }
-        guard let preferredLanguage = preferredLanguages.first else { return "English" }
-
-        return Locale(identifier: "en").localizedString(forIdentifier: preferredLanguage)
-            ?? preferredLanguage
-    }
 }

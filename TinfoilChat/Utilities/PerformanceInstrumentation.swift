@@ -3,12 +3,6 @@ import os
 
 enum PerformancePhase: String, CaseIterable, Sendable {
     case remoteConfigLoad
-    case chatIndexLoad
-    case fullChatLoad
-    case cloudSyncCycle
-    case firstChatPageLoad
-    case streamSnapshotBuild
-    case selectedChatImageHydration
 }
 
 struct PerformanceIntervalToken: Hashable, Sendable {
@@ -102,18 +96,6 @@ private final class PointsOfInterestSignpostSink: PerformanceInstrumentationSink
         switch phase {
         case .remoteConfigLoad:
             return signposter.beginInterval("remoteConfigLoad", id: signpostID)
-        case .chatIndexLoad:
-            return signposter.beginInterval("chatIndexLoad", id: signpostID)
-        case .fullChatLoad:
-            return signposter.beginInterval("fullChatLoad", id: signpostID)
-        case .cloudSyncCycle:
-            return signposter.beginInterval("cloudSyncCycle", id: signpostID)
-        case .firstChatPageLoad:
-            return signposter.beginInterval("firstChatPageLoad", id: signpostID)
-        case .streamSnapshotBuild:
-            return signposter.beginInterval("streamSnapshotBuild", id: signpostID)
-        case .selectedChatImageHydration:
-            return signposter.beginInterval("selectedChatImageHydration", id: signpostID)
         }
     }
 
@@ -124,18 +106,6 @@ private final class PointsOfInterestSignpostSink: PerformanceInstrumentationSink
         switch phase {
         case .remoteConfigLoad:
             signposter.endInterval("remoteConfigLoad", state)
-        case .chatIndexLoad:
-            signposter.endInterval("chatIndexLoad", state)
-        case .fullChatLoad:
-            signposter.endInterval("fullChatLoad", state)
-        case .cloudSyncCycle:
-            signposter.endInterval("cloudSyncCycle", state)
-        case .firstChatPageLoad:
-            signposter.endInterval("firstChatPageLoad", state)
-        case .streamSnapshotBuild:
-            signposter.endInterval("streamSnapshotBuild", state)
-        case .selectedChatImageHydration:
-            signposter.endInterval("selectedChatImageHydration", state)
         }
     }
 }
