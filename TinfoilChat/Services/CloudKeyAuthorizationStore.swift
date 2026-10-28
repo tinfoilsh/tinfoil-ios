@@ -200,20 +200,22 @@ final class CloudKeyAuthorizationStore {
         _ = try await KeyRegistry.shared.register(key: keyB64, ifMatch: current.etag ?? KeyRegistry.noKey, createdVia: .startFresh)
     }
 
-    /// Makes the held key the account's where the registry has none: an
-    /// account whose rows predate the registry has them resealed under
-    /// the key by the harness, which registers it; an account without rows
-    /// registers it as entered by hand. A key already registered is left
-    /// alone. The harness owns the resealing; it is asked once.
+    /// Makes the held key the account's where the registry has none, and
+    /// has the harness reseal under it the rows older keys sealed. An
+    /// account whose rows predate the registry registers the key as the
+    /// one that recovers them; an account without rows, as entered by hand.
+    /// The harness reseals only under the registered key, and owns the
+    /// resealing once asked.
     func registerHeldKeyIfNeeded() async throws {
         let held = EncryptionService.shared.getAllKeys()
         guard let primary = held.primary, let primaryBytes = try? EncryptionService.shared.getAlternativeKeyBytes(primary) else { return }
         let current = try await KeyRegistry.shared.current()
-        guard current.keyId == nil else { return }
         let target = primaryBytes.base64EncodedString()
-        guard current.hasData else {
-            _ = try await KeyRegistry.shared.register(key: target, ifMatch: KeyRegistry.noKey, createdVia: .manual)
-            return
+        if let keyId = current.keyId {
+            guard current.hasData, keyId == (try? ContentKeyBundle.deriveKeyIdHex(cek: primaryBytes)) else { return }
+        } else {
+            _ = try await KeyRegistry.shared.register(key: target, ifMatch: KeyRegistry.noKey, createdVia: current.hasData ? .recovery : .manual)
+            guard current.hasData else { return }
         }
         // Every key this device holds may have sealed a row.
         var keys = [target]
