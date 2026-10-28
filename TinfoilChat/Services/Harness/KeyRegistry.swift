@@ -46,22 +46,6 @@ struct KeyState: Equatable, Sendable {
     }
 }
 
-/// A passkey bundle as it is registered: the key wrapped under the
-/// passkey's PRF output.
-struct KeyBundleInput: Encodable, Sendable {
-    let credentialId: String
-    /// The AES-GCM IV, hex.
-    let kekIv: String
-    /// The wrapped content key, hex.
-    let encryptedKeys: String
-
-    enum CodingKeys: String, CodingKey {
-        case credentialId = "credential_id"
-        case kekIv = "kek_iv"
-        case encryptedKeys = "encrypted_keys"
-    }
-}
-
 private struct KeyRegisterRequest: Encodable {
     let key: String
     let ifMatch: String
