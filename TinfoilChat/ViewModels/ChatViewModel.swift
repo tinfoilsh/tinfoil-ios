@@ -553,10 +553,7 @@ class ChatViewModel: ObservableObject {
     }
 
     private func saveSetting(_ field: String, _ value: Any) {
-        guard let account else { return }
-        Task {
-            do { try await account.updateProfile([field: value]) } catch { account.report(error) }
-        }
+        ProfileManager.shared.save([field: value])
     }
 
     func changeModel(to model: ModelType) {

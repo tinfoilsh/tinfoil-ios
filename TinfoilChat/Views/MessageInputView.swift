@@ -131,6 +131,7 @@ struct MessageInputView: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @EnvironmentObject private var authManager: AuthManager
+    @ObservedObject private var profileManager = ProfileManager.shared
     @State private var textHeight: CGFloat = Layout.defaultHeight
     @State private var messageTextHasNonWhitespace = false
     @State private var isCheckingRateLimit = false
@@ -550,6 +551,34 @@ struct MessageInputView: View {
         }
     }
 
+    /// What the composer says about the account: why it cannot send, and a
+    /// settings change that was not saved.
+    @ViewBuilder
+    private var accountNotices: some View {
+        sendBlockNotice
+        settingsSaveNotice
+    }
+
+    /// A settings change, made in the composer or elsewhere, that was not
+    /// saved and was taken back.
+    @ViewBuilder
+    private var settingsSaveNotice: some View {
+        if profileManager.saveError != nil {
+            HStack(spacing: 6) {
+                Text("Your settings change was not saved")
+                Button("OK") { profileManager.saveError = nil }
+                    .buttonStyle(.plain)
+                    .underline()
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(.orange)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .modifier(RateLimitNoticeBackground(color: Color.orange.opacity(0.08)))
+            .transition(.opacity)
+        }
+    }
+
     /// Says why the open chat cannot send: its chats are locked until the
     /// key is unlocked, the account could not load, or, once there is a
     /// draft, the chat service is still connecting.
@@ -652,7 +681,7 @@ struct MessageInputView: View {
                 VStack(spacing: 0) {
                 rateLimitLabel
 
-                sendBlockNotice
+                accountNotices
 
                 // Attachment preview bar
                 if !viewModel.pendingAttachments.isEmpty {
@@ -687,7 +716,7 @@ struct MessageInputView: View {
                 VStack(spacing: 0) {
                 rateLimitLabel
 
-                sendBlockNotice
+                accountNotices
 
                 // Attachment preview bar
                 if !viewModel.pendingAttachments.isEmpty {

@@ -843,6 +843,16 @@ struct SettingsView: View {
                 }
             }
         }
+        // Outside the navigation stack, so a change refused on any page of
+        // Settings shows where it was made.
+        .alert("Couldn't Save Settings", isPresented: Binding(
+            get: { profileManager.saveError != nil },
+            set: { if !$0 { profileManager.saveError = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Your change was not saved. \(profileManager.saveError ?? "")")
+        }
         .sheet(isPresented: $showAuthView) {
             AuthenticationView()
                 .environment(Clerk.shared)

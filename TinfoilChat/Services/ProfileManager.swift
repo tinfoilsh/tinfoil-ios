@@ -100,6 +100,9 @@ class ProfileManager: ObservableObject {
     @Published private(set) var webSearchAvailable: Bool = ProfileDefaults.webSearchAvailable
     @Published private(set) var piiCheckEnabled: Bool = ProfileDefaults.piiCheckEnabled
     @Published private(set) var genUIEnabled: Bool = ProfileDefaults.genUIEnabled
+    /// Why the last change the chat service or this device refused was not
+    /// saved, until the user has seen it.
+    @Published var saveError: String?
 
     private weak var account: HarnessAccount?
     private var cancellable: AnyCancellable?
@@ -110,6 +113,7 @@ class ProfileManager: ObservableObject {
     func bind(_ account: HarnessAccount?) {
         cancellable?.cancel()
         self.account = account
+        saveError = nil
         guard let account else {
             apply(Components.Schemas.Profile())
             return
@@ -139,15 +143,16 @@ class ProfileManager: ObservableObject {
 
     /// Saves a change to the profile. The change shows at once through the
     /// account's session; one the chat service refuses is taken back, and
-    /// logged here.
-    private func save(_ patch: ProfileFields) {
+    /// shown to the user as not saved.
+    func save(_ patch: ProfileFields) {
         guard let account else { return }
         Task {
             do {
                 try await account.updateProfile(patch)
             } catch {
-                guard !(error is CancellationError) else { return }
+                guard !(error is CancellationError), self.account === account else { return }
                 Self.logger.error("Failed to save the profile: \(error, privacy: .public)")
+                saveError = error.localizedDescription
             }
         }
     }
