@@ -1155,9 +1155,13 @@ class ChatViewModel: ObservableObject {
         Task { do { try await session.selectPreset(presetId) } catch { session.report(error) } }
     }
 
+    /// Starts a chat with a preset. The input is focused once the sheet it
+    /// was picked in has dismissed, so the keyboard rises in the chat rather
+    /// than inside the dismissing sheet.
     func startChat(withPresetId presetId: String) {
-        createNewChat()
+        createNewChat(focusInput: false)
         setPromptPreset(presetId)
+        focusInputAfterDismiss = true
     }
 
     // MARK: - Turns
