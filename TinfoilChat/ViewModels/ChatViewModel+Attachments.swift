@@ -27,12 +27,14 @@ extension ChatViewModel {
     /// Reserves a pending attachment, then has the chat service convert the
     /// file into the attachment the next turn sends. A file the service
     /// refuses leaves the row failed, or is reported to the batch it came
-    /// in.
+    /// in. With `preserveExistingErrors`, its error adds a line naming the
+    /// file to those of the other files picked with it.
     private func addAttachment(
         type: AttachmentType,
         fileName: String,
         sharedImportRequestID: UUID? = nil,
         managedFile: ManagedStagedFile? = nil,
+        preserveExistingErrors: Bool = false,
         errorPublicationGeneration: Int? = nil,
         onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil,
         load: @escaping () async throws -> (data: Data, mimeType: String)
@@ -85,7 +87,12 @@ extension ChatViewModel {
                     pendingAttachments[index] = attachment
                 }
                 guard attachmentErrorPublicationFence.accepts(errorPublicationGeneration) else { return }
-                attachmentError = error.localizedDescription
+                if preserveExistingErrors {
+                    let line = "\(fileName): \(failure.message)"
+                    attachmentError = attachmentError.map { $0.isEmpty ? line : "\($0)\n\(line)" } ?? line
+                } else {
+                    attachmentError = failure.message
+                }
             }
         }
         if let managedFile {
@@ -120,6 +127,7 @@ extension ChatViewModel {
         fileName: String,
         sharedImportRequestID: UUID? = nil,
         managedFile: ManagedStagedFile? = nil,
+        preserveExistingErrors: Bool = false,
         errorPublicationGeneration: Int? = nil,
         onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil
     ) {
@@ -129,6 +137,7 @@ extension ChatViewModel {
             fileName: fileName,
             sharedImportRequestID: sharedImportRequestID,
             managedFile: managedFile,
+            preserveExistingErrors: preserveExistingErrors,
             errorPublicationGeneration: errorPublicationGeneration,
             onProcessingFailure: onProcessingFailure
         ) {
@@ -138,6 +147,7 @@ extension ChatViewModel {
 
     func addDocumentAttachment(
         handle: ManagedStagedFile,
+        preserveExistingErrors: Bool = false,
         errorPublicationGeneration: Int? = nil,
         onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil
     ) {
@@ -145,6 +155,7 @@ extension ChatViewModel {
             url: handle.url,
             fileName: handle.fileName,
             managedFile: handle,
+            preserveExistingErrors: preserveExistingErrors,
             errorPublicationGeneration: errorPublicationGeneration,
             onProcessingFailure: onProcessingFailure
         )
@@ -158,7 +169,7 @@ extension ChatViewModel {
         for (handle, kind) in admission.files {
             switch kind {
             case .document:
-                addDocumentAttachment(handle: handle, errorPublicationGeneration: errorPublicationGeneration)
+                addDocumentAttachment(handle: handle, preserveExistingErrors: true, errorPublicationGeneration: errorPublicationGeneration)
             case .image:
                 addImageAttachment(handle: handle, errorPublicationGeneration: errorPublicationGeneration) { [weak self] failure in
                     guard let self else { return }
