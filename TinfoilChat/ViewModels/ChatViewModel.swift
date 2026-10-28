@@ -293,6 +293,9 @@ class ChatViewModel: ObservableObject {
     init() {
         currentModel = ModelType.auto
         loadDeviceSettings()
+        passkeyManager.$recoverySkipped
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$isPasskeyRecoverySkipped)
         Task { await openSession() }
         observers.append(NotificationCenter.default.addObserver(forName: .cloudSyncSettingChanged, object: nil, queue: .main) { [weak self] _ in
             Task { await self?.storageModeChanged() }
