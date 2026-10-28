@@ -172,6 +172,10 @@ enum Constants {
         /// markdown each time, which stalls scrolling; 100 ms is not perceived
         /// as a delay.
         static let uiUpdateInterval: TimeInterval = 0.1
+        /// A reply's first text ticks a light haptic a few times, spaced out.
+        static let hapticTicks = 5
+        static let hapticInterval: TimeInterval = 0.1
+        static let hapticIntensity: CGFloat = 0.5
     }
 
     enum StreamingBuffer {

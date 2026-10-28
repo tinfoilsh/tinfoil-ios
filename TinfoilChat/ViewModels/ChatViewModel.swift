@@ -296,6 +296,12 @@ class ChatViewModel: ObservableObject {
     private var trailingPublish: Task<Void, Never>?
     private var nextPublishAt = Date.distantPast
     private var publishedLayout: SessionLayout?
+    /// The reply whose first text ticks the haptic, and how far it got.
+    private var hapticReply: (id: String, ticks: Int, lastAt: Date, length: Int)?
+    /// The user stopped the reply, which was announced as stopped rather than
+    /// complete.
+    private var stopAnnounced = false
+    private lazy var streamingHaptic = UIImpactFeedbackGenerator(style: .light)
     /// Whether the account changed since a session was opened for it.
     private var sessionUserId: String?? = nil
 
@@ -356,6 +362,7 @@ class ChatViewModel: ObservableObject {
         trailingPublish?.cancel()
         trailingPublish = nil
         publishedLayout = nil
+        hapticReply = nil
         rows = ChatRows()
         session = nil
         verification = VerificationInfo(isVerifying: true)
@@ -625,6 +632,7 @@ class ChatViewModel: ObservableObject {
         let chatId: String?
         let loadingId: String?
         let failedId: String?
+        let failed: Bool
         let status: ChatState.Status
         let messageCount: Int
         let lastMessageId: String?
@@ -633,6 +641,7 @@ class ChatViewModel: ObservableObject {
             chatId = session.open.id
             loadingId = session.open.loadingId
             failedId = session.open.failedId
+            failed = session.open.failure != nil
             status = session.state.status
             messageCount = session.state.messages.count
             lastMessageId = session.state.messages.last?.id
@@ -666,9 +675,44 @@ class ChatViewModel: ObservableObject {
         }
         trailingPublish?.cancel()
         trailingPublish = nil
+        announceGenerationStatus(from: publishedLayout, to: layout)
         publishedLayout = layout
         nextPublishAt = now.addingTimeInterval(Constants.Streaming.uiUpdateInterval)
+        tickStreamingHaptic(at: now)
         objectWillChange.send()
+    }
+
+    /// VoiceOver hears a reply start, finish or fail in the chat on screen,
+    /// as the web app's live region announces it.
+    private func announceGenerationStatus(from previous: SessionLayout?, to next: SessionLayout?) {
+        guard let previous, let next, previous.chatId == next.chatId, previous.status != next.status else { return }
+        let running: Set<ChatState.Status> = [.submitting, .queued, .streaming]
+        let wasRunning = running.contains(previous.status), isRunning = running.contains(next.status)
+        if !wasRunning, isRunning {
+            stopAnnounced = false
+            AccessibilityAnnouncer.announce(Constants.Accessibility.generatingResponse)
+        } else if wasRunning, next.status == .error || next.failed {
+            AccessibilityAnnouncer.announce(Constants.Accessibility.responseFailed)
+        } else if wasRunning, next.status == .idle {
+            if !stopAnnounced { AccessibilityAnnouncer.announce(Constants.Accessibility.responseComplete) }
+            stopAnnounced = false
+        }
+    }
+
+    /// A light haptic ticks as a reply's first text arrives, a few times
+    /// spaced out, when haptics are on.
+    private func tickStreamingHaptic(at now: Date) {
+        guard SettingsManager.shared.hapticFeedbackEnabled, let state = session?.state, state.status == .streaming,
+              let reply = state.messages.last, reply.role == .assistant else { return }
+        let length = reply.timeline?.reduce(0) { $1._type == .content ? $0 + ($1.content?.utf8.count ?? 0) : $0 } ?? 0
+        var tick = hapticReply?.id == reply.id ? hapticReply! : (id: reply.id, ticks: 0, lastAt: .distantPast, length: 0)
+        defer { hapticReply = tick }
+        guard length > tick.length else { return }
+        tick.length = length
+        guard tick.ticks < Constants.Streaming.hapticTicks, now.timeIntervalSince(tick.lastAt) >= Constants.Streaming.hapticInterval else { return }
+        tick.ticks += 1
+        tick.lastAt = now
+        streamingHaptic.impactOccurred(intensity: Constants.Streaming.hapticIntensity)
     }
 
     // MARK: - The open chat as the views show it
@@ -1158,6 +1202,8 @@ class ChatViewModel: ObservableObject {
 
     func cancelGeneration() {
         guard let session else { return }
+        stopAnnounced = true
+        AccessibilityAnnouncer.announce(Constants.Accessibility.generationStopped)
         Task { do { try await session.cancel() } catch { session.report(error) } }
     }
 
