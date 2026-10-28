@@ -131,7 +131,6 @@ class ChatViewModel: ObservableObject {
     // MARK: - Settings
 
     @Published var currentModel: ModelType
-    @Published var isWebSearchEnabled: Bool = false
     @Published var reasoningEffort: ReasoningEffort = .medium {
         didSet { if !isApplyingProfile { saveSetting("reasoningEffort", reasoningEffort.rawValue) } }
     }
@@ -514,7 +513,9 @@ class ChatViewModel: ObservableObject {
         if let minimum = account?.session?._protocol.minimum { AppConfig.shared.harnessServes(minimumProtocol: minimum) }
         guard let models = account?.session?.models else { return }
         let available = models.map(ModelType.init)
-        if let current = available.first(where: { $0.id == currentModel.id }) {
+        if session?.open.id == nil, session?.open.modelChosen != true, let shown = openChatModel {
+            currentModel = shown
+        } else if let current = available.first(where: { $0.id == currentModel.id }) {
             currentModel = current
         } else if let picked = session.flatMap({ session in available.first { $0.id == session.pickedModel } }) {
             currentModel = picked
@@ -548,9 +549,21 @@ class ChatViewModel: ObservableObject {
         if let effort = profile.reasoningEffort.flatMap(ReasoningEffort.init(rawValue:)), effort != reasoningEffort { reasoningEffort = effort }
         if let thinking = profile.thinkingEnabled, thinking != thinkingEnabled { thinkingEnabled = thinking }
         if let level = profile.autoIntelligence.flatMap(AutoIntelligence.init(rawValue:)), level != autoIntelligence { autoIntelligence = level }
-        if let models = account?.session?.models, let selected = profile.selectedModel, let model = models.first(where: { $0.id == selected }), session?.open.modelChosen != true, session?.open.id == nil {
-            currentModel = ModelType(model)
-        }
+        if session?.open.modelChosen != true, session?.open.id == nil { showOpenChatModel() }
+    }
+
+    /// The model the open chat shows: the one it was opened with or the user
+    /// picked for it, or for a new chat the one its prompt chooses or the one
+    /// new chats follow.
+    private var openChatModel: ModelType? {
+        guard let session else { return nil }
+        let open = session.open
+        return findSelectableModel(id: session.presetChoice().model ?? (open.model.isEmpty ? session.pickedModel : open.model))
+    }
+
+    /// The model picker shows the open chat's model.
+    private func showOpenChatModel() {
+        if let model = openChatModel { currentModel = model }
     }
 
     private func saveSetting(_ field: String, _ value: Any) {
@@ -564,8 +577,15 @@ class ChatViewModel: ObservableObject {
         keepWithOpenChat(ThreadPatch(model: model.id))
     }
 
+    /// Whether the open chat searches the web, as its toggle shows it.
+    var isWebSearchEnabled: Bool { currentChat?.webSearchEnabled ?? newChatWebSearch }
+
+    /// Whether a new chat searches the web until the user or its prompt
+    /// chooses: as the profile says, which the chat service starts new chats
+    /// with.
+    private var newChatWebSearch: Bool { account?.effectiveProfile.webSearchEnabled ?? true }
+
     func setWebSearchEnabled(_ enabled: Bool) {
-        isWebSearchEnabled = enabled
         session?.setWebSearch(enabled)
         keepWithOpenChat(ThreadPatch(webSearchEnabled: enabled))
     }
@@ -949,7 +969,7 @@ class ChatViewModel: ObservableObject {
             chat.model = model
             chat.projectId = open.onDevice ? nil : open.projectId
             chat.promptPresetId = session.presetId
-            if let webSearch { chat.webSearchEnabled = webSearch }
+            chat.webSearchEnabled = webSearch ?? newChatWebSearch
         }
         if state.flagged { chat.flagged = true }
         return chat
@@ -1112,8 +1132,12 @@ class ChatViewModel: ObservableObject {
         }
         openNewChat(local: local)
         session.setProject(projectId)
-        if let modelType { currentModel = modelType }
-        session.setModel(currentModel.id)
+        if let modelType {
+            currentModel = modelType
+            session.setModel(modelType.id)
+        } else {
+            showOpenChatModel()
+        }
         if focusInput { shouldFocusInput = true }
         scrollToBottomTrigger = UUID()
     }
@@ -1133,10 +1157,7 @@ class ChatViewModel: ObservableObject {
             do {
                 _ = try await session.openChat(id, local: isLocalOnly)
                 keepPendingOriginals(originals)
-                if let model = session.open.model.isEmpty ? nil : session.open.model, let listed = availableModels.first(where: { $0.id == model }) {
-                    currentModel = listed
-                }
-                isWebSearchEnabled = currentChat?.webSearchEnabled ?? isWebSearchEnabled
+                if !session.open.model.isEmpty { showOpenChatModel() }
                 scrollToBottomTrigger = UUID()
             } catch {
                 keepPendingOriginals(originals)
@@ -1256,15 +1277,21 @@ class ChatViewModel: ObservableObject {
             cancelMessageEdit()
             openNewChat(local: true)
             session.setTemporary(true)
+            showOpenChatModel()
             shouldFocusInput = true
         }
     }
 
     // MARK: - Prompts
 
+    /// Chooses the open chat's prompt; the model picker and the web search
+    /// toggle show what the prompt chooses.
     func setPromptPreset(_ presetId: String?) {
         guard let session else { return }
-        Task { do { try await session.selectPreset(presetId) } catch { session.report(error) } }
+        Task {
+            do { try await session.selectPreset(presetId) } catch { session.report(error) }
+            showOpenChatModel()
+        }
     }
 
     /// Starts a chat with a preset. The input is focused once the sheet it
