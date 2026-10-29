@@ -49,41 +49,58 @@ enum WorkActivity: Equatable {
     case idle
 }
 
+extension WorkStep {
+    /// What a finished thought says; one the chat service timed no duration
+    /// for shows no time.
+    static func thoughtLabel(duration: Double?) -> String {
+        guard let duration else { return "Thought" }
+        return "Thought for \(ElapsedTime.label(duration))"
+    }
+}
+
+/// Whole-second durations as work steps show them, both while they run and
+/// once they finish: "8s", "3m 33s", "1h 4m".
+enum ElapsedTime {
+    private static let secondsPerMinute = 60
+    private static let secondsPerHour = 3_600
+
+    static func label(_ seconds: Double) -> String {
+        let time = parts(seconds)
+        if time.hours > 0 { return "\(time.hours)h \(time.minutes)m" }
+        if time.minutes > 0 { return "\(time.minutes)m \(time.seconds)s" }
+        return "\(time.seconds)s"
+    }
+
+    /// The same duration as VoiceOver says it, such as "3 minutes, 33 seconds".
+    static func spokenLabel(_ seconds: Double) -> String {
+        let time = parts(seconds)
+        let components = time.hours > 0
+            ? DateComponents(hour: time.hours, minute: time.minutes)
+            : time.minutes > 0
+                ? DateComponents(minute: time.minutes, second: time.seconds)
+                : DateComponents(second: time.seconds)
+        return spokenFormatter.string(from: components) ?? label(seconds)
+    }
+
+    private static let spokenFormatter: DateComponentsFormatter = {
+        let formatter = DateComponentsFormatter()
+        formatter.unitsStyle = .full
+        formatter.allowedUnits = [.hour, .minute, .second]
+        return formatter
+    }()
+
+    /// Whole elapsed seconds, as a clock counts them, never below zero.
+    private static func parts(_ seconds: Double) -> (hours: Int, minutes: Int, seconds: Int) {
+        let whole = seconds.isFinite ? Int(max(0, seconds)) : 0
+        return (whole / secondsPerHour, whole % secondsPerHour / secondsPerMinute, whole % secondsPerMinute)
+    }
+}
+
 /// A consecutive run of trace steps (thinking / searches / fetches) with
 /// no visible answer text or GenUI widget in between. Rendered collapsed
-/// as a single "Worked for Ns" row.
+/// as a single row naming what the run did.
 struct WorkRun: Equatable {
     let steps: [WorkStep]
-
-    /// Wall-clock span from the stamps recorded while streaming. Falls back
-    /// to summed thinking durations for messages saved before stamps
-    /// existed; nil when neither is available.
-    var durationSeconds: Double? {
-        var start: Double = .infinity
-        var end: Double = -.infinity
-        var thinkingTotal: Double = 0
-
-        func note(startedAt: Double?, endedAt: Double?) {
-            guard let startedAt else { return }
-            start = min(start, startedAt)
-            end = max(end, endedAt ?? startedAt)
-        }
-
-        for step in steps {
-            switch step {
-            case .thinking(_, _, let duration, let startedAt, let endedAt):
-                note(startedAt: startedAt, endedAt: endedAt)
-                thinkingTotal += duration ?? 0
-            case .webSearches(let group):
-                for search in group { note(startedAt: search.startedAt, endedAt: search.endedAt) }
-            case .urlFetches(let group):
-                for fetch in group { note(startedAt: fetch.startedAt, endedAt: fetch.endedAt) }
-            }
-        }
-
-        if start.isFinite { return max(0, (end - start) / 1000) }
-        return thinkingTotal > 0 ? thinkingTotal : nil
-    }
 
     var liveActivity: WorkActivity {
         guard let last = steps.last, last.isInFlight else { return .idle }
@@ -97,27 +114,58 @@ struct WorkRun: Equatable {
         }
     }
 
-    /// "Worked for 4.7s" under a minute, "Worked for 1m 24s" otherwise.
-    static func formatDuration(_ seconds: Double) -> String {
-        let rounded = (seconds * 10).rounded() / 10
-        if rounded < 60 {
-            return String(format: "%.1fs", rounded)
+    /// Names what the run did, each kind of action once in the order the run
+    /// first took it: "Thought, searched the web, and read 3 pages".
+    var summaryLabel: String {
+        var actions: [String] = []
+        var hasThought = false
+        var hasSearched = false
+        var hasRead = false
+        for step in steps {
+            switch step {
+            case .thinking where !hasThought:
+                hasThought = true
+                actions.append("thought")
+            case .webSearches where !hasSearched:
+                hasSearched = true
+                actions.append("searched the web")
+            case .urlFetches where !hasRead:
+                hasRead = true
+                actions.append(readAction)
+            default:
+                break
+            }
         }
-        let whole = Int(seconds.rounded())
-        return "\(whole / 60)m \(whole % 60)s"
+        let sentence: String
+        switch actions.count {
+        case 0:
+            return "Worked"
+        case 1:
+            sentence = actions[0]
+        case 2:
+            sentence = "\(actions[0]) and \(actions[1])"
+        default:
+            sentence = actions.dropLast().joined(separator: ", ") + ", and \(actions[actions.count - 1])"
+        }
+        return sentence.prefix(1).uppercased() + sentence.dropFirst()
     }
 
-    var summaryLabel: String {
-        if let seconds = durationSeconds {
-            return "Worked for \(Self.formatDuration(seconds))"
+    /// The pages the run read, across all its link reads; a run whose every
+    /// read failed tried to read them.
+    private var readAction: String {
+        let fetches = steps.flatMap { step -> [URLFetchState] in
+            if case .urlFetches(let group) = step { return group }
+            return []
         }
-        return "Worked through \(steps.count) step\(steps.count == 1 ? "" : "s")"
+        let read = fetches.filter { $0.status == .completed }.count
+        if read > 0 { return read == 1 ? "read a page" : "read \(read) pages" }
+        return fetches.count == 1 ? "tried to read a page" : "tried to read \(fetches.count) pages"
     }
 }
 
 /// Collapsed inline row for a `WorkRun`. While the run is active it shows
 /// the current activity (thinking summary, in-flight search, link reads);
-/// once settled it reads "Worked for Ns". Tapping opens the steps sheet.
+/// once settled it names what the run did. Tapping opens the steps sheet.
 struct WorkBox: View {
     let run: WorkRun
     let isActive: Bool
@@ -346,8 +394,7 @@ private struct WorkThinkingStepView: View {
 
     private var heading: String {
         if isThinking { return "Thinking" }
-        if let duration { return "Thought for \(String(format: "%.1f", duration))s" }
-        return "Thought"
+        return WorkStep.thoughtLabel(duration: duration)
     }
 
     var body: some View {

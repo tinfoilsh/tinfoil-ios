@@ -1699,8 +1699,7 @@ struct CollapsibleThinkingBox: View {
     /// duration for shows no time.
     private var title: String {
         if isStreaming { return "Thinking" }
-        if let seconds = generationTimeSeconds { return "Thought for \(String(format: "%.1f", seconds))s" }
-        return "Thought"
+        return WorkStep.thoughtLabel(duration: generationTimeSeconds)
     }
 
     var body: some View {
@@ -1759,8 +1758,8 @@ struct ThoughtsSheetView: View {
     }
 
     private var titleText: String {
-        if let seconds = generationTimeSeconds {
-            return "Thought for \(String(format: "%.1f", seconds))s"
+        if generationTimeSeconds != nil {
+            return WorkStep.thoughtLabel(duration: generationTimeSeconds)
         }
         return "Thoughts"
     }

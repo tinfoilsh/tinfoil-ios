@@ -20,48 +20,61 @@ struct WorkRunTests {
         )
     }
 
-    @Test func durationSpansTheRunRatherThanSummingOverlappingSteps() {
-        let run = WorkRun(steps: [
-            .thinking(content: "t", isThinking: false, duration: 4, startedAt: 1_000, endedAt: 5_000),
-            .webSearches([
-                search("a", startedAt: 5_000, endedAt: 20_000),
-                search("b", startedAt: 5_000, endedAt: 25_000),
-            ]),
-        ])
-        #expect(run.durationSeconds == 24)
+    private func thought(duration: Double? = 1) -> WorkStep {
+        .thinking(content: "t", isThinking: false, duration: duration, startedAt: nil, endedAt: nil)
     }
 
-    @Test func unsettledStepUsesItsStart() {
-        let run = WorkRun(steps: [
-            .webSearches([search("a", startedAt: 0, endedAt: 3_000)]),
-            .urlFetches([URLFetchState(id: "f", url: "https://x", status: .fetching, startedAt: 4_000)]),
-        ])
-        #expect(run.durationSeconds == 4)
+    private func fetches(_ statuses: [URLFetchStatus]) -> WorkStep {
+        .urlFetches(statuses.enumerated().map { URLFetchState(id: "f\($0.offset)", url: "https://x/\($0.offset)", status: $0.element) })
     }
 
-    @Test func fallsBackToSummedThinkingDurationsWithoutStamps() {
+    @Test func summaryNamesEachActionOnceInTheOrderFirstTaken() {
         let run = WorkRun(steps: [
-            .thinking(content: "a", isThinking: false, duration: 4.7, startedAt: nil, endedAt: nil),
+            thought(),
             .webSearches([search("a")]),
-            .thinking(content: "b", isThinking: false, duration: 10.3, startedAt: nil, endedAt: nil),
+            thought(),
+            fetches([.completed, .completed]),
+            .webSearches([search("b")]),
+            fetches([.completed]),
         ])
-        #expect(run.durationSeconds == 15)
-        #expect(run.summaryLabel == "Worked for 15.0s")
+        #expect(run.summaryLabel == "Thought, searched the web, and read 3 pages")
     }
 
-    @Test func describesStepCountWhenNothingCarriesTiming() {
-        let run = WorkRun(steps: [
-            .thinking(content: "a", isThinking: false, duration: nil, startedAt: nil, endedAt: nil),
-            .webSearches([search("a")]),
-        ])
-        #expect(run.durationSeconds == nil)
-        #expect(run.summaryLabel == "Worked through 2 steps")
+    @Test func summaryJoinsTwoActionsWithoutAComma() {
+        let run = WorkRun(steps: [.webSearches([search("a")]), fetches([.completed])])
+        #expect(run.summaryLabel == "Searched the web and read a page")
+
+        let thinking = WorkRun(steps: [thought(), .webSearches([search("a")]), thought()])
+        #expect(thinking.summaryLabel == "Thought and searched the web")
     }
 
-    @Test func formatsSecondsThenMinutes() {
-        #expect(WorkRun.formatDuration(4.74) == "4.7s")
-        #expect(WorkRun.formatDuration(59.96) == "1m 0s")
-        #expect(WorkRun.formatDuration(84.2) == "1m 24s")
+    @Test func summaryCountsOnlyThePagesRead() {
+        let someFailed = WorkRun(steps: [thought(), fetches([.completed, .failed, .blocked])])
+        #expect(someFailed.summaryLabel == "Thought and read a page")
+
+        let allFailed = WorkRun(steps: [thought(), fetches([.failed, .failed])])
+        #expect(allFailed.summaryLabel == "Thought and tried to read 2 pages")
+    }
+
+    @Test func formatsWholeSecondsMinutesAndHours() {
+        #expect(ElapsedTime.label(0) == "0s")
+        #expect(ElapsedTime.label(8.9) == "8s")
+        #expect(ElapsedTime.label(59.99) == "59s")
+        #expect(ElapsedTime.label(60) == "1m 0s")
+        #expect(ElapsedTime.label(213) == "3m 33s")
+        #expect(ElapsedTime.label(3_599) == "59m 59s")
+        #expect(ElapsedTime.label(3_840) == "1h 4m")
+    }
+
+    @Test func clampsElapsedTimeAtZero() {
+        #expect(ElapsedTime.label(-4) == "0s")
+        #expect(ElapsedTime.label(.nan) == "0s")
+    }
+
+    @Test func thoughtSaysItsDurationInTheSameFormat() {
+        #expect(WorkStep.thoughtLabel(duration: 12.7) == "Thought for 12s")
+        #expect(WorkStep.thoughtLabel(duration: 213) == "Thought for 3m 33s")
+        #expect(WorkStep.thoughtLabel(duration: nil) == "Thought")
     }
 
     @Test func liveActivityFollowsTheLastInFlightStep() {
