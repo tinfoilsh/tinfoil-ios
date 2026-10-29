@@ -70,13 +70,13 @@ enum ContentKeyBundle {
         kekIvHex: String,
         wrappedKeyHex: String
     ) throws -> UnwrappedContentKey {
-        guard let iv = Data(lowercaseHex: kekIvHex), !iv.isEmpty else {
+        guard let iv = Data(lowercaseHex: kekIvHex.lowercased()), !iv.isEmpty else {
             throw ContentKeyBundleError.wrongIvLength(kekIvHex.count / 2)
         }
         guard iv.count == aesGcmIvByteCount else {
             throw ContentKeyBundleError.wrongIvLength(iv.count)
         }
-        guard let encrypted = Data(lowercaseHex: wrappedKeyHex), !encrypted.isEmpty else {
+        guard let encrypted = Data(lowercaseHex: wrappedKeyHex.lowercased()), !encrypted.isEmpty else {
             throw ContentKeyBundleError.wrongCekLength(wrappedKeyHex.count / 2)
         }
         guard encrypted.count >= aesGcmTagByteCount else {

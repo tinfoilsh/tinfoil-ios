@@ -1089,7 +1089,8 @@ struct PasskeyCompositionTests {
 
 @Suite("Legacy passkey envelope fallback")
 struct LegacyPasskeyEnvelopeTests {
-    @Test func unwrapsLegacyJSONAndRetainsOnlyValidAlternatives() throws {
+    @Test(arguments: ["%02x", "%02X"])
+    func unwrapsLegacyJSONAndRetainsOnlyValidAlternatives(hexFormat: String) throws {
         let prfOutput = Data(repeating: 3, count: 32)
         let cek = Data((0..<32).map { UInt8($0 + 1) })
         let alternative = Data((0..<32).map { UInt8($0 + 40) })
@@ -1112,8 +1113,8 @@ struct LegacyPasskeyEnvelopeTests {
 
         let recovered = try ContentKeyBundle.unwrapLegacyJsonEnvelope(
             prfOutput: prfOutput,
-            kekIvHex: iv.map { String(format: "%02x", $0) }.joined(),
-            wrappedKeyHex: encrypted.map { String(format: "%02x", $0) }.joined()
+            kekIvHex: iv.map { String(format: hexFormat, $0) }.joined(),
+            wrappedKeyHex: encrypted.map { String(format: hexFormat, $0) }.joined()
         )
 
         #expect(recovered.cek == cek)
