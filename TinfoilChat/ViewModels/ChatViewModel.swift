@@ -1492,7 +1492,12 @@ class ChatViewModel: ObservableObject {
         acknowledgeSharedImports(in: acknowledged)
         let fields = TurnFields(kind: .send, content: content, attachments: sent.isEmpty ? nil : sent, options: turnOptions)
         // A message queued behind a reply keeps the keyboard up for the next.
-        if !session.running { dismissKeyboard() }
+        if !session.running {
+            dismissKeyboard()
+            // A reply asked for again that never started does not scroll
+            // this message.
+            scrollsToTurnOnStart = false
+        }
         Task { await session.send(fields) }
         return true
     }
@@ -1538,7 +1543,7 @@ class ChatViewModel: ObservableObject {
     /// reply again shows its message at the top as the reply comes in.
     private func startTurn(scrollingToMessage: Bool) {
         dismissKeyboard()
-        if scrollingToMessage { scrollsToTurnOnStart = true }
+        scrollsToTurnOnStart = scrollingToMessage
     }
 
     private func dismissKeyboard() {
