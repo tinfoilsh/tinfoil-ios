@@ -70,6 +70,25 @@ struct SharedImportStoreTests {
         #expect(remaining == [SharedImportConfiguration.enqueueLockFileName])
     }
 
+    @Test("Removes the other pending shares when one cannot be removed")
+    func removesTheOtherSharesWhenOneCannotBeRemoved() throws {
+        let fileManager = RemovalFailingFileManager()
+        let fixture = try makeFixture(fileManager: fileManager)
+        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
+        for name in ["first.txt", "second.txt"] {
+            try fixture.store.enqueue(
+                data: Data(name.utf8),
+                typeIdentifier: UTType.plainText.identifier,
+                originalFileName: name
+            )
+        }
+        fileManager.failsNextRemoval = true
+
+        #expect(throws: CocoaError.self) { try fixture.store.removeAllRequests() }
+
+        #expect(fixture.store.pendingRequests().count == 1)
+    }
+
     @Test("Persists data without an intermediate source file")
     func persistsDataRepresentation() throws {
         let fixture = try makeFixture()
@@ -330,6 +349,7 @@ struct SharedImportStoreTests {
     }
 
     private func makeFixture(
+        fileManager: FileManager = .default,
         currentDate: @escaping () -> Date = Date.init,
         maximumPendingRequestCount: Int = SharedImportConfiguration.maximumPendingRequestCount,
         maximumPendingPayloadBytes: Int64 = SharedImportConfiguration.maximumPendingPayloadBytes
@@ -348,6 +368,7 @@ struct SharedImportStoreTests {
         )
         return (
             try SharedImportStore(
+                fileManager: fileManager,
                 inboxURL: inboxURL,
                 currentDate: currentDate,
                 maximumPendingRequestCount: maximumPendingRequestCount,
@@ -356,6 +377,19 @@ struct SharedImportStoreTests {
             rootURL,
             inboxURL
         )
+    }
+}
+
+/// A file manager that fails the next removal once asked to.
+private final class RemovalFailingFileManager: FileManager, @unchecked Sendable {
+    var failsNextRemoval = false
+
+    override func removeItem(at url: URL) throws {
+        if failsNextRemoval {
+            failsNextRemoval = false
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        try super.removeItem(at: url)
     }
 }
 
