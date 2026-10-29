@@ -27,14 +27,14 @@ extension ChatViewModel {
     /// Reserves a pending attachment, then has the chat service convert the
     /// file into the attachment the next turn sends. A file the service
     /// refuses leaves the row failed, or is reported to the batch it came
-    /// in. With `preserveExistingErrors`, its error adds a line naming the
-    /// file to those of the other files picked with it.
+    /// in: `onProcessingFailure` removes its row, and `onFailedRow` leaves
+    /// the row failed.
     private func addAttachment(
         type: AttachmentType,
         fileName: String,
         sharedImportRequestID: UUID? = nil,
         managedFile: ManagedStagedFile? = nil,
-        preserveExistingErrors: Bool = false,
+        onFailedRow: (@MainActor (ManagedFileError) -> Void)? = nil,
         errorPublicationGeneration: Int? = nil,
         onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil,
         load: @escaping () async throws -> (data: Data, mimeType: String)
@@ -88,9 +88,8 @@ extension ChatViewModel {
                     pendingAttachments[index] = attachment
                 }
                 guard attachmentErrorPublicationFence.accepts(errorPublicationGeneration) else { return }
-                if preserveExistingErrors {
-                    let line = "\(fileName): \(failure.message)"
-                    attachmentError = attachmentError.map { $0.isEmpty ? line : "\($0)\n\(line)" } ?? line
+                if let onFailedRow {
+                    onFailedRow(failure)
                 } else {
                     attachmentError = failure.message
                 }
@@ -128,7 +127,7 @@ extension ChatViewModel {
         fileName: String,
         sharedImportRequestID: UUID? = nil,
         managedFile: ManagedStagedFile? = nil,
-        preserveExistingErrors: Bool = false,
+        onFailedRow: (@MainActor (ManagedFileError) -> Void)? = nil,
         errorPublicationGeneration: Int? = nil,
         onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil
     ) {
@@ -138,7 +137,7 @@ extension ChatViewModel {
             fileName: fileName,
             sharedImportRequestID: sharedImportRequestID,
             managedFile: managedFile,
-            preserveExistingErrors: preserveExistingErrors,
+            onFailedRow: onFailedRow,
             errorPublicationGeneration: errorPublicationGeneration,
             onProcessingFailure: onProcessingFailure
         ) {
@@ -148,7 +147,7 @@ extension ChatViewModel {
 
     func addDocumentAttachment(
         handle: ManagedStagedFile,
-        preserveExistingErrors: Bool = false,
+        onFailedRow: (@MainActor (ManagedFileError) -> Void)? = nil,
         errorPublicationGeneration: Int? = nil,
         onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil
     ) {
@@ -156,7 +155,7 @@ extension ChatViewModel {
             url: handle.url,
             fileName: handle.fileName,
             managedFile: handle,
-            preserveExistingErrors: preserveExistingErrors,
+            onFailedRow: onFailedRow,
             errorPublicationGeneration: errorPublicationGeneration,
             onProcessingFailure: onProcessingFailure
         )
@@ -167,17 +166,20 @@ extension ChatViewModel {
         let admission = DocumentPickerBatchAdmission.admit(batch.files, modelSupportsImages: currentModel.isMultimodal)
         var failures = batch.failures + admission.failures
         var successCount = admission.files.count
+        // A document or image that fails adds its line to those of every
+        // other file picked with it.
+        let reportFailure = { [weak self] (failure: ManagedFileError) in
+            guard let self else { return }
+            successCount -= 1
+            failures.append(failure)
+            attachmentError = ManagedFileBatchErrorMessage.attachments(successCount: successCount, failures: failures)
+        }
         for (handle, kind) in admission.files {
             switch kind {
             case .document:
-                addDocumentAttachment(handle: handle, preserveExistingErrors: true, errorPublicationGeneration: errorPublicationGeneration)
+                addDocumentAttachment(handle: handle, onFailedRow: reportFailure, errorPublicationGeneration: errorPublicationGeneration)
             case .image:
-                addImageAttachment(handle: handle, errorPublicationGeneration: errorPublicationGeneration) { [weak self] failure in
-                    guard let self else { return }
-                    successCount -= 1
-                    failures.append(failure)
-                    attachmentError = ManagedFileBatchErrorMessage.attachments(successCount: successCount, failures: failures)
-                }
+                addImageAttachment(handle: handle, errorPublicationGeneration: errorPublicationGeneration, onAdmissionFailure: reportFailure)
             }
         }
         attachmentError = ManagedFileBatchErrorMessage.attachments(successCount: successCount, failures: failures)
