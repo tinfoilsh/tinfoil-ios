@@ -122,6 +122,7 @@ struct WorkRunTests {
         #expect(WorkStep.webSearches([search("a"), search("b")]).label(isActive: false).text == "Searched the web on 2 queries")
         #expect(WorkStep.webSearches([search("a"), search("b", status: .failed)]).label(isActive: false) == WorkLabel(text: "Search failed", tone: .failed))
         #expect(fetches([.completed, .failed]).label(isActive: false).text == "Read 1 link")
+        #expect(fetches([.failed, .blocked]).label(isActive: false).text == "Tried to read 2 links")
 
         let searching = WorkStep.webSearches([search("a", status: .searching, query: "tides")])
         #expect(searching.label(isActive: true) == WorkLabel(text: "Searching the web: tides", tone: .live))

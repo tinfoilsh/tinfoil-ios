@@ -122,6 +122,9 @@ extension WorkStep {
                 return WorkLabel(text: "Reading \(group.count) link\(group.count == 1 ? "" : "s")", tone: .live)
             }
             let read = group.filter { $0.status == .completed }.count
+            if read == 0 {
+                return WorkLabel(text: "Tried to read \(group.count) link\(group.count == 1 ? "" : "s")", tone: .settled)
+            }
             return WorkLabel(text: "Read \(read) link\(read == 1 ? "" : "s")", tone: .settled)
         }
     }
