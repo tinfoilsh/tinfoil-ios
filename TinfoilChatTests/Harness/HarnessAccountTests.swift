@@ -90,6 +90,19 @@ struct HarnessAccountTests {
         #expect(!account.readsHeldKey)
     }
 
+    @Test func aKeyRefusedWhenTheSettingsAreReadAgainInTheBackgroundIsLocked() async throws {
+        let (account, _) = makeAccount(userId: "user-1", answers: [
+            Answers.json(sessionAnswer), Answers.json(["language": "French"]),
+            Answers.refusal(409, code: HarnessErrorCode.keyMismatch, action: "unlock"),
+        ])
+        try await account.refresh()
+        #expect(account.keyReady)
+        await account.refreshProfile(background: true)
+        #expect(account.keyLocked)
+        #expect(!account.keyReady)
+        #expect(account.profile["language"] as? String == "French")
+    }
+
     @Test func settingsThisDeviceHoldsShowBeforeTheSessionLoads() async throws {
         let settings = MemoryProfileStorage()
         settings.local = ["language": "French", "reasoningEffort": "high"]

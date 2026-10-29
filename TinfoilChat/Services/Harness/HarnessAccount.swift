@@ -345,16 +345,16 @@ final class HarnessAccount: ObservableObject {
             return true
         } catch {
             guard !disposed, version == profileVersion else { return false }
-            if background {
-                Self.logger.error("Failed to refresh the profile: \(error, privacy: .public)")
-                return false
-            }
             // Only the key's refusal takes the key away; a request that
             // failed for another reason leaves it as it was.
             let keyRefused = (error as? HarnessError).map { $0.code == HarnessErrorCode.keyRequired || $0.code == HarnessErrorCode.keyMismatch } ?? false
             if keyRefused {
                 keyReady = false
                 keyLocked = true
+            }
+            if background {
+                Self.logger.error("Failed to refresh the profile: \(error, privacy: .public)")
+                return false
             }
             profileReady = false
             self.error = error.localizedDescription
