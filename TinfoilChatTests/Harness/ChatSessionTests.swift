@@ -251,6 +251,23 @@ struct ChatSessionTests {
         #expect(await routes.next() == .get)
     }
 
+    @Test func olderMessagesAreReadPastAPageThisClientShowsNothingOf() async throws {
+        func page(_ messages: [[String: Any]], hasOlder: Bool) -> [String: Any] {
+            summary().merging(["revision": "rev-1", "presetId": NSNull(), "flagged": false, "messages": messages, "hasOlder": hasOlder]) { $1 }
+        }
+        let fixture = Fixture(userId: "user-1", answers: [
+            Answers.json(page([["id": "u3", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "third question"]], hasOlder: true)),
+            Answers.json(page([["id": "n2", "role": "narrator", "createdAt": "2026-01-01T00:00:00Z", "content": "a later role"]], hasOlder: true)),
+            Answers.json(page([["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"]], hasOlder: false)),
+        ])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        try await session.older()
+        #expect(session.state.messages.map(\.id) == ["u1", "u3"])
+        #expect(!session.state.hasOlder)
+        #expect(await fixture.transport.requests.map { $0.json["before"] as? String } == [nil, "u3", "n2"])
+    }
+
     @Test func aForkOpensOnceItsOpeningReturnsUnlessTheViewMoved() async throws {
         let forkId = "0000000000002_00000000-0000-4000-8000-000000000002"
         func window(_ id: String) -> [String: Any] {

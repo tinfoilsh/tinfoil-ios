@@ -894,12 +894,16 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     func older() async throws {
         guard let threadId = open.id else { return }
         let shown = controller.track()
+        // Each page is read from the first message of the page after it,
+        // which may be one this client leaves out.
+        var before = state.messages.first?.id
         while state.hasOlder {
-            let page = try await storeOf(threadId).older(threadId, before: state.messages.first?.id)
+            let page = try await storeOf(threadId).older(threadId, before: before)
             guard shown() else { return }
             let earlier = page.messages.shown.filter { message in !state.messages.contains { $0.id == message.id } }
             controller.updateView { $0.messages = earlier + $0.messages; $0.hasOlder = page.hasOlder }
-            if earlier.isEmpty { return }
+            guard let first = page.messages.first?.id, first != before else { return }
+            before = first
         }
     }
 
