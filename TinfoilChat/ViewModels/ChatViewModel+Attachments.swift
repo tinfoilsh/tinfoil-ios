@@ -54,6 +54,7 @@ extension ChatViewModel {
                 if type == .image, let thumbnail = await Self.previewThumbnail(of: file.data), publication.isCurrent {
                     pendingImageThumbnails[attachmentId] = thumbnail
                 }
+                try Task.checkCancellation()
                 guard let session else { throw Self.uploadInterrupted }
                 let uploaded = try await session.upload(file.data, fileName: fileName, mimeType: file.mimeType)
                 try Task.checkCancellation()
