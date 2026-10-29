@@ -88,7 +88,9 @@ struct ProjectPage: View {
                     }
                     .disabled(project == nil || !viewModel.hasPremiumAccess)
 
-                    if viewModel.activeProjectChats.isEmpty {
+                    // A project whose listed chats are all left out still
+                    // offers the chats after them.
+                    if viewModel.activeProjectChats.isEmpty && (viewModel.isLoadingProjectChats || !viewModel.hasMoreProjectChats) {
                         if viewModel.isLoadingProjectChats {
                             ProgressView()
                                 .frame(maxWidth: .infinity)
