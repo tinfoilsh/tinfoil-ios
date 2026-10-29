@@ -54,7 +54,9 @@ struct LegacyStoragePurgeTests {
             "com.tinfoil.chat.profile.dirty", "com.tinfoil.chat.profile.changed-at",
             "tinfoil-user-prefs-nickname", "tinfoil-user-prefs-profession",
             "tinfoil-user-prefs-traits", "tinfoil-user-prefs-additional-context",
-            "tinfoil-sync-revision-checkpoint-v2-user-a", "tinfoil-sync-pagination-token-user-a",
+            "tinfoil-sync-revision-checkpoint-v2-user-a", "tinfoil-sync-last-sync-date-user-a",
+            "tinfoil-sync-pagination-token-user-a", "tinfoil-sync-pagination-has-more-user-a",
+            "tinfoil-sync-pagination-active-user-a", "tinfoil-sync-pagination-loaded-first-user-a",
             "tinfoil-sync-pagination-attempted-user-a", "tinfoil-migration-legacy-cloud-chats-evicted_user-a",
             "tinfoil-secret-cloud-key-authorization-user-a",
         ]
