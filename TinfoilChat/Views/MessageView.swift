@@ -1780,12 +1780,15 @@ struct ThoughtsSheetView: View {
             }
             .navigationTitle(titleText)
             .navigationBarTitleDisplayMode(.inline)
-            .task {
-                guard chunks == nil, !thinkingText.isEmpty else { return }
+            // A thought still streaming is chunked again as it grows.
+            .task(id: thinkingText) {
+                guard !thinkingText.isEmpty else { return }
                 let text = thinkingText
-                chunks = await Task.detached {
-                    ThinkingTextChunker.chunk(text)
+                let chunked = await Task.detached {
+                    ThinkingTextChunker.chunk(growing: text)
                 }.value
+                guard !Task.isCancelled else { return }
+                chunks = chunked
             }
         }
     }
