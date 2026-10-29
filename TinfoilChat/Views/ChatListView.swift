@@ -232,6 +232,10 @@ struct ChatListView: View {
         // to it, which must not read as a chat switch, since this handler
         // force-scrolls to the bottom.
         .onChange(of: viewModel.currentChat?.id) { oldId, _ in
+            // Another chat may open with as many messages as the one before,
+            // which changes no count; older messages loaded into it are told
+            // from new ones by its own first message.
+            shownFirstMessageId = messages.first?.id
             // A new chat's first message gives the chat its id: the same
             // conversation stays on screen, positioned by the message count
             // change that came with it.
