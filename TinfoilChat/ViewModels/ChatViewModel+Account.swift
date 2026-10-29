@@ -15,8 +15,8 @@ extension ChatViewModel {
         }
         // A key a passkey recovered, or one another device rotated to and
         // this one applied, loads the account again.
-        passkeyManager.onRecoveryComplete = { [weak self] in self?.handleSignIn() }
-        passkeyManager.onKeyRefreshedFromBackup = { [weak self] in Task { @MainActor in self?.handleSignIn() } }
+        passkeyManager.onRecoveryComplete = { [weak self] in self?.handleSignInUnlessTearingDown() }
+        passkeyManager.onKeyRefreshedFromBackup = { [weak self] in Task { @MainActor in self?.handleSignInUnlessTearingDown() } }
         if let activeSignInToken, signInTask != nil, accountOperationFence.isCurrent(activeSignInToken, currentUserId: userId) { return }
         signInTask?.cancel()
         let token = accountOperationFence.begin(userId: userId)
@@ -24,6 +24,13 @@ extension ChatViewModel {
         signInTask = Task { [weak self] in
             await self?.performSignIn(token: token, userId: userId)
         }
+    }
+
+    /// A passkey that finished while the account signs out loads nothing:
+    /// the sign-in would undo the teardown's fences.
+    private func handleSignInUnlessTearingDown() {
+        guard !isAccountTeardownInProgress else { return }
+        handleSignIn()
     }
 
     private func isCurrentAccountOperation(_ token: AccountOperationFence.Token, userId: String) -> Bool {
