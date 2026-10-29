@@ -85,7 +85,9 @@ struct CachedUserDataStore {
     }
 
     func clear() {
-        keychain.delete(for: key, service: nil)
+        if !keychain.delete(for: key, service: nil) {
+            Self.logger.error("Failed to remove the signed-in user's details")
+        }
         defaults.removeObject(forKey: key)
         defaults.removeObject(forKey: Constants.StorageKeys.Auth.subscription)
     }
