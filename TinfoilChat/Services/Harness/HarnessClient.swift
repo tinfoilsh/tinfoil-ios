@@ -206,8 +206,8 @@ actor HarnessClient {
             if let instance { headers[HarnessHeader.instance] = instance }
             if let lastEventId { headers[HarnessHeader.lastEventId] = String(lastEventId) }
             let response = try await transport.send(HarnessRequest(route: route, headers: headers, body: body))
+            guard response.sealed else { throw HarnessError(HarnessErrorBody.unsealedAnswer, status: nil) }
             if response.isSuccess { return response }
-            guard response.sealed else { throw HarnessError(HarnessErrorBody.unsealedRefusal, status: nil) }
             // A refusal without the harness's error envelope, or one that
             // names no action, is not one the protocol allows.
             let answer = try await response.collect()

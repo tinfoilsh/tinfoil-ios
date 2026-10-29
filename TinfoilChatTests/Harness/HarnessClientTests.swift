@@ -128,8 +128,15 @@ struct HarnessClientTests {
         let transport = ScriptedTransport([{ _ in .collected(status: 401, headers: ["content-type": "application/json"], sealed: false, body: Data(envelope.utf8)) }])
         let credentials = ScriptedCredentials(identities: ["jwt", "jwt-2"], access: [.success("key"), .success("key")])
         let error = await Self.failure { let _: Ok = try await Self.client(transport, credentials).post(.get, Input(threadId: "t")) }
-        #expect(error == HarnessError(HarnessErrorBody.unsealedRefusal, status: nil))
+        #expect(error == HarnessError(HarnessErrorBody.unsealedAnswer, status: nil))
         #expect(await transport.requests.count == 1)
+    }
+
+    @Test func anAnswerTheEnclaveDidNotSealIsNotReadEvenWhenItSucceeds() async throws {
+        let transport = ScriptedTransport([{ _ in .collected(status: 200, headers: ["content-type": "application/json"], sealed: false, body: Data(#"{"ok":true}"#.utf8)) }])
+        let credentials = ScriptedCredentials(identities: ["jwt"], access: [.success("key")])
+        let error = await Self.failure { let _: Ok = try await Self.client(transport, credentials).post(.get, Input(threadId: "t")) }
+        #expect(error == HarnessError(HarnessErrorBody.unsealedAnswer, status: nil))
     }
 
     @Test func anAnswerThatIsNotTheProtocolsIsOneTheClientCannotRead() async throws {
