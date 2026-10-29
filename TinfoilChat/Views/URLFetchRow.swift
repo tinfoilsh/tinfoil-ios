@@ -69,8 +69,6 @@ struct URLFetchRow: View {
     }
 
     private func openURL() {
-        guard let url = URL(string: fetch.url),
-              url.scheme == "https" || url.scheme == "http" else { return }
-        UIApplication.shared.open(url)
+        LinkOpener.open(fetch.url)
     }
 }
