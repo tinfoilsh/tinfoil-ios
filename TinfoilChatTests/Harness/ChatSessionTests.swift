@@ -228,6 +228,29 @@ struct ChatSessionTests {
         #expect(session.state.messages.last?.timeline?.first?.content == "Hi.")
     }
 
+    @Test func aStopThatArrivesAfterTheReplyEndedReadsTheChatAgainRatherThanFailing() async throws {
+        let window: [String: Any] = summary().merging([
+            "revision": "rev-1", "presetId": NSNull(), "flagged": false,
+            "messages": [["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"]],
+            "hasOlder": false,
+        ]) { $1 }
+        let (rereads, reread) = AsyncStream<HarnessRoute>.makeStream()
+        let fixture = Fixture(userId: "user-1", answers: [
+            Answers.json(window),
+            Answers.refusal(409, code: HarnessErrorCode.runInFlight, action: "reload"),
+            { request in
+                reread.yield(request.route)
+                return Answers.json(window)(request)
+            },
+        ])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        do { try await session.cancel() } catch { session.report(error) }
+        try #require(session.open.failure == nil)
+        var routes = rereads.makeAsyncIterator()
+        #expect(await routes.next() == .get)
+    }
+
     @Test func aForkOpensOnceItsOpeningReturnsUnlessTheViewMoved() async throws {
         let forkId = "0000000000002_00000000-0000-4000-8000-000000000002"
         func window(_ id: String) -> [String: Any] {

@@ -137,6 +137,13 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         guard !(cause is CancellationError), !account.disposed else { return }
         if let error = cause as? HarnessError {
             account.reportRateLimit(error.detail.rateLimit)
+            // The chat changed from the copy shown, as when a reply ended
+            // before the stop sent for it: it shows as the harness has it,
+            // which a running reply's stream brings, rather than as failed.
+            if error.action == .reload, let threadId = open.id {
+                if !running { Task { await showStored(threadId) } }
+                return
+            }
             patch { $0.failure = error.detail }
             HarnessAccount.noteAuthenticationRequired(error)
         } else {
