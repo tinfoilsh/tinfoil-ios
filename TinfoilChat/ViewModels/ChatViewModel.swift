@@ -380,6 +380,7 @@ class ChatViewModel: ObservableObject {
         trailingPublish = nil
         publishedLayout = nil
         hapticReply = nil
+        stopAnnounced = false
         scrollsToTurnOnStart = false
         rows = ChatRows()
         session = nil
