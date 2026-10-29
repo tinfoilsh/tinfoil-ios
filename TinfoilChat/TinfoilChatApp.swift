@@ -154,13 +154,15 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             // options.attachViewHierarchy = true // This adds the view hierarchy to the error events
         }
 
+        // Before any scene shows, so it cannot remove a key file being shared.
+        do {
+            try EncryptionKeyFile.removeExports()
+        } catch {
+            SentrySDK.capture(error: error)
+        }
+
         Task.detached(priority: .utility) {
             for error in ManagedFileStore.shared.sweepOnStartup() {
-                SentrySDK.capture(error: error)
-            }
-            do {
-                try EncryptionKeyFile.removeExports()
-            } catch {
                 SentrySDK.capture(error: error)
             }
         }
