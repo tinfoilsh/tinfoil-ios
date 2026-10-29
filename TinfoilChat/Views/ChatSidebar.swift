@@ -467,7 +467,7 @@ struct ChatSidebar: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
             .padding(.horizontal, 16)
-        } else if chatSearch.unreadable > 0 && !chatSearch.isSearching {
+        } else if chatSearch.unreadable > 0 && !chatSearch.isSearching && !chatSearch.isIndexing {
             Text(chatSearch.unreadable == 1 ? "1 matching chat couldn't be opened." : "\(chatSearch.unreadable) matching chats couldn't be opened.")
                 .font(.caption)
                 .foregroundColor(.secondary)
