@@ -297,6 +297,10 @@ extension ChatViewModel {
                     try await session.moveToDevice(chatId, original: original)
                 } catch {
                     Self.logger.error("Failed to return a chat to this device after it failed to join a project: \(error, privacy: .public)")
+                    // The lists show every copy the failed return left, on
+                    // this device and in the cloud.
+                    session.list.reloadDevice()
+                    session.list.reload()
                 }
             }
             reportActionFailure("Couldn't Move Chat", error)
