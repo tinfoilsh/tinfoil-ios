@@ -35,12 +35,12 @@ struct WorkRunTests {
             .webSearches([search("b")]),
             fetches([.completed]),
         ])
-        #expect(run.summaryLabel == "Thought, searched the web, and read 3 pages")
+        #expect(run.summaryLabel == "Thought, searched the web, and read 3 links")
     }
 
     @Test func summaryJoinsTwoActionsWithoutAComma() {
         let run = WorkRun(steps: [.webSearches([search("a")]), fetches([.completed])])
-        #expect(run.summaryLabel == "Searched the web and read a page")
+        #expect(run.summaryLabel == "Searched the web and read a link")
 
         let thinking = WorkRun(steps: [thought(), .webSearches([search("a")]), thought()])
         #expect(thinking.summaryLabel == "Thought and searched the web")
@@ -48,10 +48,10 @@ struct WorkRunTests {
 
     @Test func summaryCountsOnlyThePagesRead() {
         let someFailed = WorkRun(steps: [thought(), fetches([.completed, .failed, .blocked])])
-        #expect(someFailed.summaryLabel == "Thought and read a page")
+        #expect(someFailed.summaryLabel == "Thought and read a link")
 
         let allFailed = WorkRun(steps: [thought(), fetches([.failed, .failed])])
-        #expect(allFailed.summaryLabel == "Thought and tried to read 2 pages")
+        #expect(allFailed.summaryLabel == "Thought and tried to read 2 links")
     }
 
     @Test func formatsWholeSecondsMinutesAndHours() {

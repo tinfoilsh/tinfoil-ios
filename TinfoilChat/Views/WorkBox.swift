@@ -265,7 +265,7 @@ struct WorkRun: Equatable {
     }
 
     /// Names what the run did, each kind of action once in the order the run
-    /// first took it: "Thought, searched the web, and read 3 pages".
+    /// first took it: "Thought, searched the web, and read 3 links".
     var summaryLabel: String {
         var actions: [String] = []
         var hasThought = false
@@ -300,7 +300,7 @@ struct WorkRun: Equatable {
         return sentence.prefix(1).uppercased() + sentence.dropFirst()
     }
 
-    /// The pages the run read, across all its link reads; a run whose every
+    /// The links the run read, across all its link reads; a run whose every
     /// read failed tried to read them.
     private var readAction: String {
         let fetches = steps.flatMap { step -> [URLFetchState] in
@@ -308,8 +308,8 @@ struct WorkRun: Equatable {
             return []
         }
         let read = fetches.filter { $0.status == .completed }.count
-        if read > 0 { return read == 1 ? "read a page" : "read \(read) pages" }
-        return fetches.count == 1 ? "tried to read a page" : "tried to read \(fetches.count) pages"
+        if read > 0 { return read == 1 ? "read a link" : "read \(read) links" }
+        return fetches.count == 1 ? "tried to read a link" : "tried to read \(fetches.count) links"
     }
 }
 
