@@ -20,10 +20,10 @@ struct StreamErrorPresentation: Equatable {
     let retryAfter: Int?
 
     /// Whether sending again may succeed. A refusal for an exhausted quota,
-    /// the chat's size, a locked key or the request itself fails the same
-    /// way until that changes.
+    /// the chat's size, a locked key, a document that failed to convert or
+    /// the request itself fails the same way until that changes.
     var offersRetry: Bool {
-        ![.rateLimit, .tooLarge, .key, .storage, .revise, .refused].contains(kind)
+        ![.rateLimit, .tooLarge, .contextLength, .key, .storage, .document, .revise, .refused].contains(kind)
     }
 
     /// Whether retrying sends the user's message again, as after a

@@ -53,5 +53,11 @@ struct StreamErrorPresentationTests {
         let shown = StreamErrorPresentation(Self.error(HarnessErrorCode.upstreamRefused, .revise, upstreamCode: "document_unreadable"), occurredAt: nil)
         #expect(shown.kind == .document)
         #expect(shown.suggestion == "service detail")
+        #expect(!shown.offersRetry)
+    }
+
+    @Test func aConversationTooLongForTheModelAsksToChangeItRatherThanRetry() {
+        let shown = StreamErrorPresentation(Self.error(HarnessErrorCode.contextTooLarge, .revise), occurredAt: nil)
+        #expect(shown.kind == .contextLength && !shown.offersRetry)
     }
 }
