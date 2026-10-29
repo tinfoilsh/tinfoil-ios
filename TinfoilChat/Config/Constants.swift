@@ -95,6 +95,26 @@ enum Constants {
             static let drawerChevronExpandedRotation = 180.0
             static let drawerAnimationDuration = 0.25
         }
+
+        /// The rows a reply shows for its thinking, searches and link reads.
+        enum WorkSteps {
+            static let headerSpacing: CGFloat = 6
+            static let headerVerticalPadding: CGFloat = 8
+            static let chevronExpandedRotation = 90.0
+            static let chevronAnimationDuration = 0.2
+            /// How often the time a running step shows moves on.
+            static let elapsedTickSeconds: TimeInterval = 1
+            /// The chat service stamps steps in epoch milliseconds.
+            static let millisecondsPerSecond: Double = 1_000
+            static let boxCornerRadius: CGFloat = 8
+            static let boxBorderWidth: CGFloat = 1
+            static let boxPadding: CGFloat = 12
+            /// The space below each paragraph of a thought.
+            static let thoughtParagraphSpacing: CGFloat = 8
+            /// The space above and below each search and each link read.
+            static let searchRowPadding: CGFloat = 6
+            static let linkRowPadding: CGFloat = 4
+        }
     }
 
     enum Accessibility {

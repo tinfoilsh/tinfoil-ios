@@ -82,7 +82,7 @@ struct InlineSegmentGroupingTests {
         for boundary in boundaries {
             let result = runs([.webSearch(searchId: "first"), boundary, .webSearch(searchId: "second")])
             let sizes = result.compactMap { run -> Int? in
-                guard case .webSearches(let group) = run.run else { return nil }
+                guard case .step(.webSearches(let group)) = run.run else { return nil }
                 return group.count
             }
             #expect(sizes == [1, 1])
@@ -92,7 +92,7 @@ struct InlineSegmentGroupingTests {
 
     @Test func loneTraceRowsRenderAsThemselves() {
         let thinking = runs([.thinking(content: "Plan", isThinking: false, duration: 2), .text("Answer")])
-        guard case .thinking(let content, let isThinking, let duration) = thinking.first?.run else {
+        guard case .step(.thinking(let content, let isThinking, let duration, _, _)) = thinking.first?.run else {
             Issue.record("Expected a plain thinking row, got \(thinking.map(\.id))")
             return
         }
@@ -102,7 +102,7 @@ struct InlineSegmentGroupingTests {
         #expect(thinking.first?.id == "thinking:0")
 
         let fetch = runs([.text("Intro"), .urlFetch(fetchId: "page")])
-        guard case .urlFetches(let group) = fetch.last?.run else {
+        guard case .step(.urlFetches(let group)) = fetch.last?.run else {
             Issue.record("Expected a plain fetch row, got \(fetch.map(\.id))")
             return
         }
@@ -117,7 +117,7 @@ struct InlineSegmentGroupingTests {
             .webSearch(searchId: "second"),
         ])
         #expect(result.count == 1)
-        guard case .webSearches(let group) = result.first?.run else {
+        guard case .step(.webSearches(let group)) = result.first?.run else {
             Issue.record("Expected the searches to merge into one row, got \(result.map(\.id))")
             return
         }

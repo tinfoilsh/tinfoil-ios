@@ -105,4 +105,52 @@ struct WorkRunTests {
         ])
         #expect(settled.liveActivity == .idle)
     }
+
+    @Test func runHeaderSaysWhatItDoesWhileLiveAndWhatItDidOnceSettled() {
+        let thinking = WorkRun(steps: [
+            .webSearches([search("a")]),
+            .thinking(content: "", isThinking: true, duration: nil, startedAt: nil, endedAt: nil),
+        ])
+        #expect(thinking.label(isActive: true) == WorkLabel(text: "Thinking", tone: .live, shimmers: true))
+        #expect(thinking.label(isActive: true, thinkingSummary: "Comparing sources").text == "Comparing sources")
+
+        let settled = WorkRun(steps: [thought(), .webSearches([search("a")])])
+        #expect(settled.label(isActive: true) == WorkLabel(text: "Working", tone: .live, shimmers: true))
+        #expect(settled.label(isActive: false) == WorkLabel(text: "Thought and searched the web", tone: .settled))
+    }
+
+    @Test func stepHeaderSaysHowItEnded() {
+        #expect(thought(duration: 12.4).label(isActive: false) == WorkLabel(text: "Thought for 12s", tone: .settled))
+        #expect(WorkStep.webSearches([search("a"), search("b")]).label(isActive: false).text == "Searched the web on 2 queries")
+        #expect(WorkStep.webSearches([search("a"), search("b", status: .failed)]).label(isActive: false) == WorkLabel(text: "Search failed", tone: .failed))
+        #expect(fetches([.completed, .failed]).label(isActive: false).text == "Read 1 link")
+
+        let searching = WorkStep.webSearches([search("a", status: .searching, query: "tides")])
+        #expect(searching.label(isActive: true) == WorkLabel(text: "Searching the web: tides", tone: .live))
+    }
+
+    @Test func runCountsFromItsEarliestStamp() {
+        let run = WorkRun(steps: [
+            .thinking(content: "t", isThinking: false, duration: 1, startedAt: 5_000, endedAt: nil),
+            .webSearches([search("a", startedAt: 9_000), search("b", startedAt: 2_000)]),
+            .urlFetches([URLFetchState(id: "f", url: "https://x", status: .fetching)]),
+        ])
+        #expect(run.startedAt == 2_000)
+        #expect(run.steps[1].startedAt == 2_000)
+        #expect(run.steps[2].startedAt == nil)
+    }
+
+    @Test func stepsOfOneKindOpenSeparately() {
+        let run = WorkRun(steps: [thought(), .webSearches([search("a")]), thought()])
+        let rowIds = run.steps.enumerated().map { WorkRun.stepRowId($0.element, at: $0.offset, in: "work:0") }
+        #expect(Set(rowIds).count == run.steps.count)
+
+        let expansion = WorkStepExpansion()
+        expansion.toggle(rowIds[2])
+        #expect(expansion.isExpanded(rowIds[2]))
+        #expect(!expansion.isExpanded(rowIds[0]))
+        #expect(!expansion.isExpanded("work:0"))
+        expansion.toggle(rowIds[2])
+        #expect(!expansion.isExpanded(rowIds[2]))
+    }
 }

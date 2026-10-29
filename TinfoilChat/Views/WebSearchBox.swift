@@ -372,7 +372,7 @@ struct WebSearchQueryRow: View {
                 .padding(.leading, 26)
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, Constants.UI.WorkSteps.searchRowPadding)
     }
 
     @ViewBuilder

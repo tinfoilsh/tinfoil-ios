@@ -131,7 +131,7 @@ struct URLFetchSheetRow: View {
                         .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
                 }
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, Constants.UI.WorkSteps.linkRowPadding)
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())

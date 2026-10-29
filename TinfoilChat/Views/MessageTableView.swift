@@ -1010,6 +1010,7 @@ class ObservableMessageWrapper: ObservableObject {
     var actualContentHeight: CGFloat = 0
     var cachedHeight: CGFloat?
     var cachedHeightKey: Int?
+    let stepExpansion = WorkStepExpansion()
 
     init(message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, shouldAnimateAppearance: Bool = true, messageIndex: Int = 0) {
         self.message = message
@@ -1123,7 +1124,8 @@ struct ObservableMessageCell: View {
                     isDarkMode: wrapper.isDarkMode,
                     isLastMessage: wrapper.isLastMessage,
                     isLoading: wrapper.isLoading,
-                    messageIndex: wrapper.messageIndex
+                    messageIndex: wrapper.messageIndex,
+                    stepExpansion: wrapper.stepExpansion
                 )
                 .environmentObject(viewModel)
                 .markdownStyleHost(isDarkMode: wrapper.isDarkMode)
