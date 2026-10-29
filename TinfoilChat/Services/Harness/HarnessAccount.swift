@@ -358,6 +358,7 @@ final class HarnessAccount: ObservableObject {
             }
             profileReady = false
             self.error = error.localizedDescription
+            Self.noteAuthenticationRequired(error)
             showProfile(keptProfile())
             return false
         }
@@ -472,7 +473,10 @@ final class HarnessAccount: ObservableObject {
                 return .success(saved)
             } catch {
                 settle(patch)
-                if !disposed { showProfile(storedProfile) }
+                if !disposed {
+                    showProfile(storedProfile)
+                    Self.noteAuthenticationRequired(error)
+                }
                 return .failure(error)
             }
         }

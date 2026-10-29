@@ -16,6 +16,11 @@ private final class HeldKey {
     var bytes: Data? = Data(repeating: 7, count: 32)
 }
 
+/// How many times the app was asked to show the sign-in.
+private final class SignInPrompts: @unchecked Sendable {
+    var count = 0
+}
+
 private let sessionAnswer: [String: Any] = [
     "protocol": ["version": 1, "minimum": 1], "user": ["id": "", "anonymous": true], "rateLimit": ["kind": NSNull()],
     "models": [], "auto": ["default": "", "levels": []], "defaultModel": "gpt-oss-120b", "widgets": [], "profileDefaults": [:],
@@ -101,6 +106,18 @@ struct HarnessAccountTests {
         #expect(account.keyLocked)
         #expect(!account.keyReady)
         #expect(account.profile["language"] as? String == "French")
+    }
+
+    @Test func settingsTheHarnessRefusesForTheIdentityAskForASignIn() async throws {
+        let prompts = SignInPrompts()
+        let observer = NotificationCenter.default.addObserver(forName: .chatAuthenticationRequired, object: nil, queue: nil) { _ in prompts.count += 1 }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        let refused = Answers.refusal(401, code: HarnessErrorCode.unauthenticated, action: "reauthenticate")
+        let (account, _) = makeAccount(userId: "user-1", answers: [Answers.json(sessionAnswer), refused, refused, refused, refused])
+        try await account.refresh()
+        #expect(prompts.count == 1)
+        await #expect(throws: HarnessError.self) { try await account.updateProfile(["language": "French"]) }
+        #expect(prompts.count == 2)
     }
 
     @Test func settingsThisDeviceHoldsShowBeforeTheSessionLoads() async throws {
