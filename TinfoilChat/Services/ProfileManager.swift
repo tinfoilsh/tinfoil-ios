@@ -167,6 +167,9 @@ class ProfileManager: ObservableObject {
                 try await account.editPrompts(edits)
             } catch {
                 guard !(error is CancellationError), self.account === account else { return }
+                // An edit refused before the account showed it, as one made
+                // before the settings loaded is, is taken back here.
+                apply(account.effectiveProfile)
                 Self.logger.error("Failed to save the profile: \(error, privacy: .public)")
                 saveError = error.localizedDescription
             }
