@@ -913,11 +913,14 @@ class ChatViewModel: ObservableObject {
     /// Why the open chat cannot take a turn, which the composer explains.
     var sendBlock: SendBlock? { session?.sendBlock }
 
-    /// The chat service is still opening, or the open chat still waits for
-    /// the account's settings or key. A prompt asked for from outside the
-    /// app waits for this, as sending does.
-    var isConnecting: Bool {
-        session == nil || verification.isVerifying || sendBlock == .loading
+    /// Whether a new chat could send a prompt now: the chat service has
+    /// opened, and the account's settings, key and safeguards a new chat
+    /// needs have loaded. A prompt asked for from outside the app waits for
+    /// this, through a locked key too, rather than being dropped.
+    var canSendInNewChat: Bool {
+        guard let session, !verification.isVerifying, safeguardsHaveLoaded || authManager?.isAuthenticated != true else { return false }
+        let local = !session.account.cloud || newChatIsLocal(projectId: activeProject?.id)
+        return session.sendBlock(onDevice: local) == nil
     }
 
     var canSendInCurrentContext: Bool {
@@ -1180,19 +1183,7 @@ class ChatViewModel: ObservableObject {
         cancelMessageEdit()
         cancelAudioRecording()
         let projectId = projectId ?? activeProject?.id
-        let local: Bool
-        if projectId != nil {
-            local = false
-        } else if let isLocalOnly {
-            local = isLocalOnly
-        } else if !SettingsManager.shared.isCloudSyncEnabled {
-            local = true
-        } else if !SettingsManager.shared.isLocalOnlyModeEnabled {
-            local = false
-        } else {
-            local = activeStorageTab == .local
-        }
-        openNewChat(local: local)
+        openNewChat(local: newChatIsLocal(isLocalOnly: isLocalOnly, projectId: projectId))
         session.setProject(projectId)
         if let modelType {
             currentModel = modelType
@@ -1202,6 +1193,15 @@ class ChatViewModel: ObservableObject {
         }
         if focusInput { shouldFocusInput = true }
         scrollToBottomTrigger = UUID()
+    }
+
+    /// Whether a new chat is stored on this device rather than in the cloud.
+    private func newChatIsLocal(isLocalOnly: Bool? = nil, projectId: String?) -> Bool {
+        if projectId != nil { return false }
+        if let isLocalOnly { return isLocalOnly }
+        if !SettingsManager.shared.isCloudSyncEnabled { return true }
+        if !SettingsManager.shared.isLocalOnlyModeEnabled { return false }
+        return activeStorageTab == .local
     }
 
     func selectChat(_ chat: Chat) {

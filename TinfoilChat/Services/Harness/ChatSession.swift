@@ -118,7 +118,12 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// account's, and reads no key; a stored chat waits for the account's
     /// settings and its key.
     var sendBlock: SendBlock? {
-        if open.onDevice {
+        sendBlock(onDevice: open.onDevice)
+    }
+
+    /// Why a chat on this device, or a stored one, could not take a turn.
+    func sendBlock(onDevice: Bool) -> SendBlock? {
+        if onDevice {
             if account.cloud || account.profileReady { return nil }
         } else {
             if account.keyLocked { return .locked }

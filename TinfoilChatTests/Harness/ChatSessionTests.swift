@@ -323,6 +323,8 @@ struct ChatSessionTests {
         #expect(session.sendBlock == .locked)
         session.newChat(local: true)
         #expect(session.sendBlock == nil)
+        // A stored chat opened from this one would wait for the key.
+        #expect(session.sendBlock(onDevice: false) == .locked)
         session.newChat(local: false)
         session.setTemporary(true)
         #expect(session.sendBlock == nil)
