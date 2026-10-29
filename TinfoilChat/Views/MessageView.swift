@@ -343,6 +343,35 @@ struct MessageView: View {
         return runs
     }
 
+    /// Whether the indicator below a streaming reply shows: under its text, a
+    /// widget or a step that has settled. A reply nothing has arrived of
+    /// shows its waiting dots instead, and one whose latest row is a step
+    /// still working shows that in the step's header.
+    static func showsIndicatorBelowReply(_ message: Message, isRenderingStream: Bool) -> Bool {
+        guard message.role == .assistant, isRenderingStream else { return false }
+        let segments = message.segments ?? []
+        guard !message.content.isEmpty || message.thoughts != nil || message.isThinking || !segments.isEmpty else {
+            return false
+        }
+        if !segments.isEmpty {
+            switch inlineSegmentRuns(from: segments, message: message).last?.run {
+            case .work:
+                // A run that is the latest row stays live until text follows it.
+                return false
+            case .step(let step):
+                return !step.isInFlight
+            case .text, .toolCall, nil:
+                return true
+            }
+        }
+        // A reply without segments shows its steps above its text.
+        if message.content.hasPrefix("<think>") { return message.content.contains("</think>") }
+        guard message.content.isEmpty else { return true }
+        let isSearching = message.webSearchState?.status == .searching
+        let isFetching = message.urlFetches.contains { $0.status == .fetching }
+        return !(message.isThinking || isSearching || isFetching)
+    }
+
     /// Renders ordered message segments (text and inline event refs) in the
     /// order they streamed. Each text segment is rendered via the same
     /// markdown pipeline as the non-segmented path; event segments resolve
@@ -664,11 +693,9 @@ struct MessageView: View {
                 // Persistent streaming indicator at the bottom of the
                 // currently rendered assistant content. Only shown once
                 // initial content has started arriving so we don't double up
-                // with the initial `LoadingDotsView` placeholder above.
-                if message.role == .assistant &&
-                   isRenderingStream &&
-                   (!message.content.isEmpty || message.thoughts != nil || message.isThinking ||
-                    !(message.segments?.isEmpty ?? true)) {
+                // with the initial `LoadingDotsView` placeholder above, nor
+                // with a working step's header.
+                if Self.showsIndicatorBelowReply(message, isRenderingStream: isRenderingStream) {
                     StreamingIndicator(isDarkMode: isDarkMode)
                         .padding(.top, 4)
                         .frame(maxWidth: .infinity, alignment: .leading)
