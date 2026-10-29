@@ -8,7 +8,7 @@ struct EncryptionKeyFileTests {
         let exports = FileManager.default.temporaryDirectory
             .appendingPathComponent("EncryptionKeyFileTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: exports) }
-        let date = try #require(Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 28, hour: 12)))
+        let date = try #require(Calendar(identifier: .gregorian).date(from: DateComponents(year: 2026, month: 10, day: 28, hour: 12)))
 
         let first = try EncryptionKeyFile.write(key: "key_abc123", date: date, exportsDirectory: exports)
         let second = try EncryptionKeyFile.write(key: "key_abc123", date: date, exportsDirectory: exports)
