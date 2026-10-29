@@ -1694,6 +1694,15 @@ struct CollapsibleThinkingBox: View {
     let thinkingSummary: String?
     let onTap: () -> Void
 
+    /// What the box says of a finished thought, and what VoiceOver reads of
+    /// the box at any time. A finished thought the chat service timed no
+    /// duration for shows no time.
+    private var title: String {
+        if isStreaming { return "Thinking" }
+        if let seconds = generationTimeSeconds { return "Thought for \(String(format: "%.1f", seconds))s" }
+        return "Thought"
+    }
+
     var body: some View {
         Button(action: onTap) {
             HStack {
@@ -1716,13 +1725,8 @@ struct CollapsibleThinkingBox: View {
                         }
                         .modifier(TextShimmerAnimation())
                     }
-                } else if let seconds = generationTimeSeconds {
-                    Text("Thought for \(String(format: "%.1f", seconds))s")
-                        .font(.subheadline)
-                        .foregroundColor(isDarkMode ? .white.opacity(0.7) : Color.black.opacity(0.6))
                 } else {
-                    // A finished thought the chat service timed no duration for.
-                    Text("Thought")
+                    Text(title)
                         .font(.subheadline)
                         .foregroundColor(isDarkMode ? .white.opacity(0.7) : Color.black.opacity(0.6))
                 }
@@ -1736,7 +1740,7 @@ struct CollapsibleThinkingBox: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(NoHighlightButtonStyle())
-        .accessibilityLabel("Thinking")
+        .accessibilityLabel(title)
         .accessibilityHint("Shows the full reasoning")
     }
 }
