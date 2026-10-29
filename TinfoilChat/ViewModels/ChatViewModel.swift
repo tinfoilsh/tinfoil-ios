@@ -382,6 +382,9 @@ class ChatViewModel: ObservableObject {
         hapticReply = nil
         stopAnnounced = false
         scrollsToTurnOnStart = false
+        temporarySave?.cancel()
+        temporarySave = nil
+        isSavingTemporaryChat = false
         rows = ChatRows()
         session = nil
         verification = VerificationInfo(isVerifying: true)
@@ -1395,12 +1398,14 @@ class ChatViewModel: ObservableObject {
 
     /// The open temporary chat is being kept, once its reply is stored with it.
     @Published private(set) var isSavingTemporaryChat = false
+    /// The save in flight, which the session of another account ends.
+    private var temporarySave: Task<Void, Never>?
 
     private func saveTemporaryChat() {
         guard let session else { return }
         isSavingTemporaryChat = true
-        Task {
-            defer { isSavingTemporaryChat = false }
+        temporarySave = Task {
+            defer { if self.session === session { isSavingTemporaryChat = false } }
             do {
                 try await session.saveTemporary()
                 previousChatIdBeforeTemporary = nil
