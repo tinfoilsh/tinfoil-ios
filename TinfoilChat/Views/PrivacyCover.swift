@@ -89,6 +89,7 @@ private struct ConcealedWhileCaptured: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .accessibilityHidden(captured)
             .overlay {
                 if captured {
                     Label(Constants.Privacy.concealedLabel, systemImage: "eye.slash")
