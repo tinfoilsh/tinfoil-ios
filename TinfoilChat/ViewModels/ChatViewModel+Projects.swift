@@ -290,7 +290,9 @@ extension ChatViewModel {
             }
             session.list.reload()
         } catch {
-            if let original {
+            // A session signed out of, whose chats this device wiped, gets
+            // none of them back.
+            if let original, self.session === session {
                 do {
                     try await session.moveToDevice(chatId, original: original)
                 } catch {
