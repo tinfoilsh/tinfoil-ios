@@ -6,8 +6,7 @@ struct WorkRunTests {
         _ id: String,
         status: WebSearchStatus = .completed,
         query: String? = nil,
-        startedAt: Double? = nil,
-        endedAt: Double? = nil
+        startedAt: Double? = nil
     ) -> WebSearchInstance {
         WebSearchInstance(
             id: id,
@@ -15,13 +14,12 @@ struct WorkRunTests {
             status: status,
             sources: [],
             reason: nil,
-            startedAt: startedAt,
-            endedAt: endedAt
+            startedAt: startedAt
         )
     }
 
     private func thought(duration: Double? = 1) -> WorkStep {
-        .thinking(content: "t", isThinking: false, duration: duration, startedAt: nil, endedAt: nil)
+        .thinking(content: "t", isThinking: false, duration: duration, startedAt: nil)
     }
 
     private func fetches(_ statuses: [URLFetchStatus]) -> WorkStep {
@@ -80,12 +78,12 @@ struct WorkRunTests {
     @Test func liveActivityFollowsTheLastInFlightStep() {
         let thinking = WorkRun(steps: [
             .webSearches([search("a")]),
-            .thinking(content: "", isThinking: true, duration: nil, startedAt: nil, endedAt: nil),
+            .thinking(content: "", isThinking: true, duration: nil, startedAt: nil),
         ])
         #expect(thinking.liveActivity == .thinking)
 
         let searching = WorkRun(steps: [
-            .thinking(content: "t", isThinking: false, duration: 1, startedAt: nil, endedAt: nil),
+            .thinking(content: "t", isThinking: false, duration: 1, startedAt: nil),
             .webSearches([search("a"), search("b", status: .searching, query: "latest news")]),
         ])
         #expect(searching.liveActivity == .searching(query: "latest news"))
@@ -100,7 +98,7 @@ struct WorkRunTests {
         #expect(reading.liveActivity == .reading(count: 2))
 
         let settled = WorkRun(steps: [
-            .thinking(content: "t", isThinking: false, duration: 1, startedAt: nil, endedAt: nil),
+            .thinking(content: "t", isThinking: false, duration: 1, startedAt: nil),
             .webSearches([search("a")]),
         ])
         #expect(settled.liveActivity == .idle)
@@ -109,7 +107,7 @@ struct WorkRunTests {
     @Test func runHeaderSaysWhatItDoesWhileLiveAndWhatItDidOnceSettled() {
         let thinking = WorkRun(steps: [
             .webSearches([search("a")]),
-            .thinking(content: "", isThinking: true, duration: nil, startedAt: nil, endedAt: nil),
+            .thinking(content: "", isThinking: true, duration: nil, startedAt: nil),
         ])
         #expect(thinking.label(isActive: true) == WorkLabel(text: "Thinking", tone: .live, shimmers: true))
         #expect(thinking.label(isActive: true, thinkingSummary: "Comparing sources").text == "Comparing sources")
@@ -131,7 +129,7 @@ struct WorkRunTests {
 
     @Test func runCountsFromItsEarliestStamp() {
         let run = WorkRun(steps: [
-            .thinking(content: "t", isThinking: false, duration: 1, startedAt: 5_000, endedAt: nil),
+            .thinking(content: "t", isThinking: false, duration: 1, startedAt: 5_000),
             .webSearches([search("a", startedAt: 9_000), search("b", startedAt: 2_000)]),
             .urlFetches([URLFetchState(id: "f", url: "https://x", status: .fetching)]),
         ])

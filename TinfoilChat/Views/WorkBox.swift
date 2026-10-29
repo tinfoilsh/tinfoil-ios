@@ -10,7 +10,7 @@ import SwiftUI
 /// One step inside a run of agentic work: a thinking round, an adjacent
 /// group of web searches, or an adjacent group of URL fetches.
 enum WorkStep: Equatable {
-    case thinking(content: String, isThinking: Bool, duration: Double?, startedAt: Double?, endedAt: Double?)
+    case thinking(content: String, isThinking: Bool, duration: Double?, startedAt: Double?)
     case webSearches([WebSearchInstance])
     case urlFetches([URLFetchState])
 
@@ -29,7 +29,7 @@ enum WorkStep: Equatable {
 
     var isInFlight: Bool {
         switch self {
-        case .thinking(_, let isThinking, _, _, _):
+        case .thinking(_, let isThinking, _, _):
             return isThinking
         case .webSearches(let group):
             return group.contains { $0.status == .searching }
@@ -76,7 +76,7 @@ extension WorkStep {
     /// its parts.
     var startedAt: Double? {
         switch self {
-        case .thinking(_, _, _, let startedAt, _):
+        case .thinking(_, _, _, let startedAt):
             return startedAt
         case .webSearches(let group):
             return group.compactMap(\.startedAt).min()
@@ -99,7 +99,7 @@ extension WorkStep {
     /// live description of a thought or search.
     func label(isActive: Bool, thinkingSummary: String? = nil, webSearchSummary: String? = nil) -> WorkLabel {
         switch self {
-        case .thinking(_, _, let duration, _, _):
+        case .thinking(_, _, let duration, _):
             guard isActive else { return WorkLabel(text: Self.thoughtLabel(duration: duration), tone: .settled) }
             return WorkLabel(text: Self.nonEmpty(thinkingSummary) ?? "Thinking", tone: .live, shimmers: true)
         case .webSearches(let group):
@@ -501,7 +501,7 @@ private struct WorkStepDetails: View {
 
     var body: some View {
         switch step {
-        case .thinking(let content, _, _, _, _):
+        case .thinking(let content, _, _, _):
             ThoughtText(content: content, isDarkMode: isDarkMode)
         case .webSearches(let group):
             VStack(alignment: .leading, spacing: 0) {

@@ -160,24 +160,22 @@ struct URLFetchState: Equatable, Identifiable {
     let url: String
     var status: URLFetchStatus
     var sources: [WebSearchSource]?
-    /// Wall-clock stamps (epoch ms) recorded while streaming; see `WorkRun`.
+    /// When the read started, in epoch ms, from which its header counts
+    /// while it runs.
     var startedAt: Double?
-    var endedAt: Double?
 
     init(
         id: String = UUID().uuidString.lowercased(),
         url: String,
         status: URLFetchStatus = .fetching,
         sources: [WebSearchSource]? = nil,
-        startedAt: Double? = nil,
-        endedAt: Double? = nil
+        startedAt: Double? = nil
     ) {
         self.id = id
         self.url = url
         self.status = status
         self.sources = sources
         self.startedAt = startedAt
-        self.endedAt = endedAt
     }
 }
 
@@ -188,19 +186,18 @@ struct WebSearchInstance: Equatable, Identifiable {
     var status: WebSearchStatus
     var sources: [WebSearchSource]?
     var reason: String?
-    /// Wall-clock stamps (epoch ms) recorded while streaming; see `WorkRun`.
+    /// When the search started, in epoch ms, from which its header counts
+    /// while it runs.
     var startedAt: Double? = nil
-    var endedAt: Double? = nil
 }
 
 /// An ordered segment of assistant content. Preserves the exact order in which
 /// text and inline events (thinking, web search, URL fetch, tool call) streamed.
 enum MessageSegment: Equatable {
     case text(String)
-    /// `startedAt`/`endedAt` are wall-clock epoch ms stamped while
-    /// streaming so a run of trace segments can be summarized as
-    /// "Worked for Ns"; absent on legacy messages.
-    case thinking(content: String, isThinking: Bool, duration: Double?, startedAt: Double? = nil, endedAt: Double? = nil)
+    /// `startedAt` is when the thought started, in epoch ms, from which its
+    /// header counts while it runs; absent on legacy messages.
+    case thinking(content: String, isThinking: Bool, duration: Double?, startedAt: Double? = nil)
     case webSearch(searchId: String)
     case urlFetch(fetchId: String)
     case toolCall(toolCallId: String)

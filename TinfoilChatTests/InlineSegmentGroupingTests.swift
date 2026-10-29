@@ -38,9 +38,9 @@ struct InlineSegmentGroupingTests {
         #expect(isTrailing)
         #expect(steps.count == 5)
         guard case .webSearches(let a) = steps[0],
-              case .thinking(let compare, let compareActive, let compareDuration, _, _) = steps[1],
+              case .thinking(let compare, let compareActive, let compareDuration, _) = steps[1],
               case .webSearches(let b) = steps[2],
-              case .thinking(let verify, let verifyActive, let verifyDuration, _, _) = steps[3],
+              case .thinking(let verify, let verifyActive, let verifyDuration, _) = steps[3],
               case .webSearches(let c) = steps[4] else {
             Issue.record("Unexpected step shape: \(steps)")
             return
@@ -92,7 +92,7 @@ struct InlineSegmentGroupingTests {
 
     @Test func loneTraceRowsRenderAsThemselves() {
         let thinking = runs([.thinking(content: "Plan", isThinking: false, duration: 2), .text("Answer")])
-        guard case .step(.thinking(let content, let isThinking, let duration, _, _)) = thinking.first?.run else {
+        guard case .step(.thinking(let content, let isThinking, let duration, _)) = thinking.first?.run else {
             Issue.record("Expected a plain thinking row, got \(thinking.map(\.id))")
             return
         }

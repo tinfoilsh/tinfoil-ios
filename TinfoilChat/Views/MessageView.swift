@@ -304,7 +304,7 @@ struct MessageView: View {
                     id: "text:\(index)",
                     run: .text(text, isTrailing: index == lastTextIndex)
                 ))
-            case .thinking(let content, let isThinking, let duration, let startedAt, let endedAt):
+            case .thinking(let content, let isThinking, let duration, let startedAt):
                 // A closed, empty thought renders nothing and must not split a run.
                 guard isThinking || !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                 flushSearches()
@@ -314,8 +314,7 @@ struct MessageView: View {
                     content: content,
                     isThinking: isThinking,
                     duration: duration,
-                    startedAt: startedAt,
-                    endedAt: endedAt
+                    startedAt: startedAt
                 ))
             case .webSearch(let searchId):
                 flushFetches()
@@ -575,8 +574,7 @@ struct MessageView: View {
                                 content: message.thoughts ?? "",
                                 isThinking: message.isThinking,
                                 duration: message.generationTimeSeconds,
-                                startedAt: nil,
-                                endedAt: nil
+                                startedAt: nil
                             ),
                             rowId: Self.legacyThinkingRowId,
                             isActive: message.isThinking && isRenderingStream
@@ -614,8 +612,7 @@ struct MessageView: View {
                                 content: parsed.thinkingText,
                                 isThinking: isThinking,
                                 duration: message.generationTimeSeconds,
-                                startedAt: nil,
-                                endedAt: nil
+                                startedAt: nil
                             ),
                             rowId: Self.legacyThinkingRowId,
                             isActive: isThinking && isRenderingStream

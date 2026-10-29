@@ -50,7 +50,7 @@ enum ChatViewMapping {
                 thoughts += (thoughts.isEmpty ? "" : "\n\n") + content
                 if let duration = block.duration { thinkingSeconds += duration }
                 thinking = thinking || isThinking
-                segments.append(.thinking(content: content, isThinking: isThinking, duration: block.duration, startedAt: block.startedAt, endedAt: block.endedAt))
+                segments.append(.thinking(content: content, isThinking: isThinking, duration: block.duration, startedAt: block.startedAt))
                 timeline.append(timelineBlock(block, summary: summaries[block.id]))
             case .content:
                 let content = block.content ?? ""
@@ -64,7 +64,7 @@ enum ChatViewMapping {
                 if block.name == searchTool {
                     searches.append(WebSearchInstance(
                         id: block.id, query: block.display?.query, status: status == .completed ? .completed : status == .failed ? .failed : .searching,
-                        sources: block.display?.sources.map(source), reason: nil, startedAt: block.startedAt, endedAt: block.endedAt
+                        sources: block.display?.sources.map(source), reason: nil, startedAt: block.startedAt
                     ))
                     segments.append(.webSearch(searchId: block.id))
                 } else if block.name == fetchTool {
@@ -74,7 +74,7 @@ enum ChatViewMapping {
                     for (position, url) in urls.enumerated() {
                         let id = position == 0 ? toolCallId : "\(toolCallId)-\(position)"
                         let fetchStatus: URLFetchStatus = status == .completed ? (unread.contains(url) ? .failed : .completed) : status == .failed ? .failed : .fetching
-                        fetches.append(URLFetchState(id: id, url: url, status: fetchStatus, sources: block.display?.sources.filter { $0.url == url }.map(source), startedAt: block.startedAt, endedAt: block.endedAt))
+                        fetches.append(URLFetchState(id: id, url: url, status: fetchStatus, sources: block.display?.sources.filter { $0.url == url }.map(source), startedAt: block.startedAt))
                         segments.append(.urlFetch(fetchId: id))
                     }
                 } else {
