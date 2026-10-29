@@ -5464,7 +5464,7 @@ extension Components {
                 try encoder.encodeAdditionalProperties(additionalProperties)
             }
         }
-        /// A prompt the user saved. Its timestamps are kept as the client wrote them.
+        /// A prompt the user saved. Its timestamps are kept as the client wrote them. A stored prompt always has a description and systemPrompt, empty when unset, and numeric timestamps, set when it is stored without them, as the apps' own profile sync requires.
         ///
         /// - Remark: Generated from `#/components/schemas/CustomPreset`.
         internal struct CustomPreset: Codable, Hashable, Sendable {
