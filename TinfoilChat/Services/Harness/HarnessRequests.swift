@@ -136,6 +136,62 @@ struct ProfileFieldsInput: Encodable, Equatable, Sendable {
     }
 }
 
+/// Changes to saved prompts and favorites by id, which the harness applies
+/// to the profile as it stores it.
+struct PromptEdits {
+    /// Prompts to add, each replacing the one with its id where it stands.
+    var save: [ProfileFields] = []
+    /// Prompts to remove, which are then no longer favorites or the default.
+    var delete: [String] = []
+    var addFavorites: [String] = []
+    var removeFavorites: [String] = []
+
+    /// The request's members, without the edits it makes none of.
+    var body: JSONObject {
+        var members: [String: Any] = [:]
+        if !save.isEmpty { members["savePromptPresets"] = save }
+        if !delete.isEmpty { members["deletePromptPresetIds"] = delete }
+        if !addFavorites.isEmpty { members["addFavoritePromptPresetIds"] = addFavorites }
+        if !removeFavorites.isEmpty { members["removeFavoritePromptPresetIds"] = removeFavorites }
+        return JSONObject(members)
+    }
+
+    /// The fields the edits change in a profile, as the harness applies
+    /// them, so a change shows before the harness answers.
+    func applied(to profile: ProfileFields) -> ProfileFields {
+        var patch: ProfileFields = [:]
+        if !save.isEmpty || !delete.isEmpty {
+            var presets = profile["customPromptPresets"] as? [Any] ?? []
+            for preset in save {
+                if let index = presets.firstIndex(where: { Self.id(of: $0) == preset["id"] as? String }) {
+                    presets[index] = preset
+                } else {
+                    presets.append(preset)
+                }
+            }
+            patch["customPromptPresets"] = presets.filter { preset in
+                guard let id = Self.id(of: preset) else { return true }
+                return !delete.contains(id)
+            }
+        }
+        if !delete.isEmpty || !addFavorites.isEmpty || !removeFavorites.isEmpty {
+            var favorites = (profile["favoritePromptPresetIds"] as? [String] ?? []).filter { !delete.contains($0) && !removeFavorites.contains($0) }
+            for id in addFavorites where !favorites.contains(id) && !delete.contains(id) {
+                favorites.append(id)
+            }
+            patch["favoritePromptPresetIds"] = favorites
+        }
+        if let id = profile["defaultPromptPresetId"] as? String, delete.contains(id) {
+            patch["defaultPromptPresetId"] = ""
+        }
+        return patch
+    }
+
+    private static func id(of preset: Any) -> String? {
+        (preset as? ProfileFields)?["id"] as? String
+    }
+}
+
 /// A run to follow, cancel, or send a queued turn of.
 struct RunRequest: Encodable, Equatable, Sendable {
     var key: String?
