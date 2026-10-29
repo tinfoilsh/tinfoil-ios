@@ -11,14 +11,6 @@ import Textual
 import SwiftMath
 import UIKit
 
-/// Identifiable wrapper used to present `.sheet(item:)` for a transient
-/// grouped run of events (searches or fetches) without needing a stable
-/// model-level id.
-struct IdentifiedGroup<T>: Identifiable {
-    let id = UUID()
-    let items: [T]
-}
-
 func shouldShowStreamError(message: Message) -> Bool {
     message.role == .assistant && message.streamError != nil
 }
@@ -101,15 +93,9 @@ struct MessageView: View {
     @State private var showRawContentModal = false
     @State private var showSourcesSheet = false
     @State private var showShareSheet = false
-    @State private var showThoughtsSheet = false
-    @State private var showURLFetchSheet = false
-    @State private var activeWebSearchGroup: IdentifiedGroup<WebSearchInstance>? = nil
-    @State private var activeURLFetchGroup: IdentifiedGroup<URLFetchState>? = nil
-    @State private var activeSearchInstanceSources: IdentifiedGroup<WebSearchSource>? = nil
-    @State private var activeWorkRun: IdentifiedGroup<WorkStep>? = nil
 
     private var isAnyMessageSheetPresented: Bool {
-        showLongMessageSheet || showRawContentModal || showSourcesSheet || showShareSheet || showThoughtsSheet || showURLFetchSheet || activeWebSearchGroup != nil || activeURLFetchGroup != nil || activeSearchInstanceSources != nil || activeWorkRun != nil
+        showLongMessageSheet || showRawContentModal || showSourcesSheet || showShareSheet
     }
 
     private var inlineAssistantTextSelectionEnabled: Bool {
@@ -355,37 +341,6 @@ struct MessageView: View {
         }
         flushWork()
         return runs
-    }
-
-    /// Aggregates a group of web searches into a single `WebSearchState` for
-    /// display: the status rolls up to the "most interesting" state in the
-    /// group (searching wins, then failed/blocked, else completed), and
-    /// sources are merged, de-duplicated by URL.
-    private func aggregatedState(for group: [WebSearchInstance]) -> WebSearchState {
-        let status: WebSearchStatus
-        if group.contains(where: { $0.status == .searching }) {
-            status = .searching
-        } else if group.contains(where: { $0.status == .failed }) {
-            status = .failed
-        } else if group.contains(where: { $0.status == .blocked }) {
-            status = .blocked
-        } else {
-            status = .completed
-        }
-
-        var mergedSources: [WebSearchSource] = []
-        var seenUrls: Set<String> = []
-        for instance in group {
-            for source in instance.sources ?? [] {
-                if seenUrls.insert(source.url).inserted {
-                    mergedSources.append(source)
-                }
-            }
-        }
-
-        let reason = group.compactMap { $0.reason }.first
-        let primaryQuery = group.first?.query
-        return WebSearchState(query: primaryQuery, status: status, sources: mergedSources, reason: reason)
     }
 
     /// Renders ordered message segments (text and inline event refs) in the
@@ -905,46 +860,6 @@ struct MessageView: View {
                     .iPadSheetSizing()
             }
         }
-        .sheet(isPresented: $showThoughtsSheet) {
-            ThoughtsSheetView(
-                thinkingText: thoughtsContent ?? "",
-                generationTimeSeconds: message.generationTimeSeconds,
-                isDarkMode: isDarkMode
-            )
-            .presentationDetents([.medium, .large])
-            .iPadSheetSizing()
-            .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
-        }
-        .sheet(isPresented: $showURLFetchSheet) {
-            URLFetchSheetView(urlFetches: message.urlFetches, isDarkMode: isDarkMode)
-                .presentationDetents([.medium, .large])
-                .iPadSheetSizing()
-                .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
-        }
-        .sheet(item: $activeWebSearchGroup) { group in
-            WebSearchQueriesSheetView(instances: group.items, isDarkMode: isDarkMode)
-                .presentationDetents([.medium, .large])
-                .iPadSheetSizing()
-                .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
-        }
-        .sheet(item: $activeURLFetchGroup) { group in
-            URLFetchSheetView(urlFetches: group.items, isDarkMode: isDarkMode)
-                .presentationDetents([.medium, .large])
-                .iPadSheetSizing()
-                .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
-        }
-        .sheet(item: $activeSearchInstanceSources) { group in
-            SourcesSheetView(sources: group.items, isDarkMode: isDarkMode)
-                .presentationDetents([.medium, .large])
-                .iPadSheetSizing()
-                .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
-        }
-        .sheet(item: $activeWorkRun) { group in
-            WorkStepsSheetView(run: WorkRun(steps: group.items), isDarkMode: isDarkMode)
-                .presentationDetents([.medium, .large])
-                .iPadSheetSizing()
-                .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
-        }
         .sheet(isPresented: $showShareSheet) {
             if let currentChat = viewModel.currentChat {
                 ShareChatView(
@@ -1015,24 +930,6 @@ struct MessageView: View {
         return text.replacingOccurrences(of: "<think>", with: "")
     }
     
-    private var thoughtsContent: String? {
-        if let thoughts = message.thoughts, !thoughts.isEmpty {
-            return thoughts
-        }
-        if message.content.hasPrefix("<think>") {
-            let tagPrefix = "<think>"
-            let tagSuffix = "</think>"
-            let start = message.content.index(message.content.startIndex, offsetBy: tagPrefix.count)
-
-            if let endTagRange = message.content.range(of: tagSuffix, range: start..<message.content.endIndex) {
-                return String(message.content[start..<endTagRange.lowerBound])
-            } else {
-                return String(message.content[start...])
-            }
-        }
-        return nil
-    }
-
     private var responseContent: String {
         if message.thoughts != nil {
             return message.content.hasPrefix("<think>") ? "" : message.content
@@ -1642,117 +1539,6 @@ private final class InlineSelectableUITextView: UITextView {
             return false
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
-    }
-}
-
-struct CollapsibleThinkingBox: View {
-    let thinkingText: String
-    let isDarkMode: Bool
-    let isStreaming: Bool
-    let generationTimeSeconds: Double?
-    let thinkingSummary: String?
-    let onTap: () -> Void
-
-    /// What the box says of a finished thought, and what VoiceOver reads of
-    /// the box at any time. A finished thought the chat service timed no
-    /// duration for shows no time.
-    private var title: String {
-        if isStreaming { return "Thinking" }
-        return WorkStep.thoughtLabel(duration: generationTimeSeconds)
-    }
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack {
-                // A thought still going on has a duration that grows as it
-                // streams; it shows as thinking until it ends.
-                if isStreaming {
-                    if let summary = thinkingSummary, !summary.isEmpty {
-                        Text(summary)
-                            .font(.subheadline)
-                            .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .modifier(TextShimmerAnimation())
-                    } else {
-                        HStack(spacing: 4) {
-                            Text("Thinking")
-                                .font(.callout)
-                                .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
-                            InlineLoadingDotsView(isDarkMode: isDarkMode)
-                        }
-                        .modifier(TextShimmerAnimation())
-                    }
-                } else {
-                    Text(title)
-                        .font(.subheadline)
-                        .foregroundColor(isDarkMode ? .white.opacity(0.7) : Color.black.opacity(0.6))
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
-                    .accessibilityHidden(true)
-            }
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(NoHighlightButtonStyle())
-        .accessibilityLabel(title)
-        .accessibilityHint("Shows the full reasoning")
-    }
-}
-
-struct ThoughtsSheetView: View {
-    let thinkingText: String
-    let generationTimeSeconds: Double?
-    let isDarkMode: Bool
-    /// `thinkingText` in chunks, laid out lazily so a very large thought
-    /// never becomes one Text view whose CoreText layout blocks the main
-    /// thread.
-    @State private var chunks: [ThinkingChunk]? = nil
-
-    private var displayChunks: [ThinkingChunk] {
-        chunks ?? []
-    }
-
-    private var titleText: String {
-        if generationTimeSeconds != nil {
-            return WorkStep.thoughtLabel(duration: generationTimeSeconds)
-        }
-        return "Thoughts"
-    }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if !displayChunks.isEmpty {
-                        ForEach(displayChunks) { chunk in
-                            ThinkingChunkView(chunk: chunk, isDarkMode: isDarkMode)
-                                .equatable()
-                        }
-                    } else if !thinkingText.isEmpty {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .navigationTitle(titleText)
-            .navigationBarTitleDisplayMode(.inline)
-            // A thought still streaming is chunked again as it grows.
-            .task(id: thinkingText) {
-                guard !thinkingText.isEmpty else { return }
-                let text = thinkingText
-                let chunked = await Task.detached {
-                    ThinkingTextChunker.chunk(growing: text)
-                }.value
-                guard !Task.isCancelled else { return }
-                chunks = chunked
-            }
-        }
     }
 }
 
