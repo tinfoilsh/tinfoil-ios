@@ -419,6 +419,30 @@ final class HarnessAccount: ObservableObject {
     /// change is taken back.
     @discardableResult
     func updateProfile(_ patch: ProfileFields) async throws -> ProfileFields {
+        try await saveProfile(patch, edits: nil)
+    }
+
+    /// Saved prompts and favorites change by id on the profile as the
+    /// harness stores it, so a list this device read before another changed
+    /// it, or before the profile loaded, never replaces the stored one.
+    @discardableResult
+    func editPrompts(_ edits: PromptEdits) async throws -> ProfileFields {
+        let patch = edits.applied(to: profile)
+        guard cloud else { return try await saveProfile(patch, edits: nil) }
+        if session?.features.additionalProperties["promptPresetEdits"] == true {
+            return try await saveProfile(patch, edits: edits)
+        }
+        // A chat service without edits takes whole lists, which only the
+        // loaded profile holds.
+        guard profileReady else {
+            throw HarnessError(code: HarnessErrorCode.profileLoading, message: "Wait for your settings to load, then try again.", action: .wait)
+        }
+        return try await saveProfile(patch, edits: nil)
+    }
+
+    /// Shows and saves a change, sending the harness its fields, or the
+    /// prompt edits that make it.
+    private func saveProfile(_ patch: ProfileFields, edits: PromptEdits?) async throws -> ProfileFields {
         guard !disposed else { throw CancellationError() }
         let cloud = cloud
         let generation = keyGeneration
@@ -435,7 +459,7 @@ final class HarnessAccount: ObservableObject {
                 let version = profileVersion
                 let saved: ProfileFields
                 if cloud {
-                    let answer: RawJSON = try await post(.profileUpdate, JSONObject(["patch": JSONValue(any: patch)]))
+                    let answer: RawJSON = try await post(.profileUpdate, edits?.body ?? JSONObject(["patch": JSONValue(any: patch)]))
                     saved = try Self.object(of: answer)
                 } else {
                     saved = try settings.saveLocalProfile(patch, replace: false)

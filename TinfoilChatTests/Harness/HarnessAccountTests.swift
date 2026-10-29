@@ -127,4 +127,39 @@ struct HarnessAccountTests {
         #expect(account.profileReady)
         #expect(account.profile["language"] as? String == "French")
     }
+
+    @Test func aSavedPromptIsSentAloneSoPromptsThisDeviceHasNotLoadedStay() async throws {
+        var session = sessionAnswer
+        session["features"] = ["promptPresetEdits": true]
+        let stored: [String: Any] = ["customPromptPresets": [["id": "user:a", "name": "A"], ["id": "user:b", "name": "B"], ["id": "user:c", "name": "C"]]]
+        let (account, transport) = makeAccount(userId: "user-1", answers: [
+            Answers.json(session), Answers.refusal(503, code: "UPSTREAM_UNAVAILABLE", action: "retry"), Answers.json(stored),
+        ])
+        try await account.refresh()
+        #expect(!account.profileReady)
+
+        try await account.editPrompts(PromptEdits(save: [["id": "user:c", "name": "C"]]))
+
+        let update = try #require(await transport.requests.last)
+        #expect(update.route == .profileUpdate)
+        let saved = try #require(update.json["savePromptPresets"] as? [[String: Any]])
+        #expect(saved.map { $0["id"] as? String } == ["user:c"])
+        #expect(update.json["patch"] == nil)
+        #expect((account.profile["customPromptPresets"] as? [Any])?.count == 3)
+    }
+
+    @Test func aChatServiceWithoutPromptEditsIsSentNoPromptListBeforeTheSettingsLoad() async throws {
+        let (account, transport) = makeAccount(userId: "user-1", answers: [
+            Answers.json(sessionAnswer), Answers.refusal(503, code: "UPSTREAM_UNAVAILABLE", action: "retry"),
+        ])
+        try await account.refresh()
+        let sent = await transport.requests.count
+
+        await #expect(throws: HarnessError.self) {
+            try await account.editPrompts(PromptEdits(save: [["id": "user:c", "name": "C"]]))
+        }
+
+        #expect(await transport.requests.count == sent)
+        #expect(account.profile["customPromptPresets"] == nil)
+    }
 }
