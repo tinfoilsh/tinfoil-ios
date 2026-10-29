@@ -840,6 +840,9 @@ class ChatViewModel: ObservableObject {
         guard let session else { return nil }
         do {
             return try await session.image(attachment).data
+        } catch is CancellationError {
+            // The viewer moved off the image before it loaded.
+            return nil
         } catch {
             Self.logger.error("Failed to load an image of the open chat: \(error, privacy: .public)")
             return nil
