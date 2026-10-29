@@ -273,23 +273,12 @@ struct MessageView: View {
                 workStartIndex = nil
             }
             guard let startIndex = workStartIndex, let first = work.first else { return }
-            if work.count > 1 {
-                runs.append(IdentifiedInlineSegmentRun(
-                    id: "work:\(startIndex):\(first.id)",
-                    run: .work(WorkRun(steps: work))
-                ))
-                return
-            }
-            let id: String
-            switch first {
-            case .thinking:
-                id = "thinking:\(startIndex)"
-            case .webSearches(let group):
-                id = "websearches:\(startIndex):\(group.first?.id ?? "")"
-            case .urlFetches(let group):
-                id = "urlfetches:\(startIndex):\(group.first?.id ?? "")"
-            }
-            runs.append(IdentifiedInlineSegmentRun(id: id, run: .step(first)))
+            // A lone step and the run it grows into share an id, so the row
+            // stays open as steps join it.
+            runs.append(IdentifiedInlineSegmentRun(
+                id: "work:\(startIndex):\(first.id)",
+                run: work.count > 1 ? .work(WorkRun(steps: work)) : .step(first)
+            ))
         }
         func noteWorkStart(_ index: Int) {
             if workStartIndex == nil { workStartIndex = index }

@@ -166,6 +166,19 @@ final class WorkStepExpansion: ObservableObject {
             expandedRows.insert(rowId)
         }
     }
+
+    /// Opens or closes a step standing alone, and with it the same step as
+    /// the first of the run it may grow into, so what the step shows stays
+    /// open when more steps join it.
+    func toggleLoneStep(_ step: WorkStep, rowId: String) {
+        let firstStepRowId = WorkRun.stepRowId(step, at: 0, in: rowId)
+        if expandedRows.remove(rowId) == nil {
+            expandedRows.insert(rowId)
+            expandedRows.insert(firstStepRowId)
+        } else {
+            expandedRows.remove(firstStepRowId)
+        }
+    }
 }
 
 /// Whole-second durations as work steps show them, both while they run and
@@ -413,7 +426,7 @@ struct WorkStepBox: View {
                 isExpanded: isExpanded,
                 detailsName: step.detailsName,
                 isDarkMode: isDarkMode,
-                onToggle: { expansion.toggle(rowId) }
+                onToggle: { expansion.toggleLoneStep(step, rowId: rowId) }
             )
             if isExpanded {
                 WorkStepDetails(step: step, isDarkMode: isDarkMode)

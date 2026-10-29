@@ -152,4 +152,18 @@ struct WorkRunTests {
         expansion.toggle(rowIds[2])
         #expect(!expansion.isExpanded(rowIds[2]))
     }
+
+    @Test func aLoneStepOpensAsTheFirstStepOfTheRunItGrowsInto() {
+        let step = thought()
+        let run = WorkRun(steps: [step, .webSearches([search("a")])])
+        let expansion = WorkStepExpansion()
+
+        expansion.toggleLoneStep(step, rowId: "work:0:thinking")
+        #expect(expansion.isExpanded("work:0:thinking"))
+        #expect(expansion.isExpanded(WorkRun.stepRowId(run.steps[0], at: 0, in: "work:0:thinking")))
+        #expect(!expansion.isExpanded(WorkRun.stepRowId(run.steps[1], at: 1, in: "work:0:thinking")))
+
+        expansion.toggleLoneStep(step, rowId: "work:0:thinking")
+        #expect(expansion.expandedRows.isEmpty)
+    }
 }
