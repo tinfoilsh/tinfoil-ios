@@ -81,15 +81,28 @@ struct LegacyStoragePurgeTests {
         let (upgraded, cleanupUpgraded) = try makeDefaults()
         defer { cleanupUpgraded() }
         upgraded.set(true, forKey: StorageKeysMigration.migrationCompleteKey)
-        StorageKeysMigration.recordOlderVersion(defaults: upgraded)
+        StorageKeysMigration.migrateIfNeeded(defaults: upgraded)
         #expect(upgraded.bool(forKey: Constants.StorageKeys.Settings.ranOlderVersion))
 
         let (fresh, cleanupFresh) = try makeDefaults()
         defer { cleanupFresh() }
-        StorageKeysMigration.recordOlderVersion(defaults: fresh)
-        fresh.set(true, forKey: StorageKeysMigration.migrationCompleteKey)
-        StorageKeysMigration.recordOlderVersion(defaults: fresh)
+        StorageKeysMigration.migrateIfNeeded(defaults: fresh)
+        #expect(fresh.bool(forKey: StorageKeysMigration.migrationCompleteKey))
+        StorageKeysMigration.migrateIfNeeded(defaults: fresh)
         #expect(fresh.object(forKey: Constants.StorageKeys.Settings.ranOlderVersion) as? Bool == false)
+    }
+
+    @Test func removesThePreviousClientsSweepRecordAtLaunch() throws {
+        let (defaults, cleanup) = try makeDefaults()
+        defer { cleanup() }
+        let sweepRecord = Constants.StorageKeys.legacyMigrationKeyPrefix + "_user-a"
+        defaults.set("keyset", forKey: sweepRecord)
+        defaults.set("gpt-oss-120b", forKey: Constants.StorageKeys.Settings.selectedModel)
+
+        StorageKeysMigration.migrateIfNeeded(defaults: defaults)
+
+        #expect(defaults.object(forKey: sweepRecord) == nil)
+        #expect(defaults.string(forKey: Constants.StorageKeys.Settings.selectedModel) == "gpt-oss-120b")
     }
 
     @Test func keepsThePreviousProfileUntilItIsImported() throws {

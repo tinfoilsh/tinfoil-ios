@@ -137,7 +137,6 @@ struct ContentView: View {
                         try await chatViewModel.setEncryptionKey(key, mode: activationMode)
                         await MainActor.run {
                             chatViewModel.showCloudSyncOnboarding = false
-                            passkeyManager.completeManualKeyRecovery()
                         }
                         chatViewModel.resumeAfterManualKeySetup()
                         return nil
@@ -147,7 +146,6 @@ struct ContentView: View {
                 },
                 onDismissWithoutSetup: {
                     chatViewModel.showCloudSyncOnboarding = false
-                    passkeyManager.cancelManualKeyRecovery()
                 }
             )
         }

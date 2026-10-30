@@ -13,10 +13,7 @@ extension Color {
     static let accentPrimary = Color(red: 16/255, green: 185/255, blue: 129/255) // #10B981
     
     // Brand colors
-    static let tinfoilDark = Color(hex: "061820")
-    static let tinfoilLight = Color(hex: "EEF3F3")
     static let tinfoilAccentDark = Color(hex: "004444")
-    static let tinfoilAccentLight = Color(hex: "68C7AC")
     static let tinfoilAccentBlue = Color(hex: "10347D")
     static let tinfoilAccentBlueLight = Color(hex: "60A5FA")
     
@@ -30,8 +27,6 @@ extension Color {
     static let cardSurfaceLight = Color.white
     static let chatBackgroundDark = backgroundPrimary
     static let chatBackgroundLight = Color.white
-    static let actionButtonBackgroundDark = Color.white.opacity(0.08)
-    static let actionButtonBackgroundLight = Color.black.opacity(0.05)
     static let sidebarBackgroundDark = backgroundPrimary
     static let sidebarBackgroundLight = Color.white
     static let settingsBackgroundDark = backgroundPrimary
@@ -44,8 +39,6 @@ extension Color {
     static let sendButtonForegroundLight = Color.white
 
     // Reasoning and messaging surfaces
-    static let thinkingBackgroundDark = chatSurfaceDark
-    static let thinkingBackgroundLight = chatSurfaceLight
     static let userMessageBackgroundDark = chatSurfaceDark
     static let userMessageBackgroundLight = chatSurfaceLight
     static let userMessageForegroundDark = Color.white
@@ -92,19 +85,11 @@ extension Color {
         isDarkMode ? sheetBackgroundDark : sheetBackgroundLight
     }
 
-    static func thinkingBackground(isDarkMode: Bool) -> Color {
-        isDarkMode ? thinkingBackgroundDark : thinkingBackgroundLight
-    }
-
     static func userMessageBackground(isDarkMode: Bool) -> Color {
         isDarkMode ? userMessageBackgroundDark : userMessageBackgroundLight
     }
 
     static func userMessageForeground(isDarkMode: Bool) -> Color {
         isDarkMode ? userMessageForegroundDark : userMessageForegroundLight
-    }
-
-    static func actionButtonBackground(isDarkMode: Bool) -> Color {
-        isDarkMode ? actionButtonBackgroundDark : actionButtonBackgroundLight
     }
 }

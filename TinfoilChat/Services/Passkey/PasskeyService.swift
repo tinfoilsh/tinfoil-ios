@@ -112,23 +112,6 @@ final class PasskeyService {
         }
     }
 
-    func wrapKeyWithPRFResult(
-        key: Data,
-        credentialId: String,
-        prfResult: PRFResult
-    ) throws -> WrappedKey {
-        do {
-            let keyManager = try keyManager()
-            return try keyManager.wrapKeyWithPRFResult(
-                keyMaterial: key,
-                credentialId: credentialId,
-                prfResult: prfResult
-            )
-        } catch {
-            throw Self.mapError(error)
-        }
-    }
-
     func unwrapKeyWithPRFResult(
         wrappedKey: WrappedKey,
         prfResult: PRFResult

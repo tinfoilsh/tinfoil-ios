@@ -142,7 +142,6 @@ class ChatViewModel: ObservableObject {
     @Published private(set) var messageEditSession: MessageEditSession?
     private var previousChatIdBeforeTemporary: String?
     @Published private(set) var forkingChatId: String?
-    private var previousOpenChatId: String?
 
     // MARK: - Settings
 

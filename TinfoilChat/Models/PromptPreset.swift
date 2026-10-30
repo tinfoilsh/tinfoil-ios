@@ -32,10 +32,6 @@ struct PromptPreset: Identifiable, Equatable {
 
     static let userIdPrefix = "user:"
 
-    /// Fixed id for the preset created from the legacy custom system prompt
-    /// setting, shared with the webapp so both platforms migrate to one preset.
-    static let migratedCustomPromptId = "user:migrated-custom-prompt"
-
     /// Default SF Symbol used for user-created presets.
     static let defaultUserIcon = "square.and.pencil"
 

@@ -55,35 +55,6 @@ class ThinkingTextChunker {
         }
     }
 
-    /// Appends a late fragment of an already-finalized thought to the last
-    /// completed chunk so it continues that paragraph instead of starting a
-    /// new one.
-    func appendTail(_ token: String) {
-        if workingBuffer.isEmpty, !completedChunks.isEmpty {
-            let last = completedChunks.removeLast()
-            // Re-split the grown chunk so a long late tail can never
-            // push it past the per-chunk layout cap. The first piece
-            // keeps its id so the existing view identity is stable.
-            var pieces = Self.hardSplit(last.content + token)
-            let first = pieces.removeFirst()
-            completedChunks.append(ThinkingChunk(
-                id: last.id,
-                content: first,
-                isComplete: true
-            ))
-            for piece in pieces {
-                appendCompletedChunk(piece)
-            }
-        } else {
-            appendToken(token)
-        }
-    }
-
-    func reset() {
-        completedChunks.removeAll()
-        workingBuffer = ""
-    }
-
     /// Chunking for thinking text that may still be streaming: its last
     /// paragraph stays the working chunk, which redraws as it grows, while
     /// the paragraphs before it keep their ids.

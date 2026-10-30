@@ -143,11 +143,6 @@ struct MessageInputView: View {
 
     private var isDarkMode: Bool { colorScheme == .dark }
 
-    // Check only for authentication status
-    private var isUserAuthenticated: Bool {
-        authManager.isAuthenticated
-    }
-
     // Check if audio input should be shown
     private var showAudioButton: Bool {
         shouldShowAudioInput(

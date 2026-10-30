@@ -9,55 +9,6 @@ import AuthenticationServices
 import SwiftUI
 import ClerkKit
 
-// MARK: - Shared UI Components
-
-/// Button styled for OAuth providers or other auth actions
-func authButton(icon: String? = nil, systemIcon: String? = nil, text: String, action: @escaping () -> Void) -> some View {
-  Button(action: action) {
-    HStack(spacing: 14) {
-      if let icon = icon {
-        Image(icon)
-          .resizable()
-          .scaledToFit()
-          .frame(width: 26, height: 26)
-      } else if let systemIcon = systemIcon {
-        Image(systemName: systemIcon)
-          .resizable()
-          .scaledToFit()
-          .frame(width: 24, height: 24)
-      }
-      
-      Text(text)
-        .font(.headline)
-        .fontWeight(.medium)
-    }
-    .frame(maxWidth: .infinity)
-    .frame(height: 60)
-    .background(Color.white)
-    .foregroundColor(.black)
-    .cornerRadius(14)
-  }
-  .shadow(color: Color.black.opacity(0.15), radius: 6, x: 0, y: 3)
-}
-
-/// User profile image view with fallback to pixel avatar
-@ViewBuilder
-func userProfileImage(imageURL: URL?, userId: String? = nil, hasImage: Bool = true) -> some View {
-  if hasImage, let url = imageURL, !url.absoluteString.isEmpty {
-    AsyncImage(url: url) { image in
-      image
-        .resizable()
-        .aspectRatio(contentMode: .fill)
-    } placeholder: {
-      PixelAvatarView(name: userId ?? "user", size: 80)
-    }
-    .frame(width: 80, height: 80)
-    .clipShape(Circle())
-  } else {
-    PixelAvatarView(name: userId ?? "user", size: 80)
-  }
-}
-
 // MARK: - Error Banner
 
 struct AuthErrorBanner: View {

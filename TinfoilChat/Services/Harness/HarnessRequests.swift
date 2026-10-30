@@ -340,11 +340,6 @@ struct AttachmentRequest: Encodable, Equatable, Sendable {
     var threadId: String?
 }
 
-/// Device chats an older client kept, for the harness to convert.
-struct UpgradeRequest: Encodable, Sendable {
-    var threads: [JSONObject]
-}
-
 /// A stored chat to move to this device, or one on this device to store.
 struct TransferRequest: Encodable, Equatable, Sendable {
     var key: String?

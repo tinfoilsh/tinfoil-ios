@@ -62,10 +62,6 @@ struct Chat: Identifiable, Equatable {
         messages.isEmpty && messageCount == 0
     }
 
-    var needsGeneratedTitle: Bool {
-        titleState == .placeholder
-    }
-
     /// Last conversation activity: the later of the creation time and the
     /// newest message.
     var lastActivity: Date {
@@ -101,18 +97,6 @@ struct WebSearchSource: Equatable, Identifiable {
         self.title = title
         self.url = url
         self.snippet = snippet
-    }
-
-    var timelineValue: JSONValue {
-        var fields: [String: JSONValue] = ["title": .string(title), "url": .string(url)]
-        if let snippet { fields["snippet"] = .string(snippet) }
-        return .object(fields)
-    }
-
-    static func fromTimeline(_ value: JSONValue) -> WebSearchSource? {
-        guard let fields = value.objectValue,
-              let url = fields["url"]?.stringValue else { return nil }
-        return WebSearchSource(title: fields["title"]?.stringValue ?? url, url: url, snippet: fields["snippet"]?.stringValue)
     }
 }
 

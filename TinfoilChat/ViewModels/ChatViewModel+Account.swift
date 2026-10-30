@@ -316,10 +316,6 @@ extension ChatViewModel {
             try ensureCurrentAccount(operationUserId)
             await keyChanged()
             try ensureCurrentAccount(operationUserId)
-            if passkeyManager.passkeyActive {
-                await passkeyManager.updatePasskeyBackup()
-                try ensureCurrentAccount(operationUserId)
-            }
         } catch {
             guard currentUserId == operationUserId else { throw CancellationError() }
             throw error
