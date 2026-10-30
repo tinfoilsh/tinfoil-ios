@@ -614,23 +614,6 @@ enum Constants {
 
         // MARK: - One-shot migration flags
 
-        /// Legacy UserDefaults keys that should be purged on app
-        /// launch. These named the v1 sync state (passkey JSONB
-        /// version counters, the now-removed `passkeyBackedUp`
-        /// hint) and have no replacement in the v2 architecture.
-        static let legacyKeysToRemove: [String] = [
-            "tinfoil-secret-passkey-backed-up",
-            "tinfoil-secret-passkey-sync-version",
-            "tinfoil-secret-passkey-bundle-version",
-            "tinfoil-passkey-backed-up",
-            "tinfoil-passkey-sync-version",
-            "tinfoil-sync-chat-status",
-            "tinfoil-sync-all-chats-status",
-            "tinfoil-sync-chat-deletes-watermark",
-            "tinfoil-chat-sync-status",
-            "tinfoil-all-chats-sync-status",
-            "tinfoil-migration-legacy-cloud-chats-evicted",
-        ]
         /// The previous client's record, by account, of a resealing sweep
         /// that could not go further; the harness owns the sweep now.
         static let legacyMigrationKeyPrefix = "tinfoil-migration-exhausted-keyset"
@@ -710,62 +693,17 @@ enum Constants {
 }
 
 // MARK: - Storage Keys Migration
-// Migrate old UserDefaults keys and continuously remove retired sync keys.
+// Record whether an older version ran and remove retired sync keys.
 enum StorageKeysMigration {
     static let migrationCompleteKey = "tinfoil-settings-storage-keys-migrated"
-    private static let legacyProjectChatStatusPrefix = "tinfoil-sync-project-chat-status-"
 
-    static func migrateIfNeeded() {
-        recordOlderVersion()
-        // Purge outside the one-shot guard: users who completed the
-        // key-rename migration before this list existed would
-        // otherwise keep the stale v1 entries forever. Removing an
-        // absent key is a no-op, so re-running every launch is cheap.
-        for key in Constants.StorageKeys.legacyKeysToRemove {
-            UserDefaults.standard.removeObject(forKey: key)
+    static func migrateIfNeeded(defaults: UserDefaults = .standard) {
+        recordOlderVersion(defaults: defaults)
+        for key in defaults.dictionaryRepresentation().keys
+            where key.hasPrefix(Constants.StorageKeys.legacyMigrationKeyPrefix) {
+            defaults.removeObject(forKey: key)
         }
-        for key in UserDefaults.standard.dictionaryRepresentation().keys
-            where key.hasPrefix(legacyProjectChatStatusPrefix) || key.hasPrefix(Constants.StorageKeys.legacyMigrationKeyPrefix) {
-            UserDefaults.standard.removeObject(forKey: key)
-        }
-
-        guard !UserDefaults.standard.bool(forKey: migrationCompleteKey) else { return }
-
-        let migrations: [(old: String, new: String)] = [
-            // Auth
-            ("sh.tinfoil.authState", Constants.StorageKeys.Auth.state),
-            ("sh.tinfoil.userData", Constants.StorageKeys.Auth.userData),
-            ("sh.tinfoil.subscription", Constants.StorageKeys.Auth.subscription),
-            // Settings
-            ("lastSelectedModel", Constants.StorageKeys.Settings.selectedModel),
-            ("hapticFeedbackEnabled", Constants.StorageKeys.Settings.hapticFeedbackEnabled),
-            ("selectedLanguage", Constants.StorageKeys.Settings.selectedLanguage),
-            ("webSearchEnabled", Constants.StorageKeys.Settings.webSearchEnabled),
-            ("cloudSyncEnabled", Constants.StorageKeys.Settings.cloudSyncEnabled),
-            ("cloudSyncActiveTab", Constants.StorageKeys.Settings.cloudSyncActiveTab),
-            ("localOnlyModeEnabled", Constants.StorageKeys.Settings.localOnlyModeEnabled),
-            ("hasLaunchedBefore", Constants.StorageKeys.Settings.hasLaunchedBefore),
-            // User prefs
-            ("isPersonalizationEnabled", Constants.StorageKeys.UserPrefs.personalizationEnabled),
-            ("userNickname", Constants.StorageKeys.UserPrefs.nickname),
-            ("userProfession", Constants.StorageKeys.UserPrefs.profession),
-            ("userTraits", Constants.StorageKeys.UserPrefs.traits),
-            ("userAdditionalContext", Constants.StorageKeys.UserPrefs.additionalContext),
-            ("isUsingCustomPrompt", Constants.StorageKeys.UserPrefs.customPromptEnabled),
-            ("customSystemPrompt", Constants.StorageKeys.UserPrefs.customSystemPrompt),
-            // Secret / Passkey
-            ("encryptionKeyWasSetUp", Constants.StorageKeys.Secret.encryptionKeySetUp),
-            ("has_seen_passkey_intro", Constants.StorageKeys.Settings.hasSeenPasskeyIntro),
-        ]
-
-        for (old, new) in migrations where old != new {
-            if let value = UserDefaults.standard.object(forKey: old) {
-                UserDefaults.standard.set(value, forKey: new)
-                UserDefaults.standard.removeObject(forKey: old)
-            }
-        }
-
-        UserDefaults.standard.set(true, forKey: migrationCompleteKey)
+        defaults.set(true, forKey: migrationCompleteKey)
     }
 
     /// Records, once, whether an older version ran on this install. Every
