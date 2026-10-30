@@ -5,7 +5,7 @@ import Testing
 
 /// A transport that answers from a script and keeps what it was sent.
 actor ScriptedTransport: HarnessTransport {
-    typealias Answer = @Sendable (HarnessRequest) -> HarnessResponse
+    typealias Answer = @Sendable (HarnessRequest) throws -> HarnessResponse
 
     nonisolated let verifications: AsyncStream<EnclaveVerificationResult>
     private nonisolated let verified: AsyncStream<EnclaveVerificationResult>.Continuation
@@ -63,7 +63,7 @@ actor ScriptedTransport: HarnessTransport {
             Issue.record("unscripted request to \(request.route.rawValue)")
             throw HarnessError(code: HarnessErrorCode.connection, message: "unscripted", action: .stop)
         }
-        return answers.removeFirst()(request)
+        return try answers.removeFirst()(request)
     }
 }
 
