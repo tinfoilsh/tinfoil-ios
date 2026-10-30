@@ -103,40 +103,15 @@ struct PasskeyCompositionTests {
         #expect(PasskeyService.interaction(immediatelyAvailable: false) == .interactive)
     }
 
-    @Test func recoveryUnionDeduplicatesCurrentAndLegacyInPreferredOrder() {
-        let candidates = PasskeyRecoveryCandidates(
-            bundles: [
-                bundle(id: "current", wrappedByteCount: 48),
-                bundle(id: "shared", wrappedByteCount: 48),
-            ],
-            legacy: [legacyEntry(id: "legacy"), legacyEntry(id: "shared")],
-            preferredCredentialId: "legacy"
-        )
-
-        #expect(candidates.credentialIds == ["legacy", "current", "shared"])
-    }
-
-    @Test func legacyCredentialWithoutLocalHintRemainsARecoveryCandidate() {
-        let candidates = PasskeyRecoveryCandidates(
-            bundles: [],
-            legacy: [legacyEntry(id: "synced-legacy")],
-            preferredCredentialId: nil
-        )
-
-        #expect(candidates.credentialIds == ["synced-legacy"])
-    }
-
     @Test func selectedCurrentCredentialUsesCurrentUnwrapPath() {
         let candidates = PasskeyRecoveryCandidates(
             bundles: [
                 bundle(id: "shared", wrappedByteCount: 48),
                 bundle(id: "shared", wrappedByteCount: 80),
             ],
-            legacy: [legacyEntry(id: "shared")],
             preferredCredentialId: nil
         )
         var currentEnvelopeAttempted = false
-        var externalLegacyAttempted = false
 
         #expect(candidates.credentialIds == ["shared"])
         let route: String? = candidates.resolveSelectedCredential(
@@ -145,46 +120,22 @@ struct PasskeyCompositionTests {
             currentEnvelope: { _ in
                 currentEnvelopeAttempted = true
                 return "current-envelope"
-            },
-            legacy: { _ in
-                externalLegacyAttempted = true
-                return "legacy"
             }
         )
 
         #expect(route == "current")
         #expect(!currentEnvelopeAttempted)
-        #expect(!externalLegacyAttempted)
     }
 
-    @Test func selectedLegacyCredentialUsesValidatedLegacyPath() {
-        let candidates = PasskeyRecoveryCandidates(
-            bundles: [bundle(id: "current", wrappedByteCount: 48)],
-            legacy: [legacyEntry(id: "legacy")],
-            preferredCredentialId: nil
-        )
-
-        let route: String? = candidates.resolveSelectedCredential(
-            credentialId: "legacy",
-            current: { _ in "current" },
-            currentEnvelope: { _ in "current-envelope" },
-            legacy: { _ in "legacy" }
-        )
-
-        #expect(route == "legacy")
-    }
-
-    @Test func sharedCredentialUsesCurrentLegacyEnvelopeBeforeExternalLegacy() {
+    @Test func sharedCredentialFallsBackToItsLegacyEnvelope() {
         let candidates = PasskeyRecoveryCandidates(
             bundles: [
                 bundle(id: "shared", wrappedByteCount: 48),
                 bundle(id: "shared", wrappedByteCount: 80),
             ],
-            legacy: [legacyEntry(id: "shared")],
             preferredCredentialId: nil
         )
         var currentAttempts = 0
-        var externalLegacyAttempted = false
 
         #expect(candidates.credentialIds == ["shared"])
         let route: String? = candidates.resolveSelectedCredential(
@@ -193,25 +144,19 @@ struct PasskeyCompositionTests {
                 currentAttempts += 1
                 return nil
             },
-            currentEnvelope: { _ in "current-envelope" },
-            legacy: { _ in
-                externalLegacyAttempted = true
-                return "legacy"
-            }
+            currentEnvelope: { _ in "current-envelope" }
         )
 
         #expect(currentAttempts == 1)
         #expect(route == "current-envelope")
-        #expect(!externalLegacyAttempted)
     }
 
-    @Test func sharedCredentialFallsBackAfterAllCurrentRepresentationsFail() {
+    @Test func sharedCredentialResolvesNothingAfterAllRepresentationsFail() {
         let candidates = PasskeyRecoveryCandidates(
             bundles: [
                 bundle(id: "shared", wrappedByteCount: 48),
                 bundle(id: "shared", wrappedByteCount: 80),
             ],
-            legacy: [legacyEntry(id: "shared")],
             preferredCredentialId: nil
         )
         var attempts: [String] = []
@@ -226,48 +171,11 @@ struct PasskeyCompositionTests {
             currentEnvelope: { _ in
                 attempts.append("current-envelope")
                 return nil
-            },
-            legacy: { _ in
-                attempts.append("legacy")
-                return "legacy"
             }
         )
 
-        #expect(attempts == ["current", "current-envelope", "legacy"])
-        #expect(route == "legacy")
-    }
-
-    @Test func freshInteractiveUnionCanAddLegacyAfterSilentFailure() {
-        let immediate = PasskeyRecoveryCandidates(
-            bundles: [bundle(id: "current", wrappedByteCount: 48)],
-            legacy: [],
-            preferredCredentialId: nil
-        )
-        let interactive = PasskeyRecoveryCandidates(
-            bundles: [bundle(id: "current", wrappedByteCount: 48)],
-            legacy: [legacyEntry(id: "legacy")],
-            preferredCredentialId: nil
-        )
-
-        #expect(immediate.credentialIds == ["current"])
-        #expect(interactive.credentialIds == ["current", "legacy"])
-        #expect(interactive.resolveSelectedCredential(
-            credentialId: "legacy",
-            current: { _ in false },
-            currentEnvelope: { _ in false },
-            legacy: { _ in true }
-        ) == true)
-    }
-
-    @Test func recoveryCandidatesEvaluateWithoutCapabilityPreflight() {
-        let candidates = PasskeyRecoveryCandidates(
-            bundles: [],
-            legacy: [legacyEntry(id: "legacy")],
-            preferredCredentialId: nil
-        )
-
-        #expect(!candidates.credentialIds.isEmpty)
-        #expect(PasskeyService.interaction(immediatelyAvailable: false) == .interactive)
+        #expect(attempts == ["current", "current-envelope"])
+        #expect(route == nil)
     }
 
     @Test func presentationAnchorProviderUsesInjectedActiveWindow() throws {
@@ -290,7 +198,7 @@ struct PasskeyCompositionTests {
         }
     }
 
-    @Test func successfulLegacyRetryDismissesAndResumesExactlyOnce() {
+    @Test func successfulRecoveryRetryDismissesAndResumesExactlyOnce() {
         var dismissCount = 0
         var resumeCount = 0
 
@@ -320,26 +228,8 @@ struct PasskeyCompositionTests {
         #expect(resumeCount == 1)
     }
 
-    @Test func legacyRecoveryRejectsRotatedEnclaveKey() {
-        let expectedAccount = PasskeyManager.LegacyRecoveryAccountSnapshot(
-            userId: "user-a",
-            generation: 3
-        )
-        let currentKeyId = "rotated-key-id"
-        let recoveredKeyId = "old-key-id"
-
-        let canApply = PasskeyManager.canApplyLegacyRecovery(
-            recoveredKeyId: recoveredKeyId,
-            currentKeyId: currentKeyId,
-            expectedAccount: expectedAccount,
-            currentUserId: "user-a",
-            currentGeneration: 3
-        )
-        #expect(!canApply)
-    }
-
     @Test func currentRecoveryRejectsAccountOrKeyRotationDuringCeremony() {
-        let expectedAccount = PasskeyManager.LegacyRecoveryAccountSnapshot(
+        let expectedAccount = PasskeyManager.RecoveryAccountSnapshot(
             userId: "user-a",
             generation: 3
         )
@@ -364,104 +254,40 @@ struct PasskeyCompositionTests {
         ))
     }
 
-    @Test func accountSwitchWithNoEnclaveKeySkipsLegacyRegistration() {
-        let promotion = LegacyPasskeyPromotion(
-            expectedEnclaveKeyId: nil,
-            keyB64: Data(repeating: 1, count: 32).base64EncodedString(),
-            credentialId: "AQ",
-            kekIvHex: String(repeating: "0", count: 24),
-            encryptedKeysHex: String(repeating: "0", count: 96)
-        )
-        let recovery = LegacyPasskeyRecovery(
-            cek: Data(repeating: 1, count: 32),
-            keyIdHex: "recovered-key-id",
-            credentialId: "AQ",
-            legacyAlternatives: [],
-            promotion: promotion
-        )
-        let plan = PasskeyManager.legacyPromotionPlan(
-            recovery: recovery,
-            currentKeyId: nil,
-            isCurrentAccount: false
-        )
-        #expect(plan == nil)
-    }
-
-    @Test func promotionFailureCompletesRecoveryIntoNormalSetupPath() {
-        let resolution = PasskeyManager.legacyPromotionResolution(
-            promotionSucceeded: false,
-            identityValid: true
-        )
+    @Test func recoveryCompletionRunsExactlyOnce() {
         var completionCount = 0
         var completion: (() -> Void)? = { completionCount += 1 }
 
-        #expect(resolution.applyKey)
-        #expect(!resolution.markPasskeyActive)
-        #expect(resolution.makePasskeySetupAvailable)
         PasskeyManager.takeRecoveryCompletion(&completion)?()
         PasskeyManager.takeRecoveryCompletion(&completion)?()
         #expect(completionCount == 1)
         #expect(completion == nil)
     }
 
-    @Test func restoreGuardRejectsStaleAccount() {
-        let expected = PasskeyManager.LegacyRecoveryAccountSnapshot(
+    @Test func recoveryAccountGuardRejectsStaleAccount() {
+        let expected = PasskeyManager.RecoveryAccountSnapshot(
             userId: "user-a",
             generation: 4
         )
 
-        #expect(!PasskeyManager.isExpectedLegacyRecoveryAccount(
+        #expect(!PasskeyManager.isExpectedRecoveryAccount(
             expected,
             currentUserId: "user-b",
             currentGeneration: 5
         ))
     }
 
-    @Test func restoreGuardMatchesCurrentAccount() {
-        let expected = PasskeyManager.LegacyRecoveryAccountSnapshot(
+    @Test func recoveryAccountGuardMatchesCurrentAccount() {
+        let expected = PasskeyManager.RecoveryAccountSnapshot(
             userId: "user-a",
             generation: 4
         )
 
-        #expect(PasskeyManager.isExpectedLegacyRecoveryAccount(
+        #expect(PasskeyManager.isExpectedRecoveryAccount(
             expected,
             currentUserId: "user-a",
             currentGeneration: 4
         ))
-    }
-
-    @Test func validSameAccountPromotesRecoveredLegacyKey() async throws {
-        let promotion = LegacyPasskeyPromotion(
-            expectedEnclaveKeyId: nil,
-            keyB64: Data(repeating: 2, count: 32).base64EncodedString(),
-            credentialId: "AQ",
-            kekIvHex: String(repeating: "1", count: 24),
-            encryptedKeysHex: String(repeating: "1", count: 96)
-        )
-        let recovery = LegacyPasskeyRecovery(
-            cek: Data(repeating: 2, count: 32),
-            keyIdHex: "recovered-key-id",
-            credentialId: "AQ",
-            legacyAlternatives: [],
-            promotion: promotion
-        )
-        let plan = try #require(PasskeyManager.legacyPromotionPlan(
-            recovery: recovery,
-            currentKeyId: nil,
-            isCurrentAccount: true
-        ))
-        var registerCount = 0
-        var addBundleCount = 0
-
-        let promoted = await PasskeyManager.executeLegacyPromotion(
-            plan,
-            register: { _ in registerCount += 1 },
-            addBundle: { _ in addBundleCount += 1 }
-        )
-
-        #expect(promoted)
-        #expect(registerCount == 1)
-        #expect(addBundleCount == 0)
     }
 
     @Test func cachelessManagerRecoversDirectlyFromEvaluatedPRF() throws {
@@ -526,26 +352,6 @@ struct PasskeyCompositionTests {
         #expect(matching.verification == .match)
         #expect(mismatching.verification == .mismatch)
         #expect(unverified.verification == .unverified)
-    }
-
-    @Test func unverifiedLegacyLookupDisablesBundleRemovalVerification() {
-        let state = currentKeyState(keyId: "current-key", credentialIds: ["AQ"])
-        let inventory = PasskeyManager.passkeyBundleInventory(
-            state: state,
-            localKeyId: "current-key",
-            legacyLookup: .unverified
-        )
-        let availability = PasskeyManager.passkeyBundleAvailability(
-            state: state,
-            localKeyId: "current-key",
-            localCredentialId: "AQ",
-            legacyStatus: inventory.legacyStatus
-        )
-
-        #expect(inventory.verification == .unverified)
-        #expect(inventory.legacyStatus == .unverified)
-        #expect(availability.active)
-        #expect(!availability.setupAvailable)
     }
 
     @Test func failedInventoryRefreshPreservesBundlesButDisablesRemoval() {
@@ -622,78 +428,6 @@ struct PasskeyCompositionTests {
         #expect(!deterministicAvailability.addDeviceAvailable)
     }
 
-    @Test func finalEnclaveBundleRemovalKeepsLegacyRecoveryActive() {
-        let state = currentKeyState(keyId: "current-key", credentialIds: ["AQ"])
-        let updatedState = PasskeyManager.removingPasskeyBundle(
-            credentialId: "AQ",
-            from: state
-        )
-        let legacyLookup = LegacyPasskeyCredentialLookup.available([legacyEntry(id: "AQ")])
-        let inventory = PasskeyManager.passkeyBundleInventory(
-            state: updatedState,
-            localKeyId: "current-key",
-            legacyLookup: legacyLookup
-        )
-        let availability = PasskeyManager.passkeyBundleAvailability(
-            state: updatedState,
-            localKeyId: "current-key",
-            localCredentialId: "AQ",
-            legacyStatus: inventory.legacyStatus,
-            legacyCredentialIds: Set(inventory.legacyCredentials.map(\.id))
-        )
-
-        #expect(inventory.bundles.isEmpty)
-        #expect(inventory.legacyCredentials.map(\.id) == ["AQ"])
-        #expect(inventory.legacyStatus == .present)
-        #expect(availability.active)
-        #expect(!availability.setupAvailable)
-    }
-
-    @Test func legacyCredentialWithoutLocalHintOffersDeviceSetup() {
-        let state = currentKeyState(keyId: "current-key", credentialIds: [])
-        let inventory = PasskeyManager.passkeyBundleInventory(
-            state: state,
-            localKeyId: "current-key",
-            legacyLookup: .available([legacyEntry(id: "other")])
-        )
-
-        let availability = PasskeyManager.passkeyBundleAvailability(
-            state: state,
-            localKeyId: "current-key",
-            legacyStatus: inventory.legacyStatus
-        )
-
-        #expect(inventory.legacyCredentials.map(\.id) == ["other"])
-        #expect(!availability.active)
-        #expect(availability.addDeviceAvailable)
-    }
-
-    @Test func legacyLookupFailureLeavesRecoveryUnverified() {
-        let state = currentKeyState(keyId: "current-key", credentialIds: [])
-        let previous = PasskeyManager.passkeyBundleInventory(
-            state: state,
-            localKeyId: "current-key",
-            legacyLookup: .available([legacyEntry(id: "legacy")])
-        )
-        let refreshed = PasskeyManager.passkeyBundleInventory(
-            state: state,
-            localKeyId: "current-key",
-            legacyLookup: .unverified
-        )
-        let inventory = refreshed.preservingLegacyCredentials(from: previous)
-        let availability = PasskeyManager.passkeyBundleAvailability(
-            state: state,
-            localKeyId: "current-key",
-            legacyStatus: inventory.legacyStatus
-        )
-
-        #expect(inventory.verification == .unverified)
-        #expect(inventory.legacyStatus == .unverified)
-        #expect(inventory.legacyCredentials.map(\.id) == ["legacy"])
-        #expect(!availability.active)
-        #expect(!availability.setupAvailable)
-    }
-
     @Test func otherDeviceCurrentBundleOffersLocalPasskeySetup() {
         let state = currentKeyState(keyId: "current-key", credentialIds: ["other-device"])
 
@@ -706,70 +440,6 @@ struct PasskeyCompositionTests {
         #expect(!availability.active)
         #expect(!availability.setupAvailable)
         #expect(availability.addDeviceAvailable)
-    }
-
-    @Test func matchingLegacyCredentialPreventsDuplicateDeviceSetup() {
-        let state = currentKeyState(keyId: "current-key", credentialIds: ["other-device"])
-
-        let availability = PasskeyManager.passkeyBundleAvailability(
-            state: state,
-            localKeyId: "current-key",
-            localCredentialId: "this-device",
-            legacyStatus: .present,
-            legacyCredentialIds: ["this-device"]
-        )
-
-        #expect(availability.active)
-        #expect(!availability.addDeviceAvailable)
-    }
-
-    @Test func externalLegacyKeyMismatchOutranksDecryptFailure() {
-        let selected = PasskeyKeyFlow.preferredExternalLegacyFailure(
-            .failure(.bundleDecryptFailed, message: "decrypt failed"),
-            over: .failure(.keyIdMismatch, message: "wrong key")
-        )
-
-        guard let selected, case .failure(let failure, let message) = selected else {
-            Issue.record("Expected a preserved external legacy failure")
-            return
-        }
-        #expect(failure == .keyIdMismatch)
-        #expect(message == "wrong key")
-    }
-
-    @Test func externalLegacyKeyMismatchIsNotReplacedByDecryptFailure() {
-        let selected = PasskeyKeyFlow.preferredExternalLegacyFailure(
-            .failure(.keyIdMismatch, message: "wrong key"),
-            over: .failure(.bundleDecryptFailed, message: "decrypt failed")
-        )
-
-        guard let selected, case .failure(let failure, let message) = selected else {
-            Issue.record("Expected the key mismatch to remain available")
-            return
-        }
-        #expect(failure == .keyIdMismatch)
-        #expect(message == "wrong key")
-    }
-
-    @Test func finalEnclaveBundleWithoutLegacyRecoveryNeedsSetup() {
-        let state = PasskeyManager.removingPasskeyBundle(
-            credentialId: "AQ",
-            from: currentKeyState(keyId: "current-key", credentialIds: ["AQ"])
-        )
-        let inventory = PasskeyManager.passkeyBundleInventory(
-            state: state,
-            localKeyId: "current-key",
-            legacyLookup: .available([])
-        )
-        let availability = PasskeyManager.passkeyBundleAvailability(
-            state: state,
-            localKeyId: "current-key",
-            legacyStatus: inventory.legacyStatus
-        )
-
-        #expect(inventory.legacyStatus == .absent)
-        #expect(!availability.active)
-        #expect(availability.setupAvailable)
     }
 
     @Test func missingPasskeyBundleRemovalIsIdempotent() {
@@ -928,18 +598,6 @@ struct PasskeyCompositionTests {
             createdVia: nil,
             createdAt: nil,
             hasData: false
-        )
-    }
-
-    private func legacyEntry(id: String) -> LegacyPasskeyCredentialEntry {
-        LegacyPasskeyCredentialEntry(
-            id: id,
-            iv: "iv",
-            encryptedKeys: "keys",
-            createdAt: nil,
-            version: nil,
-            syncVersion: nil,
-            bundleVersion: nil
         )
     }
 }

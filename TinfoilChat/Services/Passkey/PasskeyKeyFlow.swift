@@ -51,67 +51,38 @@ enum PasskeyFlowResult: Sendable {
     case failure(PasskeyFlowFailure, message: String? = nil)
 }
 
-struct LegacyPasskeyPromotion: Sendable {
-    let expectedEnclaveKeyId: String?
-    let keyB64: String
-    let credentialId: String
-    let kekIvHex: String
-    let encryptedKeysHex: String
-}
-
-struct LegacyPasskeyRecovery: Sendable {
-    let cek: Data
-    let keyIdHex: String
-    let credentialId: String
-    let legacyAlternatives: [String]
-    let promotion: LegacyPasskeyPromotion
-}
-
 enum PasskeyCandidateRecoveryResult: Sendable {
     case current(PasskeyFlowResult, legacyAlternatives: [String])
-    case legacy(LegacyPasskeyRecovery)
     case failure(PasskeyFlowFailure, message: String? = nil)
 }
 
 struct PasskeyRecoveryCandidates {
     let current: TinfoilWrappedKeyAdapter.CandidateSet
-    let legacy: [LegacyPasskeyCredentialEntry]
     let credentialIds: [String]
 
     init(
         bundles: [KeyState.Bundle],
-        legacy: [LegacyPasskeyCredentialEntry],
         preferredCredentialId: String?
     ) {
         current = TinfoilWrappedKeyAdapter.partition(
             bundles,
             preferredCredentialId: preferredCredentialId
         )
-        self.legacy = legacy
 
         var seen = Set<String>()
-        var ordered = (current.credentialIds + legacy.map(\.id)).filter { seen.insert($0).inserted }
-        if let preferredCredentialId,
-           let preferredIndex = ordered.firstIndex(of: preferredCredentialId) {
-            ordered.insert(ordered.remove(at: preferredIndex), at: 0)
-        }
-        credentialIds = ordered
+        credentialIds = current.credentialIds.filter { seen.insert($0).inserted }
     }
 
     func resolveSelectedCredential<Result>(
         credentialId: String,
         current recoverCurrent: (TinfoilWrappedKeyAdapter.CandidateSet.Current) -> Result?,
-        currentEnvelope recoverCurrentEnvelope: (KeyState.Bundle) -> Result?,
-        legacy recoverLegacy: (LegacyPasskeyCredentialEntry) -> Result?
+        currentEnvelope recoverCurrentEnvelope: (KeyState.Bundle) -> Result?
     ) -> Result? {
         for candidate in current.current where candidate.bundle.credentialId == credentialId {
             if let result = recoverCurrent(candidate) { return result }
         }
         for bundle in current.legacy where bundle.credentialId == credentialId {
             if let result = recoverCurrentEnvelope(bundle) { return result }
-        }
-        for entry in legacy where entry.id == credentialId {
-            if let result = recoverLegacy(entry) { return result }
         }
         return nil
     }
@@ -292,20 +263,18 @@ enum PasskeyKeyFlow {
         )
     }
 
-    static func recoverFromCurrentAndLegacy(
+    static func recoverFromRegistry(
         state: KeyState,
-        legacyEntries: [LegacyPasskeyCredentialEntry],
         prefer: String?,
         immediatelyAvailable: Bool
     ) async -> PasskeyCandidateRecoveryResult {
         let candidates = PasskeyRecoveryCandidates(
             bundles: state.bundles.values.sorted { $0.credentialId < $1.credentialId },
-            legacy: legacyEntries,
             preferredCredentialId: prefer
         )
         PasskeyDiagnostics.step(
             "recovery: keyId=\(PasskeyDiagnostics.keyIdPrefix(state.keyId)) "
-            + "bundles=\(state.bundles.count) legacy=\(legacyEntries.count) "
+            + "bundles=\(state.bundles.count) "
             + "candidates=\(candidates.credentialIds.count) "
             + "preferKnown=\(prefer != nil) silent=\(immediatelyAvailable)"
         )
@@ -330,7 +299,6 @@ enum PasskeyKeyFlow {
         }
         PasskeyDiagnostics.step("recovery: ceremony succeeded, resolving asserted credential")
 
-        var externalLegacyFailure: PasskeyCandidateRecoveryResult?
         if let resolved: PasskeyCandidateRecoveryResult = candidates.resolveSelectedCredential(
             credentialId: evaluated.credentialId,
             current: { candidate in
@@ -376,35 +344,15 @@ enum PasskeyKeyFlow {
                     credentialId: evaluated.credentialId,
                     createdVia: state.createdVia
                 ), legacyAlternatives: unwrapped.legacyAlternativeKeys)
-            },
-            legacy: { entry in
-                let result = recoverLegacyEntry(
-                    entry,
-                    evaluated: evaluated,
-                    enclaveKeyId: state.keyId
-                )
-                if case .legacy = result { return result }
-                if case .failure(let failure, let message) = result {
-                    PasskeyDiagnostics.failure(
-                        "recovery: legacy entry failed (\(failure.rawValue)): \(message ?? "-")"
-                    )
-                }
-                externalLegacyFailure = preferredExternalLegacyFailure(
-                    externalLegacyFailure,
-                    over: result
-                )
-                return nil
             }
         ) {
             return resolved
         }
 
-        if externalLegacyFailure == nil {
-            PasskeyDiagnostics.failure(
-                "recovery: asserted credential resolved no usable bundle"
-            )
-        }
-        return externalLegacyFailure ?? .failure(.bundleDecryptFailed)
+        PasskeyDiagnostics.failure(
+            "recovery: asserted credential resolved no usable bundle"
+        )
+        return .failure(.bundleDecryptFailed)
     }
 
     /// Derive the key id for an unwrapped CEK and enforce the §8.6
@@ -427,19 +375,6 @@ enum PasskeyKeyFlow {
             return nil
         }
         return keyIdHex
-    }
-
-    static func preferredExternalLegacyFailure(
-        _ current: PasskeyCandidateRecoveryResult?,
-        over candidate: PasskeyCandidateRecoveryResult
-    ) -> PasskeyCandidateRecoveryResult? {
-        guard case .failure(let candidateFailure, _) = candidate else { return current }
-        guard let current else { return candidate }
-        guard case .failure(let currentFailure, _) = current else { return candidate }
-        if candidateFailure == .keyIdMismatch && currentFailure != .keyIdMismatch {
-            return candidate
-        }
-        return current
     }
 
     /// Recover the user's CEK by re-authenticating their passkey and
@@ -594,75 +529,6 @@ enum PasskeyKeyFlow {
             cek: existingCek,
             createdVia: createdVia
         )
-    }
-
-    // MARK: - Legacy (v1) passkey recovery
-
-    private static func recoverLegacyEntry(
-        _ entry: LegacyPasskeyCredentialEntry,
-        evaluated: EvaluatedCredential,
-        enclaveKeyId: String?
-    ) -> PasskeyCandidateRecoveryResult {
-        guard let ivData = Data(base64Encoded: entry.iv),
-              let ciphertextData = Data(base64Encoded: entry.encryptedKeys) else {
-            return .failure(.bundleDecryptFailed, message: "Legacy bundle is not valid base64")
-        }
-
-        let cek: Data
-        let legacyAlternatives: [String]
-        do {
-            let unwrapped = try ContentKeyBundle.unwrapLegacyJsonEnvelope(
-                prfOutput: evaluated.prfResult.output,
-                kekIvHex: ivData.hexEncodedString(),
-                wrappedKeyHex: ciphertextData.hexEncodedString()
-            )
-            cek = unwrapped.cek
-            legacyAlternatives = unwrapped.legacyAlternativeKeys
-        } catch {
-            return .failure(.bundleDecryptFailed, message: error.localizedDescription)
-        }
-
-        let keyIdHex: String
-        do {
-            keyIdHex = try ContentKeyBundle.deriveKeyIdHex(cek: cek)
-        } catch {
-            return .failure(.bundleDecryptFailed, message: error.localizedDescription)
-        }
-
-        // The legacy CEK must match the enclave's current primary key
-        // (when one exists) before we treat it as a recovery — adopting
-        // a rotated-away key as primary would strand the live data.
-        if let enclaveKeyId, keyIdHex != enclaveKeyId {
-            let mismatch = "legacy keyId \(PasskeyDiagnostics.keyIdPrefix(keyIdHex)) "
-                + "!= enclave \(PasskeyDiagnostics.keyIdPrefix(enclaveKeyId))"
-            return .failure(.keyIdMismatch, message: mismatch)
-        }
-
-        let bundle: WrappedKeyBundle
-        do {
-            let wrapped = try PasskeyService.shared.wrapKeyWithPRFResult(
-                key: cek,
-                credentialId: evaluated.credentialId,
-                prfResult: evaluated.prfResult
-            )
-            bundle = TinfoilWrappedKeyAdapter.bundleBody(wrapped)
-        } catch {
-            return .failure(.bundleDecryptFailed, message: error.localizedDescription)
-        }
-
-        return .legacy(LegacyPasskeyRecovery(
-            cek: cek,
-            keyIdHex: keyIdHex,
-            credentialId: evaluated.credentialId,
-            legacyAlternatives: legacyAlternatives,
-            promotion: LegacyPasskeyPromotion(
-                expectedEnclaveKeyId: enclaveKeyId,
-                keyB64: cek.base64EncodedString(),
-                credentialId: bundle.credentialId,
-                kekIvHex: bundle.kekIvHex,
-                encryptedKeysHex: bundle.wrappedKeyHex
-            )
-        ))
     }
 
     // MARK: - Multi-device: enroll new passkey for current CEK
