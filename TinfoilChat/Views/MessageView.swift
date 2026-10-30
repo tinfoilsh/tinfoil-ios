@@ -85,8 +85,6 @@ struct MessageView: View {
     let messageIndex: Int
     let stepExpansion: WorkStepExpansion
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
-    @State private var showCopyFeedback = false
-    @State private var cachedParsedContent: (thinkingText: String, remainderText: String, contentHash: Int)? = nil
     @State private var showLongMessageSheet = false
     @State private var selectLongMessageOnPresentation = false
     @State private var userTextSelectionRequest = 0
@@ -906,43 +904,6 @@ struct MessageView: View {
         })
     }
 
-    private func copyMessagePart(_ text: String) {
-        let cleanText = removeThinktags(from: text)
-        
-        #if os(macOS)
-        if let pasteboard = NSPasteboard.general {
-            pasteboard.clearContents()
-            pasteboard.setString(cleanText, forType: .string)
-        }
-        #elseif os(iOS)
-        UIPasteboard.general.string = cleanText
-        #endif
-        
-        withAnimation {
-            showCopyFeedback = true
-        }
-        
-        // Hide the feedback after a delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            withAnimation {
-                showCopyFeedback = false
-            }
-        }
-    }
-    
-    // Remove think tags from text if present
-    private func removeThinktags(from text: String) -> String {
-        guard text.hasPrefix("<think>") else { return text }
-        
-        // If the text has think tags, we need to clean it up
-        if let endTagRange = text.range(of: "</think>") {
-            // Get just the text after the closing think tag
-            return String(text[endTagRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        
-        return text.replacingOccurrences(of: "<think>", with: "")
-    }
-    
     private var responseContent: String {
         if message.thoughts != nil {
             return message.content.hasPrefix("<think>") ? "" : message.content
@@ -1377,32 +1338,6 @@ struct MessageBubbleModifier: ViewModifier {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-    }
-}
-
-/// A view that renders Markdown content using the Textual library.
-struct MarkdownText: View {
-    let content: String
-    let isDarkMode: Bool
-    let horizontalPadding: CGFloat
-    let textSelectionEnabled: Bool
-
-    init(content: String, isDarkMode: Bool, horizontalPadding: CGFloat = 0, textSelectionEnabled: Bool = true) {
-        self.content = content
-        self.isDarkMode = isDarkMode
-        self.horizontalPadding = horizontalPadding
-        self.textSelectionEnabled = textSelectionEnabled
-    }
-
-    var body: some View {
-        StructuredText(markdown: content)
-            .textual.highlighterTheme(.default)
-            .if(textSelectionEnabled) { view in
-                view.textual.textSelection(.enabled)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, horizontalPadding)
-            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

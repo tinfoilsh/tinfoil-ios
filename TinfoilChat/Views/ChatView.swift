@@ -28,7 +28,6 @@ struct ChatContainer: View {
     @State private var scrollProxy: ScrollViewProxy?
     @State private var dragOffset: CGFloat = 0
     @State private var showAuthView = false
-    @State private var showSettings = false
     @State private var lastBackgroundTime: Date?
     @State private var showPremiumModal = false
     @State private var isVerificationBadgeExpanded = false
@@ -36,7 +35,7 @@ struct ChatContainer: View {
     @State private var sidebarNavigationRequest: ChatNavigationRequest?
 
     private var isAnySheetPresented: Bool {
-        viewModel.showVerifierSheet || viewModel.showAddSheet || viewModel.showModelSelectorSheet || viewModel.showRateLimitPaywall || viewModel.showDocumentPicker || viewModel.showPhotoPicker || viewModel.showCamera || viewModel.showDocumentScanner || viewModel.showMessageSheet || viewModel.showImageViewer || viewModel.showSidebarSettings || showAuthView || showSettings || showPremiumModal
+        viewModel.showVerifierSheet || viewModel.showAddSheet || viewModel.showModelSelectorSheet || viewModel.showRateLimitPaywall || viewModel.showDocumentPicker || viewModel.showPhotoPicker || viewModel.showCamera || viewModel.showDocumentScanner || viewModel.showMessageSheet || viewModel.showImageViewer || viewModel.showSidebarSettings || showAuthView || showPremiumModal
     }
     
     // Sidebar constants
@@ -45,14 +44,6 @@ struct ChatContainer: View {
     private let sidebarLogoHeight: CGFloat = 28
 
     private let backgroundTimeThreshold: TimeInterval = 300 // 5 minutes in seconds
-
-    private var toolbarButtonFill: Color {
-        colorScheme == .dark ? Color.white.opacity(0.1) : Color.white
-    }
-
-    private var toolbarButtonStroke: Color {
-        colorScheme == .dark ? Color.white.opacity(0.2) : Color.white
-    }
 
     private var toolbarContentColor: Color {
         colorScheme == .dark ? Color.white : Color.black
@@ -156,14 +147,6 @@ struct ChatContainer: View {
             AuthenticationView()
                 .environment(Clerk.shared)
                 .environmentObject(authManager)
-        }
-        .sheet(isPresented: $showSettings, onDismiss: {
-            viewModel.focusInputIfPending()
-        }) {
-            SettingsView()
-                .environment(Clerk.shared)
-                .environmentObject(authManager)
-                .environmentObject(viewModel)
         }
         .sheet(isPresented: $viewModel.showSidebarSettings, onDismiss: {
             viewModel.focusInputIfPending()
@@ -595,11 +578,6 @@ struct ChatContainer: View {
         showAuthView = true
     }
     
-    /// Shows the settings view
-    private func showSettingsView() {
-        showSettings = true
-    }
-
     /// Label showing whether current chat is local or cloud-synced.
     /// Only rendered when cloud sync is enabled (see call site).
     private var chatStorageLabel: some View {
@@ -810,141 +788,6 @@ struct PrivacyExplainerSheet: View {
     }
 }
 
-/// Individual model tab component
-struct ModelTab: View {
-    enum Style {
-        case compact
-        case regular
-
-        var iconSize: CGFloat {
-            switch self {
-            case .compact: return 20
-            case .regular: return 36
-            }
-        }
-
-        var nameFont: CGFloat {
-            switch self {
-            case .compact: return 9
-            case .regular: return 13
-            }
-        }
-
-        var cardSize: CGSize {
-            switch self {
-            case .compact: return CGSize(width: 88, height: 72)
-            case .regular: return CGSize(width: 120, height: 110)
-            }
-        }
-
-        var cornerRadius: CGFloat {
-            switch self {
-            case .compact: return 12
-            case .regular: return 16
-            }
-        }
-
-        var checkmarkSize: CGFloat {
-            switch self {
-            case .compact: return 10
-            case .regular: return 16
-            }
-        }
-
-        var checkmarkIconSize: CGFloat {
-            switch self {
-            case .compact: return 6
-            case .regular: return 9
-            }
-        }
-
-        var spacing: CGFloat {
-            switch self {
-            case .compact: return 4
-            case .regular: return 8
-            }
-        }
-    }
-
-    let model: ModelType
-    let isSelected: Bool
-    let isDarkMode: Bool
-    let isEnabled: Bool
-    var style: Style = .compact
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            VStack(spacing: style.spacing) {
-                // Model icon
-                Image(model.iconName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: style.iconSize, height: style.iconSize)
-                    .opacity(isEnabled ? 1.0 : 0.7)
-
-                // Model name
-                Text(model.displayName)
-                    .font(.system(size: style.nameFont, weight: .medium))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .opacity(isEnabled ? 1.0 : 0.7)
-            }
-            .foregroundColor(isEnabled ? (isSelected ? .primary : .secondary) : .gray)
-            .frame(width: style.cardSize.width, height: style.cardSize.height)
-            .background(
-                ZStack {
-                    // Base background
-                    if #available(iOS 26, *) {
-                        RoundedRectangle(cornerRadius: style.cornerRadius)
-                            .fill(.thickMaterial)
-                            .opacity(isEnabled ? 1.0 : 0.7)
-                    } else {
-                        RoundedRectangle(cornerRadius: style.cornerRadius)
-                            .fill(Color.chatSurface(isDarkMode: isDarkMode))
-                            .opacity(isEnabled ? 1.0 : 0.7)
-                    }
-
-                    // Selected state background
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: style.cornerRadius)
-                            .fill(Color.accentPrimary.opacity(0.15))
-                    }
-
-                    // Subtle border for unselected enabled items
-                    if !isSelected && isEnabled {
-                        RoundedRectangle(cornerRadius: style.cornerRadius)
-                            .strokeBorder(Color.gray.opacity(0.2), lineWidth: 1)
-                    }
-
-                    // Selection indicator
-                    if isSelected {
-                        VStack {
-                            HStack {
-                                Spacer()
-                                Circle()
-                                    .fill(Color.accentPrimary)
-                                    .frame(width: style.checkmarkSize, height: style.checkmarkSize)
-                                    .overlay(
-                                        Image(systemName: "checkmark")
-                                            .font(.system(size: style.checkmarkIconSize, weight: .bold))
-                                            .foregroundColor(.white)
-                                    )
-                            }
-                            Spacer()
-                        }
-                        .padding(style == .compact ? 4 : 8)
-                    }
-                }
-            )
-        }
-        .buttonStyle(PlainButtonStyle())
-        .scaleEffect(isSelected ? 1.02 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
-    }
-}
-
 // MARK: - Helper Views
 
 /// Animated button that transforms between a menu icon and an X
@@ -1131,50 +974,6 @@ struct VerificationStatusIndicator: View {
             } else if !viewModel.isVerified {
                 isBadgeExpanded = false
             }
-        }
-    }
-}
-
-/// Model picker for selecting between different AI models
-struct ModelPicker: View {
-    @ObservedObject var viewModel: TinfoilChat.ChatViewModel
-
-    var body: some View {
-        Menu {
-            let selectableModels = viewModel.selectableModels
-
-            ForEach(selectableModels) { model in
-                Button(action: {
-                    viewModel.changeModel(to: model)
-                }) {
-                    Label {
-                        Text(model.displayName)
-                    } icon: {
-                        modelIcon(for: model, size: 20)
-                    }
-                }
-                .disabled(viewModel.currentModel == model)
-            }
-        } label: {
-            modelIcon(for: viewModel.currentModel, size: 22)
-        }
-        .accessibilityLabel("Select model")
-        .accessibilityValue(viewModel.currentModel.displayName)
-    }
-
-    /// Auto entries have no asset icon; show a routing glyph instead.
-    @ViewBuilder
-    private func modelIcon(for model: ModelType, size: CGFloat) -> some View {
-        if model.isAuto {
-            Image(systemName: "shuffle")
-                .resizable()
-                .scaledToFit()
-                .frame(width: size, height: size)
-        } else {
-            Image(model.iconName)
-                .resizable()
-                .scaledToFit()
-                .frame(width: size, height: size)
         }
     }
 }

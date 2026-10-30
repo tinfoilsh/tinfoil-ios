@@ -264,10 +264,6 @@ struct ModularAuthenticationView: View {
     }
   }
   
-  private var thirdPartyAuthOptions: some View {
-    EmptyView() // We've moved this directly into the mainContentView
-  }
-  
   private var shouldShowThirdPartyAuth: Bool {
     clerk.user == nil && !isInVerificationMode && legalConsent.pendingSignUp == nil
   }

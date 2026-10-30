@@ -1080,12 +1080,6 @@ class ObservableMessageWrapper: ObservableObject {
         bufferMultiplier = Constants.StreamingBuffer.initialMultiplier
         actualContentHeight = 0
     }
-
-    func getCacheKey() -> Int {
-        message.content.hashValue ^
-        (message.thoughts?.hashValue ?? 0) ^
-        isDarkMode.hashValue
-    }
 }
 
 struct ObservableMessageCell: View {

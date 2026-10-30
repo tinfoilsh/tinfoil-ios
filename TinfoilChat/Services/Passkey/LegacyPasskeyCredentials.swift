@@ -8,7 +8,7 @@
 //  combines this endpoint with the enclave key registry so the recovery
 //  flow can authenticate once against every registered candidate.
 //  After unlock the recovered CEK is promoted into the enclave key
-//  registry (see PasskeyKeyFlow.recoverFromLegacyPasskey).
+//  registry.
 //
 //  Writes to this endpoint are intentionally NOT exposed — the legacy
 //  table is read-only for the new client. Mirrors the webapp's
@@ -48,15 +48,6 @@ enum LegacyPasskeyCredentialLookup: Sendable {
 enum LegacyPasskeyCredentials {
     /// The answer carries wrapped keys, which no cache may keep.
     private static let session = URLSession.ephemeralRefusingRedirects()
-
-    /// Fetch the legacy passkey credentials for the authenticated user.
-    /// Returns an empty array on any non-success for recovery callers.
-    /// Inventory callers use `lookup()` to distinguish absence from a
-    /// lookup failure.
-    static func fetch() async -> [LegacyPasskeyCredentialEntry] {
-        guard case .available(let entries) = await lookup() else { return [] }
-        return entries
-    }
 
     static func lookup() async -> LegacyPasskeyCredentialLookup {
         guard let token = await authToken() else { return .unverified }

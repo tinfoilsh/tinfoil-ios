@@ -599,27 +599,4 @@ class AuthManager: ObservableObject {
             return false
         }
     }
-    
-    /// Deletes the user's account and clears all local data
-    func deleteAccount() async throws {
-        invalidateAccountLifecycle()
-        do {
-            guard let clerk = self.clerk else {
-                throw NSError(domain: "AuthError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Clerk instance not set"])
-            }
-            
-            guard let user = clerk.user else {
-                throw NSError(domain: "AuthError", code: 2, userInfo: [NSLocalizedDescriptionKey: "No user found"])
-            }
-            
-            // Delete the user's account
-            try await user.delete()
-            
-            // Clear local state
-            await clearAuthState()
-            
-        } catch {
-            throw error
-        }
-    }
 } 

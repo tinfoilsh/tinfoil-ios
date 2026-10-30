@@ -7,22 +7,6 @@
 
 import SwiftUI
 
-/// Animated dots for searching state
-struct SearchingDotsView: View {
-    let isDarkMode: Bool
-
-    var body: some View {
-        HStack(spacing: 3) {
-            ForEach(0..<3) { index in
-                Circle()
-                    .frame(width: 5, height: 5)
-                    .modifier(PulsingAnimation(delay: 0.15 * Double(index)))
-            }
-        }
-        .foregroundColor(isDarkMode ? .white : .black.opacity(0.8))
-    }
-}
-
 /// Raw favicon image fetched through the attested metadata enclave.
 /// Owns its async load + state so it can be dropped into any parent
 /// (with its own frame, background, and clip shape) without each

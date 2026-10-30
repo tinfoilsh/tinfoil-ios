@@ -118,8 +118,6 @@ struct ModelType: Identifiable, Hashable, Equatable {
     /// The chat service converts images and documents for every model.
     var isMultimodal: Bool { true }
 
-    var isDeprecated: Bool { model.deprecated }
-
     var badges: [Components.Schemas.SessionModel.BadgesPayloadPayload] { model.badges }
 
     // MARK: - Reasoning capabilities

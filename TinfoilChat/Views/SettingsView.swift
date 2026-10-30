@@ -121,7 +121,6 @@ struct SettingsView: View {
     @State private var editingLastName = ""
     @State private var isUpdatingProfile = false
     @State private var profileUpdateError: String? = nil
-    @State private var showLanguagePicker = false
     @State private var showSignOutConfirmation = false
     @State private var showPremiumModal = false
     @State private var accountDeletionError: String? = nil

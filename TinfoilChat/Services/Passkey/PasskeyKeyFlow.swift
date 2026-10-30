@@ -65,20 +65,6 @@ struct LegacyPasskeyRecovery: Sendable {
     let credentialId: String
     let legacyAlternatives: [String]
     let promotion: LegacyPasskeyPromotion
-
-    var flowResult: PasskeyFlowResult {
-        .success(
-            cek: cek,
-            keyIdHex: keyIdHex,
-            credentialId: credentialId,
-            createdVia: KeyOrigin.recovery.rawValue
-        )
-    }
-}
-
-enum LegacyPasskeyRecoveryResult: Sendable {
-    case success(LegacyPasskeyRecovery)
-    case failure(PasskeyFlowFailure, message: String? = nil)
 }
 
 enum PasskeyCandidateRecoveryResult: Sendable {
@@ -611,54 +597,6 @@ enum PasskeyKeyFlow {
     }
 
     // MARK: - Legacy (v1) passkey recovery
-
-    /// Recover the user's CEK from a passkey registered on the
-    /// pre-enclave webapp and return immutable promotion material.
-    ///
-    /// The caller passes the legacy credential entries (from
-    /// `LegacyPasskeyCredentials.fetch()`) and the enclave's current
-    /// key_id (or nil when no `user_keys` row exists yet). This method:
-    ///   1. authenticate one of the legacy passkeys (PRF),
-    ///   2. unwrap the AES-GCM legacy bundle under the PRF-derived KEK,
-    ///   3. derive the CEK's key_id and reject a known mismatch,
-    ///   4. return the recovered key and wrapped bundle for the manager
-    ///      to validate and promote under the current account.
-    static func recoverFromLegacyPasskey(
-        entries: [LegacyPasskeyCredentialEntry],
-        enclaveKeyId: String?
-    ) async -> LegacyPasskeyRecoveryResult {
-        guard !entries.isEmpty else {
-            return .failure(.noRemoteBundle)
-        }
-
-        let credentialIds = entries.map(\.id)
-        let evaluated: EvaluatedCredential
-        do {
-            // Use only locally-available credentials so the system does not
-            // surface its cross-device "Use a Device Nearby" QR sheet. When
-            // the legacy passkey isn't on this device, this fails fast and we
-            // fall through to manual recovery (scan the webapp QR / paste key).
-            evaluated = try await PasskeyService.shared.evaluateCredential(
-                credentialIds: credentialIds,
-                preferredCredentialId: nil,
-                immediatelyAvailable: true
-            )
-        } catch let err {
-            return .failure(failureFromPasskeyError(err), message: err.localizedDescription)
-        }
-
-        guard let entry = entries.first(where: { $0.id == evaluated.credentialId }) else {
-            return .failure(.noRemoteBundle)
-        }
-        switch recoverLegacyEntry(entry, evaluated: evaluated, enclaveKeyId: enclaveKeyId) {
-        case .legacy(let recovery):
-            return .success(recovery)
-        case .failure(let failure, let message):
-            return .failure(failure, message: message)
-        case .current:
-            return .failure(.bundleDecryptFailed)
-        }
-    }
 
     private static func recoverLegacyEntry(
         _ entry: LegacyPasskeyCredentialEntry,
