@@ -6,6 +6,11 @@ import OSLog
 final class DeviceProfileStorage: ProfileStorage {
     private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Harness")
 
+    /// The members of the stored local profile: the install that stored it,
+    /// and its fields.
+    private static let installMember = "installId"
+    private static let profileMember = "profile"
+
     private let keychain: KeychainStore
     private let defaults: UserDefaults
     private let service = Constants.Harness.Profile.keychainService
@@ -19,14 +24,23 @@ final class DeviceProfileStorage: ProfileStorage {
     /// and removes its profile once the import is kept; afterwards only the
     /// local profile is read. A stored profile that cannot be decoded is
     /// logged and shown as empty, without an import; a keychain that cannot
-    /// be read, as while the device is locked, fails the read.
+    /// be read, as while the device is locked, fails the read. Keychain
+    /// items outlive the app, so a profile stored by another install, or by
+    /// none, is one a deleted install left: it is removed, and read as none.
     func loadLocalProfile() throws -> ProfileFields {
         if let data = try keychain.load(for: Constants.Harness.Profile.localProfileKey, service: service) {
-            guard let profile = Self.object(data) else {
+            guard let stored = Self.object(data) else {
                 Self.logger.error("The local settings could not be read")
                 return [:]
             }
-            return profile
+            if stored[Self.installMember] as? String == installId {
+                guard let profile = stored[Self.profileMember] as? ProfileFields else {
+                    Self.logger.error("The local settings could not be read")
+                    return [:]
+                }
+                return profile
+            }
+            keychain.delete(for: Constants.Harness.Profile.localProfileKey, service: service)
         }
         let imported = try PreviousClientSettings.profile(keychain: keychain, defaults: defaults)
         if !imported.isEmpty {
@@ -118,9 +132,19 @@ final class DeviceProfileStorage: ProfileStorage {
     }
 
     private func write(_ profile: ProfileFields) throws {
-        guard let data = Self.data(profile), (try? keychain.save(data, for: Constants.Harness.Profile.localProfileKey, service: service)) != nil else {
+        let stored: ProfileFields = [Self.installMember: installId, Self.profileMember: profile]
+        guard let data = Self.data(stored), (try? keychain.save(data, for: Constants.Harness.Profile.localProfileKey, service: service)) != nil else {
             throw HarnessError(code: HarnessErrorCode.localSaveFailed, message: "Your settings could not be saved on this device.", action: .retry)
         }
+    }
+
+    /// This install's id, made on first use and kept in the defaults, which
+    /// go with the app.
+    private var installId: String {
+        if let id = defaults.string(forKey: Constants.Harness.Profile.installIdKey) { return id }
+        let id = UUID().uuidString
+        defaults.set(id, forKey: Constants.Harness.Profile.installIdKey)
+        return id
     }
 
     private static func object(_ data: Data) -> ProfileFields? {
@@ -144,9 +168,18 @@ enum PreviousClientSettings {
         "reasoningEffort", "thinkingEnabled", "webSearchAvailable", "piiCheckEnabled", "genUIEnabled", "chatFont",
     ]
 
+    /// Whether the previous client ran in this install, and so kept the
+    /// profile the keychain holds. The defaults go with the app while the
+    /// keychain outlives it, so a profile found where no older version ran
+    /// was left by a deleted install.
+    static func ranInThisInstall(defaults: UserDefaults) -> Bool {
+        defaults.bool(forKey: Constants.StorageKeys.Settings.ranOlderVersion)
+    }
+
     static func profile(keychain: KeychainStore, defaults: UserDefaults) throws -> ProfileFields {
         var fields: ProfileFields = [:]
-        if let data = try keychain.load(for: Constants.Harness.Profile.previousProfileKey, service: Constants.Harness.Profile.keychainService),
+        if ranInThisInstall(defaults: defaults),
+           let data = try keychain.load(for: Constants.Harness.Profile.previousProfileKey, service: Constants.Harness.Profile.keychainService),
            let stored = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
             for name in profileFields {
                 if let value = stored[name], !(value is NSNull) { fields[name] = value }

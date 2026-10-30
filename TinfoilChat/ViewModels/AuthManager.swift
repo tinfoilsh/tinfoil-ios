@@ -59,7 +59,10 @@ struct CachedUserDataStore {
     let defaults: UserDefaults
     private let key = Constants.StorageKeys.Auth.userData
 
-    func load() -> Data? {
+    /// The details, and whether they are the copy an older version kept in
+    /// the defaults, which go with the app: only this install can have kept
+    /// that copy.
+    func load() -> (data: Data, isFromOlderVersion: Bool)? {
         defaults.removeObject(forKey: Constants.StorageKeys.Auth.subscription)
         do {
             let stored = try keychain.load(for: key, service: nil)
@@ -68,11 +71,11 @@ struct CachedUserDataStore {
                 try keychain.save(previous, for: key, service: nil)
             }
             defaults.removeObject(forKey: key)
-            return stored ?? previous
+            return stored.map { ($0, false) } ?? previous.map { ($0, true) }
         } catch {
             // The copy older versions kept stays until it can be moved.
             Self.logger.error("Failed to read the signed-in user's details: \(error, privacy: .public)")
-            return defaults.data(forKey: key)
+            return defaults.data(forKey: key).map { ($0, true) }
         }
     }
 
@@ -280,8 +283,14 @@ class AuthManager: ObservableObject {
     
     private func loadCachedAuthState() {
         if let userData = userDataStore.load(),
-           let decodedUserData = try? JSONSerialization.jsonObject(with: userData) as? [String: Any] {
+           let decodedUserData = try? JSONSerialization.jsonObject(with: userData.data) as? [String: Any] {
             localUserData = decodedUserData
+            // An older version left this account signed in on this install,
+            // so the key it kept without an account is this account's. It is
+            // claimed here, before the chat view model can bind the key.
+            if userData.isFromOlderVersion, let localUserId {
+                EncryptionService.shared.claimUnownedKey(for: localUserId)
+            }
         }
         
         isAuthenticated = UserDefaults.standard.bool(forKey: authStateKey)

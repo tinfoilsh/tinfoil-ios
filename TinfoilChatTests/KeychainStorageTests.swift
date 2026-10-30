@@ -5,6 +5,9 @@ import Testing
 
 @Suite("Keychain storage")
 struct KeychainStorageTests {
+    private let localProfile = MemoryKeychain.Item(Constants.Harness.Profile.keychainService, Constants.Harness.Profile.localProfileKey)
+    private let previousProfile = MemoryKeychain.Item(Constants.Harness.Profile.keychainService, Constants.Harness.Profile.previousProfileKey)
+
     @Test func lockedKeychainReadsAsUnavailable() {
         #expect(KeychainError(status: errSecInteractionNotAllowed) == .unavailable)
         #expect(KeychainError(status: errSecAuthFailed) == .failed(errSecAuthFailed))
@@ -44,10 +47,64 @@ struct KeychainStorageTests {
         #expect(keychain.items[MemoryKeychain.Item(Constants.Harness.Profile.keychainService, Constants.Harness.Profile.localProfileKey)] != nil)
     }
 
+    @Test func undecodableProfileReadsAsEmptyWithoutAnImport() throws {
+        let keychain = MemoryKeychain()
+        keychain.items[localProfile] = Data("not json".utf8)
+        let (defaults, suiteName) = try previousClientDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        #expect(try DeviceProfileStorage(keychain: keychain, defaults: defaults).loadLocalProfile().isEmpty)
+        #expect(keychain.saves == 0)
+    }
+
+    /// Keychain items outlive the app: the settings a deleted install kept
+    /// are not the next person's.
+    @Test func profileAnotherInstallStoredIsRemoved() throws {
+        let keychain = MemoryKeychain()
+        let (deleted, deletedSuite) = try makeDefaults()
+        let (installed, installedSuite) = try makeDefaults()
+        defer {
+            deleted.removePersistentDomain(forName: deletedSuite)
+            installed.removePersistentDomain(forName: installedSuite)
+        }
+        _ = try DeviceProfileStorage(keychain: keychain, defaults: deleted).saveLocalProfile(["nickname": "Al"], replace: true)
+        #expect(try DeviceProfileStorage(keychain: keychain, defaults: deleted).loadLocalProfile()["nickname"] as? String == "Al")
+
+        #expect(try DeviceProfileStorage(keychain: keychain, defaults: installed).loadLocalProfile().isEmpty)
+        #expect(keychain.items[localProfile] == nil)
+    }
+
+    @Test func profileStoredWithoutAnInstallIsRemoved() throws {
+        let keychain = MemoryKeychain()
+        keychain.items[localProfile] = Data(#"{"nickname":"Al"}"#.utf8)
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        #expect(try DeviceProfileStorage(keychain: keychain, defaults: defaults).loadLocalProfile().isEmpty)
+        #expect(keychain.items[localProfile] == nil)
+    }
+
+    @Test func previousClientsProfileIsImportedOnlyWhereItRan() throws {
+        let keychain = MemoryKeychain()
+        keychain.items[previousProfile] = Data(#"{"nickname":"Al"}"#.utf8)
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        #expect(try DeviceProfileStorage(keychain: keychain, defaults: defaults).loadLocalProfile().isEmpty)
+
+        defaults.set(true, forKey: Constants.StorageKeys.Settings.ranOlderVersion)
+        #expect(try DeviceProfileStorage(keychain: keychain, defaults: defaults).loadLocalProfile()["nickname"] as? String == "Al")
+    }
+
     private func previousClientDefaults() throws -> (UserDefaults, String) {
+        let (defaults, suiteName) = try makeDefaults()
+        defaults.set("gpt-oss-120b", forKey: Constants.StorageKeys.Settings.selectedModel)
+        return (defaults, suiteName)
+    }
+
+    private func makeDefaults() throws -> (UserDefaults, String) {
         let suiteName = "KeychainStorageTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defaults.set("gpt-oss-120b", forKey: Constants.StorageKeys.Settings.selectedModel)
         return (defaults, suiteName)
     }
 }
