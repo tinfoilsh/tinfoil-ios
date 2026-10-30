@@ -169,12 +169,11 @@ enum PreviousClientSettings {
     ]
 
     /// Whether the previous client ran in this install, and so kept the
-    /// profile the keychain holds. Every previous client kept the response
-    /// language in the defaults from its first launch, and this client keeps
-    /// none; the defaults go with the app while the keychain outlives it, so
-    /// a profile found without the language was left by a deleted install.
+    /// profile the keychain holds. The defaults go with the app while the
+    /// keychain outlives it, so a profile found where no older version ran
+    /// was left by a deleted install.
     static func ranInThisInstall(defaults: UserDefaults) -> Bool {
-        defaults.object(forKey: Constants.StorageKeys.Settings.selectedLanguage) != nil
+        defaults.bool(forKey: Constants.StorageKeys.Settings.ranOlderVersion)
     }
 
     static func profile(keychain: KeychainStore, defaults: UserDefaults) throws -> ProfileFields {

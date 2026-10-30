@@ -92,7 +92,7 @@ struct KeychainStorageTests {
 
         #expect(try DeviceProfileStorage(keychain: keychain, defaults: defaults).loadLocalProfile().isEmpty)
 
-        defaults.set("System", forKey: Constants.StorageKeys.Settings.selectedLanguage)
+        defaults.set(true, forKey: Constants.StorageKeys.Settings.ranOlderVersion)
         #expect(try DeviceProfileStorage(keychain: keychain, defaults: defaults).loadLocalProfile()["nickname"] as? String == "Al")
     }
 

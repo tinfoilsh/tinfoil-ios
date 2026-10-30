@@ -569,6 +569,9 @@ enum Constants {
             static let appLaunchCount = "tinfoil-settings-app-launch-count"
             static let hasSeenReviewPrompt = "tinfoil-settings-has-seen-review-prompt"
             static let hasCompletedOnboarding = "tinfoil-settings-has-completed-onboarding"
+            /// Whether an older version ran on this install, recorded once
+            /// as this version first launches.
+            static let ranOlderVersion = "tinfoil-settings-ran-older-version"
         }
 
         // MARK: - User Personalization Preferences
@@ -693,10 +696,11 @@ enum Constants {
 // MARK: - Storage Keys Migration
 // Migrate old UserDefaults keys and continuously remove retired sync keys.
 enum StorageKeysMigration {
-    private static let migrationCompleteKey = "tinfoil-settings-storage-keys-migrated"
+    static let migrationCompleteKey = "tinfoil-settings-storage-keys-migrated"
     private static let legacyProjectChatStatusPrefix = "tinfoil-sync-project-chat-status-"
 
     static func migrateIfNeeded() {
+        recordOlderVersion()
         // Purge outside the one-shot guard: users who completed the
         // key-rename migration before this list existed would
         // otherwise keep the stale v1 entries forever. Removing an
@@ -746,6 +750,15 @@ enum StorageKeysMigration {
         }
 
         UserDefaults.standard.set(true, forKey: migrationCompleteKey)
+    }
+
+    /// Records, once, whether an older version ran on this install. Every
+    /// version the control plane still supports set the migration marker
+    /// the first time it launched, so the marker is there before this
+    /// version first sets it exactly when one of them ran here.
+    static func recordOlderVersion(defaults: UserDefaults = .standard) {
+        guard defaults.object(forKey: Constants.StorageKeys.Settings.ranOlderVersion) == nil else { return }
+        defaults.set(defaults.bool(forKey: migrationCompleteKey), forKey: Constants.StorageKeys.Settings.ranOlderVersion)
     }
 }
  
