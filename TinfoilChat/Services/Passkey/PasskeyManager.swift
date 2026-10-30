@@ -264,10 +264,9 @@ final class PasskeyManager: ObservableObject {
             )
             guard canMutateAccountKey else { return .recoveryFailed }
             switch result {
-            case .current(let current, let legacyAlternatives):
+            case .success:
                 if await applyValidatedCurrentRecovery(
-                    current,
-                    legacyAlternatives: legacyAlternatives,
+                    result,
                     expectedAccount: recoveryAccount
                 ) {
                     PasskeyDiagnostics.step("attemptRecovery: silent recovery succeeded")
@@ -385,7 +384,6 @@ final class PasskeyManager: ObservableObject {
 
     private func applyValidatedCurrentRecovery(
         _ result: PasskeyFlowResult,
-        legacyAlternatives: [String],
         expectedAccount: RecoveryAccountSnapshot
     ) async -> Bool {
         guard case .success(let cek, let keyIdHex, let credentialId, _) = result else {
@@ -424,7 +422,6 @@ final class PasskeyManager: ObservableObject {
             PasskeyDiagnostics.failure("applyRecovery: account changed while applying key")
             return false
         }
-        PasskeyKeyFlow.retainLegacyAlternatives(legacyAlternatives)
         persistEnclaveKeyId(keyIdHex)
         activatePasskey()
         return true
@@ -568,10 +565,9 @@ final class PasskeyManager: ObservableObject {
         )
         guard canMutateAccountKey else { return false }
         switch result {
-        case .current(let current, let legacyAlternatives):
+        case .success:
             guard await applyValidatedCurrentRecovery(
-                current,
-                legacyAlternatives: legacyAlternatives,
+                result,
                 expectedAccount: recoveryAccount
             ) else {
                 PasskeyDiagnostics.report("retryRecovery: recovered key failed validation")
