@@ -6,6 +6,11 @@ import Testing
 struct SpeechPlayerTests {
     private let owner = SpeechOwner(chatId: "chat", messageId: "message")
 
+    @Test func aRequestThatTimedOutBeforeAnyAudioSaysSo() {
+        #expect(SpeechError.sanitized(HarnessError(HarnessErrorBody.unreachable, urlErrorCode: .timedOut)) == .timedOut)
+        #expect(SpeechError.sanitized(HarnessError(HarnessErrorBody.unreachable, urlErrorCode: .notConnectedToInternet)) == .requestFailed)
+    }
+
     @Test(.timeLimit(.minutes(1)))
     func aCurrentInterruptionStopsPlaybackAndSurfacesTheError() async throws {
         let output = SilentSpeechOutput()

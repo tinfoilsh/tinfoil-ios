@@ -11,14 +11,16 @@ struct SealedTransportTests {
     }
 
     @Test(arguments: [
-        TinfoilError.network("attestation fetch failed", urlError: URLError(.notConnectedToInternet)),
-        URLError(.notConnectedToInternet),
-        URLError(.timedOut),
-    ] as [any Error])
-    func aChatServiceThatCouldNotBeReachedIsAConnectionProblemToRetry(_ failure: any Error) {
+        (TinfoilError.network("attestation fetch failed", urlError: URLError(.notConnectedToInternet)), URLError.Code.notConnectedToInternet),
+        (TinfoilError.network("not an HTTP response"), nil),
+        (URLError(.notConnectedToInternet), .notConnectedToInternet),
+        (URLError(.timedOut), .timedOut),
+    ] as [(any Error, URLError.Code?)])
+    func aChatServiceThatCouldNotBeReachedIsAConnectionProblemToRetry(_ failure: any Error, _ network: URLError.Code?) {
         let error = Self.mapped(failure)
-        #expect(error == HarnessError(HarnessErrorBody.unreachable))
+        #expect(error?.detail == HarnessErrorBody.unreachable)
         #expect(error?.code == HarnessErrorCode.connection && error?.action == .retry)
+        #expect(error?.urlErrorCode == network)
     }
 
     @Test func anEnclaveThatFailedVerificationSaysNothingWasSent() {

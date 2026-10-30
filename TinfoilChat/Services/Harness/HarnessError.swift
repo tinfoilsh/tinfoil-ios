@@ -112,10 +112,13 @@ extension HarnessErrorBody: Decodable {
 struct HarnessError: Error, Equatable {
     let detail: HarnessErrorBody
     let status: Int?
+    /// Why the network failed, for a request that could not be carried.
+    let urlErrorCode: URLError.Code?
 
-    init(_ detail: HarnessErrorBody, status: Int? = nil) {
+    init(_ detail: HarnessErrorBody, status: Int? = nil, urlErrorCode: URLError.Code? = nil) {
         self.detail = detail
         self.status = status
+        self.urlErrorCode = urlErrorCode
     }
 
     init(code: String, message: String, action: ErrorAction, status: Int? = nil) {

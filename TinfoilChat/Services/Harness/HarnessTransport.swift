@@ -120,10 +120,10 @@ actor SealedTransport: HarnessTransport {
         case is CancellationError:
             return CancellationError()
         case let error as URLError:
-            return error.code == .cancelled ? CancellationError() : HarnessError(HarnessErrorBody.unreachable)
+            return error.code == .cancelled ? CancellationError() : HarnessError(HarnessErrorBody.unreachable, urlErrorCode: error.code)
         case let error as TinfoilError:
             switch error {
-            case .networkError: return HarnessError(HarnessErrorBody.unreachable)
+            case .networkError(let details): return HarnessError(HarnessErrorBody.unreachable, urlErrorCode: details.urlError?.code)
             case .attestationError: return HarnessError(HarnessErrorBody.unverified)
             case .configurationError: return misconfigured
             }
