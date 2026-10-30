@@ -48,13 +48,13 @@ protocol HarnessTransport: Sendable {
 }
 
 /// The transport to the harness enclave: each request's body is sealed to
-/// the X25519 key the enclave's attestation endorses, which is verified
-/// again as its freshness ends or as the enclave refuses a key it rotated.
+/// the X25519 key the enclave's attestation endorses, which the client
+/// verifies again as its freshness ends or as the enclave refuses a key it
+/// rotated.
 actor SealedTransport: HarnessTransport {
-    private let origin: String
+    private let origin: URL
     private let enclave: String
     private let repo: String
-    private let session: URLSession
     /// The enclave's client, made and verified by the first request and
     /// shared by every request after it.
     private var connecting: Task<EnclaveHTTPClient, Error>?
@@ -62,22 +62,17 @@ actor SealedTransport: HarnessTransport {
     init(url: String = Constants.Harness.url, repo: String = Constants.Harness.configRepo) throws {
         guard let parsed = URL(string: url), parsed.scheme == "https", let host = parsed.host,
               parsed.user == nil, parsed.password == nil, parsed.path.isEmpty || parsed.path == "/",
-              parsed.query == nil, parsed.fragment == nil else {
+              parsed.query == nil, parsed.fragment == nil,
+              let origin = URL(string: "https://\(host)" + (parsed.port.map { ":\($0)" } ?? "")) else {
             throw HarnessError(
                 code: HarnessErrorCode.configuration,
                 message: "Configure an HTTPS origin for the chat service.",
                 action: .stop
             )
         }
-        origin = "https://\(host)" + (parsed.port.map { ":\($0)" } ?? "")
+        self.origin = origin
         enclave = parsed.port.map { "\(host):\($0)" } ?? host
         self.repo = repo
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = Constants.Harness.streamIdleTimeoutSeconds
-        configuration.waitsForConnectivity = true
-        configuration.httpCookieStorage = nil
-        configuration.urlCache = nil
-        session = URLSession(configuration: configuration, delegate: RedirectRefusal.shared, delegateQueue: nil)
     }
 
     func verification() async -> Verification? {
@@ -86,32 +81,16 @@ actor SealedTransport: HarnessTransport {
     }
 
     func send(_ request: HarnessRequest) async throws -> HarnessResponse {
-        let enclave = try await client()
-        for attempt in 0..<2 {
-            let key = try await publicKey(enclave)
-            try Task.checkCancellation()
-            let client = try EHBPClient(baseURL: origin, publicKey: key, session: session)
-            do {
-                let (stream, response) = try await client.requestStream(
-                    method: "POST",
-                    path: request.route.rawValue,
-                    headers: request.headers,
-                    body: request.body
-                )
-                let sealed = response.value(forHTTPHeaderField: EHBPProtocol.responseNonceHeader) != nil
-                return HarnessResponse(status: response.statusCode, headers: Self.headers(of: response), sealed: sealed, body: stream)
-            } catch let error as EHBPError where error.code == .keyConfigMismatch {
-                // The enclave rotated its key since it was verified; the
-                // request is sealed again, once, to the key verified now.
-                guard attempt == 0 else { break }
-                _ = try await verified(enclave, again: true)
-            }
-        }
-        throw HarnessError(
-            code: HarnessErrorCode.connection,
-            message: "The chat service refused the key it was verified with.",
-            action: .retry
-        )
+        let client = try await client()
+        var sent = URLRequest(url: origin.appending(path: request.route.rawValue))
+        sent.httpMethod = "POST"
+        sent.allHTTPHeaderFields = request.headers
+        sent.httpBody = request.body
+        sent.timeoutInterval = Constants.Harness.streamIdleTimeoutSeconds
+        let answer = try await client.recoverableBytes(for: sent)
+        let response = answer.response
+        let sealed = response.value(forHTTPHeaderField: EHBPProtocol.responseNonceHeader) != nil
+        return HarnessResponse(status: response.statusCode, headers: Self.headers(of: response), sealed: sealed, body: answer.body)
     }
 
     /// The enclave's client, verified once it is made. One that has not been
@@ -132,49 +111,20 @@ actor SealedTransport: HarnessTransport {
         let enclave = enclave
         let repo = repo
         return Task {
-            try await Self.withinAttestationTimeout {
-                try await EnclaveHTTPClient(enclave: enclave, repo: repo, transportMode: .ehbp)
+            try await withThrowingTaskGroup(of: EnclaveHTTPClient.self) { group in
+                group.addTask { try await EnclaveHTTPClient(enclave: enclave, repo: repo, transportMode: .ehbp) }
+                group.addTask {
+                    try await Task.sleep(for: .seconds(Constants.Harness.attestationTimeoutSeconds))
+                    throw HarnessError(
+                        code: HarnessErrorCode.connection,
+                        message: "The chat service could not be verified in time. Check your connection and try again.",
+                        action: .retry
+                    )
+                }
+                let first = try await group.next()!
+                group.cancelAll()
+                return first
             }
-        }
-    }
-
-    /// The key requests are sealed to, from the enclave's verification.
-    private func publicKey(_ enclave: EnclaveHTTPClient) async throws -> Data {
-        let verification = try await verified(enclave, again: false)
-        guard let hex = verification.hpkePublicKey, let key = Data(lowercaseHex: hex),
-              key.count == Constants.Harness.hpkePublicKeyBytes else {
-            throw HarnessError(
-                code: HarnessErrorCode.configuration,
-                message: "The chat service endorses no key to seal requests to.",
-                action: .stop
-            )
-        }
-        return key
-    }
-
-    /// The enclave's verification, fresh or made again, within the
-    /// attestation timeout. One that has not finished by then fails the
-    /// request; the next one asks again.
-    private func verified(_ enclave: EnclaveHTTPClient, again: Bool) async throws -> Verification {
-        try await Self.withinAttestationTimeout {
-            try await again ? enclave.reverify() : enclave.ensureVerified()
-        }
-    }
-
-    private static func withinAttestationTimeout<T: Sendable>(_ work: @escaping @Sendable () async throws -> T) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask(operation: work)
-            group.addTask {
-                try await Task.sleep(for: .seconds(Constants.Harness.attestationTimeoutSeconds))
-                throw HarnessError(
-                    code: HarnessErrorCode.connection,
-                    message: "The chat service could not be verified in time. Check your connection and try again.",
-                    action: .retry
-                )
-            }
-            let first = try await group.next()!
-            group.cancelAll()
-            return first
         }
     }
 

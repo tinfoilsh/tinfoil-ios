@@ -238,8 +238,9 @@ enum Constants {
         /// latest sorts first, as the web app makes them.
         static let maxReverseTimestamp: Int = 9999999999999
         static let reverseTimestampDigits: Int = String(maxReverseTimestamp).count
-        /// An attestation that has not finished by then is abandoned: the
-        /// request fails, and the next one verifies the enclave again.
+        /// Making the chat service's client, which verifies the enclave
+        /// first, is abandoned after this long: the requests waiting on it
+        /// fail, and the next one tries again.
         static let attestationTimeoutSeconds: TimeInterval = 20
         /// A live run's chat access that could not be minted again, for a
         /// reason that names no time to ask again, is asked for again after
@@ -248,7 +249,6 @@ enum Constants {
         /// How long a run's stream may go without a byte before the
         /// connection is given up.
         static let streamIdleTimeoutSeconds: TimeInterval = 120
-        static let hpkePublicKeyBytes = 32
         /// The version of the protocol this client was built from, the
         /// info.version of harness-protocol/openapi.yaml. A harness that no
         /// longer serves it asks the user to update the app.
