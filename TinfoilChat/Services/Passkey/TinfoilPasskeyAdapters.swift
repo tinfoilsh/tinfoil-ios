@@ -22,44 +22,19 @@ enum TinfoilWrappedKeyAdapter {
     }
 
     struct CandidateSet {
-        /// A bundle the kit unwraps: one wrapped key, or a generic key
-        /// envelope's primary key with the alternatives wrapped beside it.
         struct Current {
             let bundle: KeyState.Bundle
             let wrappedKey: WrappedKey
-            var alternatives: [WrappedKey] = []
         }
 
-        let orderedBundles: [KeyState.Bundle]
         let current: [Current]
-        let legacy: [KeyState.Bundle]
-
-        enum Selection {
-            case current(Current)
-            case legacy(KeyState.Bundle)
-            case missing
-        }
 
         var credentialIds: [String] {
-            orderedBundles.map(\.credentialId)
+            current.map(\.bundle.credentialId)
         }
 
         func current(credentialId: String) -> Current? {
             current.first { $0.bundle.credentialId == credentialId }
-        }
-
-        func legacy(credentialId: String) -> KeyState.Bundle? {
-            legacy.first { $0.credentialId == credentialId }
-        }
-
-        func selection(credentialId: String) -> Selection {
-            if let current = current(credentialId: credentialId) {
-                return .current(current)
-            }
-            if let legacy = legacy(credentialId: credentialId) {
-                return .legacy(legacy)
-            }
-            return .missing
         }
     }
 
@@ -106,20 +81,8 @@ enum TinfoilWrappedKeyAdapter {
     private static func candidateSet(
         orderedBundles: [KeyState.Bundle]
     ) -> CandidateSet {
-        var usable: [KeyState.Bundle] = []
         var current: [CandidateSet.Current] = []
-        var legacy: [KeyState.Bundle] = []
         for bundle in orderedBundles {
-            switch GenericKeyEnvelope.parse(bundle) {
-            case .envelope(let primary, let alternatives):
-                usable.append(bundle)
-                current.append(CandidateSet.Current(bundle: bundle, wrappedKey: primary, alternatives: alternatives))
-                continue
-            case .invalid:
-                continue
-            case .notEnvelope:
-                usable.append(bundle)
-            }
             if bundle.kekIv.count == ContentKeyBundle.aesGcmIvByteCount * 2,
                bundle.encryptedKeys.count == (
                    ContentKeyBundle.cekByteCount + ContentKeyBundle.aesGcmTagByteCount
@@ -132,84 +95,9 @@ enum TinfoilWrappedKeyAdapter {
                         wrappedKeyHex: bundle.encryptedKeys
                     ))
                 ))
-            } else {
-                legacy.append(bundle)
             }
         }
-        return CandidateSet(
-            orderedBundles: usable,
-            current: current,
-            legacy: legacy
-        )
-    }
-}
-
-/// The generic key envelope web clients write into a bundle's
-/// `encrypted_keys`: plaintext UTF-8 JSON naming the primary key and its
-/// alternatives as the kit's wrapped key records, each wrapped under the
-/// bundle's own passkey.
-enum GenericKeyEnvelope {
-    static let version = 1
-    static let maxAlternatives = 64
-    static let maxBytes = 128 * 1024
-    static let authorizationModes: Set<String> = ["validated", "explicit_start_fresh"]
-    private static let fields: Set<String> = ["version", "authorizationMode", "primary", "alternatives"]
-    private static let objectStart: Character = "{"
-
-    enum Parsed {
-        /// The bundle carries a single wrapped key or the legacy encrypted
-        /// envelope.
-        case notEnvelope
-        /// The bundle carries an envelope that fails its checks, and is not
-        /// a candidate.
-        case invalid
-        case envelope(primary: WrappedKey, alternatives: [WrappedKey])
-    }
-
-    static func parse(_ bundle: KeyState.Bundle) -> Parsed {
-        guard let bytes = Data(lowercaseHex: bundle.encryptedKeys),
-              bytes.count <= maxBytes,
-              let text = String(data: bytes, encoding: .utf8),
-              text.drop(while: \.isWhitespace).first == objectStart else {
-            return .notEnvelope
-        }
-        guard Data(lowercaseHex: bundle.kekIv)?.count == ContentKeyBundle.aesGcmIvByteCount,
-              let object = (try? JSONSerialization.jsonObject(with: bytes)) as? [String: Any],
-              Set(object.keys) == fields,
-              let version = object["version"] as? NSNumber,
-              CFGetTypeID(version) != CFBooleanGetTypeID(),
-              version == NSNumber(value: Self.version),
-              let mode = object["authorizationMode"] as? String, authorizationModes.contains(mode),
-              let primaryRecord = object["primary"] as? String,
-              let alternativeRecords = object["alternatives"] as? [String],
-              alternativeRecords.count <= maxAlternatives,
-              Set(alternativeRecords).count == alternativeRecords.count,
-              !alternativeRecords.contains(primaryRecord),
-              let primary = canonicalRecord(primaryRecord) else {
-            return .invalid
-        }
-        var alternatives: [WrappedKey] = []
-        for record in alternativeRecords {
-            guard let alternative = canonicalRecord(record) else { return .invalid }
-            alternatives.append(alternative)
-        }
-        let records = [primary] + alternatives
-        guard records.allSatisfy({ $0.profile == TinfoilPasskeyProfile.current && $0.credentialId == bundle.credentialId }),
-              Set(records.map(\.kekIvHex)).count == records.count else {
-            return .invalid
-        }
-        return .envelope(primary: primary, alternatives: alternatives)
-    }
-
-    /// A wrapped key record the kit decodes and encodes back to the same
-    /// bytes.
-    private static func canonicalRecord(_ record: String) -> WrappedKey? {
-        let data = Data(record.utf8)
-        guard let wrappedKey = try? decodeWrappedKeyRecord(data),
-              (try? encodeWrappedKeyRecord(wrappedKey)) == data else {
-            return nil
-        }
-        return wrappedKey
+        return CandidateSet(current: current)
     }
 }
 

@@ -51,11 +51,6 @@ enum PasskeyFlowResult: Sendable {
     case failure(PasskeyFlowFailure, message: String? = nil)
 }
 
-enum PasskeyCandidateRecoveryResult: Sendable {
-    case current(PasskeyFlowResult, legacyAlternatives: [String])
-    case failure(PasskeyFlowFailure, message: String? = nil)
-}
-
 struct PasskeyRecoveryCandidates {
     let current: TinfoilWrappedKeyAdapter.CandidateSet
     let credentialIds: [String]
@@ -71,20 +66,6 @@ struct PasskeyRecoveryCandidates {
 
         var seen = Set<String>()
         credentialIds = current.credentialIds.filter { seen.insert($0).inserted }
-    }
-
-    func resolveSelectedCredential<Result>(
-        credentialId: String,
-        current recoverCurrent: (TinfoilWrappedKeyAdapter.CandidateSet.Current) -> Result?,
-        currentEnvelope recoverCurrentEnvelope: (KeyState.Bundle) -> Result?
-    ) -> Result? {
-        for candidate in current.current where candidate.bundle.credentialId == credentialId {
-            if let result = recoverCurrent(candidate) { return result }
-        }
-        for bundle in current.legacy where bundle.credentialId == credentialId {
-            if let result = recoverCurrentEnvelope(bundle) { return result }
-        }
-        return nil
     }
 }
 
@@ -204,7 +185,7 @@ enum PasskeyKeyFlow {
     // MARK: - Returning user: unlock from server
 
     /// End-to-end "returning user" unlock against the enclave. Wraps
-    /// keyCurrent() + unlockWithPasskeyDetailed() + the key_id binding check
+    /// keyCurrent() + unlockWithPasskey() + the key_id binding check
     /// into a single call.
     static func unlockFromServer(prefer: String? = nil, silent: Bool = false) async -> PasskeyFlowResult {
         let state: KeyState
@@ -227,7 +208,7 @@ enum PasskeyKeyFlow {
         }
 
         let candidates = state.bundles.values.sorted { $0.credentialId < $1.credentialId }
-        let (result, legacyAlternatives) = await unlockWithPasskeyDetailed(
+        let result = await unlockWithPasskey(
             candidates: candidates,
             prefer: prefer,
             silent: silent
@@ -251,10 +232,6 @@ enum PasskeyKeyFlow {
             PasskeyDiagnostics.failure("unlock: key id mismatch \(mismatch)")
             return .failure(.keyIdMismatch, message: mismatch)
         }
-        // Adopt the bundle's legacy alternatives only after the binding
-        // check accepts it: a rejected bundle must not mutate the local
-        // key history.
-        retainLegacyAlternatives(legacyAlternatives)
         return .success(
             cek: cek,
             keyIdHex: derivedKeyIdHex,
@@ -267,7 +244,7 @@ enum PasskeyKeyFlow {
         state: KeyState,
         prefer: String?,
         immediatelyAvailable: Bool
-    ) async -> PasskeyCandidateRecoveryResult {
+    ) async -> PasskeyFlowResult {
         let candidates = PasskeyRecoveryCandidates(
             bundles: state.bundles.values.sorted { $0.credentialId < $1.credentialId },
             preferredCredentialId: prefer
@@ -299,60 +276,33 @@ enum PasskeyKeyFlow {
         }
         PasskeyDiagnostics.step("recovery: ceremony succeeded, resolving asserted credential")
 
-        if let resolved: PasskeyCandidateRecoveryResult = candidates.resolveSelectedCredential(
-            credentialId: evaluated.credentialId,
-            current: { candidate in
-                let unwrapped: UnwrappedContentKey
-                do {
-                    unwrapped = try unwrapCurrent(candidate, prfResult: evaluated.prfResult)
-                } catch {
-                    PasskeyDiagnostics.failure(
-                        "recovery: bundle unwrap failed: \(PasskeyDiagnostics.describe(error))"
-                    )
-                    return nil
-                }
-                guard let keyIdHex = validatedKeyId(
-                    cek: unwrapped.cek, enclaveKeyId: state.keyId, context: "bundle"
-                ) else { return nil }
-                return .current(.success(
-                    cek: unwrapped.cek,
-                    keyIdHex: keyIdHex,
-                    credentialId: evaluated.credentialId,
-                    createdVia: state.createdVia
-                ), legacyAlternatives: unwrapped.legacyAlternativeKeys)
-            },
-            currentEnvelope: { bundle in
-                let unwrapped: UnwrappedContentKey
-                do {
-                    unwrapped = try ContentKeyBundle.unwrapLegacyJsonEnvelope(
-                        prfOutput: evaluated.prfResult.output,
-                        kekIvHex: bundle.kekIv,
-                        wrappedKeyHex: bundle.encryptedKeys
-                    )
-                } catch {
-                    PasskeyDiagnostics.failure(
-                        "recovery: envelope unwrap failed: \(PasskeyDiagnostics.describe(error))"
-                    )
-                    return nil
-                }
-                guard let keyIdHex = validatedKeyId(
-                    cek: unwrapped.cek, enclaveKeyId: state.keyId, context: "envelope"
-                ) else { return nil }
-                return .current(.success(
-                    cek: unwrapped.cek,
-                    keyIdHex: keyIdHex,
-                    credentialId: evaluated.credentialId,
-                    createdVia: state.createdVia
-                ), legacyAlternatives: unwrapped.legacyAlternativeKeys)
-            }
-        ) {
-            return resolved
+        guard let candidate = candidates.current.current(credentialId: evaluated.credentialId) else {
+            PasskeyDiagnostics.failure(
+                "recovery: asserted credential resolved no usable bundle"
+            )
+            return .failure(.bundleDecryptFailed)
         }
-
-        PasskeyDiagnostics.failure(
-            "recovery: asserted credential resolved no usable bundle"
+        let cek: Data
+        do {
+            cek = try PasskeyService.shared.unwrapKeyWithPRFResult(
+                wrappedKey: candidate.wrappedKey,
+                prfResult: evaluated.prfResult
+            )
+        } catch {
+            PasskeyDiagnostics.failure(
+                "recovery: bundle unwrap failed: \(PasskeyDiagnostics.describe(error))"
+            )
+            return .failure(.bundleDecryptFailed)
+        }
+        guard let keyIdHex = validatedKeyId(cek: cek, enclaveKeyId: state.keyId) else {
+            return .failure(.bundleDecryptFailed)
+        }
+        return .success(
+            cek: cek,
+            keyIdHex: keyIdHex,
+            credentialId: evaluated.credentialId,
+            createdVia: state.createdVia
         )
-        return .failure(.bundleDecryptFailed)
     }
 
     /// Derive the key id for an unwrapped CEK and enforce the §8.6
@@ -360,16 +310,15 @@ enum PasskeyKeyFlow {
     /// any failure. Returns the derived key id hex when it matches.
     private static func validatedKeyId(
         cek: Data,
-        enclaveKeyId: String?,
-        context: String
+        enclaveKeyId: String?
     ) -> String? {
         guard let keyIdHex = try? ContentKeyBundle.deriveKeyIdHex(cek: cek) else {
-            PasskeyDiagnostics.failure("recovery: \(context) key id derivation failed")
+            PasskeyDiagnostics.failure("recovery: bundle key id derivation failed")
             return nil
         }
         guard keyIdHex == enclaveKeyId else {
             PasskeyDiagnostics.failure(
-                "recovery: \(context) key id mismatch derived=\(PasskeyDiagnostics.keyIdPrefix(keyIdHex)) "
+                "recovery: bundle key id mismatch derived=\(PasskeyDiagnostics.keyIdPrefix(keyIdHex)) "
                 + "enclave=\(PasskeyDiagnostics.keyIdPrefix(enclaveKeyId))"
             )
             return nil
@@ -379,135 +328,46 @@ enum PasskeyKeyFlow {
 
     /// Recover the user's CEK by re-authenticating their passkey and
     /// unwrapping a candidate bundle. The caller supplies the bundles —
-    /// typically from a fresh `keyCurrent()` probe. Legacy alternative
-    /// keys found in the bundle envelope are returned, not retained:
-    /// the caller decides after its own validation (e.g. the key_id
-    /// binding check) whether they may enter the local key history.
-    private static func unlockWithPasskeyDetailed(
+    /// typically from a fresh `keyCurrent()` probe.
+    private static func unlockWithPasskey(
         candidates: [KeyState.Bundle],
         prefer: String? = nil,
         silent: Bool = false
-    ) async -> (PasskeyFlowResult, legacyAlternatives: [String]) {
-        guard !candidates.isEmpty else {
-            return (.failure(.noRemoteBundle), [])
-        }
+    ) async -> PasskeyFlowResult {
         let candidateSet = TinfoilWrappedKeyAdapter.partition(
             candidates,
             preferredCredentialId: prefer
         )
+        guard !candidateSet.current.isEmpty else {
+            return .failure(.noRemoteBundle)
+        }
         let credentialId: String
         let cek: Data
-        var legacyAlternatives: [String] = []
-
-        // The kit recovers a single wrapped key by itself; alternatives and
-        // the legacy envelope need the ceremony's PRF output.
-        if candidateSet.legacy.isEmpty, candidateSet.current.allSatisfy({ $0.alternatives.isEmpty }) {
-            guard !candidateSet.current.isEmpty else {
-                return (.failure(.noRemoteBundle), [])
-            }
-            do {
-                let recovered = try await PasskeyService.shared.recoverKey(
-                    wrappedKeys: candidateSet.current.map(\.wrappedKey),
-                    preferredCredentialId: prefer,
-                    immediatelyAvailable: silent
-                )
-                credentialId = recovered.credentialId
-                cek = recovered.key
-            } catch let err {
-                return (.failure(failureFromPasskeyError(err), message: err.localizedDescription), [])
-            }
-        } else {
-            let evaluated: EvaluatedCredential
-            do {
-                evaluated = try await PasskeyService.shared.evaluateCredential(
-                    credentialIds: candidateSet.credentialIds,
-                    preferredCredentialId: prefer,
-                    immediatelyAvailable: silent
-                )
-            } catch let err {
-                return (.failure(failureFromPasskeyError(err), message: err.localizedDescription), [])
-            }
-
-            switch candidateSet.selection(credentialId: evaluated.credentialId) {
-            case .current(let current):
-                do {
-                    let unwrapped = try unwrapCurrent(current, prfResult: evaluated.prfResult)
-                    cek = unwrapped.cek
-                    legacyAlternatives = unwrapped.legacyAlternativeKeys
-                    credentialId = evaluated.credentialId
-                } catch let err as PasskeyError {
-                    return (.failure(failureFromPasskeyError(err), message: err.localizedDescription), [])
-                } catch {
-                    return (.failure(.bundleDecryptFailed, message: error.localizedDescription), [])
-                }
-            case .legacy(let bundle):
-                let unwrapped: UnwrappedContentKey
-                do {
-                    unwrapped = try ContentKeyBundle.unwrapLegacyJsonEnvelope(
-                        prfOutput: evaluated.prfResult.output,
-                        kekIvHex: bundle.kekIv,
-                        wrappedKeyHex: bundle.encryptedKeys
-                    )
-                } catch {
-                    return (.failure(.bundleDecryptFailed, message: error.localizedDescription), [])
-                }
-                credentialId = evaluated.credentialId
-                cek = unwrapped.cek
-                legacyAlternatives = unwrapped.legacyAlternativeKeys
-            case .missing:
-                return (.failure(.noRemoteBundle), [])
-            }
+        do {
+            let recovered = try await PasskeyService.shared.recoverKey(
+                wrappedKeys: candidateSet.current.map(\.wrappedKey),
+                preferredCredentialId: prefer,
+                immediatelyAvailable: silent
+            )
+            credentialId = recovered.credentialId
+            cek = recovered.key
+        } catch let err {
+            return .failure(failureFromPasskeyError(err), message: err.localizedDescription)
         }
 
         let keyIdHex: String
         do {
             keyIdHex = try ContentKeyBundle.deriveKeyIdHex(cek: cek)
         } catch {
-            return (.failure(.bundleDecryptFailed, message: error.localizedDescription), [])
+            return .failure(.bundleDecryptFailed, message: error.localizedDescription)
         }
 
-        return (
-            .success(
-                cek: cek,
-                keyIdHex: keyIdHex,
-                credentialId: credentialId,
-                createdVia: nil
-            ),
-            legacyAlternatives
+        return .success(
+            cek: cek,
+            keyIdHex: keyIdHex,
+            credentialId: credentialId,
+            createdVia: nil
         )
-    }
-
-    /// Keep historical CEKs carried by a legacy bundle envelope as
-    /// decrypt-only fallbacks so the migration sweep can unseal rows
-    /// still sealed under a rotated-away key. Additive and idempotent;
-    /// never touches the primary key.
-    static func retainLegacyAlternatives(_ keys: [String]) {
-        for key in keys {
-            try? EncryptionService.shared.addDecryptionKey(key)
-        }
-    }
-
-    /// Unwraps a bundle the kit reads with the passkey's PRF output: its
-    /// key, and the alternatives a generic key envelope wraps beside it as
-    /// key strings for the key history. A key named twice fails the bundle.
-    static func unwrapCurrent(
-        _ candidate: TinfoilWrappedKeyAdapter.CandidateSet.Current,
-        prfResult: PRFResult
-    ) throws -> UnwrappedContentKey {
-        let cek = try PasskeyService.shared.unwrapKeyWithPRFResult(
-            wrappedKey: candidate.wrappedKey,
-            prfResult: prfResult
-        )
-        var seen: Set<String> = [EncryptionService.shared.encodeKeyFromBytes(cek)]
-        var alternatives: [String] = []
-        for wrappedKey in candidate.alternatives {
-            let key = EncryptionService.shared.encodeKeyFromBytes(
-                try PasskeyService.shared.unwrapKeyWithPRFResult(wrappedKey: wrappedKey, prfResult: prfResult)
-            )
-            guard seen.insert(key).inserted else { throw ContentKeyBundleError.duplicateKey }
-            alternatives.append(key)
-        }
-        return UnwrappedContentKey(cek: cek, legacyAlternativeKeys: alternatives)
     }
 
     // MARK: - First-time backup: register the existing local CEK
