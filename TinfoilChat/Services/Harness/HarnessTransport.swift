@@ -41,11 +41,15 @@ struct HarnessResponse: Sendable {
     }
 }
 
+/// The result of a verification of the enclave.
+typealias EnclaveVerificationResult = Result<Verification, TinfoilError>
+
 /// Carries requests to the harness through an attested, sealed channel.
 protocol HarnessTransport: Sendable {
     func send(_ request: HarnessRequest) async throws -> HarnessResponse
-    /// The latest verification of the enclave, or nil before the first.
-    func verification() async -> Verification?
+    /// The result of each verification of the enclave as it finishes. Of
+    /// those not read yet, only the latest is kept.
+    var verifications: AsyncStream<EnclaveVerificationResult> { get }
 }
 
 /// The transport to the harness enclave: each request's body is sealed to
@@ -55,6 +59,8 @@ protocol HarnessTransport: Sendable {
 actor SealedTransport: HarnessTransport {
     private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Harness")
 
+    nonisolated let verifications: AsyncStream<EnclaveVerificationResult>
+    private let verified: AsyncStream<EnclaveVerificationResult>.Continuation
     private let origin: URL
     private let enclave: String
     private let repo: String
@@ -76,11 +82,11 @@ actor SealedTransport: HarnessTransport {
         self.origin = origin
         enclave = parsed.port.map { "\(host):\($0)" } ?? host
         self.repo = repo
+        (verifications, verified) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
     }
 
-    func verification() async -> Verification? {
-        guard let connecting, let client = try? await connecting.value else { return nil }
-        return await client.current
+    deinit {
+        verified.finish()
     }
 
     /// Sends a request, failing with a harness error, or with
@@ -153,9 +159,17 @@ actor SealedTransport: HarnessTransport {
     private func connect() -> Task<EnclaveHTTPClient, Error> {
         let enclave = enclave
         let repo = repo
+        let verified = verified
         return Task {
             try await withThrowingTaskGroup(of: EnclaveHTTPClient.self) { group in
-                group.addTask { try await EnclaveHTTPClient(enclave: enclave, repo: repo, transportMode: .ehbp) }
+                group.addTask {
+                    try await EnclaveHTTPClient(
+                        enclave: enclave,
+                        repo: repo,
+                        transportMode: .ehbp,
+                        onVerificationResult: { verified.yield($0) }
+                    )
+                }
                 group.addTask {
                     try await Task.sleep(for: .seconds(Constants.Harness.attestationTimeoutSeconds))
                     throw URLError(.timedOut)

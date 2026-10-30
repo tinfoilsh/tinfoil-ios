@@ -1,12 +1,14 @@
 import Foundation
 import Testing
-import Tinfoil
+@testable import Tinfoil
 @testable import TinfoilChat
 
 /// A transport that answers from a script and keeps what it was sent.
 actor ScriptedTransport: HarnessTransport {
     typealias Answer = @Sendable (HarnessRequest) -> HarnessResponse
 
+    nonisolated let verifications: AsyncStream<EnclaveVerificationResult>
+    private nonisolated let verified: AsyncStream<EnclaveVerificationResult>.Continuation
     private(set) var requests: [HarnessRequest] = []
     private var answers: [Answer]
     private var holding = false
@@ -16,6 +18,13 @@ actor ScriptedTransport: HarnessTransport {
 
     init(_ answers: [Answer]) {
         self.answers = answers
+        (verifications, verified) = AsyncStream.makeStream()
+    }
+
+    /// Reports a verification of the enclave, as the SDK does as each one
+    /// finishes.
+    nonisolated func report(_ result: EnclaveVerificationResult) {
+        verified.yield(result)
     }
 
     /// Scripts the next answer.
@@ -56,8 +65,23 @@ actor ScriptedTransport: HarnessTransport {
         }
         return answers.removeFirst()(request)
     }
+}
 
-    func verification() async -> Verification? { nil }
+extension Verification {
+    /// A verification as the SDK reports one that succeeded.
+    static let succeeded = Verification(
+        configRepo: Constants.Harness.configRepo,
+        codeDigest: "digest",
+        codeTag: "v1.0.0",
+        codeMeasurement: nil,
+        enclaveMeasurement: nil,
+        tlsPublicKeyFingerprint: "fingerprint",
+        hpkePublicKey: nil,
+        cryptoMaterial: [],
+        freshnessExpiresAt: .distantFuture,
+        verifiedAt: Date(),
+        verifier: SoftwareIdentity(name: "tinfoil-swift", version: "test")
+    )
 }
 
 actor ScriptedCredentials: HarnessCredentials {
