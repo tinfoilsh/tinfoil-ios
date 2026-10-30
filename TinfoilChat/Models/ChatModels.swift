@@ -846,6 +846,11 @@ struct QueuedMessage: Identifiable, Equatable {
 
 /// Represents a single message in a chat
 struct Message: Identifiable, Codable, Equatable {
+    private enum HarnessTool: String {
+        case webSearch = "web_search"
+        case webFetch = "web_fetch"
+    }
+
     let id: String
     let role: MessageRole
     var turnId: String? = nil
@@ -921,7 +926,8 @@ struct Message: Identifiable, Codable, Equatable {
     var hasUnsupportedGenUI: Bool {
         guard role == .assistant else { return false }
         for toolCall in toolCalls {
-            if !GenUIRegistry.shared.isGenUIToolName(toolCall.name) {
+            if HarnessTool(rawValue: toolCall.name) == nil,
+               !GenUIRegistry.shared.isGenUIToolName(toolCall.name) {
                 return true
             }
         }
@@ -930,7 +936,8 @@ struct Message: Identifiable, Codable, Equatable {
                 guard let object = block.objectValue,
                       object["type"]?.stringValue == "tool_call",
                       let name = object["name"]?.stringValue else { continue }
-                if !GenUIRegistry.shared.isGenUIToolName(name) {
+                if HarnessTool(rawValue: name) == nil,
+                   !GenUIRegistry.shared.isGenUIToolName(name) {
                     return true
                 }
             }
@@ -1031,7 +1038,7 @@ struct Message: Identifiable, Codable, Equatable {
         case attachments
         case thinkingDuration, isError
         case webSearchBeforeThinking, annotations, searchReasoning
-        case segments, webSearches, toolCalls, timeline
+        case segments, webSearches, toolCalls, timeline, createdAt
         // Legacy keys for decoding React messages that use the old format
         case documentContent, imageData, imageBase64, multimodalText, documents
     }
@@ -1054,6 +1061,10 @@ struct Message: Identifiable, Codable, Equatable {
         } else if let dateString = try? container.decode(String.self, forKey: .timestamp) {
             // Try parsing with fractional seconds first, then without
             timestamp = Self.iso8601Formatter.date(from: dateString) 
+                ?? Self.iso8601FormatterNoFractional.date(from: dateString)
+                ?? Date()
+        } else if let dateString = try? container.decode(String.self, forKey: .createdAt) {
+            timestamp = Self.iso8601Formatter.date(from: dateString)
                 ?? Self.iso8601FormatterNoFractional.date(from: dateString)
                 ?? Date()
         } else {
@@ -1123,21 +1134,79 @@ struct Message: Identifiable, Codable, Equatable {
         // the timeline so the standard segments rendering pipeline can
         // reproduce the webapp's chronological layout faithfully.
         if role == .assistant,
-           segments == nil,
            let timeline,
+           segments == nil || timeline.contains(where: Self.isHarnessTool),
            !timeline.isEmpty {
-            let derived = Self.deriveFromTimeline(timeline)
+            let derived = Self.deriveFromTimeline(Self.displayTimeline(timeline))
+            let hasHarnessTools = timeline.contains(where: Self.isHarnessTool)
             if !derived.segments.isEmpty {
                 segments = derived.segments
             }
-            if webSearches == nil, !derived.webSearches.isEmpty {
+            if webSearches == nil || hasHarnessTools, !derived.webSearches.isEmpty {
                 webSearches = derived.webSearches
             }
-            if toolCalls.isEmpty, !derived.toolCalls.isEmpty {
+            if toolCalls.isEmpty || hasHarnessTools {
                 toolCalls = derived.toolCalls
             }
-            if urlFetches.isEmpty, !derived.urlFetches.isEmpty {
+            if urlFetches.isEmpty || hasHarnessTools, !derived.urlFetches.isEmpty {
                 urlFetches = derived.urlFetches
+            }
+        }
+    }
+
+    private static func isHarnessTool(_ block: JSONValue) -> Bool {
+        guard let fields = block.objectValue,
+              fields["type"]?.stringValue == "tool_call",
+              let name = fields["name"]?.stringValue else { return false }
+        return HarnessTool(rawValue: name) != nil
+    }
+
+    /// Presentation and prompt history use native search/fetch blocks; sync keeps
+    /// the original tool blocks, including their results and privacy metadata.
+    static func displayTimeline(_ timeline: [JSONValue]) -> [JSONValue] {
+        timeline.map { block in
+            guard isHarnessTool(block), let fields = block.objectValue,
+                  let name = fields["name"]?.stringValue,
+                  let tool = HarnessTool(rawValue: name),
+                  let id = fields["toolCallId"]?.stringValue ?? fields["id"]?.stringValue else { return block }
+            let arguments: [String: JSONValue]
+            if let json = fields["arguments"]?.stringValue,
+               let decoded = try? JSONDecoder().decode(JSONValue.self, from: Data(json.utf8)) {
+                arguments = decoded.objectValue ?? [:]
+            } else {
+                arguments = [:]
+            }
+            let result = fields["result"]?.objectValue ?? [:]
+            let error = result["error"]?.stringValue
+            let failed = result["error"] != nil && result["error"] != .null
+                || fields["result"] == nil || fields["result"] == .null
+            switch tool {
+            case .webSearch:
+                var state: [String: JSONValue] = [
+                    "status": .string(failed ? WebSearchStatus.failed.rawValue : WebSearchStatus.completed.rawValue),
+                    "sources": .array(result["results"]?.arrayValue ?? []),
+                ]
+                if let query = result["query"]?.stringValue ?? arguments["query"]?.stringValue {
+                    state["query"] = .string(query)
+                }
+                if let error { state["reason"] = .string(error) }
+                return .object(["type": .string("web_search"), "id": .string(id), "state": .object(state)])
+            case .webFetch:
+                let url = result["url"]?.stringValue ?? arguments["url"]?.stringValue ?? ""
+                var fetch: [String: JSONValue] = [
+                    "id": .string(id),
+                    "url": .string(url),
+                    "status": .string(failed ? URLFetchStatus.failed.rawValue : URLFetchStatus.completed.rawValue),
+                ]
+                if !failed {
+                    var source: [String: JSONValue] = [
+                        "url": .string(url),
+                        "title": result["title"] ?? .string(url),
+                    ]
+                    source["snippet"] = result["text"]
+                    fetch["sources"] = .array([.object(source)])
+                }
+                return .object(["type": .string("url_fetches"), "id": .string(id), "fetches": .array([.object(fetch)])])
             }
         }
     }
@@ -1372,20 +1441,24 @@ struct Message: Identifiable, Codable, Equatable {
             pendingFetchesSettled = true
         }
 
-        func resolutionFields(for toolCallId: String) -> [String: JSONValue] {
-            guard let timeline,
-                  let resolved = timeline.first(where: {
-                      $0.objectValue?["type"]?.stringValue == "tool_call"
-                          && $0.objectValue?["toolCallId"]?.stringValue == toolCallId
-                  })?.objectValue else { return [:] }
-            var fields: [String: JSONValue] = [:]
-            if let resolvedAt = resolved["resolvedAt"] { fields["resolvedAt"] = resolvedAt }
-            if let resolution = resolved["resolution"] { fields["resolution"] = resolution }
-            return fields
-        }
+        let originalTools = Dictionary(
+            (timeline ?? []).compactMap { block -> (String, [String: JSONValue])? in
+                guard let fields = block.objectValue,
+                      fields["type"]?.stringValue == "tool_call",
+                      let id = fields["toolCallId"]?.stringValue ?? fields["id"]?.stringValue else { return nil }
+                return (id, fields)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         for segment in segments {
             if case .urlFetch(let fetchId) = segment {
+                if let original = originalTools[fetchId],
+                   original["name"]?.stringValue == HarnessTool.webFetch.rawValue {
+                    flushFetches()
+                    blocks.append(.object(original))
+                    continue
+                }
                 guard let fetch = fetchById[fetchId] else { continue }
                 var fetchFields: [String: JSONValue] = [
                     "id": .string(fetch.id),
@@ -1428,6 +1501,11 @@ struct Message: Identifiable, Codable, Equatable {
                 if let endedAt { block["endedAt"] = .number(endedAt) }
                 blocks.append(.object(block))
             case .webSearch(let searchId):
+                if let original = originalTools[searchId],
+                   original["name"]?.stringValue == HarnessTool.webSearch.rawValue {
+                    blocks.append(.object(original))
+                    continue
+                }
                 var state: [String: JSONValue] = [:]
                 if let search = searchById[searchId] {
                     if let query = search.query { state["query"] = .string(query) }
@@ -1449,14 +1527,12 @@ struct Message: Identifiable, Codable, Equatable {
                 blocks.append(.object(block))
             case .toolCall(let toolCallId):
                 guard let tool = toolById[toolCallId] else { continue }
-                var block: [String: JSONValue] = [
-                    "type": .string("tool_call"),
-                    "id": .string("tool-call-\(blocks.count)"),
-                    "toolCallId": .string(toolCallId),
-                    "name": .string(tool.name),
-                    "arguments": .string(tool.arguments),
-                ]
-                block.merge(resolutionFields(for: toolCallId)) { _, new in new }
+                var block = originalTools[toolCallId] ?? [:]
+                block["type"] = .string("tool_call")
+                if block["id"] == nil { block["id"] = .string("tool-call-\(blocks.count)") }
+                block["toolCallId"] = .string(toolCallId)
+                block["name"] = .string(tool.name)
+                block["arguments"] = .string(tool.arguments)
                 blocks.append(.object(block))
             case .urlFetch:
                 break

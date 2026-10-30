@@ -18,6 +18,35 @@ struct WebSearchHistoryTests {
         try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(messages)) as? [[String: Any]])
     }
 
+    @Test @MainActor
+    func continuesAHarnessChatWithSearchEvidenceAndWidgets() throws {
+        let original = try HarnessMessageFixture.decode()
+        let restored = try JSONDecoder().decode(Message.self, from: JSONEncoder().encode(original))
+        let query = try ChatQueryBuilder.buildQuery(
+            modelId: "gpt-oss-120b", systemPrompt: "", rules: "",
+            conversationMessages: [restored, Message(role: .user, content: "How many participants?")],
+            genUIEnabled: false
+        )
+        let body = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(query)) as? [String: Any])
+        let messages = try #require(body["messages"] as? [[String: Any]])
+        #expect(messages.compactMap { $0["role"] as? String } == [
+            "assistant", "tool", "assistant", "tool", "assistant", "tool", "assistant", "tool", "user",
+        ])
+        for (index, snippet) in [(1, "70 participants"), (3, "73 participants"), (5, "The study included 73 participants.")] {
+            let content = try #require(messages[index]["content"] as? String)
+            let output = try #require(JSONSerialization.jsonObject(with: Data(content.utf8)) as? [String: Any])
+            let sources = try #require(output["sources"] as? [[String: String]])
+            #expect(sources.map { $0["snippet"] } == [snippet])
+            let calls = try #require(messages[index - 1]["tool_calls"] as? [[String: Any]])
+            #expect(calls.first?["id"] as? String == messages[index]["tool_call_id"] as? String)
+        }
+        let widgetCalls = try #require(messages[6]["tool_calls"] as? [[String: Any]])
+        #expect(widgetCalls.count == 1)
+        #expect((widgetCalls[0]["function"] as? [String: Any])?["name"] as? String == "render_link_preview")
+        #expect(messages[7]["tool_call_id"] as? String == "widget-call")
+        #expect(messages[8]["content"] as? String == "How many participants?")
+    }
+
     @Test func eventSourceHelpersFilterAndPreserveOrder() throws {
         let other = "https://example.com/other"
         let payload = """
