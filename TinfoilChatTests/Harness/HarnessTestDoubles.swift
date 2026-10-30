@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import TinfoilAI
+import Tinfoil
 @testable import TinfoilChat
 
 /// A transport that answers from a script and keeps what it was sent.

@@ -1,6 +1,6 @@
 import Foundation
 import OSLog
-import TinfoilAI
+import Tinfoil
 
 /// Who is asking the harness, and the chat access they hold.
 protocol HarnessCredentials: Sendable {

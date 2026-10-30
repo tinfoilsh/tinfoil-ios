@@ -13,7 +13,7 @@ import Combine
 import Foundation
 import OSLog
 import SwiftUI
-import TinfoilAI
+import Tinfoil
 import VisionKit
 
 enum ChatStorageTab: String, Sendable, Hashable {

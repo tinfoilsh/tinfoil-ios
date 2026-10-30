@@ -1,6 +1,6 @@
 import EHBP
 import Foundation
-import TinfoilAI
+import Tinfoil
 
 /// A request to the harness, as the transport sends it: its route, the
 /// headers beyond who is asking, and its body, sealed to the enclave.
@@ -50,10 +50,14 @@ protocol HarnessTransport: Sendable {
 /// The transport to the harness enclave: each request's body is sealed to
 /// the X25519 key the enclave's attestation endorses, which is verified
 /// again as its freshness ends or as the enclave refuses a key it rotated.
-final class SealedTransport: HarnessTransport {
+actor SealedTransport: HarnessTransport {
     private let origin: String
-    private let handle: EnclaveHandle
+    private let enclave: String
+    private let repo: String
     private let session: URLSession
+    /// The enclave's client, made and verified by the first request and
+    /// shared by every request after it.
+    private var connecting: Task<EnclaveHTTPClient, Error>?
 
     init(url: String = Constants.Harness.url, repo: String = Constants.Harness.configRepo) throws {
         guard let parsed = URL(string: url), parsed.scheme == "https", let host = parsed.host,
@@ -66,7 +70,8 @@ final class SealedTransport: HarnessTransport {
             )
         }
         origin = "https://\(host)" + (parsed.port.map { ":\($0)" } ?? "")
-        handle = try EnclaveHandle(enclave: parsed.port.map { "\(host):\($0)" } ?? host, repo: repo)
+        enclave = parsed.port.map { "\(host):\($0)" } ?? host
+        self.repo = repo
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = Constants.Harness.streamIdleTimeoutSeconds
         configuration.waitsForConnectivity = true
@@ -76,12 +81,14 @@ final class SealedTransport: HarnessTransport {
     }
 
     func verification() async -> Verification? {
-        await handle.verification
+        guard let connecting, let client = try? await connecting.value else { return nil }
+        return await client.current
     }
 
     func send(_ request: HarnessRequest) async throws -> HarnessResponse {
+        let enclave = try await client()
         for attempt in 0..<2 {
-            let key = try await publicKey()
+            let key = try await publicKey(enclave)
             try Task.checkCancellation()
             let client = try EHBPClient(baseURL: origin, publicKey: key, session: session)
             do {
@@ -97,7 +104,7 @@ final class SealedTransport: HarnessTransport {
                 // The enclave rotated its key since it was verified; the
                 // request is sealed again, once, to the key verified now.
                 guard attempt == 0 else { break }
-                _ = try await verified(again: true)
+                _ = try await verified(enclave, again: true)
             }
         }
         throw HarnessError(
@@ -107,9 +114,33 @@ final class SealedTransport: HarnessTransport {
         )
     }
 
+    /// The enclave's client, verified once it is made. One that has not been
+    /// made within the attestation timeout, or failed, fails the requests
+    /// waiting on it; the next request makes it again.
+    private func client() async throws -> EnclaveHTTPClient {
+        let task = connecting ?? connect()
+        connecting = task
+        do {
+            return try await task.value
+        } catch {
+            if connecting == task { connecting = nil }
+            throw error
+        }
+    }
+
+    private func connect() -> Task<EnclaveHTTPClient, Error> {
+        let enclave = enclave
+        let repo = repo
+        return Task {
+            try await Self.withinAttestationTimeout {
+                try await EnclaveHTTPClient(enclave: enclave, repo: repo, transportMode: .ehbp)
+            }
+        }
+    }
+
     /// The key requests are sealed to, from the enclave's verification.
-    private func publicKey() async throws -> Data {
-        let verification = try await verified(again: false)
+    private func publicKey(_ enclave: EnclaveHTTPClient) async throws -> Data {
+        let verification = try await verified(enclave, again: false)
         guard let hex = verification.hpkePublicKey, let key = Data(lowercaseHex: hex),
               key.count == Constants.Harness.hpkePublicKeyBytes else {
             throw HarnessError(
@@ -124,9 +155,15 @@ final class SealedTransport: HarnessTransport {
     /// The enclave's verification, fresh or made again, within the
     /// attestation timeout. One that has not finished by then fails the
     /// request; the next one asks again.
-    private func verified(again: Bool) async throws -> Verification {
-        try await withThrowingTaskGroup(of: Verification.self) { group in
-            group.addTask { try await again ? self.handle.verify() : self.handle.verifyIfNeeded() }
+    private func verified(_ enclave: EnclaveHTTPClient, again: Bool) async throws -> Verification {
+        try await Self.withinAttestationTimeout {
+            try await again ? enclave.reverify() : enclave.ensureVerified()
+        }
+    }
+
+    private static func withinAttestationTimeout<T: Sendable>(_ work: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask(operation: work)
             group.addTask {
                 try await Task.sleep(for: .seconds(Constants.Harness.attestationTimeoutSeconds))
                 throw HarnessError(
