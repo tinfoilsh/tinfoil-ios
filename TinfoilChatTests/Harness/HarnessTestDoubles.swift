@@ -18,7 +18,7 @@ actor ScriptedTransport: HarnessTransport {
 
     init(_ answers: [Answer]) {
         self.answers = answers
-        (verifications, verified) = AsyncStream.makeStream()
+        (verifications, verified) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
     }
 
     /// Reports a verification of the enclave, as the SDK does as each one
