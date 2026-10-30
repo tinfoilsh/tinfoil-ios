@@ -2,7 +2,7 @@
 //  SummarizerService.swift
 //  TinfoilChat
 //
-//  Service for making requests to the summarizer enclave via SecureClient
+//  Service for making requests to the summarizer enclave via EnclaveHandle
 //
 
 import Foundation
@@ -12,39 +12,22 @@ import TinfoilAI
 actor SummarizerService {
     static let shared = SummarizerService()
 
-    private var client: SecureClient?
-    private var verificationTask: Task<SecureClient, Error>?
+    private var handle: EnclaveHandle?
 
     private init() {}
 
-    private func getClient() async throws -> SecureClient {
-        if let client = client {
-            return client
+    /// The summarizer enclave's handle, which verifies on first use and again
+    /// whenever its attestation expires
+    private func enclaveHandle() throws -> EnclaveHandle {
+        if let handle {
+            return handle
         }
-
-        if let existingTask = verificationTask {
-            return try await existingTask.value
-        }
-
-        let task = Task<SecureClient, Error> {
-            let newClient = SecureClient(
-                githubRepo: Constants.Summarizer.configRepo,
-                enclaveURL: Constants.Summarizer.enclaveURL
-            )
-            _ = try await newClient.verify()
-            return newClient
-        }
-        verificationTask = task
-
-        do {
-            let verifiedClient = try await task.value
-            client = verifiedClient
-            verificationTask = nil
-            return verifiedClient
-        } catch {
-            verificationTask = nil
-            throw error
-        }
+        let created = try EnclaveHandle.enclave(
+            at: Constants.Summarizer.enclaveURL,
+            repo: Constants.Summarizer.configRepo
+        )
+        handle = created
+        return created
     }
 
     /// Summarize content using the summarizer enclave
@@ -53,12 +36,12 @@ actor SummarizerService {
     ///   - style: The summarization style to use
     /// - Returns: The generated summary string
     func summarize(content: String, style: SummarizeStyle) async throws -> String {
-        let client = try await getClient()
+        let enclave = try enclaveHandle()
 
         let request = SummarizeRequest(content: content, style: style)
         let requestData = try JSONEncoder().encode(request)
 
-        let response = try await client.post(
+        let (data, response) = try await enclave.post(
             url: "\(Constants.Summarizer.enclaveURL)/summarize",
             headers: ["Content-Type": "application/json"],
             body: requestData
@@ -68,7 +51,7 @@ actor SummarizerService {
             throw SummarizerError.requestFailed(statusCode: response.statusCode)
         }
 
-        let decoded = try JSONDecoder().decode(SummarizeResponse.self, from: response.body)
+        let decoded = try JSONDecoder().decode(SummarizeResponse.self, from: data)
         return decoded.summary
     }
 
