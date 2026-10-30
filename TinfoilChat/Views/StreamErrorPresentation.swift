@@ -7,7 +7,7 @@ import Foundation
 /// for logs; the card shows it only as details.
 struct StreamErrorPresentation: Equatable {
     enum Kind: Equatable {
-        case connection, auth, key, rateLimit, busy, queueFull, contextLength, tooLarge, model, document, server, storage, revise, refused, unfinished
+        case connection, verification, auth, key, rateLimit, busy, queueFull, contextLength, tooLarge, model, document, server, storage, revise, refused, unfinished
     }
 
     let kind: Kind
@@ -29,7 +29,7 @@ struct StreamErrorPresentation: Equatable {
     /// Whether retrying sends the user's message again, as after a
     /// connection that failed before the service answered.
     var resends: Bool {
-        [.connection, .busy, .queueFull].contains(kind)
+        [.connection, .verification, .busy, .queueFull].contains(kind)
     }
 
     var offersUnlock: Bool { kind == .key }
@@ -74,6 +74,9 @@ struct StreamErrorPresentation: Equatable {
     )
     private static let connection = StreamErrorPresentation(
         .connection, "Connection problem", "Check your internet connection, then resend your message. \(notLost)"
+    )
+    private static let verification = StreamErrorPresentation(
+        .verification, "Unable to verify the chat service", "Nothing was sent. Resend your message in a moment. \(notLost)"
     )
     private static let rateLimit = StreamErrorPresentation(
         .rateLimit, "Usage limit reached", "Please wait for the limit to reset before trying again."
@@ -128,6 +131,7 @@ struct StreamErrorPresentation: Equatable {
         case HarnessErrorCode.localSaveFailed: return storage
         case HarnessErrorCode.unfinishedReply: return unfinished
         case HarnessErrorCode.streamInterrupted, HarnessErrorCode.connection: return connection
+        case HarnessErrorCode.attestation: return verification
         default: return byAction(error, occurredAt: occurredAt)
         }
     }

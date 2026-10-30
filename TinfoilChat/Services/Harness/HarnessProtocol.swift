@@ -159,6 +159,8 @@ enum HarnessErrorCode {
     // never sends.
     static let configuration = "CONFIGURATION"
     static let connection = "CONNECTION"
+    /// The enclave could not be verified, so the request was not sent.
+    static let attestation = "ATTESTATION"
     static let invalidStream = "INVALID_STREAM"
     /// A refusal or a run's error without the members the protocol requires
     /// of it.

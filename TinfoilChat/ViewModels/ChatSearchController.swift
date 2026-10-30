@@ -26,6 +26,8 @@ struct SearchFailure: Equatable {
             self.init("Your chats couldn't be prepared for search. Try again.", canRetry: true)
         case HarnessErrorCode.connection:
             self.init("Couldn't reach the chat service. Check your connection and try again.", canRetry: true)
+        case HarnessErrorCode.attestation:
+            self.init("Couldn't verify the chat service, so your search wasn't sent. Try again.", canRetry: true)
         case HarnessErrorCode.keyMismatch:
             self.init("Your encryption key is out of date. Recover your current key to search your chats.", canRetry: false)
         default:

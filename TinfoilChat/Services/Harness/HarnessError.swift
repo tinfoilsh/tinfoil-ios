@@ -60,13 +60,25 @@ struct HarnessErrorBody: Equatable, Sendable {
         action: .retry
     )
 
+    /// Why a request failed when the chat service could not be reached, or
+    /// stopped answering: whether the request took effect is unknown.
+    static let unreachable = HarnessErrorBody(
+        code: HarnessErrorCode.connection,
+        message: "The chat service could not be reached. Check your connection and try again.",
+        action: .retry
+    )
+
     /// Why a request failed when its answer did not come from the harness:
     /// an answer the enclave did not seal, a refusal or not, says nothing
     /// this client may show or act on, and whether the request took effect
     /// is unknown, as when the connection drops.
-    static let unsealedAnswer = HarnessErrorBody(
-        code: HarnessErrorCode.connection,
-        message: "The chat service could not be reached. Check your connection and try again.",
+    static let unsealedAnswer = unreachable
+
+    /// Why a request failed when the enclave could not be verified: it was
+    /// not sent.
+    static let unverified = HarnessErrorBody(
+        code: HarnessErrorCode.attestation,
+        message: "The chat service could not be verified, so nothing was sent.",
         action: .retry
     )
 }

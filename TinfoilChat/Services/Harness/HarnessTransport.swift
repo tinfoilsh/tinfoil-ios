@@ -1,5 +1,6 @@
 import EHBP
 import Foundation
+import OSLog
 import Tinfoil
 
 /// A request to the harness, as the transport sends it: its route, the
@@ -52,6 +53,8 @@ protocol HarnessTransport: Sendable {
 /// verifies again as its freshness ends or as the enclave refuses a key it
 /// rotated.
 actor SealedTransport: HarnessTransport {
+    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Harness")
+
     private let origin: URL
     private let enclave: String
     private let repo: String
@@ -80,18 +83,58 @@ actor SealedTransport: HarnessTransport {
         return await client.current
     }
 
+    /// Sends a request, failing with a harness error, or with
+    /// CancellationError once cancelled. An answer's body fails as the SDK
+    /// reads it, so a stream that breaks shows as interrupted.
     func send(_ request: HarnessRequest) async throws -> HarnessResponse {
-        let client = try await client()
-        var sent = URLRequest(url: origin.appending(path: request.route.rawValue))
-        sent.httpMethod = "POST"
-        sent.allHTTPHeaderFields = request.headers
-        sent.httpBody = request.body
-        sent.timeoutInterval = Constants.Harness.streamIdleTimeoutSeconds
-        let answer = try await client.recoverableBytes(for: sent)
-        let response = answer.response
-        let sealed = response.value(forHTTPHeaderField: EHBPProtocol.responseNonceHeader) != nil
-        return HarnessResponse(status: response.statusCode, headers: Self.headers(of: response), sealed: sealed, body: answer.body)
+        do {
+            let client = try await client()
+            var sent = URLRequest(url: origin.appending(path: request.route.rawValue))
+            sent.httpMethod = "POST"
+            sent.allHTTPHeaderFields = request.headers
+            sent.httpBody = request.body
+            sent.timeoutInterval = Constants.Harness.streamIdleTimeoutSeconds
+            let answer = try await client.recoverableBytes(for: sent)
+            let response = answer.response
+            let sealed = response.value(forHTTPHeaderField: EHBPProtocol.responseNonceHeader) != nil
+            return HarnessResponse(status: response.statusCode, headers: Self.headers(of: response), sealed: sealed, body: answer.body)
+        } catch {
+            let failure = Self.harnessError(for: error)
+            if !(failure is CancellationError) {
+                Self.logger.error("Failed to send a request to the chat service: \(error, privacy: .public)")
+            }
+            throw failure
+        }
     }
+
+    /// The error a request that could not be carried fails with, so the rest
+    /// of the app meets only harness errors.
+    static func harnessError(for error: Error) -> Error {
+        switch error {
+        case is CancellationError:
+            return CancellationError()
+        case let error as URLError:
+            return error.code == .cancelled ? CancellationError() : HarnessError(HarnessErrorBody.unreachable)
+        case let error as TinfoilError:
+            switch error {
+            case .networkError: return HarnessError(HarnessErrorBody.unreachable)
+            case .attestationError: return HarnessError(HarnessErrorBody.unverified)
+            case .configurationError: return misconfigured
+            }
+        case is EHBPError:
+            // The enclave refused even the key verified again, or its answer
+            // was not sealed to this request.
+            return HarnessError(HarnessErrorBody.unsealedAnswer)
+        default:
+            return HarnessError(HarnessErrorBody.unreachable)
+        }
+    }
+
+    private static let misconfigured = HarnessError(
+        code: HarnessErrorCode.configuration,
+        message: "The chat service is not configured correctly.",
+        action: .stop
+    )
 
     /// The enclave's client, verified once it is made. One that has not been
     /// made within the attestation timeout, or failed, fails the requests
@@ -115,11 +158,7 @@ actor SealedTransport: HarnessTransport {
                 group.addTask { try await EnclaveHTTPClient(enclave: enclave, repo: repo, transportMode: .ehbp) }
                 group.addTask {
                     try await Task.sleep(for: .seconds(Constants.Harness.attestationTimeoutSeconds))
-                    throw HarnessError(
-                        code: HarnessErrorCode.connection,
-                        message: "The chat service could not be verified in time. Check your connection and try again.",
-                        action: .retry
-                    )
+                    throw URLError(.timedOut)
                 }
                 let first = try await group.next()!
                 group.cancelAll()

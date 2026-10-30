@@ -1022,6 +1022,7 @@ struct PasskeyCompositionTests {
         let taken = HarnessError(code: HarnessErrorCode.keyMismatch, message: "another key", action: .unlock, status: 409)
 
         #expect(PasskeyKeyFlow.failureFromRegistryError(offline) == .enclaveUnavailable)
+        #expect(PasskeyKeyFlow.failureFromRegistryError(HarnessError(HarnessErrorBody.unverified)) == .enclaveUnavailable)
         #expect(PasskeyKeyFlow.failureFromRegistryError(refused) == .enclaveUnavailable)
         #expect(PasskeyKeyFlow.failureFromRegistryError(taken) == .remoteKeyExists)
         #expect(PasskeyKeyFlow.failureFromRegistryError(HarnessError.unauthenticated) == .registerFailed)
