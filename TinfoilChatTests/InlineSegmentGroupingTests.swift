@@ -38,9 +38,9 @@ struct InlineSegmentGroupingTests {
         #expect(isTrailing)
         #expect(steps.count == 5)
         guard case .webSearches(let a) = steps[0],
-              case .thinking(let compare, let compareActive, let compareDuration, _, _) = steps[1],
+              case .thinking(let compare, let compareActive, let compareDuration, _) = steps[1],
               case .webSearches(let b) = steps[2],
-              case .thinking(let verify, let verifyActive, let verifyDuration, _, _) = steps[3],
+              case .thinking(let verify, let verifyActive, let verifyDuration, _) = steps[3],
               case .webSearches(let c) = steps[4] else {
             Issue.record("Unexpected step shape: \(steps)")
             return
@@ -82,7 +82,7 @@ struct InlineSegmentGroupingTests {
         for boundary in boundaries {
             let result = runs([.webSearch(searchId: "first"), boundary, .webSearch(searchId: "second")])
             let sizes = result.compactMap { run -> Int? in
-                guard case .webSearches(let group) = run.run else { return nil }
+                guard case .step(.webSearches(let group)) = run.run else { return nil }
                 return group.count
             }
             #expect(sizes == [1, 1])
@@ -92,22 +92,22 @@ struct InlineSegmentGroupingTests {
 
     @Test func loneTraceRowsRenderAsThemselves() {
         let thinking = runs([.thinking(content: "Plan", isThinking: false, duration: 2), .text("Answer")])
-        guard case .thinking(let content, let isThinking, let duration) = thinking.first?.run else {
+        guard case .step(.thinking(let content, let isThinking, let duration, _)) = thinking.first?.run else {
             Issue.record("Expected a plain thinking row, got \(thinking.map(\.id))")
             return
         }
         #expect(content == "Plan")
         #expect(isThinking == false)
         #expect(duration == 2)
-        #expect(thinking.first?.id == "thinking:0")
+        #expect(thinking.first?.id == "work:0:thinking")
 
         let fetch = runs([.text("Intro"), .urlFetch(fetchId: "page")])
-        guard case .urlFetches(let group) = fetch.last?.run else {
+        guard case .step(.urlFetches(let group)) = fetch.last?.run else {
             Issue.record("Expected a plain fetch row, got \(fetch.map(\.id))")
             return
         }
         #expect(group.map(\.id) == ["page"])
-        #expect(fetch.last?.id == "urlfetches:1:page")
+        #expect(fetch.last?.id == "work:1:fetches:page")
     }
 
     @Test func closedEmptyThoughtDoesNotSplitOrCountAsAStep() {
@@ -117,7 +117,7 @@ struct InlineSegmentGroupingTests {
             .webSearch(searchId: "second"),
         ])
         #expect(result.count == 1)
-        guard case .webSearches(let group) = result.first?.run else {
+        guard case .step(.webSearches(let group)) = result.first?.run else {
             Issue.record("Expected the searches to merge into one row, got \(result.map(\.id))")
             return
         }
@@ -138,6 +138,16 @@ struct InlineSegmentGroupingTests {
         let first = runs([.webSearch(searchId: "first")])
         let expanded = runs([.webSearch(searchId: "first"), .webSearch(searchId: "second")])
         #expect(first.first?.id == expanded.first?.id)
+    }
+
+    @Test func loneStepKeepsItsIdentityWhenARunGrowsFromIt() {
+        let lone = runs([.thinking(content: "Plan", isThinking: true, duration: nil)])
+        let grown = runs([.thinking(content: "Plan", isThinking: false, duration: 1), .webSearch(searchId: "first")])
+        guard case .step = lone.first?.run, case .work = grown.first?.run else {
+            Issue.record("Expected a lone step growing into a run, got \(lone.map(\.id)) and \(grown.map(\.id))")
+            return
+        }
+        #expect(lone.first?.id == grown.first?.id)
     }
 
     @Test func workRunKeepsItsIdentityAsStepsArrive() {

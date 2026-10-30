@@ -79,25 +79,9 @@ class ThinkingTextChunker {
         }
     }
 
-    func finalize() {
-        if !workingBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            appendCompletedChunk(workingBuffer)
-        }
-        workingBuffer = ""
-    }
-
     func reset() {
         completedChunks.removeAll()
         workingBuffer = ""
-    }
-
-    /// One-shot chunking for already-complete thinking text, e.g. thoughts
-    /// loaded from storage where the streaming chunks were not persisted.
-    static func chunk(_ text: String) -> [ThinkingChunk] {
-        let chunker = ThinkingTextChunker()
-        chunker.appendToken(text)
-        chunker.finalize()
-        return chunker.getAllChunks()
     }
 
     /// Chunking for thinking text that may still be streaming: its last

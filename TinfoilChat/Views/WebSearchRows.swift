@@ -1,167 +1,11 @@
 //
-//  WebSearchBox.swift
+//  WebSearchRows.swift
 //  TinfoilChat
 //
 //  Created on 02/02/26.
 //  Copyright © 2026 Tinfoil. All rights reserved.
 
 import SwiftUI
-
-/// Inline row showing web search status; tapping opens sources sheet.
-/// When `groupSize > 1`, the row summarizes an adjacent run of searches
-/// (e.g. "Searched the web on 4 queries") so the chat isn't vertically
-/// polluted by one pill per search.
-struct WebSearchBox: View {
-    let webSearchState: WebSearchState
-    let isDarkMode: Bool
-    let webSearchSummary: String?
-    let groupSize: Int
-    let onTap: () -> Void
-
-    init(
-        webSearchState: WebSearchState,
-        isDarkMode: Bool,
-        webSearchSummary: String?,
-        groupSize: Int = 1,
-        onTap: @escaping () -> Void
-    ) {
-        self.webSearchState = webSearchState
-        self.isDarkMode = isDarkMode
-        self.webSearchSummary = webSearchSummary
-        self.groupSize = groupSize
-        self.onTap = onTap
-    }
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack {
-                headerContent
-                Spacer()
-                if showsChevron {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
-                        .accessibilityHidden(true)
-                }
-            }
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(NoHighlightButtonStyle())
-        .disabled(!isInteractive)
-    }
-
-    private var isGroup: Bool { groupSize > 1 }
-
-    private var showsChevron: Bool {
-        guard webSearchState.status != .searching else { return false }
-        return isGroup || !webSearchState.sources.isEmpty
-    }
-
-    private var isInteractive: Bool {
-        guard webSearchState.status != .searching else { return false }
-        return isGroup || !webSearchState.sources.isEmpty
-    }
-
-    @ViewBuilder
-    private var headerContent: some View {
-        switch webSearchState.status {
-        case .searching:
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                ProgressView()
-                    .scaleEffect(0.6)
-                    .frame(width: 14, height: 14)
-                    .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 5 }
-                if isGroup {
-                    Text("Searching the web on \(groupSize) queries")
-                        .font(.subheadline)
-                        .foregroundColor(isDarkMode ? .white : .black.opacity(0.8))
-                } else if let summary = webSearchSummary, !summary.isEmpty {
-                    Text(summary)
-                        .font(.subheadline)
-                        .foregroundColor(isDarkMode ? .white : .black.opacity(0.8))
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else if let query = webSearchState.query {
-                    Text("Searching the web: \(query)")
-                        .font(.subheadline)
-                        .foregroundColor(isDarkMode ? .white : .black.opacity(0.8))
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text("Searching the web")
-                        .font(.subheadline)
-                        .foregroundColor(isDarkMode ? .white : .black.opacity(0.8))
-                }
-            }
-
-        case .completed:
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: "globe")
-                        .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
-                        .font(.system(size: 14))
-                        .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 5 }
-                        .accessibilityHidden(true)
-
-                    Text("Searched the web on \(groupSize) quer\(groupSize == 1 ? "y" : "ies")")
-                        .font(.subheadline)
-                        .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
-                }
-                if !isGroup && !webSearchState.sources.isEmpty {
-                    // Indent favicons under the label so they visually
-                    // group with the label rather than the leading globe icon.
-                    sourceFavicons
-                        .padding(.leading, 22)
-                }
-            }
-
-        case .failed:
-            HStack(spacing: 8) {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundColor(.red)
-                    .font(.system(size: 14))
-                    .accessibilityHidden(true)
-                Text("Search failed")
-                    .font(.subheadline)
-                    .foregroundColor(.red.opacity(0.8))
-            }
-
-        case .blocked:
-            HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
-                    .font(.system(size: 14))
-                    .accessibilityHidden(true)
-                Text(webSearchState.reason ?? "Search blocked")
-                    .font(.subheadline)
-                    .foregroundColor(.orange.opacity(0.8))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var sourceFavicons: some View {
-        HStack(spacing: -4) {
-            ForEach(Array(webSearchState.sources.prefix(4).enumerated()), id: \.element.id) { index, source in
-                FaviconView(url: source.url, isDarkMode: isDarkMode)
-                    .zIndex(Double(4 - index))
-            }
-            if webSearchState.sources.count > 4 {
-                Text("+\(webSearchState.sources.count - 4)")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.6))
-                    .padding(.leading, 6)
-            }
-        }
-        .accessibilityHidden(true)
-    }
-
-}
 
 /// Animated dots for searching state
 struct SearchingDotsView: View {
@@ -303,32 +147,9 @@ struct SourceRowView: View {
     }
 }
 
-/// Sheet listing every query in a grouped run of web searches, each
-/// expandable to reveal its individual sources.
-struct WebSearchQueriesSheetView: View {
-    let instances: [WebSearchInstance]
-    let isDarkMode: Bool
-
-    var body: some View {
-        NavigationStack {
-            List {
-                ForEach(instances) { instance in
-                    WebSearchQueryRow(instance: instance, isDarkMode: isDarkMode)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                }
-            }
-            .listStyle(.plain)
-            .navigationTitle("Searches")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-        .preferredColorScheme(isDarkMode ? .dark : .light)
-    }
-}
-
-/// Flat row for a single search inside the grouped queries sheet: the
-/// query stands as the heading with its sources listed directly beneath
-/// (when attributed). Mirrors the webapp's grouped-search expansion.
+/// Flat row for a single search inside an open search step: the query
+/// stands as the heading with its sources listed directly beneath (when
+/// attributed). Mirrors the webapp's grouped-search expansion.
 struct WebSearchQueryRow: View {
     let instance: WebSearchInstance
     let isDarkMode: Bool
@@ -372,7 +193,7 @@ struct WebSearchQueryRow: View {
                 .padding(.leading, 26)
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, Constants.UI.WorkSteps.searchRowPadding)
     }
 
     @ViewBuilder

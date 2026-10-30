@@ -37,7 +37,7 @@ struct ChatViewMappingTests {
         #expect(shown.thinkingDuration == 1.5)
         #expect(shown.isThinking == false)
         #expect(shown.segments == [
-            .thinking(content: "why", isThinking: false, duration: 1.5, startedAt: 1000, endedAt: 2500),
+            .thinking(content: "why", isThinking: false, duration: 1.5, startedAt: 1000),
             .text("Hello "),
             .text("world"),
         ])

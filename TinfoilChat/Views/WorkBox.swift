@@ -10,7 +10,7 @@ import SwiftUI
 /// One step inside a run of agentic work: a thinking round, an adjacent
 /// group of web searches, or an adjacent group of URL fetches.
 enum WorkStep: Equatable {
-    case thinking(content: String, isThinking: Bool, duration: Double?, startedAt: Double?, endedAt: Double?)
+    case thinking(content: String, isThinking: Bool, duration: Double?, startedAt: Double?)
     case webSearches([WebSearchInstance])
     case urlFetches([URLFetchState])
 
@@ -29,7 +29,7 @@ enum WorkStep: Equatable {
 
     var isInFlight: Bool {
         switch self {
-        case .thinking(_, let isThinking, _, _, _):
+        case .thinking(_, let isThinking, _, _):
             return isThinking
         case .webSearches(let group):
             return group.contains { $0.status == .searching }
@@ -49,40 +49,207 @@ enum WorkActivity: Equatable {
     case idle
 }
 
+/// What a work header says, and how it reads.
+struct WorkLabel: Equatable {
+    enum Tone: Equatable {
+        case live
+        case settled
+        case failed
+        case blocked
+    }
+
+    let text: String
+    let tone: Tone
+    /// A thought or run still working shimmers.
+    var shimmers = false
+}
+
+extension WorkStep {
+    /// What a finished thought says; one the chat service timed no duration
+    /// for shows no time.
+    static func thoughtLabel(duration: Double?) -> String {
+        guard let duration else { return "Thought" }
+        return "Thought for \(ElapsedTime.label(duration))"
+    }
+
+    /// When the step started, in epoch milliseconds: the earliest stamp of
+    /// its parts.
+    var startedAt: Double? {
+        switch self {
+        case .thinking(_, _, _, let startedAt):
+            return startedAt
+        case .webSearches(let group):
+            return group.compactMap(\.startedAt).min()
+        case .urlFetches(let group):
+            return group.compactMap(\.startedAt).min()
+        }
+    }
+
+    /// What the step's details hold, as VoiceOver names them.
+    var detailsName: String {
+        switch self {
+        case .thinking: return "reasoning"
+        case .webSearches: return "searches"
+        case .urlFetches: return "links"
+        }
+    }
+
+    /// What the step's header says: what it is doing while it runs, and
+    /// what it did once it settles. The summaries are the chat service's
+    /// live description of a thought or search.
+    func label(isActive: Bool, thinkingSummary: String? = nil, webSearchSummary: String? = nil) -> WorkLabel {
+        switch self {
+        case .thinking(_, _, let duration, _):
+            guard isActive else { return WorkLabel(text: Self.thoughtLabel(duration: duration), tone: .settled) }
+            return WorkLabel(text: Self.nonEmpty(thinkingSummary) ?? "Thinking", tone: .live, shimmers: true)
+        case .webSearches(let group):
+            if isActive {
+                if group.count > 1 {
+                    return WorkLabel(text: "Searching the web on \(group.count) queries", tone: .live)
+                }
+                return WorkLabel(text: Self.searchingLabel(summary: webSearchSummary, query: group.first?.query), tone: .live)
+            }
+            switch Self.status(of: group) {
+            case .failed:
+                return WorkLabel(text: "Search failed", tone: .failed)
+            case .blocked:
+                return WorkLabel(text: group.compactMap(\.reason).first ?? "Search blocked", tone: .blocked)
+            case .searching, .completed:
+                return WorkLabel(text: "Searched the web on \(group.count) quer\(group.count == 1 ? "y" : "ies")", tone: .settled)
+            }
+        case .urlFetches(let group):
+            if isActive {
+                return WorkLabel(text: "Reading \(group.count) link\(group.count == 1 ? "" : "s")", tone: .live)
+            }
+            let read = group.filter { $0.status == .completed }.count
+            if read == 0 {
+                return WorkLabel(text: "Tried to read \(group.count) link\(group.count == 1 ? "" : "s")", tone: .settled)
+            }
+            return WorkLabel(text: "Read \(read) link\(read == 1 ? "" : "s")", tone: .settled)
+        }
+    }
+
+    static func searchingLabel(summary: String?, query: String?) -> String {
+        if let summary = nonEmpty(summary) { return summary }
+        if let query { return "Searching the web: \(query)" }
+        return "Searching the web"
+    }
+
+    /// The status a group of searches shows as one: searching while any
+    /// runs, then failed, then blocked, and otherwise completed.
+    private static func status(of group: [WebSearchInstance]) -> WebSearchStatus {
+        let statuses = group.map(\.status)
+        for status in [WebSearchStatus.searching, .failed, .blocked] where statuses.contains(status) {
+            return status
+        }
+        return .completed
+    }
+
+    fileprivate static func nonEmpty(_ text: String?) -> String? {
+        guard let text, !text.isEmpty else { return nil }
+        return text
+    }
+}
+
+/// Which work rows of a message are open. It belongs to the message's row
+/// in the table rather than to its view, so a row still shows what it showed
+/// when the table hosts the message in another cell.
+final class WorkStepExpansion: ObservableObject {
+    @Published private(set) var expandedRows: Set<String> = []
+
+    func isExpanded(_ rowId: String) -> Bool {
+        expandedRows.contains(rowId)
+    }
+
+    func toggle(_ rowId: String) {
+        if expandedRows.remove(rowId) == nil {
+            expandedRows.insert(rowId)
+        }
+    }
+
+    /// Opens or closes a step standing alone, and with it the same step as
+    /// the first of the run it may grow into, so what the step shows stays
+    /// open when more steps join it.
+    func toggleLoneStep(_ step: WorkStep, rowId: String) {
+        let firstStepRowId = WorkRun.stepRowId(step, at: 0, in: rowId)
+        if expandedRows.remove(rowId) == nil {
+            expandedRows.insert(rowId)
+            expandedRows.insert(firstStepRowId)
+        } else {
+            expandedRows.remove(firstStepRowId)
+        }
+    }
+}
+
+/// Whole-second durations as work steps show them, both while they run and
+/// once they finish: "8s", "3m 33s", "1h 4m".
+enum ElapsedTime {
+    private static let secondsPerMinute = 60
+    private static let secondsPerHour = 3_600
+
+    static func label(_ seconds: Double) -> String {
+        let time = parts(seconds)
+        if time.hours > 0 { return "\(time.hours)h \(time.minutes)m" }
+        if time.minutes > 0 { return "\(time.minutes)m \(time.seconds)s" }
+        return "\(time.seconds)s"
+    }
+
+    /// The same duration as VoiceOver says it, such as "3 minutes, 33 seconds".
+    static func spokenLabel(_ seconds: Double) -> String {
+        let time = parts(seconds)
+        let components = time.hours > 0
+            ? DateComponents(hour: time.hours, minute: time.minutes)
+            : time.minutes > 0
+                ? DateComponents(minute: time.minutes, second: time.seconds)
+                : DateComponents(second: time.seconds)
+        return spokenFormatter.string(from: components) ?? label(seconds)
+    }
+
+    private static let spokenFormatter: DateComponentsFormatter = {
+        let formatter = DateComponentsFormatter()
+        formatter.unitsStyle = .full
+        formatter.allowedUnits = [.hour, .minute, .second]
+        return formatter
+    }()
+
+    /// Whole elapsed seconds, as a clock counts them, never below zero.
+    private static func parts(_ seconds: Double) -> (hours: Int, minutes: Int, seconds: Int) {
+        let whole = seconds.isFinite ? Int(max(0, seconds)) : 0
+        return (whole / secondsPerHour, whole % secondsPerHour / secondsPerMinute, whole % secondsPerMinute)
+    }
+}
+
 /// A consecutive run of trace steps (thinking / searches / fetches) with
 /// no visible answer text or GenUI widget in between. Rendered collapsed
-/// as a single "Worked for Ns" row.
+/// as a single row naming what the run did.
 struct WorkRun: Equatable {
     let steps: [WorkStep]
 
-    /// Wall-clock span from the stamps recorded while streaming. Falls back
-    /// to summed thinking durations for messages saved before stamps
-    /// existed; nil when neither is available.
-    var durationSeconds: Double? {
-        var start: Double = .infinity
-        var end: Double = -.infinity
-        var thinkingTotal: Double = 0
+    /// When the run started, in epoch milliseconds: its earliest stamp.
+    var startedAt: Double? {
+        steps.compactMap(\.startedAt).min()
+    }
 
-        func note(startedAt: Double?, endedAt: Double?) {
-            guard let startedAt else { return }
-            start = min(start, startedAt)
-            end = max(end, endedAt ?? startedAt)
+    /// The row id a step of the run is opened under. A run can hold more
+    /// than one step of a kind, so its position tells them apart.
+    static func stepRowId(_ step: WorkStep, at index: Int, in runRowId: String) -> String {
+        "\(runRowId)/\(index):\(step.id)"
+    }
+
+    /// What the run's header says: what it is doing now while it is live,
+    /// and what it did once it settles.
+    func label(isActive: Bool, thinkingSummary: String? = nil, webSearchSummary: String? = nil) -> WorkLabel {
+        guard isActive else { return WorkLabel(text: summaryLabel, tone: .settled) }
+        switch liveActivity {
+        case .thinking:
+            return WorkLabel(text: WorkStep.nonEmpty(thinkingSummary) ?? "Thinking", tone: .live, shimmers: true)
+        case .searching(let query):
+            return WorkLabel(text: WorkStep.searchingLabel(summary: webSearchSummary, query: query), tone: .live)
+        case .reading(let count):
+            return WorkLabel(text: "Reading \(count) link\(count == 1 ? "" : "s")", tone: .live)
+        case .idle:
+            return WorkLabel(text: "Working", tone: .live, shimmers: true)
         }
-
-        for step in steps {
-            switch step {
-            case .thinking(_, _, let duration, let startedAt, let endedAt):
-                note(startedAt: startedAt, endedAt: endedAt)
-                thinkingTotal += duration ?? 0
-            case .webSearches(let group):
-                for search in group { note(startedAt: search.startedAt, endedAt: search.endedAt) }
-            case .urlFetches(let group):
-                for fetch in group { note(startedAt: fetch.startedAt, endedAt: fetch.endedAt) }
-            }
-        }
-
-        if start.isFinite { return max(0, (end - start) / 1000) }
-        return thinkingTotal > 0 ? thinkingTotal : nil
     }
 
     var liveActivity: WorkActivity {
@@ -97,292 +264,337 @@ struct WorkRun: Equatable {
         }
     }
 
-    /// "Worked for 4.7s" under a minute, "Worked for 1m 24s" otherwise.
-    static func formatDuration(_ seconds: Double) -> String {
-        let rounded = (seconds * 10).rounded() / 10
-        if rounded < 60 {
-            return String(format: "%.1fs", rounded)
+    /// Names what the run did, each kind of action once in the order the run
+    /// first took it: "Thought, searched the web, and read 3 links".
+    var summaryLabel: String {
+        var actions: [String] = []
+        var hasThought = false
+        var hasSearched = false
+        var hasRead = false
+        for step in steps {
+            switch step {
+            case .thinking where !hasThought:
+                hasThought = true
+                actions.append("thought")
+            case .webSearches where !hasSearched:
+                hasSearched = true
+                actions.append("searched the web")
+            case .urlFetches where !hasRead:
+                hasRead = true
+                actions.append(readAction)
+            default:
+                break
+            }
         }
-        let whole = Int(seconds.rounded())
-        return "\(whole / 60)m \(whole % 60)s"
+        let sentence: String
+        switch actions.count {
+        case 0:
+            return "Worked"
+        case 1:
+            sentence = actions[0]
+        case 2:
+            sentence = "\(actions[0]) and \(actions[1])"
+        default:
+            sentence = actions.dropLast().joined(separator: ", ") + ", and \(actions[actions.count - 1])"
+        }
+        return sentence.prefix(1).uppercased() + sentence.dropFirst()
     }
 
-    var summaryLabel: String {
-        if let seconds = durationSeconds {
-            return "Worked for \(Self.formatDuration(seconds))"
+    /// The links the run read, across all its link reads; a run whose every
+    /// read failed tried to read them.
+    private var readAction: String {
+        let fetches = steps.flatMap { step -> [URLFetchState] in
+            if case .urlFetches(let group) = step { return group }
+            return []
         }
-        return "Worked through \(steps.count) step\(steps.count == 1 ? "" : "s")"
+        let read = fetches.filter { $0.status == .completed }.count
+        if read > 0 { return read == 1 ? "read a link" : "read \(read) links" }
+        return fetches.count == 1 ? "tried to read a link" : "tried to read \(fetches.count) links"
     }
 }
 
-/// Collapsed inline row for a `WorkRun`. While the run is active it shows
-/// the current activity (thinking summary, in-flight search, link reads);
-/// once settled it reads "Worked for Ns". Tapping opens the steps sheet.
-struct WorkBox: View {
-    let run: WorkRun
+/// The header of a work row. While the work runs it shows a progress
+/// indicator, what the work is doing and how long it has run; once the work
+/// settles, what it did. The chevron after the text turns down while the
+/// row is open.
+struct WorkHeader: View {
+    let label: WorkLabel
+    let isActive: Bool
+    /// When the work started, in epoch milliseconds. Work with no stamp
+    /// counts from when its header first showed.
+    let startedAt: Double?
+    let isExpanded: Bool
+    let detailsName: String
+    let isDarkMode: Bool
+    let onToggle: () -> Void
+
+    @State private var shownAt = Date()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var start: Date {
+        startedAt.map { Date(timeIntervalSince1970: $0 / Constants.UI.WorkSteps.millisecondsPerSecond) } ?? shownAt
+    }
+
+    var body: some View {
+        if isActive {
+            TimelineView(.periodic(from: start, by: Constants.UI.WorkSteps.elapsedTickSeconds)) { context in
+                header(elapsed: context.date.timeIntervalSince(start))
+            }
+        } else {
+            header(elapsed: nil)
+        }
+    }
+
+    private func header(elapsed: TimeInterval?) -> some View {
+        Button(action: onToggle) {
+            HStack(spacing: Constants.UI.WorkSteps.headerSpacing) {
+                if elapsed != nil {
+                    InlineLoadingDotsView(isDarkMode: isDarkMode)
+                }
+                labelText
+                if let elapsed {
+                    Text(ElapsedTime.label(elapsed))
+                        .font(.subheadline)
+                        .monospacedDigit()
+                        .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.45))
+                        .fixedSize()
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
+                    .rotationEffect(.degrees(isExpanded ? Constants.UI.WorkSteps.chevronExpandedRotation : 0))
+                    .animation(
+                        reduceMotion ? nil : .easeInOut(duration: Constants.UI.WorkSteps.chevronAnimationDuration),
+                        value: isExpanded
+                    )
+                    .fixedSize()
+            }
+            .padding(.vertical, Constants.UI.WorkSteps.headerVerticalPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(NoHighlightButtonStyle())
+        .accessibilityLabel(elapsed.map { "\(label.text), \(ElapsedTime.spokenLabel($0))" } ?? label.text)
+        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+        .accessibilityHint(isExpanded ? "Hides the \(detailsName)" : "Shows the \(detailsName)")
+    }
+
+    /// Live text stays on one line so the time after it stays in view; what
+    /// a settled step did wraps at large text sizes rather than being cut.
+    @ViewBuilder
+    private var labelText: some View {
+        let text = Text(label.text)
+            .font(.subheadline)
+            .foregroundColor(labelColor)
+            .lineLimit(label.tone == .live ? 1 : nil)
+            .truncationMode(.tail)
+        if label.shimmers {
+            text.modifier(TextShimmerAnimation())
+        } else {
+            text
+        }
+    }
+
+    private var labelColor: Color {
+        switch label.tone {
+        case .live: return isDarkMode ? .white : .black.opacity(0.8)
+        case .settled: return isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6)
+        case .failed: return .red.opacity(0.8)
+        case .blocked: return .orange.opacity(0.8)
+        }
+    }
+}
+
+/// A thought, searches or link reads standing alone in a reply: a header
+/// that opens the step's details in a box below it.
+struct WorkStepBox: View {
+    let step: WorkStep
+    let rowId: String
     let isActive: Bool
     let isDarkMode: Bool
     let thinkingSummary: String?
     let webSearchSummary: String?
-    let onTap: () -> Void
-
-    private var activity: WorkActivity? {
-        isActive ? run.liveActivity : nil
-    }
-
-    private var primaryColor: Color {
-        isDarkMode ? .white : .black.opacity(0.8)
-    }
-
-    private var mutedColor: Color {
-        isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6)
-    }
+    @ObservedObject var expansion: WorkStepExpansion
 
     var body: some View {
-        Button(action: onTap) {
-            HStack {
-                headerContent
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
-                    .accessibilityHidden(true)
+        let isExpanded = expansion.isExpanded(rowId)
+        VStack(alignment: .leading, spacing: 0) {
+            WorkHeader(
+                label: step.label(isActive: isActive, thinkingSummary: thinkingSummary, webSearchSummary: webSearchSummary),
+                isActive: isActive,
+                startedAt: step.startedAt,
+                isExpanded: isExpanded,
+                detailsName: step.detailsName,
+                isDarkMode: isDarkMode,
+                onToggle: { expansion.toggleLoneStep(step, rowId: rowId) }
+            )
+            if isExpanded {
+                WorkStepDetails(step: step, isDarkMode: isDarkMode)
+                    .padding(.horizontal, Constants.UI.WorkSteps.boxPadding)
+                    .padding(.top, step.detailsInsets.top)
+                    .padding(.bottom, step.detailsInsets.bottom)
+                    .workStepsBox(isDarkMode: isDarkMode)
             }
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(NoHighlightButtonStyle())
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityHint("Shows the steps")
-    }
-
-    private var accessibilityLabel: String {
-        switch activity {
-        case .thinking:
-            if let summary = thinkingSummary, !summary.isEmpty { return summary }
-            return "Thinking"
-        case .searching(let query):
-            return query.map { "Searching the web: \($0)" } ?? "Searching the web"
-        case .reading(let count):
-            return "Reading \(count) link\(count == 1 ? "" : "s")"
-        case .idle:
-            return "Working"
-        case nil:
-            return run.summaryLabel
-        }
-    }
-
-    @ViewBuilder
-    private var headerContent: some View {
-        switch activity {
-        case .thinking:
-            if let summary = thinkingSummary, !summary.isEmpty {
-                Text(summary)
-                    .font(.subheadline)
-                    .foregroundColor(primaryColor)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .modifier(TextShimmerAnimation())
-            } else {
-                workingLabel("Thinking")
-            }
-
-        case .searching(let query):
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                spinner
-                if let summary = webSearchSummary, !summary.isEmpty {
-                    Text(summary)
-                        .font(.subheadline)
-                        .foregroundColor(primaryColor)
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else if let query {
-                    Text("Searching the web: \(query)")
-                        .font(.subheadline)
-                        .foregroundColor(primaryColor)
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text("Searching the web")
-                        .font(.subheadline)
-                        .foregroundColor(primaryColor)
-                }
-            }
-
-        case .reading(let count):
-            HStack(spacing: 8) {
-                spinner
-                Text("Reading \(count) link\(count == 1 ? "" : "s")")
-                    .font(.subheadline)
-                    .foregroundColor(primaryColor)
-            }
-
-        case .idle:
-            workingLabel("Working")
-
-        case nil:
-            Text(run.summaryLabel)
-                .font(.subheadline)
-                .foregroundColor(mutedColor)
-        }
-    }
-
-    private var spinner: some View {
-        ProgressView()
-            .scaleEffect(0.6)
-            .frame(width: 14, height: 14)
-            .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 5 }
-    }
-
-    private func workingLabel(_ text: String) -> some View {
-        HStack(spacing: 4) {
-            Text(text)
-                .font(.callout)
-                .foregroundColor(primaryColor)
-            InlineLoadingDotsView(isDarkMode: isDarkMode)
-        }
-        .modifier(TextShimmerAnimation())
     }
 }
 
-/// Sheet listing every step of a work run in order. Thoughts expand in
-/// place; searches and link reads list their queries / pages inline using
-/// the same rows as their standalone sheets.
-struct WorkStepsSheetView: View {
+/// A run of work in a reply: a header for the whole run that opens a box
+/// listing its steps, each of which opens in place to its details.
+struct WorkBox: View {
     let run: WorkRun
+    let rowId: String
+    /// The run is the latest row of a reply that is streaming.
+    let isActive: Bool
+    let isStreaming: Bool
     let isDarkMode: Bool
+    let thinkingSummary: String?
+    let webSearchSummary: String?
+    @ObservedObject var expansion: WorkStepExpansion
 
     var body: some View {
-        NavigationStack {
-            // A scroll view rather than a List: a List row resizes after an
-            // expanded thought renders, so the thought overlaps other rows.
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(Array(run.steps.enumerated()), id: \.offset) { _, step in
-                        WorkStepSection(step: step, isDarkMode: isDarkMode)
+        let isExpanded = expansion.isExpanded(rowId)
+        VStack(alignment: .leading, spacing: 0) {
+            WorkHeader(
+                label: run.label(isActive: isActive, thinkingSummary: thinkingSummary, webSearchSummary: webSearchSummary),
+                isActive: isActive,
+                startedAt: run.startedAt,
+                isExpanded: isExpanded,
+                detailsName: "steps",
+                isDarkMode: isDarkMode,
+                onToggle: { expansion.toggle(rowId) }
+            )
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(run.steps.enumerated()), id: \.offset) { index, step in
+                        if index > 0 {
+                            Rectangle()
+                                .fill(workStepsBorderColor(isDarkMode: isDarkMode))
+                                .frame(height: Constants.UI.WorkSteps.boxBorderWidth)
+                        }
+                        stepRow(step, at: index)
                     }
                 }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .workStepsBox(isDarkMode: isDarkMode)
             }
-            .navigationTitle(run.summaryLabel)
-            .navigationBarTitleDisplayMode(.inline)
         }
-        .preferredColorScheme(isDarkMode ? .dark : .light)
+    }
+
+    /// A step of the run: its own header, live while that step runs, which
+    /// opens the step's details below it.
+    private func stepRow(_ step: WorkStep, at index: Int) -> some View {
+        let stepRowId = WorkRun.stepRowId(step, at: index, in: rowId)
+        let isStepActive = isStreaming && step.isInFlight
+        let isStepExpanded = expansion.isExpanded(stepRowId)
+        return VStack(alignment: .leading, spacing: 0) {
+            WorkHeader(
+                label: step.label(
+                    isActive: isStepActive,
+                    thinkingSummary: isStepActive ? thinkingSummary : nil,
+                    webSearchSummary: isStepActive ? webSearchSummary : nil
+                ),
+                isActive: isStepActive,
+                startedAt: step.startedAt,
+                isExpanded: isStepExpanded,
+                detailsName: step.detailsName,
+                isDarkMode: isDarkMode,
+                onToggle: { expansion.toggle(stepRowId) }
+            )
+            if isStepExpanded {
+                WorkStepDetails(step: step, isDarkMode: isDarkMode)
+                    .padding(.bottom, step.detailsInsets.bottom)
+            }
+        }
+        .padding(.horizontal, Constants.UI.WorkSteps.boxPadding)
     }
 }
 
-private struct WorkStepSection: View {
+/// What a step holds: a thought's text, each search with its results, or
+/// each link read, failed ones included.
+private struct WorkStepDetails: View {
     let step: WorkStep
     let isDarkMode: Bool
 
     var body: some View {
         switch step {
-        case .thinking(let content, let isThinking, let duration, _, _):
-            WorkThinkingStepView(
-                content: content,
-                isThinking: isThinking,
-                duration: duration,
-                isDarkMode: isDarkMode
-            )
+        case .thinking(let content, _, _, _):
+            ThoughtText(content: content, isDarkMode: isDarkMode)
         case .webSearches(let group):
-            VStack(alignment: .leading, spacing: 4) {
-                stepHeading(
-                    icon: "globe",
-                    text: group.contains(where: { $0.status == .searching })
-                        ? "Searching the web on \(group.count) quer\(group.count == 1 ? "y" : "ies")"
-                        : "Searched the web on \(group.count) quer\(group.count == 1 ? "y" : "ies")"
-                )
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(group) { instance in
                     WebSearchQueryRow(instance: instance, isDarkMode: isDarkMode)
-                        .padding(.leading, 22)
                 }
             }
-            .padding(.vertical, 6)
         case .urlFetches(let group):
-            let completed = group.filter { $0.status == .completed }.count
-            VStack(alignment: .leading, spacing: 4) {
-                stepHeading(
-                    icon: "link",
-                    text: group.contains(where: { $0.status == .fetching })
-                        ? "Reading \(group.count) link\(group.count == 1 ? "" : "s")"
-                        : "Read \(completed) link\(completed == 1 ? "" : "s")"
-                )
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(group) { fetch in
-                    URLFetchSheetRow(fetch: fetch, isDarkMode: isDarkMode)
-                        .padding(.leading, 22)
+                    URLFetchRow(fetch: fetch, isDarkMode: isDarkMode)
                 }
             }
-            .padding(.vertical, 6)
-        }
-    }
-
-    private func stepHeading(icon: String, text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 14))
-                .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
-                .accessibilityHidden(true)
-            Text(text)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundColor(isDarkMode ? .white : .black.opacity(0.85))
         }
     }
 }
 
-/// A thinking step inside the work sheet: a "Thought for Ns" heading that
-/// expands to the reasoning text, chunked lazily so a long thought never
-/// lays out as one giant Text.
-private struct WorkThinkingStepView: View {
+/// A thought's text in chunks, so a very long thought never lays out as
+/// one Text whose layout blocks the main thread.
+private struct ThoughtText: View {
     let content: String
-    let isThinking: Bool
-    let duration: Double?
     let isDarkMode: Bool
 
-    @State private var isExpanded = false
     @State private var chunks: [ThinkingChunk]? = nil
 
-    private var heading: String {
-        if isThinking { return "Thinking" }
-        if let duration { return "Thought for \(String(format: "%.1f", duration))s" }
-        return "Thought"
-    }
-
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                if let chunks {
-                    ForEach(chunks) { chunk in
-                        ThinkingChunkView(chunk: chunk, isDarkMode: isDarkMode)
-                            .equatable()
-                    }
-                } else if !content.isEmpty {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
+        VStack(alignment: .leading, spacing: 0) {
+            if let chunks {
+                ForEach(chunks) { chunk in
+                    ThinkingChunkView(chunk: chunk, isDarkMode: isDarkMode)
+                        .equatable()
                 }
-            }
-            .padding(.top, 8)
-            .task(id: isExpanded) {
-                guard isExpanded, chunks == nil, !content.isEmpty else { return }
-                let text = content
-                chunks = await Task.detached {
-                    ThinkingTextChunker.chunk(text)
-                }.value
-            }
-        } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Image(systemName: "brain")
-                    .font(.system(size: 14))
-                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
-                    .accessibilityHidden(true)
-                Text(heading)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(isDarkMode ? .white : .black.opacity(0.85))
+            } else if !content.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
             }
         }
-        .tint(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.5))
-        .padding(.vertical, 6)
+        // A thought still streaming is chunked again as it grows.
+        .task(id: content) {
+            guard !content.isEmpty else { return }
+            let text = content
+            let chunked = await Task.detached {
+                ThinkingTextChunker.chunk(growing: text)
+            }.value
+            guard !Task.isCancelled else { return }
+            chunks = chunked
+        }
+    }
+}
+
+private extension WorkStep {
+    /// The space a box leaves above and below a step's details. Each kind's
+    /// rows pad themselves, so the box adds what brings them to its padding.
+    var detailsInsets: (top: CGFloat, bottom: CGFloat) {
+        let layout = Constants.UI.WorkSteps.self
+        switch self {
+        case .thinking:
+            return (layout.boxPadding, layout.boxPadding - layout.thoughtParagraphSpacing)
+        case .webSearches:
+            return (layout.boxPadding - layout.searchRowPadding, layout.boxPadding - layout.searchRowPadding)
+        case .urlFetches:
+            return (layout.boxPadding - layout.linkRowPadding, layout.boxPadding - layout.linkRowPadding)
+        }
+    }
+}
+
+private func workStepsBorderColor(isDarkMode: Bool) -> Color {
+    isDarkMode ? .white.opacity(0.1) : .black.opacity(0.1)
+}
+
+private extension View {
+    /// The bordered box a work row opens its details in.
+    func workStepsBox(isDarkMode: Bool) -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(
+                RoundedRectangle(cornerRadius: Constants.UI.WorkSteps.boxCornerRadius)
+                    .stroke(workStepsBorderColor(isDarkMode: isDarkMode), lineWidth: Constants.UI.WorkSteps.boxBorderWidth)
+            )
     }
 }

@@ -11,14 +11,6 @@ import Textual
 import SwiftMath
 import UIKit
 
-/// Identifiable wrapper used to present `.sheet(item:)` for a transient
-/// grouped run of events (searches or fetches) without needing a stable
-/// model-level id.
-struct IdentifiedGroup<T>: Identifiable {
-    let id = UUID()
-    let items: [T]
-}
-
 func shouldShowStreamError(message: Message) -> Bool {
     message.role == .assistant && message.streamError != nil
 }
@@ -91,6 +83,7 @@ struct MessageView: View {
     let isLastMessage: Bool
     let isLoading: Bool
     let messageIndex: Int
+    let stepExpansion: WorkStepExpansion
     @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
     @State private var showCopyFeedback = false
     @State private var cachedParsedContent: (thinkingText: String, remainderText: String, contentHash: Int)? = nil
@@ -100,15 +93,9 @@ struct MessageView: View {
     @State private var showRawContentModal = false
     @State private var showSourcesSheet = false
     @State private var showShareSheet = false
-    @State private var showThoughtsSheet = false
-    @State private var showURLFetchSheet = false
-    @State private var activeWebSearchGroup: IdentifiedGroup<WebSearchInstance>? = nil
-    @State private var activeURLFetchGroup: IdentifiedGroup<URLFetchState>? = nil
-    @State private var activeSearchInstanceSources: IdentifiedGroup<WebSearchSource>? = nil
-    @State private var activeWorkRun: IdentifiedGroup<WorkStep>? = nil
 
     private var isAnyMessageSheetPresented: Bool {
-        showLongMessageSheet || showRawContentModal || showSourcesSheet || showShareSheet || showThoughtsSheet || showURLFetchSheet || activeWebSearchGroup != nil || activeURLFetchGroup != nil || activeSearchInstanceSources != nil || activeWorkRun != nil
+        showLongMessageSheet || showRawContentModal || showSourcesSheet || showShareSheet
     }
 
     private var inlineAssistantTextSelectionEnabled: Bool {
@@ -242,9 +229,7 @@ struct MessageView: View {
     /// into a single `.work` row summarizing the whole run.
     enum InlineSegmentRun {
         case text(String, isTrailing: Bool)
-        case thinking(content: String, isThinking: Bool, duration: Double?)
-        case webSearches([WebSearchInstance])
-        case urlFetches([URLFetchState])
+        case step(WorkStep)
         case toolCall(GenUIToolCall)
         case work(WorkRun)
     }
@@ -288,30 +273,12 @@ struct MessageView: View {
                 workStartIndex = nil
             }
             guard let startIndex = workStartIndex, let first = work.first else { return }
-            if work.count > 1 {
-                runs.append(IdentifiedInlineSegmentRun(
-                    id: "work:\(startIndex):\(first.id)",
-                    run: .work(WorkRun(steps: work))
-                ))
-                return
-            }
-            switch first {
-            case .thinking(let content, let isThinking, let duration, _, _):
-                runs.append(IdentifiedInlineSegmentRun(
-                    id: "thinking:\(startIndex)",
-                    run: .thinking(content: content, isThinking: isThinking, duration: duration)
-                ))
-            case .webSearches(let group):
-                runs.append(IdentifiedInlineSegmentRun(
-                    id: "websearches:\(startIndex):\(group.first?.id ?? "")",
-                    run: .webSearches(group)
-                ))
-            case .urlFetches(let group):
-                runs.append(IdentifiedInlineSegmentRun(
-                    id: "urlfetches:\(startIndex):\(group.first?.id ?? "")",
-                    run: .urlFetches(group)
-                ))
-            }
+            // A lone step and the run it grows into share an id, so the row
+            // stays open as steps join it.
+            runs.append(IdentifiedInlineSegmentRun(
+                id: "work:\(startIndex):\(first.id)",
+                run: work.count > 1 ? .work(WorkRun(steps: work)) : .step(first)
+            ))
         }
         func noteWorkStart(_ index: Int) {
             if workStartIndex == nil { workStartIndex = index }
@@ -326,7 +293,7 @@ struct MessageView: View {
                     id: "text:\(index)",
                     run: .text(text, isTrailing: index == lastTextIndex)
                 ))
-            case .thinking(let content, let isThinking, let duration, let startedAt, let endedAt):
+            case .thinking(let content, let isThinking, let duration, let startedAt):
                 // A closed, empty thought renders nothing and must not split a run.
                 guard isThinking || !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                 flushSearches()
@@ -336,8 +303,7 @@ struct MessageView: View {
                     content: content,
                     isThinking: isThinking,
                     duration: duration,
-                    startedAt: startedAt,
-                    endedAt: endedAt
+                    startedAt: startedAt
                 ))
             case .webSearch(let searchId):
                 flushFetches()
@@ -365,35 +331,33 @@ struct MessageView: View {
         return runs
     }
 
-    /// Aggregates a group of web searches into a single `WebSearchState` for
-    /// display: the status rolls up to the "most interesting" state in the
-    /// group (searching wins, then failed/blocked, else completed), and
-    /// sources are merged, de-duplicated by URL.
-    private func aggregatedState(for group: [WebSearchInstance]) -> WebSearchState {
-        let status: WebSearchStatus
-        if group.contains(where: { $0.status == .searching }) {
-            status = .searching
-        } else if group.contains(where: { $0.status == .failed }) {
-            status = .failed
-        } else if group.contains(where: { $0.status == .blocked }) {
-            status = .blocked
-        } else {
-            status = .completed
+    /// Whether the indicator below a streaming reply shows: under its text, a
+    /// widget or a step that has settled. A reply nothing has arrived of
+    /// shows its waiting dots instead, and one whose latest row is a step
+    /// still working shows that in the step's header.
+    static func showsIndicatorBelowReply(_ message: Message, isRenderingStream: Bool) -> Bool {
+        guard message.role == .assistant, isRenderingStream else { return false }
+        let segments = message.segments ?? []
+        guard !message.content.isEmpty || message.thoughts != nil || message.isThinking || !segments.isEmpty else {
+            return false
         }
-
-        var mergedSources: [WebSearchSource] = []
-        var seenUrls: Set<String> = []
-        for instance in group {
-            for source in instance.sources ?? [] {
-                if seenUrls.insert(source.url).inserted {
-                    mergedSources.append(source)
-                }
+        if !segments.isEmpty {
+            switch inlineSegmentRuns(from: segments, message: message).last?.run {
+            case .work:
+                // A run that is the latest row stays live until text follows it.
+                return false
+            case .step(let step):
+                return !step.isInFlight
+            case .text, .toolCall, nil:
+                return true
             }
         }
-
-        let reason = group.compactMap { $0.reason }.first
-        let primaryQuery = group.first?.query
-        return WebSearchState(query: primaryQuery, status: status, sources: mergedSources, reason: reason)
+        // A reply without segments shows its steps above its text.
+        if message.content.hasPrefix("<think>") { return message.content.contains("</think>") }
+        guard message.content.isEmpty else { return true }
+        let isSearching = message.webSearchState?.status == .searching
+        let isFetching = message.urlFetches.contains { $0.status == .fetching }
+        return !(message.isThinking || isSearching || isFetching)
     }
 
     /// Renders ordered message segments (text and inline event refs) in the
@@ -421,61 +385,68 @@ struct MessageView: View {
                         .transaction { transaction in
                             transaction.animation = nil
                         }
-                case .thinking(let content, let isThinking, let duration):
-                    CollapsibleThinkingBox(
-                        thinkingText: content,
-                        isDarkMode: isDarkMode,
-                        isStreaming: isThinking && isRenderingStream,
-                        generationTimeSeconds: duration,
-                        thinkingSummary: isLoading && isLastMessage && isThinking
-                            ? viewModel.thinkingSummary
-                            : nil,
-                        onTap: { showThoughtsSheet = true }
-                    )
-                case .webSearches(let group):
-                    let aggregate = aggregatedState(for: group)
-                    let isSearchInFlight = aggregate.status == .searching
-                        && isRenderingStream
-                    WebSearchBox(
-                        webSearchState: aggregate,
-                        isDarkMode: isDarkMode,
-                        webSearchSummary: isLoading && isLastMessage && isSearchInFlight
-                            ? viewModel.webSearchSummary
-                            : nil,
-                        groupSize: group.count,
-                        onTap: {
-                            if group.count > 1 {
-                                activeWebSearchGroup = IdentifiedGroup(items: group)
-                            } else if let first = group.first,
-                                      !(first.sources ?? []).isEmpty {
-                                activeSearchInstanceSources = IdentifiedGroup(items: first.sources ?? [])
-                            }
-                        }
-                    )
-                case .urlFetches(let group):
-                    URLFetchBox(
-                        urlFetches: group,
-                        isDarkMode: isDarkMode,
-                        onTap: {
-                            activeURLFetchGroup = IdentifiedGroup(items: group)
-                        }
-                    )
+                case .step(let step):
+                    workStepBox(step, rowId: identifiedRun.id, isActive: isRenderingStream && step.isInFlight)
                 case .toolCall(let toolCall):
                     genUIToolCallView(toolCall)
                 case .work(let run):
-                    let isActive = isRenderingStream && identifiedRun.id == runs.last?.id
                     WorkBox(
                         run: run,
-                        isActive: isActive,
+                        rowId: identifiedRun.id,
+                        isActive: isRenderingStream && identifiedRun.id == runs.last?.id,
+                        isStreaming: isRenderingStream,
                         isDarkMode: isDarkMode,
-                        thinkingSummary: isLoading && isLastMessage ? viewModel.thinkingSummary : nil,
-                        webSearchSummary: isLoading && isLastMessage ? viewModel.webSearchSummary : nil,
-                        onTap: { activeWorkRun = IdentifiedGroup(items: run.steps) }
+                        thinkingSummary: isRenderingStream ? viewModel.thinkingSummary : nil,
+                        webSearchSummary: isRenderingStream ? viewModel.webSearchSummary : nil,
+                        expansion: stepExpansion
                     )
                 }
             }
         }
     }
+
+    /// A thought, searches or link reads standing alone. Only a step still
+    /// running shows the chat service's live summary of it.
+    private func workStepBox(_ step: WorkStep, rowId: String, isActive: Bool) -> some View {
+        WorkStepBox(
+            step: step,
+            rowId: rowId,
+            isActive: isActive,
+            isDarkMode: isDarkMode,
+            thinkingSummary: isActive ? viewModel.thinkingSummary : nil,
+            webSearchSummary: isActive ? viewModel.webSearchSummary : nil,
+            expansion: stepExpansion
+        )
+    }
+
+    /// The link reads and search of a reply saved before replies kept their
+    /// steps in order.
+    @ViewBuilder
+    private var legacyFetchAndSearchBoxes: some View {
+        if !message.urlFetches.isEmpty {
+            let step = WorkStep.urlFetches(message.urlFetches)
+            workStepBox(step, rowId: Self.legacyFetchesRowId, isActive: isRenderingStream && step.isInFlight)
+        }
+        if let webSearchState = message.webSearchState {
+            let step = legacySearchStep(webSearchState)
+            workStepBox(step, rowId: Self.legacySearchRowId, isActive: isRenderingStream && step.isInFlight)
+        }
+    }
+
+    private func legacySearchStep(_ state: WebSearchState) -> WorkStep {
+        .webSearches([WebSearchInstance(
+            id: Self.legacySearchId,
+            query: state.query,
+            status: state.status,
+            sources: state.sources,
+            reason: state.reason
+        )])
+    }
+
+    private static let legacySearchId = "search"
+    private static let legacyThinkingRowId = "legacy:thinking"
+    private static let legacySearchRowId = "legacy:search"
+    private static let legacyFetchesRowId = "legacy:fetches"
 
     private func genUIToolCallView(_ toolCall: GenUIToolCall) -> some View {
         GenUIToolCallView(
@@ -561,21 +532,7 @@ struct MessageView: View {
                     (message.segments?.isEmpty ?? true) &&
                     isRenderingStream {
                     VStack(alignment: .leading, spacing: 4) {
-                        if !message.urlFetches.isEmpty {
-                            URLFetchBox(urlFetches: message.urlFetches, isDarkMode: isDarkMode, onTap: { showURLFetchSheet = true })
-                        }
-
-                        // Show web search box if searching
-                        if let webSearchState = message.webSearchState {
-                            WebSearchBox(
-                                webSearchState: webSearchState,
-                                isDarkMode: isDarkMode,
-                                webSearchSummary: isLoading && isLastMessage
-                                    ? viewModel.webSearchSummary
-                                    : nil,
-                                onTap: { showSourcesSheet = true }
-                            )
-                        }
+                        legacyFetchAndSearchBoxes
 
                         // Show loading dots unless a web search is actively in
                         // flight, in which case the search box itself pulses
@@ -601,34 +558,21 @@ struct MessageView: View {
                 // If the message is thinking or has thoughts, display them in a thinking box
                 else if message.isThinking || message.thoughts != nil {
                     VStack(alignment: .leading, spacing: 4) {
-                        CollapsibleThinkingBox(
-                            thinkingText: message.thoughts ?? "",
-                            isDarkMode: isDarkMode,
-                            isStreaming: message.isThinking && isRenderingStream,
-                            generationTimeSeconds: message.generationTimeSeconds,
-                            thinkingSummary: isLoading && isLastMessage && message.isThinking
-                                ? viewModel.thinkingSummary
-                                : nil,
-                            onTap: { showThoughtsSheet = true }
+                        workStepBox(
+                            .thinking(
+                                content: message.thoughts ?? "",
+                                isThinking: message.isThinking,
+                                duration: message.generationTimeSeconds,
+                                startedAt: nil
+                            ),
+                            rowId: Self.legacyThinkingRowId,
+                            isActive: message.isThinking && isRenderingStream
                         )
 
                         if let segments = message.segments, !segments.isEmpty {
                             inlineSegmentsView(segments: segments)
                         } else {
-                            if !message.urlFetches.isEmpty {
-                                URLFetchBox(urlFetches: message.urlFetches, isDarkMode: isDarkMode, onTap: { showURLFetchSheet = true })
-                            }
-
-                            if let webSearchState = message.webSearchState {
-                                WebSearchBox(
-                                    webSearchState: webSearchState,
-                                    isDarkMode: isDarkMode,
-                                    webSearchSummary: isLoading && isLastMessage
-                                        ? viewModel.webSearchSummary
-                                        : nil,
-                                    onTap: { showSourcesSheet = true }
-                                )
-                            }
+                            legacyFetchAndSearchBoxes
 
                             if !message.content.isEmpty {
                                 LaTeXMarkdownView(
@@ -651,17 +595,16 @@ struct MessageView: View {
                 // Legacy support: if content still has <think> tags, parse and display
                 else if let parsed = getParsedMessageContent() {
                     VStack(alignment: .leading, spacing: 4) {
-                        CollapsibleThinkingBox(
-                            thinkingText: parsed.thinkingText,
-                            isDarkMode: isDarkMode,
-                            isStreaming: isRenderingStream,
-                            generationTimeSeconds: message.generationTimeSeconds,
-                            thinkingSummary: isLoading
-                                && isLastMessage
-                                && !message.content.contains("</think>")
-                                ? viewModel.thinkingSummary
-                                : nil,
-                            onTap: { showThoughtsSheet = true }
+                        let isThinking = !message.content.contains("</think>")
+                        workStepBox(
+                            .thinking(
+                                content: parsed.thinkingText,
+                                isThinking: isThinking,
+                                duration: message.generationTimeSeconds,
+                                startedAt: nil
+                            ),
+                            rowId: Self.legacyThinkingRowId,
+                            isActive: isThinking && isRenderingStream
                         )
                         
                         // Remainder: text after </think> if present
@@ -707,21 +650,7 @@ struct MessageView: View {
                         inlineSegmentsView(segments: segments)
                     } else {
                         VStack(alignment: .leading, spacing: 4) {
-                            if !message.urlFetches.isEmpty {
-                                URLFetchBox(urlFetches: message.urlFetches, isDarkMode: isDarkMode, onTap: { showURLFetchSheet = true })
-                            }
-
-                            // Web search box for non-thinking assistant messages
-                            if let webSearchState = message.webSearchState {
-                                WebSearchBox(
-                                    webSearchState: webSearchState,
-                                    isDarkMode: isDarkMode,
-                                    webSearchSummary: isLoading && isLastMessage
-                                        ? viewModel.webSearchSummary
-                                        : nil,
-                                    onTap: { showSourcesSheet = true }
-                                )
-                            }
+                            legacyFetchAndSearchBoxes
 
                             LaTeXMarkdownView(
                                 content: message.content,
@@ -750,11 +679,9 @@ struct MessageView: View {
                 // Persistent streaming indicator at the bottom of the
                 // currently rendered assistant content. Only shown once
                 // initial content has started arriving so we don't double up
-                // with the initial `LoadingDotsView` placeholder above.
-                if message.role == .assistant &&
-                   isRenderingStream &&
-                   (!message.content.isEmpty || message.thoughts != nil || message.isThinking ||
-                    !(message.segments?.isEmpty ?? true)) {
+                // with the initial `LoadingDotsView` placeholder above, nor
+                // with a working step's header.
+                if Self.showsIndicatorBelowReply(message, isRenderingStream: isRenderingStream) {
                     StreamingIndicator(isDarkMode: isDarkMode)
                         .padding(.top, 4)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -946,46 +873,6 @@ struct MessageView: View {
                     .iPadSheetSizing()
             }
         }
-        .sheet(isPresented: $showThoughtsSheet) {
-            ThoughtsSheetView(
-                thinkingText: thoughtsContent ?? "",
-                generationTimeSeconds: message.generationTimeSeconds,
-                isDarkMode: isDarkMode
-            )
-            .presentationDetents([.medium, .large])
-            .iPadSheetSizing()
-            .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
-        }
-        .sheet(isPresented: $showURLFetchSheet) {
-            URLFetchSheetView(urlFetches: message.urlFetches, isDarkMode: isDarkMode)
-                .presentationDetents([.medium, .large])
-                .iPadSheetSizing()
-                .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
-        }
-        .sheet(item: $activeWebSearchGroup) { group in
-            WebSearchQueriesSheetView(instances: group.items, isDarkMode: isDarkMode)
-                .presentationDetents([.medium, .large])
-                .iPadSheetSizing()
-                .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
-        }
-        .sheet(item: $activeURLFetchGroup) { group in
-            URLFetchSheetView(urlFetches: group.items, isDarkMode: isDarkMode)
-                .presentationDetents([.medium, .large])
-                .iPadSheetSizing()
-                .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
-        }
-        .sheet(item: $activeSearchInstanceSources) { group in
-            SourcesSheetView(sources: group.items, isDarkMode: isDarkMode)
-                .presentationDetents([.medium, .large])
-                .iPadSheetSizing()
-                .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
-        }
-        .sheet(item: $activeWorkRun) { group in
-            WorkStepsSheetView(run: WorkRun(steps: group.items), isDarkMode: isDarkMode)
-                .presentationDetents([.medium, .large])
-                .iPadSheetSizing()
-                .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
-        }
         .sheet(isPresented: $showShareSheet) {
             if let currentChat = viewModel.currentChat {
                 ShareChatView(
@@ -1056,24 +943,6 @@ struct MessageView: View {
         return text.replacingOccurrences(of: "<think>", with: "")
     }
     
-    private var thoughtsContent: String? {
-        if let thoughts = message.thoughts, !thoughts.isEmpty {
-            return thoughts
-        }
-        if message.content.hasPrefix("<think>") {
-            let tagPrefix = "<think>"
-            let tagSuffix = "</think>"
-            let start = message.content.index(message.content.startIndex, offsetBy: tagPrefix.count)
-
-            if let endTagRange = message.content.range(of: tagSuffix, range: start..<message.content.endIndex) {
-                return String(message.content[start..<endTagRange.lowerBound])
-            } else {
-                return String(message.content[start...])
-            }
-        }
-        return nil
-    }
-
     private var responseContent: String {
         if message.thoughts != nil {
             return message.content.hasPrefix("<think>") ? "" : message.content
@@ -1686,118 +1555,6 @@ private final class InlineSelectableUITextView: UITextView {
     }
 }
 
-struct CollapsibleThinkingBox: View {
-    let thinkingText: String
-    let isDarkMode: Bool
-    let isStreaming: Bool
-    let generationTimeSeconds: Double?
-    let thinkingSummary: String?
-    let onTap: () -> Void
-
-    /// What the box says of a finished thought, and what VoiceOver reads of
-    /// the box at any time. A finished thought the chat service timed no
-    /// duration for shows no time.
-    private var title: String {
-        if isStreaming { return "Thinking" }
-        if let seconds = generationTimeSeconds { return "Thought for \(String(format: "%.1f", seconds))s" }
-        return "Thought"
-    }
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack {
-                // A thought still going on has a duration that grows as it
-                // streams; it shows as thinking until it ends.
-                if isStreaming {
-                    if let summary = thinkingSummary, !summary.isEmpty {
-                        Text(summary)
-                            .font(.subheadline)
-                            .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .modifier(TextShimmerAnimation())
-                    } else {
-                        HStack(spacing: 4) {
-                            Text("Thinking")
-                                .font(.callout)
-                                .foregroundColor(isDarkMode ? .white : Color.black.opacity(0.8))
-                            InlineLoadingDotsView(isDarkMode: isDarkMode)
-                        }
-                        .modifier(TextShimmerAnimation())
-                    }
-                } else {
-                    Text(title)
-                        .font(.subheadline)
-                        .foregroundColor(isDarkMode ? .white.opacity(0.7) : Color.black.opacity(0.6))
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
-                    .accessibilityHidden(true)
-            }
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(NoHighlightButtonStyle())
-        .accessibilityLabel(title)
-        .accessibilityHint("Shows the full reasoning")
-    }
-}
-
-struct ThoughtsSheetView: View {
-    let thinkingText: String
-    let generationTimeSeconds: Double?
-    let isDarkMode: Bool
-    /// `thinkingText` in chunks, laid out lazily so a very large thought
-    /// never becomes one Text view whose CoreText layout blocks the main
-    /// thread.
-    @State private var chunks: [ThinkingChunk]? = nil
-
-    private var displayChunks: [ThinkingChunk] {
-        chunks ?? []
-    }
-
-    private var titleText: String {
-        if let seconds = generationTimeSeconds {
-            return "Thought for \(String(format: "%.1f", seconds))s"
-        }
-        return "Thoughts"
-    }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if !displayChunks.isEmpty {
-                        ForEach(displayChunks) { chunk in
-                            ThinkingChunkView(chunk: chunk, isDarkMode: isDarkMode)
-                                .equatable()
-                        }
-                    } else if !thinkingText.isEmpty {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .navigationTitle(titleText)
-            .navigationBarTitleDisplayMode(.inline)
-            // A thought still streaming is chunked again as it grows.
-            .task(id: thinkingText) {
-                guard !thinkingText.isEmpty else { return }
-                let text = thinkingText
-                let chunked = await Task.detached {
-                    ThinkingTextChunker.chunk(growing: text)
-                }.value
-                guard !Task.isCancelled else { return }
-                chunks = chunked
-            }
-        }
-    }
-}
-
 struct ThinkingChunkView: View, Equatable {
     let chunk: ThinkingChunk
     let isDarkMode: Bool
@@ -1816,7 +1573,7 @@ struct ThinkingChunkView: View, Equatable {
             .font(.system(.body))
             .foregroundColor(isDarkMode ? .white.opacity(0.9) : Color.black.opacity(0.8))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, 8)
+            .padding(.bottom, Constants.UI.WorkSteps.thoughtParagraphSpacing)
     }
 }
 
