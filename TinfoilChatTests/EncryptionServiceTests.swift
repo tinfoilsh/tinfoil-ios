@@ -69,6 +69,22 @@ struct EncryptionServiceTests {
         #expect(service.getKey() == nil)
     }
 
+    /// A claim the keychain could not take, as while the device is locked,
+    /// waits in the defaults for the next bind.
+    @Test func waitingClaimIsCompletedBeforeTheKeyIsBound() throws {
+        let (service, name, cleanup) = try makeService()
+        defer { cleanup() }
+        let key = service.generateKey()
+        try storeUnownedKey(key, keychainService: name)
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defaults.set("user-a", forKey: Constants.StorageKeys.Secret.encryptionKeyClaim)
+
+        service.bind(userId: "user-a")
+
+        #expect(service.getKey() == key)
+        #expect(defaults.object(forKey: Constants.StorageKeys.Secret.encryptionKeyClaim) == nil)
+    }
+
     @Test func replacedKeyIsKeptUnlessStartingFresh() async throws {
         let (service, _, cleanup) = try makeService()
         defer { cleanup() }

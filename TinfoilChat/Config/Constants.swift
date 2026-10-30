@@ -585,6 +585,9 @@ enum Constants {
         // MARK: - Secret / Sensitive
         enum Secret {
             static let encryptionKeySetUp = "tinfoil-secret-encryption-key-set-up"
+            /// The account an older version left signed in, whose claim on
+            /// the encryption key it kept waits for the keychain.
+            static let encryptionKeyClaim = "tinfoil-secret-encryption-key-claim"
             static let passkeyEnclaveKeyId = "tinfoil-secret-passkey-enclave-key-id"
             static let passkeyEnclaveCredentialId = "tinfoil-secret-passkey-enclave-credential-id"
             static let passkeyRecoveryDismissedKeyId = "tinfoil-secret-passkey-recovery-dismissed-key-id"
