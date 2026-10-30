@@ -13,7 +13,7 @@ struct MessageInputSizingTests {
     func initialTranscriptionExpandsWithoutKeyboardInput() {
         let host = UIHostingController(rootView: editor(text: String(repeating: Self.paragraph, count: 3)))
 
-        let size = host.sizeThatFits(in: CGSize(width: Self.phoneWidth, height: .greatestFiniteMagnitude))
+        let size = host.sizeThatFits(in: CGSize(width: Self.phoneWidth, height: CGFloat.greatestFiniteMagnitude))
 
         #expect(size.width == Self.phoneWidth)
         #expect(size.height == Self.maximumHeight)
@@ -22,7 +22,7 @@ struct MessageInputSizingTests {
     @Test
     func programmaticTranscriptionExpandsAndClearingShrinksTheEditor() {
         let host = UIHostingController(rootView: editor(text: "Existing draft"))
-        let proposal = CGSize(width: Self.phoneWidth, height: .greatestFiniteMagnitude)
+        let proposal = CGSize(width: Self.phoneWidth, height: CGFloat.greatestFiniteMagnitude)
         #expect(host.sizeThatFits(in: proposal).height == Self.minimumHeight)
 
         host.rootView = editor(text: "Existing draft " + String(repeating: Self.paragraph, count: 3))
@@ -35,8 +35,8 @@ struct MessageInputSizingTests {
     @Test
     func layoutUsesTheProposedWidthRatherThanThePreviousFrame() {
         let host = UIHostingController(rootView: editor(text: Self.paragraph))
-        let wideProposal = CGSize(width: 600, height: .greatestFiniteMagnitude)
-        let narrowProposal = CGSize(width: 180, height: .greatestFiniteMagnitude)
+        let wideProposal = CGSize(width: 600, height: CGFloat.greatestFiniteMagnitude)
+        let narrowProposal = CGSize(width: 180, height: CGFloat.greatestFiniteMagnitude)
 
         let wideSize = host.sizeThatFits(in: wideProposal)
         let narrowSize = host.sizeThatFits(in: narrowProposal)
@@ -51,7 +51,7 @@ struct MessageInputSizingTests {
     func veryLongTranscriptionStaysWithinTheScrollableHeightLimit() {
         let host = UIHostingController(rootView: editor(text: String(repeating: Self.paragraph, count: 100)))
 
-        let size = host.sizeThatFits(in: CGSize(width: Self.phoneWidth, height: .greatestFiniteMagnitude))
+        let size = host.sizeThatFits(in: CGSize(width: Self.phoneWidth, height: CGFloat.greatestFiniteMagnitude))
 
         #expect(size.height == Self.maximumHeight)
     }

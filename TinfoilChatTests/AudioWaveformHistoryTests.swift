@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import TinfoilChat
+import CoreGraphics
 
 struct AudioWaveformHistoryTests {
     @Test(arguments: [

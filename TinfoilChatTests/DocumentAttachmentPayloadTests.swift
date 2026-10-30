@@ -3,6 +3,8 @@ import OpenAI
 import Testing
 @testable import TinfoilChat
 
+private typealias Attachment = TinfoilChat.Attachment
+
 @Suite("Document attachment offloading")
 struct DocumentAttachmentPayloadTests {
     private actor UploadRecorder {

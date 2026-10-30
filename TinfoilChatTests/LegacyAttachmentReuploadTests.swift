@@ -2,6 +2,8 @@ import Foundation
 import Testing
 @testable import TinfoilChat
 
+private typealias Attachment = TinfoilChat.Attachment
+
 @Suite("Pre-enclave attachment ids")
 struct LegacyAttachmentReuploadTests {
     private static let legacyId = "8b9b6ffd-306c-4bbc-9a23-50723cfefed7"

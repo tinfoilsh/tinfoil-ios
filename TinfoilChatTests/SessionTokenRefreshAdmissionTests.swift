@@ -5,31 +5,39 @@ struct SessionTokenRefreshAdmissionTests {
     @Test
     func concurrentRefreshesAreRejectedUntilTheOwnerFinishes() throws {
         var admission = SessionTokenRefreshAdmission()
-        let first = try #require(admission.begin())
-        #expect(admission.begin() == nil)
+        let firstAdmission = admission.begin()
+        let first = try #require(firstAdmission)
+        let rejected = admission.begin()
+        #expect(rejected == nil)
         admission.finish(first)
-        let next = try #require(admission.begin())
+        let nextAdmission = admission.begin()
+        let next = try #require(nextAdmission)
         #expect(next != first)
     }
 
     @Test
     func invalidationAdmitsANewRefreshWithoutWaitingForThePreviousOwner() throws {
         var admission = SessionTokenRefreshAdmission()
-        let old = try #require(admission.begin())
+        let oldAdmission = admission.begin()
+        let old = try #require(oldAdmission)
         admission.reset()
-        let current = try #require(admission.begin())
+        let currentAdmission = admission.begin()
+        let current = try #require(currentAdmission)
         #expect(current != old)
         admission.finish(old)
         #expect(admission.requestID == current)
-        #expect(admission.begin() == nil)
+        let rejected = admission.begin()
+        #expect(rejected == nil)
         admission.finish(current)
-        #expect(admission.begin() != nil)
+        let admitted2 = admission.begin()
+        #expect(admitted2 != nil)
     }
 
     @Test
     func invalidationRetiresAnOwnerThatHasNotStartedItsWork() throws {
         var admission = SessionTokenRefreshAdmission()
-        let queued = try #require(admission.begin())
+        let queuedAdmission = admission.begin()
+        let queued = try #require(queuedAdmission)
         admission.reset()
         #expect(admission.requestID != queued)
         admission.finish(queued)

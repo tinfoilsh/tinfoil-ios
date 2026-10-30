@@ -4,15 +4,15 @@ import Testing
 struct ModelAvailabilityTests {
     @Test func filtersSelectableModelsUsingBackendAvailabilityMatrix() {
         let models = [
-            config(id: "paid-chat", type: "chat", chat: true, paid: true),
-            config(id: "paid-code", type: "code", chat: true, paid: true),
-            config(id: "free-chat", type: "chat", chat: true, paid: false),
-            config(id: "free-code", type: "code", chat: true, paid: false),
-            config(id: "chat-disabled", type: "chat", chat: false, paid: true),
-            config(id: "chat-unspecified", type: "chat", chat: nil, paid: true),
-            config(id: "title", type: "title", chat: true, paid: true),
-            config(id: "audio", type: "audio", chat: true, paid: true),
-            config(id: "document", type: "document", chat: true, paid: true),
+            Self.config(id: "paid-chat", type: "chat", chat: true, paid: true),
+            Self.config(id: "paid-code", type: "code", chat: true, paid: true),
+            Self.config(id: "free-chat", type: "chat", chat: true, paid: false),
+            Self.config(id: "free-code", type: "code", chat: true, paid: false),
+            Self.config(id: "chat-disabled", type: "chat", chat: false, paid: true),
+            Self.config(id: "chat-unspecified", type: "chat", chat: nil, paid: true),
+            Self.config(id: "title", type: "title", chat: true, paid: true),
+            Self.config(id: "audio", type: "audio", chat: true, paid: true),
+            Self.config(id: "document", type: "document", chat: true, paid: true),
         ]
 
         let available = ModelAvailability.realModels(from: models)
@@ -22,10 +22,10 @@ struct ModelAvailabilityTests {
 
     @Test func offersOneAutoEntryAheadOfRealModelsWhenAnyChatModelExists() {
         let models = [
-            config(id: "first"),
-            config(id: "free", paid: false),
-            config(id: "code", type: "code"),
-            config(id: "title", type: "title"),
+            Self.config(id: "first"),
+            Self.config(id: "free", paid: false),
+            Self.config(id: "code", type: "code"),
+            Self.config(id: "title", type: "title"),
         ]
         let available = ModelAvailability.realModels(from: models)
 
@@ -41,8 +41,8 @@ struct ModelAvailabilityTests {
 
     @Test func autoEntryUnionsCapabilitiesAndUsesSmallestContextWindow() throws {
         let available = ModelAvailability.realModels(from: [
-            config(id: "big", contextWindowTokens: 256_000),
-            config(id: "small-vision", multimodal: true, contextWindowTokens: 32_000),
+            Self.config(id: "big", contextWindowTokens: 256_000),
+            Self.config(id: "small-vision", multimodal: true, contextWindowTokens: 32_000),
         ])
 
         let auto = try #require(ModelAvailability.autoModel(from: available))
@@ -53,14 +53,14 @@ struct ModelAvailabilityTests {
     }
 
     @Test func defaultsToAutoAndFallsBackToNothingWithoutChatModels() {
-        let available = ModelAvailability.realModels(from: [config(id: "first"), config(id: "second")])
+        let available = ModelAvailability.realModels(from: [Self.config(id: "first"), Self.config(id: "second")])
 
         #expect(ModelAvailability.defaultModel(from: available)?.id == AutoModel.id)
         #expect(ModelAvailability.defaultModel(from: []) == nil)
     }
 
     @Test func savedModelResolutionMapsLegacyAutoIdsOntoAuto() {
-        let available = ModelAvailability.realModels(from: [config(id: "first")])
+        let available = ModelAvailability.realModels(from: [Self.config(id: "first")])
 
         for legacyId in AutoModel.legacyIds.union([AutoModel.id]) {
             #expect(ModelAvailability.resolveSavedModel(id: legacyId, from: available)?.id == AutoModel.id)

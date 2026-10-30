@@ -8,6 +8,8 @@ import Foundation
 import Testing
 @testable import TinfoilChat
 
+private typealias Attachment = TinfoilChat.Attachment
+
 @Suite("Enclave v2 sharing")
 struct ShareV2ContractTests {
     private let shareKey = String(repeating: "ab", count: 32)

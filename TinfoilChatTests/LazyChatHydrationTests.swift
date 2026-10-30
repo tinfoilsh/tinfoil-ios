@@ -100,7 +100,7 @@ private actor RecordingChatLoadingService: ChatLoadingService {
                 indexes[.cloud, default: []].append(ChatIndexEntry(from: chat))
             }
             if tombstoneOnApplyIds.contains(chat.id) {
-                DeletedChatsTracker.shared.markAsDeleted(chat.id)
+                await DeletedChatsTracker.shared.markAsDeleted(chat.id)
             }
         }
         return result
@@ -121,6 +121,7 @@ private actor RecordingChatLoadingService: ChatLoadingService {
     func deletedStorages() -> [ChatStorageTab] { deleteCalls.map(\.1) }
 }
 
+@Suite(.serialized)
 struct LazyChatHydrationTests {
     @Test
     func publishesThousandIndexSummariesWithoutLoadingFullChats() async throws {
@@ -327,7 +328,7 @@ struct LazyChatHydrationTests {
         let paginationService = RecordingChatLoadingService()
         let paginationChat = makeChat(id: "deleted-pagination", updatedAt: Date())
         DeletedChatsTracker.shared.markAsDeleted(paginationChat.id)
-        defer { DeletedChatsTracker.shared.removeFromDeleted(paginationChat.id) }
+        defer { DeletedChatsTracker.shared.clear() }
 
         let page = await ChatPaginationPersistence.saveCloudChats(
             [paginationChat],
@@ -344,7 +345,7 @@ struct LazyChatHydrationTests {
         let searchService = RecordingChatLoadingService()
         let searchChat = makeChat(id: "deleted-search", updatedAt: Date())
         DeletedChatsTracker.shared.markAsDeleted(searchChat.id)
-        defer { DeletedChatsTracker.shared.removeFromDeleted(searchChat.id) }
+        defer { DeletedChatsTracker.shared.clear() }
         let searchResult = try await RemoteSearchPersistence.resolve(
             searchChat,
             userId: "user",
@@ -364,7 +365,7 @@ struct LazyChatHydrationTests {
         let service = RecordingChatLoadingService()
         let chat = makeChat(id: "delete-race", updatedAt: Date())
         await service.setTombstoneOnApplyIds([chat.id])
-        defer { DeletedChatsTracker.shared.removeFromDeleted(chat.id) }
+        defer { DeletedChatsTracker.shared.clear() }
 
         let result = await ChatPaginationPersistence.saveCloudChats(
             [chat],
@@ -455,11 +456,15 @@ struct LazyChatHydrationTests {
     func mutationGateRejectsConcurrentOperationForSameChat() {
         var gate = ChatMutationGate()
 
-        #expect(gate.begin(chatId: "chat"))
-        #expect(!gate.begin(chatId: "chat"))
-        #expect(gate.begin(chatId: "other"))
+        let first = gate.begin(chatId: "chat")
+        #expect(first)
+        let concurrent = gate.begin(chatId: "chat")
+        #expect(!concurrent)
+        let other = gate.begin(chatId: "other")
+        #expect(other)
         gate.end(chatId: "chat")
-        #expect(gate.begin(chatId: "chat"))
+        let again = gate.begin(chatId: "chat")
+        #expect(again)
     }
 
     @Test

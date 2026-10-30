@@ -2,6 +2,8 @@ import Foundation
 import Testing
 @testable import TinfoilChat
 
+private typealias Attachment = TinfoilChat.Attachment
+
 @MainActor
 @Suite("Attachment Processing Store Tests")
 struct AttachmentProcessingStoreTests {

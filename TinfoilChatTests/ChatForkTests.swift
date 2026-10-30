@@ -7,6 +7,8 @@ import Foundation
 import Testing
 @testable import TinfoilChat
 
+private typealias Attachment = TinfoilChat.Attachment
+
 struct ChatForkTests {
     nonisolated static let model = ModelType(
         from: AppModelConfig(

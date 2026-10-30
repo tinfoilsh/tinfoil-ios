@@ -366,7 +366,8 @@ private final class ControlledFlagFetcher {
     }
 
     func complete(_ index: Int, report: SafeguardFlagsReport) throws {
-        let continuation = try #require(pending.removeValue(forKey: index), "No pending request at index \(index)")
+        let removed = pending.removeValue(forKey: index)
+        let continuation = try #require(removed, "No pending request at index \(index)")
         continuation.resume(returning: report)
     }
 

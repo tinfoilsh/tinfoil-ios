@@ -15,6 +15,8 @@ import Foundation
 import Testing
 @testable import TinfoilChat
 
+private typealias Attachment = TinfoilChat.Attachment
+
 @Suite("Attachment legacy key decode")
 struct AttachmentLegacyKeyDecodeTests {
 
