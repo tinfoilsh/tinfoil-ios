@@ -44,6 +44,12 @@ struct StreamErrorPresentationTests {
         #expect(shown.kind == .connection && shown.resends)
     }
 
+    @Test func aChatServiceThatCouldNotBeVerifiedResendsTheMessageNeverSent() {
+        let shown = StreamErrorPresentation(HarnessErrorBody.unverified, occurredAt: nil)
+        #expect(shown.kind == .verification)
+        #expect(shown.offersRetry && shown.resends)
+    }
+
     @Test func anUnfinishedReplyOffersToAskForItAgain() {
         let shown = StreamErrorPresentation(HarnessErrorBody.unfinishedReply, occurredAt: nil)
         #expect(shown.kind == .unfinished && shown.offersRetry && !shown.resends)

@@ -13,7 +13,7 @@ import Combine
 import Foundation
 import OSLog
 import SwiftUI
-import TinfoilAI
+import Tinfoil
 import VisionKit
 
 enum ChatStorageTab: String, Sendable, Hashable {
@@ -164,9 +164,43 @@ class ChatViewModel: ObservableObject {
         var isVerifying: Bool = false
         var isVerified: Bool = false
         var error: String? = nil
+
+        /// Follows a verification of the enclave. A success shows once the
+        /// session has opened; a failure, after a success too, says what
+        /// failed.
+        mutating func follow(_ result: EnclaveVerificationResult, sessionOpen: Bool) {
+            switch result {
+            case .success:
+                if sessionOpen { self = VerificationInfo(isVerified: true) }
+            case .failure(let error):
+                self = VerificationInfo(error: Self.failure(error))
+            }
+        }
+
+        /// What a failed verification says failed, in plain words.
+        static func failure(_ error: TinfoilError) -> String {
+            switch error {
+            case .networkError:
+                return "The enclave could not be reached to verify it. Check your connection and try again."
+            case .configurationError:
+                return "The app could not set up the enclave's verification."
+            case .attestationError(let details):
+                switch details.layer {
+                case .envelope?: return "The enclave's attestation could not be read."
+                case .provenance?: return "The enclave's published code could not be authenticated."
+                case .quote?: return "The enclave's hardware evidence could not be authenticated."
+                case .policy?: return "The enclave does not meet the required security checks."
+                default: return "The enclave could not be verified."
+                }
+            }
+        }
     }
     @Published var verification = VerificationInfo()
     @Published var enclaveVerification: Verification? = nil
+    /// The latest verification of the session's enclave, or nil before the
+    /// first.
+    private var latestVerification: EnclaveVerificationResult?
+    private var verificationWatch: Task<Void, Never>?
     private var isRetryingSession = false
     var isVerifying: Bool { verification.isVerifying }
     var isVerified: Bool { verification.isVerified }
@@ -374,6 +408,9 @@ class ChatViewModel: ObservableObject {
         }
         session?.account.dispose()
         sessionCancellables = []
+        verificationWatch?.cancel()
+        verificationWatch = nil
+        latestVerification = nil
         publishEvaluation?.cancel()
         publishEvaluation = nil
         trailingPublish?.cancel()
@@ -408,11 +445,18 @@ class ChatViewModel: ObservableObject {
         session.objectWillChange.sink { [weak self] _ in self?.sessionChanged() }.store(in: &sessionCancellables)
         account.$rateLimit.receive(on: RunLoop.main).sink { [weak self] limit in self?.rateLimit = limit.flatMap(RateLimitInfo.init) }.store(in: &sessionCancellables)
         account.$profile.receive(on: RunLoop.main).sink { [weak self] _ in self?.applyProfileSettings() }.store(in: &sessionCancellables)
-        account.$session.receive(on: RunLoop.main).sink { [weak self, weak account] loaded in
+        account.$session.receive(on: RunLoop.main).sink { [weak self] loaded in
             self?.applySessionModels()
-            guard loaded != nil, let account else { return }
-            Task { await self?.showVerification(of: account) }
+            guard loaded != nil, let self, let latest = latestVerification else { return }
+            verification.follow(latest, sessionOpen: true)
         }.store(in: &sessionCancellables)
+        let verifications = account.client.verifications
+        verificationWatch = Task { [weak self, weak account] in
+            for await result in verifications {
+                guard let self, let account else { return }
+                showVerification(result, of: account)
+            }
+        }
         account.$chatRevision.receive(on: RunLoop.main).sink { [weak self] _ in Task { await self?.refreshOpenChat() } }.store(in: &sessionCancellables)
         account.$projectRevision.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in Task { await self?.loadProjects() } }.store(in: &sessionCancellables)
         account.$keyReady.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] ready in
@@ -431,7 +475,7 @@ class ChatViewModel: ObservableObject {
             guard self.session === session else { return }
         } catch {
             guard self.session === session else { return }
-            verification = VerificationInfo(error: error.localizedDescription)
+            showSessionFailure(error)
             account.report(error)
             // The settings this device holds show even while the chat
             // service cannot be reached.
@@ -1693,7 +1737,7 @@ class ChatViewModel: ObservableObject {
                 try await session.account.refresh(credentials: true)
             } catch {
                 guard self.session === session else { return }
-                if verification.error != nil { verification = VerificationInfo(error: error.localizedDescription) }
+                if verification.error != nil { showSessionFailure(error) }
                 session.account.report(error)
             }
         }
@@ -1706,12 +1750,20 @@ class ChatViewModel: ObservableObject {
         retryClientSetup()
     }
 
-    /// Shows how the enclave the account's session reached was verified.
-    private func showVerification(of account: HarnessAccount) async {
-        let verified = await account.client.verification()
+    /// Shows how the enclave the account's session reaches was last
+    /// verified.
+    private func showVerification(_ result: EnclaveVerificationResult, of account: HarnessAccount) {
         guard self.account === account else { return }
-        enclaveVerification = verified
-        verification = VerificationInfo(isVerified: verified != nil, error: verified == nil ? "The chat service could not be verified." : nil)
+        latestVerification = result
+        if case .success(let verified) = result { enclaveVerification = verified }
+        verification.follow(result, sessionOpen: account.session != nil)
+    }
+
+    /// Shows why the session could not open, unless a failed verification of
+    /// the enclave already says what failed.
+    private func showSessionFailure(_ error: Error) {
+        if case .failure? = latestVerification { return }
+        verification = VerificationInfo(error: error.localizedDescription)
     }
 }
 

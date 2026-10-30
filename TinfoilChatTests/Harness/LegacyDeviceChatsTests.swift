@@ -46,7 +46,7 @@ struct LegacyDeviceChatsTests {
         ]]])
         let answer: ScriptedTransport.Answer = { request in
             let row = (request.json["threads"] as? [[String: Any]])?.first
-            return row?["id"] as? String == "refused" ? refusal(request) : converted(request)
+            return try row?["id"] as? String == "refused" ? refusal(request) : converted(request)
         }
         let transport = ScriptedTransport([answer, answer])
         let controlPlane = FreeKeyControlPlane()

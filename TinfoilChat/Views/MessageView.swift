@@ -1751,6 +1751,7 @@ struct ErrorMessageView: View {
         switch presentation.kind {
         case .rateLimit: return "gauge.with.dots.needle.67percent"
         case .connection: return "wifi.exclamationmark"
+        case .verification: return "exclamationmark.shield"
         case .key: return "key.slash"
         default: return "exclamationmark.triangle"
         }

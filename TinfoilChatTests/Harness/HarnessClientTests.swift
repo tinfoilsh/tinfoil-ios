@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import TinfoilAI
+import Tinfoil
 @testable import TinfoilChat
 
 /// A flag that waiters wake on, or give up on when cancelled.

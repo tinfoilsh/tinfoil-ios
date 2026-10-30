@@ -183,9 +183,10 @@ extension HarnessError {
     /// rows sealed under another.
     var isKeyMismatch: Bool { code == HarnessErrorCode.keyMismatch }
 
-    /// The registry could not be reached, or refused on its own account.
+    /// The registry could not be reached or verified, or refused on its own
+    /// account.
     var isRegistryUnavailable: Bool {
         if let status, status >= Constants.Harness.Keys.serverErrorStatus { return true }
-        return [HarnessErrorCode.connection, HarnessErrorCode.upstreamRefused, HarnessErrorCode.configuration].contains(code)
+        return [HarnessErrorCode.connection, HarnessErrorCode.attestation, HarnessErrorCode.upstreamRefused, HarnessErrorCode.configuration].contains(code)
     }
 }

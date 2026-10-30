@@ -331,9 +331,11 @@ final class RunController: ObservableObject {
         return false
     }
 
+    /// A stream that broke, or a request that could not reach the harness:
+    /// the run may go on.
     private static func interrupted(_ cause: Error) -> Bool {
         guard let error = cause as? HarnessError else { return true }
-        return error.code == HarnessErrorCode.streamInterrupted
+        return error.code == HarnessErrorCode.streamInterrupted || error.code == HarnessErrorCode.connection
     }
 
     /// The chat changed from the copy this client shows, as when the harness

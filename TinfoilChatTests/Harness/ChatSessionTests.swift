@@ -95,7 +95,7 @@ struct ChatSessionTests {
         let transport = fixture.transport
         await transport.push { request in
             let turn = request.json
-            return Answers.events(deviceRun(id: turn["threadId"] as! String, question: "second question", questionId: turn["clientRequestId"] as! String))(request)
+            return try Answers.events(deviceRun(id: turn["threadId"] as! String, question: "second question", questionId: turn["clientRequestId"] as! String))(request)
         }
         let finished = await session.send(TurnFields(kind: .send, content: "second question", options: TurnOptions(model: "kimi-k3")))
         #expect(finished)
@@ -183,7 +183,7 @@ struct ChatSessionTests {
         session.setTemporary(true)
         await fixture.transport.push { request in
             let turn = request.json
-            return Answers.events(deviceRun(id: turn["threadId"] as! String, question: "hello", questionId: turn["clientRequestId"] as! String))(request)
+            return try Answers.events(deviceRun(id: turn["threadId"] as! String, question: "hello", questionId: turn["clientRequestId"] as! String))(request)
         }
         #expect(await session.send(TurnFields(kind: .send, content: "hello")))
         let threadId = try #require(session.open.id)
@@ -240,7 +240,7 @@ struct ChatSessionTests {
             Answers.refusal(409, code: HarnessErrorCode.runInFlight, action: "reload"),
             { request in
                 reread.yield(request.route)
-                return Answers.json(window)(request)
+                return try Answers.json(window)(request)
             },
         ])
         let session = fixture.session

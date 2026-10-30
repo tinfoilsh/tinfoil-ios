@@ -60,13 +60,25 @@ struct HarnessErrorBody: Equatable, Sendable {
         action: .retry
     )
 
+    /// Why a request failed when the chat service could not be reached, or
+    /// stopped answering: whether the request took effect is unknown.
+    static let unreachable = HarnessErrorBody(
+        code: HarnessErrorCode.connection,
+        message: "The chat service could not be reached. Check your connection and try again.",
+        action: .retry
+    )
+
     /// Why a request failed when its answer did not come from the harness:
     /// an answer the enclave did not seal, a refusal or not, says nothing
     /// this client may show or act on, and whether the request took effect
     /// is unknown, as when the connection drops.
-    static let unsealedAnswer = HarnessErrorBody(
-        code: HarnessErrorCode.connection,
-        message: "The chat service could not be reached. Check your connection and try again.",
+    static let unsealedAnswer = unreachable
+
+    /// Why a request failed when the enclave could not be verified: it was
+    /// not sent.
+    static let unverified = HarnessErrorBody(
+        code: HarnessErrorCode.attestation,
+        message: "The chat service could not be verified, so nothing was sent.",
         action: .retry
     )
 }
@@ -100,10 +112,13 @@ extension HarnessErrorBody: Decodable {
 struct HarnessError: Error, Equatable {
     let detail: HarnessErrorBody
     let status: Int?
+    /// Why the network failed, for a request that could not be carried.
+    let urlErrorCode: URLError.Code?
 
-    init(_ detail: HarnessErrorBody, status: Int? = nil) {
+    init(_ detail: HarnessErrorBody, status: Int? = nil, urlErrorCode: URLError.Code? = nil) {
         self.detail = detail
         self.status = status
+        self.urlErrorCode = urlErrorCode
     }
 
     init(code: String, message: String, action: ErrorAction, status: Int? = nil) {

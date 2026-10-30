@@ -6,7 +6,7 @@
 //
 
 import SwiftUI
-import TinfoilAI
+import Tinfoil
 
 // MARK: - Verification Section
 

@@ -1,6 +1,5 @@
 import Foundation
 import OSLog
-import TinfoilAI
 
 /// Who is asking the harness, and the chat access they hold.
 protocol HarnessCredentials: Sendable {
@@ -60,9 +59,10 @@ actor HarnessClient {
         runRenewal = nil
     }
 
-    /// The latest verification of the enclave, or nil before the first.
-    func verification() async -> Verification? {
-        await transport.verification()
+    /// The result of each verification of the enclave as it finishes. Of
+    /// those not read yet, only the latest is kept.
+    nonisolated var verifications: AsyncStream<EnclaveVerificationResult> {
+        transport.verifications
     }
 
     /// Routes requests about a chat's run to the instance a hint names, for
