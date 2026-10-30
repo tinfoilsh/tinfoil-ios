@@ -271,6 +271,7 @@ struct PromptDetailView: View {
     var onEdit: (String) -> Void
     var onRequestDelete: (PromptPreset) -> Void
 
+    @EnvironmentObject private var chatViewModel: ChatViewModel
     @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
@@ -433,7 +434,7 @@ struct PromptDetailView: View {
 
     private func modelLabel(for modelId: String?) -> String {
         guard let modelId else { return Constants.PromptLibrary.noOverrideLabel }
-        return AppConfig.shared.findSelectableModel(id: modelId)?.displayName ?? modelId
+        return chatViewModel.findSelectableModel(id: modelId)?.displayName ?? modelId
     }
 
     private func webSearchLabel(for enabled: Bool?) -> String {
@@ -459,6 +460,7 @@ enum PromptEditorTarget: Identifiable {
 struct PromptEditorView: View {
     let target: PromptEditorTarget
 
+    @EnvironmentObject private var chatViewModel: ChatViewModel
     @ObservedObject private var profileManager = ProfileManager.shared
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
@@ -474,7 +476,7 @@ struct PromptEditorView: View {
     /// Models offered for the override: Auto followed by the real chat models,
     /// the same list the chat's model picker shows.
     private var modelOptions: [ModelType] {
-        AppConfig.shared.selectableModels
+        chatViewModel.selectableModels
     }
 
     private var isEditing: Bool {

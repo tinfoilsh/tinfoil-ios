@@ -3,62 +3,6 @@ import Testing
 import TinfoilAI
 @testable import TinfoilChat
 
-/// A transport that answers from a script and keeps what it was sent.
-private actor ScriptedTransport: HarnessTransport {
-    typealias Answer = @Sendable (HarnessRequest) -> HarnessResponse
-
-    private(set) var requests: [HarnessRequest] = []
-    private var answers: [Answer]
-
-    init(_ answers: [Answer]) {
-        self.answers = answers
-    }
-
-    func send(_ request: HarnessRequest) async throws -> HarnessResponse {
-        requests.append(request)
-        guard !answers.isEmpty else {
-            Issue.record("unscripted request to \(request.route.rawValue)")
-            throw HarnessError(code: HarnessErrorCode.connection, message: "unscripted", action: .stop)
-        }
-        return answers.removeFirst()(request)
-    }
-
-    func verification() async -> Verification? { nil }
-}
-
-private actor ScriptedCredentials: HarnessCredentials {
-    enum Call: Equatable { case identity(refresh: Bool), anonymousKey(refresh: Bool), chatAccess(identity: String, refresh: Bool) }
-
-    private(set) var calls: [Call] = []
-    var identities: [String?]
-    var anonymousKeys: [String]
-    var access: [Result<String, HarnessError>]
-    var renewsAt: Date?
-
-    init(identities: [String?] = [], anonymousKeys: [String] = [], access: [Result<String, HarnessError>] = []) {
-        self.identities = identities
-        self.anonymousKeys = anonymousKeys
-        self.access = access
-    }
-
-    func identity(refresh: Bool) async throws -> String? {
-        calls.append(.identity(refresh: refresh))
-        return identities.isEmpty ? nil : identities.removeFirst()
-    }
-
-    func anonymousKey(refresh: Bool) async throws -> String {
-        calls.append(.anonymousKey(refresh: refresh))
-        return anonymousKeys.removeFirst()
-    }
-
-    func chatAccess(identity: String, refresh: Bool) async throws -> String {
-        calls.append(.chatAccess(identity: identity, refresh: refresh))
-        return try access.removeFirst().get()
-    }
-
-    func chatAccessRenewsAt() async -> Date? { renewsAt }
-}
-
 /// A flag that waiters wake on, or give up on when cancelled.
 private actor Signal {
     private var raised = false

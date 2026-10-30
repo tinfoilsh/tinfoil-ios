@@ -41,7 +41,7 @@ private struct LinkPreviewView: View {
     let args: LinkPreviewWidget.Args
     let isDarkMode: Bool
 
-    @State private var metadata: LinkMetadata?
+    @State private var metadata: LinkPreview?
 
     private var domain: String {
         guard let url = URL(string: args.url), let host = url.host else { return args.url }

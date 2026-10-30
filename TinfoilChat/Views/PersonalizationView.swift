@@ -126,7 +126,7 @@ struct PersonalizationView: View {
     @ObservedObject private var profileManager: ProfileManager
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var editor: PersonalizationEditorState
-    @State private var isSaving: Bool = false
+    @State private var isSaving = false
     @State private var saveError: String?
 
     private let availableTraits = SettingsManager.shared.availableTraits
@@ -151,28 +151,34 @@ struct PersonalizationView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Color.settingsBackground(for: colorScheme))
+        .disabled(isSaving)
         .navigationTitle("Personalization")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Save") {
                     isSaving = true
-                    do {
-                        try profileManager.savePersonalization(editor.draft)
-                    } catch {
-                        saveError = error.localizedDescription
-                        isSaving = false
-                        return
-                    }
                     Task { @MainActor in
-                        await profileManager.syncToCloud()
-                        isSaving = false
-                        dismiss()
+                        defer { isSaving = false }
+                        do {
+                            try await profileManager.savePersonalization(editor.draft)
+                            dismiss()
+                        } catch {
+                            saveError = error.localizedDescription
+                        }
                     }
                 }
                 .fontWeight(.semibold)
                 .disabled(isSaving)
             }
+        }
+        .alert("Could Not Save Personalization", isPresented: Binding(
+            get: { saveError != nil },
+            set: { if !$0 { saveError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(saveError ?? "")
         }
         .onTapGesture {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -188,7 +194,6 @@ struct PersonalizationView: View {
         .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
         .task {
             let loadGeneration = editor.beginLoad()
-            await profileManager.syncFromCloud()
             editor.applyLoadedDraft(
                 profileManager.personalizationDraft,
                 generation: loadGeneration
@@ -196,14 +201,6 @@ struct PersonalizationView: View {
         }
         .onChange(of: profileManager.personalizationDraft) { _, draft in
             editor.applyRefreshedDraft(draft)
-        }
-        .alert("Could Not Save Personalization", isPresented: Binding(
-            get: { saveError != nil },
-            set: { if !$0 { saveError = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(saveError ?? "")
         }
     }
 

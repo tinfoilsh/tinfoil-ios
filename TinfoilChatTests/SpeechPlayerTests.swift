@@ -66,15 +66,12 @@ struct SpeechPlayerTests {
     }
 
     @Test
-    func invalidTextDoesNotReplaceCurrentPlayback() throws {
+    func emptyTextDoesNotReplaceCurrentPlayback() throws {
         let player = SpeechPlayer(output: SilentSpeechOutput())
         try player.read(owner: owner, content: "First response.", service: WaitingSpeechService())
         let next = SpeechOwner(chatId: "chat", messageId: "next")
         #expect(throws: SpeechError.empty) {
-            try player.read(owner: next, content: "```swift\ncode()\n```", service: WaitingSpeechService())
-        }
-        #expect(throws: SpeechError.tooLong) {
-            try player.read(owner: next, content: String(repeating: "x", count: Constants.Speech.maxTextCharacters + 1), service: WaitingSpeechService())
+            try player.read(owner: next, content: "  \n", service: WaitingSpeechService())
         }
         #expect(player.snapshot.owner == owner)
         #expect(player.snapshot.status == .loading)
@@ -246,7 +243,7 @@ private final class SilentSpeechOutput: SpeechAudioPlaying {
 }
 
 private struct ShortSpeechService: SpeechSynthesizing {
-    func generate(_ text: String, receive: @escaping @Sendable ([Float]) async throws -> Void) async throws {
+    func generate(receive: @escaping @Sendable ([Float]) async throws -> Void) async throws {
         try await receive([0.25])
     }
 }
@@ -266,7 +263,7 @@ private struct WaitingSpeechService: SpeechSynthesizing {
         canceledContinuation = cancel.continuation
     }
 
-    func generate(_ text: String, receive: @escaping @Sendable ([Float]) async throws -> Void) async throws {
+    func generate(receive: @escaping @Sendable ([Float]) async throws -> Void) async throws {
         let (stream, continuation) = AsyncThrowingStream<[Float], Error>.makeStream()
         continuation.onTermination = { [canceledContinuation] termination in
             if case .cancelled = termination { canceledContinuation.yield(()) }

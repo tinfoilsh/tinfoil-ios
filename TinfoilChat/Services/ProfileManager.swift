@@ -2,271 +2,197 @@
 //  ProfileManager.swift
 //  TinfoilChat
 //
-//  Manages user profile settings with Keychain storage and cloud sync
+//  The account's settings as the views bind to them. The chat service holds
+//  the profile, or this device does for an account without cloud sync and
+//  for a signed-out caller; the account's session keeps either, and this
+//  mirrors it and writes the user's changes back as patches.
 //
 
-import Foundation
 import Combine
-import SwiftUI
+import Foundation
+import OSLog
 
-enum ProfileLocalSaveError: LocalizedError {
-    case keychainWriteFailed
-
-    var errorDescription: String? {
-        switch self {
-        case .keychainWriteFailed:
-            return "Personalization couldn't be saved securely. Please try again."
-        }
-    }
+enum ProfileDefaults {
+    static let language = ResponseLanguageResolver.systemSelection
+    static let nickname = ""
+    static let profession = ""
+    static let traits: [String] = []
+    static let additionalContext = ""
+    static let isUsingPersonalization = true
+    static let customPromptPresets: [SyncedPromptPreset] = []
+    static let favoritePromptPresetIds: [String] = []
+    static let defaultPromptPresetId = ""
+    static let webSearchAvailable = true
+    static let piiCheckEnabled = true
+    static let genUIEnabled = true
 }
 
-extension Notification.Name {
-    static let profileSharedSettingsDidChange = Notification.Name("com.tinfoil.chat.profile.shared-settings-did-change")
+/// A prompt the user saved, as the profile stores it. Field names are part
+/// of the wire format shared with the web app.
+struct SyncedPromptPreset: Codable, Equatable {
+    var id: String
+    var name: String
+    var description: String
+    var systemPrompt: String
+    var createdAt: Double
+    var updatedAt: Double
+    /// Optional chat settings applied once when the preset is selected for a
+    /// chat. Nil means "leave the chat as is".
+    var model: String?
+    var webSearchEnabled: Bool?
+
+    init(
+        id: String,
+        name: String,
+        description: String,
+        systemPrompt: String,
+        createdAt: Double,
+        updatedAt: Double,
+        model: String? = nil,
+        webSearchEnabled: Bool? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.systemPrompt = systemPrompt
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.model = model
+        self.webSearchEnabled = webSearchEnabled
+    }
+
+    init(_ preset: Components.Schemas.CustomPreset) {
+        id = preset.id
+        name = preset.name
+        description = preset.description ?? ""
+        systemPrompt = preset.systemPrompt ?? ""
+        createdAt = Self.millis(preset.createdAt)
+        updatedAt = Self.millis(preset.updatedAt)
+        model = preset.model
+        webSearchEnabled = preset.webSearchEnabled
+    }
+
+    /// A timestamp as a client wrote it: epoch milliseconds, or a date.
+    private static func millis(_ value: Components.Schemas.Json?) -> Double {
+        switch value?.value {
+        case let number as Double: return number
+        case let number as Int: return Double(number)
+        case let text as String: return (ChatAccessCache.date(of: text)?.timeIntervalSince1970 ?? 0) * 1000
+        default: return 0
+        }
+    }
 }
 
 @MainActor
 class ProfileManager: ObservableObject {
     static let shared = ProfileManager()
-    
-    // Published properties for UI binding
-    @Published var isDarkMode: Bool = ProfileDefaults.isDarkMode
-    @Published var language: String = ProfileDefaults.language
-    
-    // Personalization settings
-    @Published var nickname: String = ProfileDefaults.nickname
-    @Published var profession: String = ProfileDefaults.profession
-    @Published var traits: [String] = ProfileDefaults.traits
-    @Published var additionalContext: String = ProfileDefaults.additionalContext
-    @Published var isUsingPersonalization: Bool = ProfileDefaults.isUsingPersonalization
-    
-    // User-created prompt presets (synced through the shared profile row)
-    @Published var customPromptPresets: [SyncedPromptPreset] = ProfileDefaults.customPromptPresets
+    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Profile")
 
-    // Preset ids pinned as homescreen favorites (built-in or custom)
-    @Published var favoritePromptPresetIds: [String] = ProfileDefaults.favoritePromptPresetIds
+    @Published private(set) var language: String = ProfileDefaults.language
+    @Published private(set) var nickname: String = ProfileDefaults.nickname
+    @Published private(set) var profession: String = ProfileDefaults.profession
+    @Published private(set) var traits: [String] = ProfileDefaults.traits
+    @Published private(set) var additionalContext: String = ProfileDefaults.additionalContext
+    @Published private(set) var isUsingPersonalization: Bool = ProfileDefaults.isUsingPersonalization
+    @Published private(set) var customPromptPresets: [SyncedPromptPreset] = ProfileDefaults.customPromptPresets
+    @Published private(set) var favoritePromptPresetIds: [String] = ProfileDefaults.favoritePromptPresetIds
+    @Published private(set) var defaultPromptPresetId: String = ProfileDefaults.defaultPromptPresetId
+    @Published private(set) var syncError: String?
 
-    // Preset stamped onto new chats; empty means the Tinfoil default
-    @Published var defaultPromptPresetId: String = ProfileDefaults.defaultPromptPresetId
+    private weak var account: HarnessAccount?
+    private var cancellable: AnyCancellable?
 
-    @Published private(set) var pinnedChatIds: [String]? = nil
-    
-    // Sync state
-    @Published var isSyncing: Bool = false
-    @Published var lastSyncDate: Date?
-    @Published var syncError: String?
-    
-    // Private properties
-    private let keychainQueue = DispatchQueue(label: "com.tinfoil.chat.profile-keychain")
-    private let keychainHelper = KeychainHelper.shared
-    private let profileSync = ProfileSyncService.shared
-    private var syncTimer: Timer?
-    private var syncDebounceTimer: Timer?
-    private var syncLoopTask: Task<Void, Never>?
-    private var lastSyncedVersion: Int = 0
-    private var lastSyncedProfile: ProfileData?
-    private var cancellables = Set<AnyCancellable>()
-    private var isApplyingProfile: Bool = false  // Flag to prevent observer loops
-    private var isPulling: Bool = false
-    private var isPushing: Bool = false
-    private var isFullSyncInProgress: Bool = false
-    private var fullSyncWaiters: [CheckedContinuation<Void, Never>] = []
-    private var accountGeneration: Int = 0
-    private var themeMode: String?
-    private var localFieldClocks: [String: EditClock]?
-    private var localClockVersion: Int?
-    private var codeExecutionEnabled: Bool?
-    private var chatFont: String?
-    private var projectUploadPreference: String?
-    
-    // Keychain keys
-    private let keychainKey = "userProfile"
-    private let profileBaselineKey = "userProfileSyncBaseline"
-    private let keychainService = "com.tinfoil.chat.profile"
-    private let profileDirtyKey = "com.tinfoil.chat.profile.dirty"
-    // Content modification time of the pending local profile edit, used
-    // to arbitrate last-write-wins against a concurrently-updated remote.
-    private let profileChangedAtKey = "com.tinfoil.chat.profile.changed-at"
-    
-    private init() {
-        loadFromKeychain()
-        migrateLegacyCustomPrompt()
-        setupChangeObservers()
-        setupModelCatalogObserver()
-        setupAutoSync()
-        // Trigger an initial sync shortly after initialization
-        Task { @MainActor in
-            await performFullSync()
-        }
-    }
-    
-    // MARK: - Local Storage
-    
-    /// Load profile from Keychain
-    private func loadFromKeychain() {
-        var loadedProfile: ProfileData?
-        if let data = keychainHelper.load(for: keychainKey, service: keychainService),
-           let profile = try? JSONDecoder().decode(ProfileData.self, from: data) {
-            loadedProfile = profile
-            applyProfile(profile)
+    private init() {}
 
-            // Also update last synced version if profile has one
-            if let version = profile.version {
-                lastSyncedVersion = version
-            }
-        }
-
-        if let baselineData = keychainHelper.load(
-            for: profileBaselineKey,
-            service: keychainService
-        ), let baseline = try? JSONDecoder().decode(ProfileData.self, from: baselineData) {
-            lastSyncedProfile = baseline
-            lastSyncedVersion = baseline.version ?? lastSyncedVersion
-            if loadedProfile == nil {
-                applyProfile(baseline)
-                persistProfileToKeychain(baseline)
-            }
-        } else if let profile = loadedProfile, !hasPendingLocalProfileChanges {
-            lastSyncedProfile = profile
-            persistBaselineToKeychain(profile)
-        }
-    }
-    
-    /// Save profile to Keychain
-    private func saveToKeychain() {
-        let profile = createProfileData()
-
-        persistProfileToKeychain(profile)
-
-        // Only treat this as a local edit when the content actually
-        // diverges from the last synced baseline. Debounced observers
-        // can fire after `isApplyingProfile` has reset following a
-        // cloud apply, which would otherwise mark the profile dirty and
-        // wedge future pulls behind a phantom pending change.
-        if !isApplyingProfile && hasProfileChanged(profile, lastSyncedProfile) {
-            markLocalProfileChanged()
-            if !isSyncing {
-                debounceCloudSync()
-            } else {
-                // If a sync is running, we'll re-check after it finishes
-            }
-        }
-    }
-
-    private var hasPendingLocalProfileChanges: Bool {
-        UserDefaults.standard.bool(forKey: profileDirtyKey)
-    }
-
-    private func markLocalProfileChanged() {
-        UserDefaults.standard.set(true, forKey: profileDirtyKey)
-        UserDefaults.standard.set(
-            ProfileManager.iso8601Formatter.string(from: Date()),
-            forKey: profileChangedAtKey
-        )
-    }
-
-    private func clearLocalProfileChanged() {
-        UserDefaults.standard.removeObject(forKey: profileDirtyKey)
-        UserDefaults.standard.removeObject(forKey: profileChangedAtKey)
-    }
-
-    /// Edit time of the pending local profile change, used to arbitrate
-    /// last-write-wins against the remote. Returns nil when the edit time
-    /// is unknown (e.g. a dirty flag left by an older build, or partially
-    /// cleared storage) so unknown-age local data cannot win the
-    /// arbitration and clobber a genuinely newer remote: conflict
-    /// resolution then defers to the remote, while a non-conflicting push
-    /// still stamps the current time.
-    private func localProfileChangedAt() -> String? {
-        if let stored = UserDefaults.standard.string(forKey: profileChangedAtKey),
-           ProfileManager.iso8601Formatter.date(from: stored) != nil {
-            return stored
-        }
-        return nil
-    }
-
-    private static let iso8601Formatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
-    private func persistProfileToKeychain(_ profile: ProfileData) {
-        guard let data = try? JSONEncoder().encode(profile) else {
+    /// Mirrors the account's profile, as its session keeps it.
+    func bind(_ account: HarnessAccount?) {
+        cancellable?.cancel()
+        self.account = account
+        guard let account else {
+            apply(Components.Schemas.Profile())
             return
         }
+        cancellable = Publishers.CombineLatest(account.$profile, account.$session)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _ in
+                guard let self, let account = self.account else { return }
+                apply(account.effectiveProfile)
+            }
+    }
 
-        let helper = keychainHelper
-        let key = keychainKey
-        let service = keychainService
-        keychainQueue.async {
-            helper.save(data, for: key, service: service)
+    private func apply(_ profile: Components.Schemas.Profile) {
+        language = profile.language ?? ProfileDefaults.language
+        nickname = profile.nickname ?? ProfileDefaults.nickname
+        profession = profile.profession ?? ProfileDefaults.profession
+        traits = profile.traits ?? ProfileDefaults.traits
+        additionalContext = profile.additionalContext ?? ProfileDefaults.additionalContext
+        isUsingPersonalization = profile.isUsingPersonalization ?? ProfileDefaults.isUsingPersonalization
+        customPromptPresets = (profile.customPromptPresets ?? []).map(SyncedPromptPreset.init)
+        favoritePromptPresetIds = profile.favoritePromptPresetIds ?? ProfileDefaults.favoritePromptPresetIds
+        defaultPromptPresetId = profile.defaultPromptPresetId ?? ProfileDefaults.defaultPromptPresetId
+        // The toggles Settings keeps follow the profile only where it holds
+        // them: a profile not loaded yet leaves them as they were.
+        let settings = SettingsManager.shared
+        settings.isApplyingSharedProfile = true
+        defer { settings.isApplyingSharedProfile = false }
+        if let webSearchAvailable = profile.webSearchAvailable, settings.webSearchAvailable != webSearchAvailable {
+            settings.webSearchAvailable = webSearchAvailable
+        }
+        if let piiCheckEnabled = profile.piiCheckEnabled, settings.piiCheckEnabled != piiCheckEnabled {
+            settings.piiCheckEnabled = piiCheckEnabled
+        }
+        if let genUIEnabled = profile.genUIEnabled, settings.genUIEnabled != genUIEnabled {
+            settings.genUIEnabled = genUIEnabled
+        }
+        if let language = profile.language, settings.selectedLanguage != language { settings.selectedLanguage = language }
+    }
+
+    /// Saves a change to the profile. The change shows at once through the
+    /// account's session; one the chat service refuses is taken back, and
+    /// reported here.
+    private func save(_ patch: ProfileFields) {
+        guard let account else { return }
+        Task {
+            do {
+                try await account.updateProfile(patch)
+                syncError = nil
+            } catch {
+                guard !(error is CancellationError) else { return }
+                Self.logger.error("Failed to save the profile: \(error, privacy: .public)")
+                syncError = error.localizedDescription
+            }
         }
     }
 
-    private func persistProfileToKeychainSynchronously(_ profile: ProfileData) throws {
-        let data = try JSONEncoder().encode(profile)
-        let helper = keychainHelper
-        let key = keychainKey
-        let service = keychainService
-        let saved = keychainQueue.sync {
-            helper.save(data, for: key, service: service)
-        }
-        guard saved else {
-            throw ProfileLocalSaveError.keychainWriteFailed
-        }
+    private static func encoded<T: Encodable>(_ value: T) -> Any {
+        (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(value), options: [.fragmentsAllowed])) ?? NSNull()
     }
 
-    private func persistBaselineToKeychain(_ profile: ProfileData) {
-        guard let data = try? JSONEncoder().encode(profile) else {
-            return
-        }
+    // MARK: - Settings
 
-        let helper = keychainHelper
-        let key = profileBaselineKey
-        let service = keychainService
-        keychainQueue.async {
-            helper.save(data, for: key, service: service)
-        }
+    func setLanguage(_ language: String) {
+        guard language != self.language else { return }
+        self.language = language
+        save(["language": language])
     }
-    
-    /// Create ProfileData from current settings
-    private func createProfileData() -> ProfileData {
-        let reasoningEffort = UserDefaults.standard.string(
-            forKey: Constants.StorageKeys.Settings.reasoningEffort
-        ) ?? ProfileDefaults.reasoningEffort
-        let thinkingEnabled: Bool
-        if UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.thinkingEnabled) != nil {
-            thinkingEnabled = UserDefaults.standard.bool(forKey: Constants.StorageKeys.Settings.thinkingEnabled)
-        } else {
-            thinkingEnabled = ProfileDefaults.thinkingEnabled
-        }
 
-        return ProfileData(
-            isDarkMode: isDarkMode,
-            themeMode: themeMode,
-            language: language,
-            nickname: nickname,
-            profession: profession,
-            traits: traits,
-            additionalContext: additionalContext,
-            isUsingPersonalization: isUsingPersonalization,
-            customPromptPresets: customPromptPresets,
-            favoritePromptPresetIds: favoritePromptPresetIds,
-            defaultPromptPresetId: defaultPromptPresetId,
-            reasoningEffort: reasoningEffort,
-            thinkingEnabled: thinkingEnabled,
-            webSearchAvailable: SettingsManager.shared.webSearchAvailable,
-            codeExecutionEnabled: codeExecutionEnabled,
-            piiCheckEnabled: SettingsManager.shared.piiCheckEnabled,
-            genUIEnabled: SettingsManager.shared.genUIEnabled,
-            chatFont: chatFont,
-            projectUploadPreference: projectUploadPreference,
-            pinnedChatIds: pinnedChatIds,
-            version: lastSyncedVersion,  // Will be incremented by ProfileSyncService
-            updatedAt: localProfileChangedAt(),
-            fieldClocks: localFieldClocks,
-            clockVersion: localClockVersion
-        )
+    /// A toggle Settings shares with the profile.
+    enum SharedSetting: String {
+        case webSearchAvailable
+        case piiCheckEnabled
+        case genUIEnabled
+    }
+
+    /// A shared toggle changed in Settings.
+    func sharedSettingDidChange(_ setting: SharedSetting) {
+        let settings = SettingsManager.shared
+        let value: Bool
+        switch setting {
+        case .webSearchAvailable: value = settings.webSearchAvailable
+        case .piiCheckEnabled: value = settings.piiCheckEnabled
+        case .genUIEnabled: value = settings.genUIEnabled
+        }
+        save([setting.rawValue: value])
     }
 
     var personalizationDraft: PersonalizationDraft {
@@ -279,300 +205,32 @@ class ProfileManager: ObservableObject {
         )
     }
 
-    func savePersonalization(_ draft: PersonalizationDraft) throws {
-        let changedFields = draft.changedProfileFields(comparedTo: personalizationDraft)
-        var clocks = localFieldClocks ?? lastSyncedProfile?.fieldClocks ?? [:]
-
-        if !changedFields.isEmpty {
-            let observedMax = changedFields.compactMap { clocks[$0]?.v }.max()
-            let tick = try EditClockStore.nextClock(observedMax: observedMax)
-            for field in changedFields {
-                clocks[field] = tick
-            }
+    /// Saves the personalization, or throws what refused it; the account's
+    /// session then shows the settings as they were.
+    func savePersonalization(_ draft: PersonalizationDraft) async throws {
+        guard let account else { throw HarnessError.unauthenticated }
+        let before = personalizationDraft
+        showPersonalization(draft)
+        do {
+            try await account.updateProfile([
+                "isUsingPersonalization": draft.isEnabled,
+                "nickname": draft.nickname,
+                "profession": draft.profession,
+                "traits": draft.traits,
+                "additionalContext": draft.additionalContext,
+            ])
+        } catch {
+            if personalizationDraft == draft { showPersonalization(before) }
+            throw error
         }
+    }
 
-        var profile = createProfileData()
-        profile.isUsingPersonalization = draft.isEnabled
-        profile.nickname = draft.nickname
-        profile.profession = draft.profession
-        profile.traits = draft.traits
-        profile.additionalContext = draft.additionalContext
-        profile.fieldClocks = clocks.isEmpty ? nil : clocks
-        profile.clockVersion = lastSyncedVersion
-        try persistProfileToKeychainSynchronously(profile)
-
-        isApplyingProfile = true
+    private func showPersonalization(_ draft: PersonalizationDraft) {
         isUsingPersonalization = draft.isEnabled
         nickname = draft.nickname
         profession = draft.profession
         traits = draft.traits
         additionalContext = draft.additionalContext
-        localFieldClocks = profile.fieldClocks
-        localClockVersion = profile.clockVersion
-        isApplyingProfile = false
-
-        if !changedFields.isEmpty {
-            markLocalProfileChanged()
-        }
-    }
-    
-    /// Apply profile data to published properties
-    private func applyProfile(_ profile: ProfileData) {
-        isApplyingProfile = true  // Prevent observer loops
-        // Suppress SettingsManager's sync callbacks while applying, so writing
-        // shared settings here does not re-enter this still-initializing
-        // singleton (applyProfile can run from within init).
-        SettingsManager.shared.isApplyingSharedProfile = true
-        
-        if let isDarkMode = profile.isDarkMode {
-            self.isDarkMode = isDarkMode
-        }
-        if let themeMode = profile.themeMode {
-            self.themeMode = themeMode
-        }
-        self.language = profile.language ?? ProfileDefaults.language
-        if let nickname = profile.nickname {
-            self.nickname = nickname
-        }
-        if let profession = profile.profession {
-            self.profession = profession
-        }
-        if let traits = profile.traits {
-            self.traits = traits
-        }
-        if let additionalContext = profile.additionalContext {
-            self.additionalContext = additionalContext
-        }
-        self.isUsingPersonalization = profile.usesPersonalization
-        if let customPromptPresets = profile.customPromptPresets {
-            self.customPromptPresets = customPromptPresets
-        }
-        if let favoritePromptPresetIds = profile.favoritePromptPresetIds {
-            self.favoritePromptPresetIds = favoritePromptPresetIds
-        }
-        if let defaultPromptPresetId = profile.defaultPromptPresetId {
-            self.defaultPromptPresetId = defaultPromptPresetId
-        }
-        if let reasoningEffort = profile.reasoningEffort,
-           ReasoningEffort(rawValue: reasoningEffort) != nil {
-            UserDefaults.standard.set(reasoningEffort, forKey: Constants.StorageKeys.Settings.reasoningEffort)
-        }
-        if let thinkingEnabled = profile.thinkingEnabled {
-            UserDefaults.standard.set(thinkingEnabled, forKey: Constants.StorageKeys.Settings.thinkingEnabled)
-        }
-        if let webSearchAvailable = profile.webSearchAvailable {
-            SettingsManager.shared.webSearchAvailable = webSearchAvailable
-        }
-        if let codeExecutionEnabled = profile.codeExecutionEnabled {
-            self.codeExecutionEnabled = codeExecutionEnabled
-        }
-        if let piiCheckEnabled = profile.piiCheckEnabled {
-            SettingsManager.shared.piiCheckEnabled = piiCheckEnabled
-        }
-        if let genUIEnabled = profile.genUIEnabled {
-            SettingsManager.shared.genUIEnabled = genUIEnabled
-        }
-        if let chatFont = profile.chatFont {
-            self.chatFont = chatFont
-        }
-        if let projectUploadPreference = profile.projectUploadPreference {
-            self.projectUploadPreference = projectUploadPreference
-        }
-        if let pinnedChatIds = profile.pinnedChatIds {
-            self.pinnedChatIds = ChatFavorites.normalize(pinnedChatIds)
-        }
-        if let version = profile.version {
-            self.lastSyncedVersion = version
-        }
-        self.localFieldClocks = profile.fieldClocks
-        self.localClockVersion = profile.clockVersion
-
-        NotificationCenter.default.post(
-            name: .profileSharedSettingsDidChange,
-            object: profile
-        )
-
-        SettingsManager.shared.isApplyingSharedProfile = false
-        isApplyingProfile = false  // Re-enable observers
-
-        // Presets synced from another device may name a retired model. Prune
-        // only once the catalog is authoritative; the catalog observer prunes
-        // on its own when the config load completes later. Runs after
-        // observers are back on so the cleanup persists and syncs like any
-        // other preset edit.
-        if AppConfig.shared.isInitialized {
-            pruneUnavailablePresetModels(available: AppConfig.shared.availableModels)
-        }
-    }
-
-    /// Prompt presets may pin a model the controlplane has since retired.
-    /// Drop those each time the catalog becomes authoritative, so the
-    /// cleanup happens after the initial config load and after any retry.
-    private func setupModelCatalogObserver() {
-        AppConfig.shared.$isInitialized
-            .filter { $0 }
-            .sink { [weak self] _ in
-                self?.pruneUnavailablePresetModels(available: AppConfig.shared.availableModels)
-            }
-            .store(in: &cancellables)
-    }
-
-    // MARK: - Change Observers
-    
-    private func setupChangeObservers() {
-        // Observe all published properties for changes
-        $isDarkMode
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard !(self?.isApplyingProfile ?? false) else { return }
-                self?.saveToKeychain()
-            }
-            .store(in: &cancellables)
-        
-        
-        $language
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard !(self?.isApplyingProfile ?? false) else { return }
-                self?.saveToKeychain()
-            }
-            .store(in: &cancellables)
-        
-        $nickname
-            .dropFirst()
-            .filter { [weak self] _ in !(self?.isApplyingProfile ?? false) }
-            .compactMap { [weak self] _ in self?.accountGeneration }
-            .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
-            .sink { [weak self] generation in
-                guard let self,
-                      generation == self.accountGeneration,
-                      !self.isApplyingProfile else { return }
-                self.saveToKeychain()
-            }
-            .store(in: &cancellables)
-        
-        $profession
-            .dropFirst()
-            .filter { [weak self] _ in !(self?.isApplyingProfile ?? false) }
-            .compactMap { [weak self] _ in self?.accountGeneration }
-            .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
-            .sink { [weak self] generation in
-                guard let self,
-                      generation == self.accountGeneration,
-                      !self.isApplyingProfile else { return }
-                self.saveToKeychain()
-            }
-            .store(in: &cancellables)
-        
-        $traits
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard !(self?.isApplyingProfile ?? false) else { return }
-                self?.saveToKeychain()
-            }
-            .store(in: &cancellables)
-        
-        $additionalContext
-            .dropFirst()
-            .filter { [weak self] _ in !(self?.isApplyingProfile ?? false) }
-            .compactMap { [weak self] _ in self?.accountGeneration }
-            .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
-            .sink { [weak self] generation in
-                guard let self,
-                      generation == self.accountGeneration,
-                      !self.isApplyingProfile else { return }
-                self.saveToKeychain()
-            }
-            .store(in: &cancellables)
-        
-        $isUsingPersonalization
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard !(self?.isApplyingProfile ?? false) else { return }
-                self?.saveToKeychain()
-            }
-            .store(in: &cancellables)
-        
-        $customPromptPresets
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard !(self?.isApplyingProfile ?? false) else { return }
-                self?.saveToKeychain()
-            }
-            .store(in: &cancellables)
-
-        $favoritePromptPresetIds
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard !(self?.isApplyingProfile ?? false) else { return }
-                self?.saveToKeychain()
-            }
-            .store(in: &cancellables)
-
-        $defaultPromptPresetId
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard !(self?.isApplyingProfile ?? false) else { return }
-                self?.saveToKeychain()
-            }
-            .store(in: &cancellables)
-    }
-
-    // MARK: - Legacy Custom Prompt Migration
-
-    /// Fields of the stored profile that ProfileData no longer models.
-    private struct LegacyCustomPromptFields: Decodable {
-        var isUsingCustomPrompt: Bool?
-        var customSystemPrompt: String?
-    }
-
-    /// The settings screen used to hold a single free-text custom prompt
-    /// behind a toggle, stored in the synced profile and mirrored to
-    /// UserDefaults. That prompt now lives in the library as a user preset
-    /// marked as the default, so an enabled legacy prompt is converted once
-    /// and the legacy storage is cleared either way. The migrated preset uses
-    /// a fixed id so devices that migrate independently before syncing
-    /// converge on the same preset instead of conflicting.
-    private func migrateLegacyCustomPrompt() {
-        let defaults = UserDefaults.standard
-        let enabledKey = Constants.StorageKeys.UserPrefs.customPromptEnabled
-        let promptKey = Constants.StorageKeys.UserPrefs.customSystemPrompt
-
-        var legacy: LegacyCustomPromptFields?
-        if let data = keychainHelper.load(for: keychainKey, service: keychainService) {
-            legacy = try? JSONDecoder().decode(LegacyCustomPromptFields.self, from: data)
-        }
-        let hasDefaultsValues = defaults.object(forKey: enabledKey) != nil
-            || defaults.object(forKey: promptKey) != nil
-        guard legacy?.isUsingCustomPrompt != nil || legacy?.customSystemPrompt != nil || hasDefaultsValues else {
-            return
-        }
-
-        let enabled = legacy?.isUsingCustomPrompt ?? defaults.bool(forKey: enabledKey)
-        let prompt = legacy?.customSystemPrompt ?? defaults.string(forKey: promptKey) ?? ""
-        if enabled, Self.systemPromptHasContent(prompt), defaultPromptPresetId.isEmpty {
-            let migratedId = PromptPreset.migratedCustomPromptId
-            if !customPromptPresets.contains(where: { $0.id == migratedId }) {
-                let now = Date().timeIntervalSince1970 * 1000
-                customPromptPresets.append(
-                    SyncedPromptPreset(
-                        id: migratedId,
-                        name: Constants.PromptLibrary.migratedCustomPromptName,
-                        description: Constants.PromptLibrary.migratedCustomPromptDescription,
-                        systemPrompt: prompt,
-                        createdAt: now,
-                        updatedAt: now
-                    )
-                )
-            }
-            defaultPromptPresetId = migratedId
-        }
-
-        defaults.removeObject(forKey: enabledKey)
-        defaults.removeObject(forKey: promptKey)
-        // Rewrite the stored profile so the legacy fields are dropped and the
-        // migrated preset is persisted even when nothing else changes.
-        saveToKeychain()
     }
 
     // MARK: - Prompt Presets
@@ -593,6 +251,10 @@ class ProfileManager: ObservableObject {
         let random = UUID().uuidString.prefix(8).lowercased()
         let timestamp = String(Int(Date().timeIntervalSince1970 * 1000), radix: 36)
         return "\(PromptPreset.userIdPrefix)\(timestamp)-\(random)"
+    }
+
+    private func savePresets() {
+        save(["customPromptPresets": Self.encoded(customPromptPresets)])
     }
 
     /// Create a new user preset and return its library representation.
@@ -616,6 +278,7 @@ class ProfileManager: ObservableObject {
             webSearchEnabled: webSearchEnabled
         )
         customPromptPresets.append(preset)
+        savePresets()
         return PromptPreset(from: preset)
     }
 
@@ -635,31 +298,22 @@ class ProfileManager: ObservableObject {
         customPromptPresets[index].model = model
         customPromptPresets[index].webSearchEnabled = webSearchEnabled
         customPromptPresets[index].updatedAt = Date().timeIntervalSince1970 * 1000
-    }
-
-    /// Clear the model choice from any user preset whose model is no longer
-    /// in the catalog, so a retired model does not linger in prompt settings.
-    /// Mutating `customPromptPresets` persists and syncs the profile like any
-    /// other preset edit. Returns the ids of the presets changed.
-    @discardableResult
-    func pruneUnavailablePresetModels(available: [ModelType]) -> [String] {
-        let pruned = PromptPresetSettings.pruningUnavailableModels(
-            in: customPromptPresets,
-            available: available
-        )
-        if !pruned.changedIds.isEmpty {
-            customPromptPresets = pruned.presets
-        }
-        return pruned.changedIds
+        savePresets()
     }
 
     /// Delete a user preset.
     func deletePromptPreset(id: String) {
         customPromptPresets.removeAll { $0.id == id }
         favoritePromptPresetIds.removeAll { $0 == id }
+        var patch: ProfileFields = [
+            "customPromptPresets": Self.encoded(customPromptPresets),
+            "favoritePromptPresetIds": favoritePromptPresetIds,
+        ]
         if defaultPromptPresetId == id {
             defaultPromptPresetId = ProfileDefaults.defaultPromptPresetId
+            patch["defaultPromptPresetId"] = defaultPromptPresetId
         }
+        save(patch)
     }
 
     // MARK: - Default Preset
@@ -671,11 +325,6 @@ class ProfileManager: ObservableObject {
         promptPreset(for: defaultPromptPresetId.isEmpty ? nil : defaultPromptPresetId)
     }
 
-    /// The preset id to stamp onto a newly created chat.
-    var defaultPromptPresetIdForNewChat: String? {
-        defaultPromptPreset?.id
-    }
-
     func isDefaultPreset(_ id: String) -> Bool {
         defaultPromptPresetId == id
     }
@@ -684,6 +333,7 @@ class ProfileManager: ObservableObject {
     /// nil is passed.
     func setDefaultPromptPreset(_ id: String?) {
         defaultPromptPresetId = id ?? ProfileDefaults.defaultPromptPresetId
+        save(["defaultPromptPresetId": defaultPromptPresetId])
     }
 
     // MARK: - Favorites
@@ -701,9 +351,8 @@ class ProfileManager: ObservableObject {
 
     /// Whether another preset can still be pinned given the favorites cap.
     /// Capacity is measured against favorites that actually resolve to a
-    /// preset, so stale ids (e.g. a custom preset deleted on another device,
-    /// or one not yet synced here) never count toward the cap and block
-    /// adding a valid favorite.
+    /// preset, so stale ids never count toward the cap and block adding a
+    /// valid favorite.
     var canAddFavorite: Bool {
         favoritePromptPresets.count < Constants.PromptLibrary.maxFavorites
     }
@@ -721,39 +370,10 @@ class ProfileManager: ObservableObject {
             favoritePromptPresetIds.remove(at: index)
         } else if canAddFavorite {
             favoritePromptPresetIds.append(id)
+        } else {
+            return
         }
-    }
-
-    func isChatPinned(_ id: String) -> Bool {
-        guard let normalizedID = ChatFavorites.normalizedID(id) else { return false }
-        return pinnedChatIds?.contains(normalizedID) == true
-    }
-
-    private func updatePinnedChatIds(_ ids: [String]) {
-        pinnedChatIds = ids
-        saveToKeychain()
-    }
-
-    func pinChat(_ id: String) {
-        guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        updatePinnedChatIds(ChatFavorites.normalize([id] + (pinnedChatIds ?? [])))
-    }
-
-    func unpinChat(_ id: String) {
-        guard let normalizedID = ChatFavorites.normalizedID(id),
-              let pinnedChatIds,
-              pinnedChatIds.contains(normalizedID) else { return }
-        updatePinnedChatIds(pinnedChatIds.filter { $0 != normalizedID })
-    }
-
-    func removePinnedChats(_ ids: Set<String>) {
-        guard let pinnedChatIds,
-              pinnedChatIds.contains(where: { ids.contains($0) }) else { return }
-        updatePinnedChatIds(ChatFavorites.removing(pinnedChatIds, confirmedMissing: ids))
-    }
-
-    func clearPinnedChats() {
-        updatePinnedChatIds([])
+        save(["favoritePromptPresetIds": favoritePromptPresetIds])
     }
 
     /// Duplicate a built-in or user preset into a new editable user preset.
@@ -768,422 +388,14 @@ class ProfileManager: ObservableObject {
             webSearchEnabled: source.webSearchEnabled
         )
     }
-    
-    // MARK: - Cloud Sync
-    
-    /// Setup automatic sync timer
-    private func setupAutoSync() {
-        // Cancel any existing timers/tasks
-        syncTimer?.invalidate()
-        syncLoopTask?.cancel()
 
-        // Use an async loop to avoid RunLoop mode issues
-        let intervalNanoseconds = UInt64(Constants.Sync.profileSyncIntervalSeconds * 1_000_000_000)
-        syncLoopTask = Task { @MainActor in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: intervalNanoseconds)
-                await self.performFullSync()
-            }
-        }
-    }
-    
-    /// Debounce cloud sync after local changes
-    private func debounceCloudSync() {
-        syncDebounceTimer?.invalidate()
-        let timer = Timer(timeInterval: 2.0, repeats: false) { [weak self] _ in
-            Task { @MainActor in
-                await self?.performFullSync()
-            }
-        }
-        syncDebounceTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
-    }
+    // MARK: - Account removal
 
-    private func updateSyncingState() {
-        isSyncing = isPulling || isPushing
-    }
-
-    private func prepareLocalProfileForSync() throws -> ProfileData {
-        var profile = createProfileData()
-        let changedFields = ProfileMerge.changedProfileFields(
-            local: profile,
-            baseline: lastSyncedProfile
-        )
-        var clocks = profile.fieldClocks ?? lastSyncedProfile?.fieldClocks ?? [:]
-        let unstampedFields = changedFields.filter {
-            clocks[$0] == lastSyncedProfile?.fieldClocks?[$0]
-        }
-        if !unstampedFields.isEmpty {
-            let tick = try EditClockStore.nextClock()
-            for field in unstampedFields {
-                clocks[field] = tick
-            }
-        }
-        profile.fieldClocks = clocks.isEmpty ? nil : clocks
-        profile.clockVersion = lastSyncedVersion
-        localFieldClocks = profile.fieldClocks
-        localClockVersion = profile.clockVersion
-        if !unstampedFields.isEmpty {
-            persistProfileToKeychain(profile)
-        }
-        return profile
-    }
-    
-    /// Sync profile from cloud
-    func syncFromCloud() async {
-        await performFullSync()
-    }
-
-    private func syncFromCloud(generation: Int) async -> Bool {
-        // Skip if not authenticated
-        guard await profileSync.isAuthenticated() else {
-            return false
-        }
-
-        // Skip if no encryption key is set
-        guard EncryptionService.shared.hasEncryptionKey() else {
-            return false
-        }
-
-        isPulling = true
-        updateSyncingState()
-        defer {
-            isPulling = false
-            updateSyncingState()
-        }
-
-        do {
-            guard generation == accountGeneration else { return false }
-            if let cloudProfile = try await profileSync.fetchProfile() {
-                guard generation == accountGeneration else { return false }
-                let cloudVersion = cloudProfile.version ?? 0
-                let localProfile: ProfileData
-                if hasPendingLocalProfileChanges {
-                    localProfile = try prepareLocalProfileForSync()
-                } else {
-                    localProfile = createProfileData()
-                }
-
-                if let baseline = lastSyncedProfile {
-                    let merge = ProfileMerge.mergeProfiles(
-                        baseline: baseline,
-                        local: localProfile,
-                        remote: cloudProfile
-                    )
-                    guard merge.conflicts.isEmpty else {
-                        throw ProfileSyncError.unresolvedConflicts(merge.conflicts)
-                    }
-                    applyProfile(merge.merged)
-                    persistProfileToKeychain(createProfileData())
-                    commitSyncedBaseline(cloudProfile, version: cloudVersion)
-                    if hasProfileChanged(merge.merged, cloudProfile) {
-                        markLocalProfileChanged()
-                    } else {
-                        clearLocalProfileChanged()
-                    }
-                } else if hasPendingLocalProfileChanges {
-                    guard let reconciled = ProfileMerge.reconcileDirtyProfileWithoutBaseline(
-                        local: localProfile,
-                        remote: cloudProfile
-                    ) else {
-                        throw ProfileSyncError.unresolvedConflicts(
-                            ProfileMerge.changedProfileFields(local: localProfile, baseline: nil)
-                        )
-                    }
-                    applyProfile(reconciled)
-                    persistProfileToKeychain(createProfileData())
-                    commitSyncedBaseline(cloudProfile, version: cloudVersion)
-                    markLocalProfileChanged()
-                } else {
-                    applyProfile(cloudProfile)
-                    persistProfileToKeychain(createProfileData())
-                    commitSyncedBaseline(cloudProfile, version: cloudVersion)
-                    clearLocalProfileChanged()
-                }
-            }
-            lastSyncDate = Date()
-            syncError = nil
-            return true
-        } catch {
-            guard generation == accountGeneration else { return false }
-            syncError = error.localizedDescription
-            return false
-        }
-    }
-    
-    /// Sync profile to cloud
-    func syncToCloud() async {
-        await performFullSync()
-    }
-
-    private func syncToCloud(generation: Int) async {
-        // Skip if not authenticated but keep pending flag so we can retry later
-        guard await profileSync.isAuthenticated() else {
-            return
-        }
-
-        // Skip if no encryption key is set
-        guard EncryptionService.shared.hasEncryptionKey() else {
-            return
-        }
-
-        let authorizationMode = CloudKeyAuthorizationStore.shared.currentMode()
-        guard authorizationMode != nil else {
-            return
-        }
-
-        if profileSync.hasFailedRemoteDecryption(),
-           authorizationMode != .explicitStartFresh {
-            return
-        }
-
-        guard generation == accountGeneration else { return }
-        var profile: ProfileData
-        do {
-            profile = try prepareLocalProfileForSync()
-        } catch {
-            syncError = error.localizedDescription
-            return
-        }
-
-        // Only push if there is a real change vs last synced baseline.
-        // When nothing diverges, clear the pending flag so a phantom
-        // dirty marker can't permanently block pulls from the cloud.
-        guard hasProfileChanged(profile, lastSyncedProfile) else {
-            clearLocalProfileChanged()
-            return
-        }
-
-        isPushing = true
-        updateSyncingState()
-        defer {
-            isPushing = false
-            updateSyncingState()
-        }
-
-        do {
-            let result = try await profileSync.saveProfile(
-                profile,
-                baseline: lastSyncedProfile
-            )
-            guard generation == accountGeneration else { return }
-            if result.success {
-                // Server returns the authoritative version; always adopt it
-                if let version = result.version {
-                    lastSyncedVersion = version
-                } else {
-                    // Fallback: ensure we at least bump our local version
-                    lastSyncedVersion = (profile.version ?? lastSyncedVersion) + 1
-                }
-
-                if let remoteProfile = result.remoteProfile {
-                    // A concurrently-updated device won the last-write
-                    // race; adopt its settings locally so both devices
-                    // converge instead of keeping our now-stale edit.
-                    let postSaveMerge = ProfileMerge.mergeProfiles(
-                        baseline: profile,
-                        local: createProfileData(),
-                        remote: remoteProfile
-                    )
-                    applyProfile(postSaveMerge.merged)
-                    persistProfileToKeychain(createProfileData())
-                    commitSyncedBaseline(remoteProfile, version: lastSyncedVersion)
-                } else {
-                    profile.version = lastSyncedVersion
-                    profile.clockVersion = lastSyncedVersion
-                    localFieldClocks = profile.fieldClocks
-                    localClockVersion = profile.clockVersion
-                    persistProfileToKeychain(createProfileData())
-                    commitSyncedBaseline(profile, version: lastSyncedVersion)
-                }
-                let currentAfter = createProfileData()
-                if hasProfileChanged(currentAfter, lastSyncedProfile) {
-                    markLocalProfileChanged()
-                    debounceCloudSync()
-                } else {
-                    clearLocalProfileChanged()
-                }
-                lastSyncDate = Date()
-                syncError = nil
-            }
-        } catch {
-            guard generation == accountGeneration else { return }
-            syncError = error.localizedDescription
-            // On error, allow future changes to trigger another attempt via debounce
-        }
-    }
-    
-    /// Perform immediate sync (both directions)
-    func performFullSync() async {
-        if isFullSyncInProgress {
-            await withCheckedContinuation { continuation in
-                fullSyncWaiters.append(continuation)
-            }
-            return
-        }
-        isFullSyncInProgress = true
-        defer {
-            isFullSyncInProgress = false
-            let waiters = fullSyncWaiters
-            fullSyncWaiters.removeAll()
-            waiters.forEach { $0.resume() }
-        }
-
-        let generation = accountGeneration
-        // First pull from cloud
-        guard await syncFromCloud(generation: generation) else { return }
-        
-        // Then push any local changes (method will no-op if nothing changed)
-        await syncToCloud(generation: generation)
-    }
-    
-    /// Retry decryption with new encryption key
-    func retryDecryptionWithNewKey() async {
-        await performFullSync()
-    }
-    
-    // MARK: - Helpers
-
-    /// Record `snapshot` as the synced baseline at `version`: stamp the
-    /// version, persist it to the keychain (without triggering local
-    /// change observers), and set it as the in-memory baseline. The
-    /// baseline is the last server state this client observed — the
-    /// common ancestor for three-way merges — so callers pass the
-    /// fetched remote, or the exact snapshot they just pushed. Passing a
-    /// local working copy instead would make its pending edits look
-    /// already-synced and let a later pull silently revert them.
-    private func commitSyncedBaseline(_ snapshot: ProfileData, version: Int) {
-        var baseline = snapshot
-        baseline.version = version
-        baseline.clockVersion = version
-        persistBaselineToKeychain(baseline)
-        lastSyncedProfile = baseline
-        lastSyncedVersion = version
-    }
-
-    /// Check if two profiles are different (excluding metadata)
-    private func hasProfileChanged(_ profile1: ProfileData?, _ profile2: ProfileData?) -> Bool {
-        guard let p1 = profile1, let p2 = profile2 else {
-            return profile1 != nil || profile2 != nil
-        }
-        
-        return p1.isDarkMode != p2.isDarkMode ||
-               p1.themeMode != p2.themeMode ||
-               p1.language != p2.language ||
-               p1.nickname != p2.nickname ||
-               p1.profession != p2.profession ||
-               p1.traits != p2.traits ||
-               p1.additionalContext != p2.additionalContext ||
-               p1.isUsingPersonalization != p2.isUsingPersonalization ||
-               p1.customPromptPresets != p2.customPromptPresets ||
-               p1.favoritePromptPresetIds != p2.favoritePromptPresetIds ||
-               (p1.defaultPromptPresetId ?? "") != (p2.defaultPromptPresetId ?? "") ||
-               p1.reasoningEffort != p2.reasoningEffort ||
-               p1.thinkingEnabled != p2.thinkingEnabled ||
-               p1.webSearchAvailable != p2.webSearchAvailable ||
-               p1.codeExecutionEnabled != p2.codeExecutionEnabled ||
-               p1.piiCheckEnabled != p2.piiCheckEnabled ||
-               p1.genUIEnabled != p2.genUIEnabled ||
-               p1.chatFont != p2.chatFont ||
-               p1.projectUploadPreference != p2.projectUploadPreference ||
-               p1.pinnedChatIds != p2.pinnedChatIds
-    }
-
-    func sharedSettingsDidChange() {
-        // Ignore changes that originate from applying a synced/loaded profile.
-        // Settings applied mid-`applyProfile` (e.g. webSearchAvailable) would
-        // otherwise persist a partially-applied snapshot, since fields applied
-        // later in the sequence still hold their pre-apply values. The applying
-        // flow persists the full profile itself once application completes.
-        guard !isApplyingProfile else { return }
-        saveToKeychain()
-    }
-    
-    /// Generate personalization prompt for chat as a `<user_preferences>` XML block.
-    ///
-    /// Mirrors the webapp's `useCustomSystemPrompt` so the same prompt structure
-    /// reaches the model regardless of platform.
-    func getPersonalizationPrompt() -> String? {
-        PersonalizationPromptBuilder.build(
-            isEnabled: isUsingPersonalization,
-            nickname: nickname,
-            profession: profession,
-            traits: traits,
-            additionalContext: additionalContext
-        )
-    }
-    
-    nonisolated static func systemPromptHasContent(_ prompt: String) -> Bool {
-        var result = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        if result.hasPrefix("<system>") {
-            result = String(result.dropFirst("<system>".count)).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        if result.hasSuffix("</system>") {
-            result = String(result.dropLast("</system>".count)).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return !result.isEmpty
-    }
-    
-    private func applyDefaultProfile(pinnedChatIds: [String]? = nil) {
-        isApplyingProfile = true
-        isDarkMode = ProfileDefaults.isDarkMode
-        themeMode = nil
-        language = ProfileDefaults.language
-        nickname = ProfileDefaults.nickname
-        profession = ProfileDefaults.profession
-        traits = ProfileDefaults.traits
-        additionalContext = ProfileDefaults.additionalContext
-        isUsingPersonalization = ProfileDefaults.isUsingPersonalization
-        customPromptPresets = ProfileDefaults.customPromptPresets
-        favoritePromptPresetIds = ProfileDefaults.favoritePromptPresetIds
-        defaultPromptPresetId = ProfileDefaults.defaultPromptPresetId
-        SettingsManager.shared.piiCheckEnabled = ProfileDefaults.piiCheckEnabled
-        self.pinnedChatIds = pinnedChatIds
-        isApplyingProfile = false
-    }
-
-    func resetProfile() {
-        applyDefaultProfile(pinnedChatIds: [])
-        persistProfileToKeychain(createProfileData())
-        markLocalProfileChanged()
-        debounceCloudSync()
-    }
-
-    func clearLocalProfileForAccountRemoval() async {
-        accountGeneration += 1
-        syncDebounceTimer?.invalidate()
-        if isFullSyncInProgress {
-            await withCheckedContinuation { continuation in
-                fullSyncWaiters.append(continuation)
-            }
-        }
-        applyDefaultProfile()
-        // Reset non-published profile state too, so fields and CRDT
-        // clocks from the previous account never ride along into the
-        // next account's first sync.
-        localFieldClocks = nil
-        localClockVersion = nil
-        codeExecutionEnabled = nil
-        chatFont = nil
-        projectUploadPreference = nil
-        // Delete on the same serial queue the persist helpers write on and
-        // wait for it, so a queued save from before removal can never land
-        // after the delete and resurrect the previous account's profile.
-        let helper = keychainHelper
-        let profileKey = keychainKey
-        let baselineKey = profileBaselineKey
-        let service = keychainService
-        await withCheckedContinuation { continuation in
-            keychainQueue.async {
-                helper.delete(for: profileKey, service: service)
-                helper.delete(for: baselineKey, service: service)
-                continuation.resume()
-            }
-        }
-        lastSyncedVersion = 0
-        lastSyncedProfile = nil
-        syncError = nil
-        clearLocalProfileChanged()
-        profileSync.clearCache()
+    /// Forgets the settings this device kept for the account.
+    func clearLocalProfileForAccountRemoval() {
+        let storage = DeviceProfileStorage()
+        storage.clearLocalProfile()
+        if let userId = account?.userId { storage.clearCloudProfileCache(userId: userId) }
+        apply(Components.Schemas.Profile())
     }
 }

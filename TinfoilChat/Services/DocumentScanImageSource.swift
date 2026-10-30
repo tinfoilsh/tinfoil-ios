@@ -15,9 +15,14 @@ actor DocumentScanImageSource {
         return try autoreleasepool {
             let image = scan.imageOfPage(at: index)
             guard let data = image.jpegData(compressionQuality: Constants.Attachments.imageCompressionQuality) else {
-                throw ImageProcessingService.ProcessingError.encodingFailed
+                throw ScanEncodingError()
             }
             return data
         }
     }
+}
+
+/// A scanned page that could not be encoded as a JPEG.
+struct ScanEncodingError: LocalizedError {
+    var errorDescription: String? { "The scanned page could not be encoded." }
 }

@@ -111,53 +111,6 @@ struct DocumentPickerBatchTests {
         #expect(FileManager.default.fileExists(atPath: files[2].url.path))
     }
 
-    @Test("Image admission strictly rejects invalid image bytes")
-    func rejectsInvalidImageData() async throws {
-        let fixture = try makeFixture(fileNames: ["invalid.png"])
-        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
-
-        await #expect(throws: ImageProcessingService.ProcessingError.invalidImageData) {
-            try await ImageProcessingService.shared.processImage(at: fixture.sourceURLs[0])
-        }
-    }
-
-    @Test("Files images retain the ten MiB image read bound")
-    func rejectsOversizedImage() async throws {
-        let fixture = try makeFixture(fileNames: [])
-        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
-        let oversizedURL = fixture.rootURL.appendingPathComponent("oversized.png")
-        FileManager.default.createFile(atPath: oversizedURL.path, contents: nil)
-        let handle = try FileHandle(forWritingTo: oversizedURL)
-        try handle.truncate(atOffset: UInt64(Constants.Attachments.maxImageSizeBytes + 1))
-        try handle.close()
-
-        await #expect(throws: BoundedFileIO.Error.fileTooLarge(
-            size: Constants.Attachments.maxImageSizeBytes + 1,
-            maximum: Constants.Attachments.maxImageSizeBytes
-        )) {
-            try await ImageProcessingService.shared.processImage(at: oversizedURL)
-        }
-    }
-
-    @Test("Files image processing cleans up its staged handle after rejection")
-    @MainActor
-    func rejectedImageProcessingCleansUpHandle() async throws {
-        let fixture = try makeFixture(fileNames: ["invalid.png"])
-        defer { try? FileManager.default.removeItem(at: fixture.rootURL) }
-        let staged = try fixture.store.stage(
-            sourceURL: fixture.sourceURLs[0],
-            fileName: "invalid.png"
-        )
-        let store = AttachmentProcessingStore()
-
-        let task = store.start(id: "invalid-image", stagedFile: staged) { _ in
-            _ = try? await ImageProcessingService.shared.processImage(at: staged.url)
-        }
-        await task.value
-
-        #expect(!FileManager.default.fileExists(atPath: staged.url.path))
-    }
-
     @Test("Project batches continue after failures and combine the result message")
     func processesProjectBatchSequentially() async throws {
         let fixture = try makeFixture(fileNames: ["first.txt", "failed.txt", "third.txt"])

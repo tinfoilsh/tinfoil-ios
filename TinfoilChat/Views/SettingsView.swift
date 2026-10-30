@@ -70,7 +70,7 @@ class SettingsManager: ObservableObject {
         didSet {
             UserDefaults.standard.set(webSearchAvailable, forKey: Constants.StorageKeys.Settings.webSearchAvailable)
             if !isApplyingSharedProfile {
-                ProfileManager.shared.sharedSettingsDidChange()
+                ProfileManager.shared.sharedSettingDidChange(.webSearchAvailable)
             }
         }
     }
@@ -79,7 +79,7 @@ class SettingsManager: ObservableObject {
         didSet {
             UserDefaults.standard.set(piiCheckEnabled, forKey: Constants.StorageKeys.Settings.piiCheckEnabled)
             if !isApplyingSharedProfile {
-                ProfileManager.shared.sharedSettingsDidChange()
+                ProfileManager.shared.sharedSettingDidChange(.piiCheckEnabled)
             }
         }
     }
@@ -89,7 +89,7 @@ class SettingsManager: ObservableObject {
         didSet {
             UserDefaults.standard.set(genUIEnabled, forKey: Constants.StorageKeys.Settings.genUIEnabled)
             if !isApplyingSharedProfile {
-                ProfileManager.shared.sharedSettingsDidChange()
+                ProfileManager.shared.sharedSettingDidChange(.genUIEnabled)
             }
         }
     }
@@ -98,6 +98,9 @@ class SettingsManager: ObservableObject {
     @Published var isCloudSyncEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isCloudSyncEnabled, forKey: Constants.StorageKeys.Settings.cloudSyncEnabled)
+            if isCloudSyncEnabled != oldValue, !isApplyingSharedProfile {
+                NotificationCenter.default.post(name: .cloudSyncSettingChanged, object: nil)
+            }
         }
     }
 
@@ -206,7 +209,11 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.cloudSyncEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.localOnlyModeEnabled)
 
-        // Reset in-memory state to defaults
+        // Reset in-memory state to defaults. The resets are not the user's
+        // changes: none is written to the account's profile, which the
+        // teardown clears.
+        isApplyingSharedProfile = true
+        defer { isApplyingSharedProfile = false }
         hapticFeedbackEnabled = true
         selectedLanguage = ProfileDefaults.language
         isPersonalizationEnabled = ProfileDefaults.isUsingPersonalization
@@ -317,11 +324,8 @@ struct SettingsView: View {
     
     /// Shared destructive cleanup used by both "Delete Everything" and "Delete Account".
     private func performFullDataCleanup() async {
-        await ProfileManager.shared.clearLocalProfileForAccountRemoval()
-        await chatViewModel.clearAllChatsFromDevice(
-            resumeRecoveryScans: false,
-            reopenAccountOperations: false
-        )
+        ProfileManager.shared.clearLocalProfileForAccountRemoval()
+        await chatViewModel.clearAllChatsFromDevice()
         await PasskeyManager.shared.reset()
         EncryptionService.shared.clearKey()
         await DeviceEncryptionService.shared.clearKey()
@@ -976,20 +980,8 @@ struct SettingsView: View {
             // Auto-navigate to Cloud Sync if requested
             if shouldOpenCloudSync {
             }
-            
-            // Sync ProfileManager settings
-            Task {
-                // Trigger sync from cloud
-                await ProfileManager.shared.syncFromCloud()
-                
-                // Update settings from ProfileManager
-                await MainActor.run {
-                    let profileManager = ProfileManager.shared
-                    
-                    // Mirror the profile language for legacy settings consumers.
-                    settings.selectedLanguage = profileManager.language
-                }
-            }
+            // Mirror the profile language for legacy settings consumers.
+            settings.selectedLanguage = ProfileManager.shared.language
         }
         // Keep UI settings in sync with ProfileManager when remote changes arrive
         .onReceive(ProfileManager.shared.$language) { newValue in
@@ -1057,7 +1049,7 @@ struct LanguagePickerView: View {
         let normalizedSelection = ResponseLanguageResolver.normalizedSelection(profileManager.language)
         List(languages, id: \.self) { language in
             Button(action: {
-                profileManager.language = language
+                profileManager.setLanguage(language)
                 dismiss()
             }) {
                 HStack {
@@ -1077,12 +1069,6 @@ struct LanguagePickerView: View {
         .background(Color.settingsBackground(for: colorScheme))
         .navigationTitle("Response Language")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            // Trigger sync to get latest from cloud
-            Task {
-                await profileManager.syncFromCloud()
-            }
-        }
     }
 }
 

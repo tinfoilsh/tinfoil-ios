@@ -2,169 +2,62 @@
 //  ProjectModels.swift
 //  TinfoilChat
 //
-//  Models for webapp-compatible Projects.
+//  Projects as the views show them, from what the chat service stores.
 //
 
 import Foundation
 
-struct MemoryFact: Codable, Identifiable, Equatable {
-    let id: String
-    var fact: String
-    var date: String
-    var category: String
-    var confidence: Double
-}
-
-struct Project: Codable, Identifiable, Equatable {
+struct Project: Identifiable, Equatable {
     let id: String
     var name: String
-    var color: String? = nil
+    var color: String?
     var description: String
     var systemInstructions: String
-    var memory: [MemoryFact]
-    var createdAt: String
-    var updatedAt: String
-    var syncVersion: Int
-    var decryptionFailed: Bool?
+    /// When the harness dated the project, if it did.
+    var createdAt: String?
+    var updatedAt: String?
+
+    init(_ project: Components.Schemas.Project) {
+        id = project.id
+        name = project.name
+        color = project.color
+        description = project.description
+        systemInstructions = project.systemInstructions
+        createdAt = project.createdAt
+        updatedAt = project.updatedAt
+    }
+
+    init(_ project: ProjectView) {
+        id = project.id
+        name = project.name
+        color = project.color
+        description = project.description
+        systemInstructions = project.systemInstructions
+        createdAt = project.createdAt
+        updatedAt = project.updatedAt
+    }
 }
 
-struct ProjectData: Codable, Equatable {
-    var name: String
-    var color: String? = nil
-    var description: String
-    var systemInstructions: String
-    var memory: [MemoryFact]
-}
-
-struct CreateProjectData: Codable, Equatable {
-    var name: String
-    var color: String? = nil
-    var description: String = ""
-    var systemInstructions: String = ""
-}
-
-struct UpdateProjectData: Codable, Equatable {
-    var name: String? = nil
-    var color: String? = nil
-    var description: String? = nil
-    var systemInstructions: String? = nil
-    var memory: [MemoryFact]? = nil
-}
-
-struct ProjectDocument: Codable, Identifiable, Equatable {
+struct ProjectDocument: Identifiable, Equatable {
     let id: String
     let projectId: String
     var filename: String
     var contentType: String
     var sizeBytes: Int
-    var syncVersion: Int
-    var createdAt: String
-    var updatedAt: String
+    var createdAt: String?
+    var updatedAt: String?
     var content: String?
-    var decryptionFailed: Bool?
-    /// Small JPEG preview stored alongside image documents so lists can show
-    /// a real thumbnail; the full image is never persisted.
-    var thumbnailBase64: String? = nil
-}
+    var thumbnailBase64: String?
 
-struct ProjectDocumentPayload: Codable, Equatable {
-    var content: String
-    var filename: String
-    var contentType: String
-    var sizeBytes: Int? = nil
-    var thumbnailBase64: String? = nil
-
-    var resolvedSizeBytes: Int {
-        sizeBytes ?? content.utf8.count
+    init(_ document: Components.Schemas.ProjectDocument) {
+        id = document.id
+        projectId = document.projectId
+        filename = document.filename
+        contentType = document.contentType
+        sizeBytes = document.sizeBytes
+        createdAt = document.createdAt
+        updatedAt = document.updatedAt
+        content = document.content
+        thumbnailBase64 = document.thumbnailBase64
     }
 }
-
-extension ProjectData {
-    init(createData: CreateProjectData) {
-        self.init(
-            name: createData.name,
-            color: createData.color,
-            description: createData.description,
-            systemInstructions: createData.systemInstructions,
-            memory: []
-        )
-    }
-
-    init(updateData: UpdateProjectData, existing: Project) {
-        self.init(
-            name: updateData.name ?? existing.name,
-            color: updateData.color ?? existing.color,
-            description: updateData.description ?? existing.description,
-            systemInstructions: updateData.systemInstructions ?? existing.systemInstructions,
-            memory: updateData.memory ?? existing.memory
-        )
-    }
-}
-
-struct ProjectChat: Codable, Identifiable, Equatable {
-    let id: String
-    let projectId: String
-    let syncVersion: Int?
-    let size: Int?
-    let formatVersion: Int?
-    let createdAt: String
-    let updatedAt: String
-    let content: String?
-}
-
-struct GenerateProjectIdResponse: Codable {
-    let projectId: String
-    let timestamp: String
-    let reverseTimestamp: Int
-}
-
-struct GenerateDocumentIdResponse: Codable {
-    let documentId: String
-    let timestamp: String
-    let reverseTimestamp: Int
-}
-
-struct ProjectListResponse: Codable {
-    let projects: [ProjectListItem]
-    let nextContinuationToken: String?
-    let hasMore: Bool
-}
-
-struct ProjectListItem: Codable, Identifiable {
-    let id: String
-    let key: String?
-    let createdAt: String
-    let updatedAt: String
-    let syncVersion: Int
-    let size: Int?
-    let content: String?
-}
-
-struct ProjectDocumentListResponse: Codable {
-    let documents: [ProjectDocumentListItem]
-}
-
-struct ProjectDocumentListItem: Codable, Identifiable {
-    let id: String
-    let projectId: String
-    let sizeBytes: Int?
-    let syncVersion: Int
-    let createdAt: String
-    let updatedAt: String
-    let content: String?
-}
-
-struct ProjectChatListResponse: Codable {
-    let chats: [RemoteChat]
-    let hasMore: Bool?
-    let nextContinuationToken: String?
-}
-
-struct ProjectSyncStatus: Codable, Equatable {
-    let count: Int
-    let lastUpdated: String?
-}
-
-typealias ProjectChatSyncStatus = ProjectSyncStatus
-typealias ProjectDocumentSyncStatus = ProjectSyncStatus
-

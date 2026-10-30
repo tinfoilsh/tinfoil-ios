@@ -12,9 +12,7 @@ struct BufferMultiplierTests {
             message: Message(role: .assistant, content: "Test"),
             isDarkMode: false,
             isLastMessage: true,
-            isLoading: true,
-            isArchived: false,
-            showArchiveSeparator: false
+            isLoading: true
         )
     }
 

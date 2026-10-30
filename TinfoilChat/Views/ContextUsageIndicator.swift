@@ -8,7 +8,7 @@
 import SwiftUI
 
 /// Mirrors the webapp's `ContextUsage` shape.
-struct ContextUsage {
+struct ContextUsage: Equatable {
     let percentage: Double
     let usedTokens: Int
     let limitTokens: Int

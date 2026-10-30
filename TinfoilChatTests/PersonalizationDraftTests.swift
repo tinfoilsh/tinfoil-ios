@@ -49,22 +49,4 @@ struct PersonalizationDraftTests {
         #expect(!editor.applyRefreshedDraft(refreshed))
         #expect(editor.nickname == "Local")
     }
-
-    @Test("local save failures have a user-facing message")
-    func localSaveFailureHasMessage() {
-        let error: Error = ProfileLocalSaveError.keychainWriteFailed
-
-        #expect(error.localizedDescription == "Personalization couldn't be saved securely. Please try again.")
-    }
-
-    @Test("trait and context edits dirty their profile clocks")
-    func traitAndContextEditsAreTracked() {
-        var draft = PersonalizationDraft.defaults
-        draft.traits = ["thoughtful"]
-        draft.additionalContext = "Explain tradeoffs"
-
-        #expect(Set(draft.changedProfileFields(comparedTo: .defaults)) == Set([
-            "traits", "additionalContext",
-        ]))
-    }
 }

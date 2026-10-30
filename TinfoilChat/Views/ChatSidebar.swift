@@ -10,10 +10,9 @@ import ClerkKit
 import SafariServices
 
 /// Search results, unlike the root list, surface project chats for Premium
-/// users; temporary and undecryptable chats are always excluded.
+/// users; temporary chats are always excluded.
 func isSearchResultSidebarChat(_ chat: ChatListSummary, hasPremiumAccess: Bool) -> Bool {
     !chat.isTemporary
-        && !chat.decryptionFailed
         && PremiumProjectPolicy.includesChat(
             projectId: chat.projectId,
             hasPremiumAccess: hasPremiumAccess
@@ -21,7 +20,7 @@ func isSearchResultSidebarChat(_ chat: ChatListSummary, hasPremiumAccess: Bool) 
 }
 
 func isRootSidebarChat(_ chat: ChatListSummary) -> Bool {
-    !chat.isTemporary && !chat.decryptionFailed && chat.projectId == nil
+    !chat.isTemporary && chat.projectId == nil
 }
 
 func resolveSidebarSearchChat(
@@ -63,9 +62,7 @@ struct ChatSidebar: View {
     @State private var chatSearchTerm: String = ""
     @StateObject private var chatSearch = ChatSearchController()
     @ObservedObject private var settings = SettingsManager.shared
-    @ObservedObject private var cloudSync = CloudSyncService.shared
     @ObservedObject private var syncHealth = SyncHealthStore.shared
-    @ObservedObject private var profileManager = ProfileManager.shared
 
     private var activeTab: ChatStorageTab {
         viewModel.activeStorageTab
@@ -415,7 +412,7 @@ struct ChatSidebar: View {
                 .strokeBorder(Color.gray.opacity(0.1), lineWidth: 1)
         )
         .onChange(of: chatSearchTerm) { _, term in
-            chatSearch.updateTerm(term, userId: searchUserId)
+            chatSearch.updateTerm(term, account: viewModel.account)
         }
     }
 
@@ -449,7 +446,7 @@ struct ChatSidebar: View {
     /// Whether a row may be renamed or deleted, matching the inline
     /// edit/trash controls and the accessibility actions on the row.
     private func canManageChat(_ chat: ChatListSummary) -> Bool {
-        authManager.isAuthenticated && !chat.isBlankChat && !chat.decryptionFailed
+        authManager.isAuthenticated && !chat.isBlankChat
     }
 
     /// Swipe right to pin, swipe left to delete or rename, mirroring the
@@ -460,13 +457,13 @@ struct ChatSidebar: View {
     ) -> some View {
         content
             .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                if viewModel.canPinChat(chat) || profileManager.isChatPinned(chat.id) {
+                if viewModel.canPinChat(chat) || viewModel.isChatPinned(chat.id) {
                     Button {
                         viewModel.toggleChatPin(chat)
                     } label: {
                         Label(
-                            profileManager.isChatPinned(chat.id) ? "Unpin" : "Pin",
-                            systemImage: profileManager.isChatPinned(chat.id) ? "pin.slash" : "pin"
+                            viewModel.isChatPinned(chat.id) ? "Unpin" : "Pin",
+                            systemImage: viewModel.isChatPinned(chat.id) ? "pin.slash" : "pin"
                         )
                     }
                     .tint(.blue)
@@ -501,10 +498,10 @@ struct ChatSidebar: View {
                 editingTitle: $editingTitle,
                 createdTimeString: chat.isBlankChat ? "" : relativeTimeString(from: chat.createdAt),
                 updatedTimeString: chat.isBlankChat ? "" : updatedTimeString(for: chat),
-                isSyncing: !chat.isBlankChat && cloudSync.pendingUploadChatIds.contains(chat.id),
+                isSyncing: chat.pendingSave,
                 syncFailed: !chat.isBlankChat && syncHealth.failedChats[chat.id] != nil,
                 isGenerating: viewModel.isChatStreaming(chat.id),
-                isPinned: profileManager.isChatPinned(chat.id),
+                isPinned: viewModel.isChatPinned(chat.id),
                 projectColor: chat.projectId.flatMap { projectColors[$0] },
                 onSelect: {
                     if isChatSearchActive {
@@ -548,21 +545,21 @@ struct ChatSidebar: View {
                 showEditDelete: authManager.isAuthenticated
             )
             .contextMenu {
-                if viewModel.canPinChat(chat) || profileManager.isChatPinned(chat.id) {
+                if viewModel.canPinChat(chat) || viewModel.isChatPinned(chat.id) {
                     Button {
                         viewModel.toggleChatPin(chat)
                     } label: {
                         Label(
-                            profileManager.isChatPinned(chat.id) ? "Unpin" : "Pin",
-                            systemImage: profileManager.isChatPinned(chat.id) ? "pin.slash" : "pin"
+                            viewModel.isChatPinned(chat.id) ? "Unpin" : "Pin",
+                            systemImage: viewModel.isChatPinned(chat.id) ? "pin.slash" : "pin"
                         )
                     }
                 }
-                if viewModel.hasPremiumAccess && !chat.isBlankChat && !chat.decryptionFailed {
+                if viewModel.hasPremiumAccess && !chat.isBlankChat {
                     MoveToProjectMenu(
                         title: chat.projectId == nil ? "Add to Project" : "Move to Project",
                         projects: viewModel.projects.filter {
-                            $0.decryptionFailed != true && $0.id != chat.projectId
+                            $0.id != chat.projectId
                         }
                     ) { project in
                         Task {
@@ -675,7 +672,7 @@ struct ChatSidebar: View {
             editingTitle: $editingTitle,
             createdTimeString: relativeTimeString(from: chat.createdAt),
             updatedTimeString: updatedTimeString(for: summary),
-            isSyncing: cloudSync.pendingUploadChatIds.contains(chat.id),
+            isSyncing: chat.pendingSave,
             syncFailed: syncHealth.failedChats[chat.id] != nil,
             isGenerating: viewModel.isChatStreaming(chat.id),
             isPinned: true,
@@ -725,7 +722,7 @@ struct ChatSidebar: View {
                 MoveToProjectMenu(
                     title: chat.projectId == nil ? "Add to Project" : "Move to Project",
                     projects: viewModel.projects.filter {
-                        $0.decryptionFailed != true && $0.id != chat.projectId
+                        $0.id != chat.projectId
                     }
                 ) { project in
                     Task {
@@ -991,12 +988,7 @@ struct ChatSidebar: View {
                     }
                 } label: {
                     HStack(spacing: 12) {
-                        if project.decryptionFailed == true {
-                            Image(systemName: "lock.fill")
-                                .foregroundColor(.orange)
-                        } else {
-                            ProjectFolderIcon(color: project.color)
-                        }
+                        ProjectFolderIcon(color: project.color)
                         Text(project.name)
                             .lineLimit(1)
                         Spacer()
@@ -1009,9 +1001,8 @@ struct ChatSidebar: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(project.decryptionFailed == true)
-                .accessibilityLabel(project.decryptionFailed == true ? "\(project.name), encrypted, unavailable" : project.name)
-                .accessibilityHint(project.decryptionFailed == true ? "" : "Opens the project")
+                .accessibilityLabel(project.name)
+                .accessibilityHint("Opens the project")
                 .sidebarRow(top: 10)
             }
         }
@@ -1329,7 +1320,7 @@ struct ChatListItem: View {
         .accessibilityLabel(rowAccessibilityLabel)
         .accessibilityAddTraits(rowAccessibilityTraits)
         .accessibilityHint(rowAccessibilityHint)
-        .if(showEditDelete && !chat.isBlankChat && !chat.decryptionFailed && !isEditing) { view in
+        .if(showEditDelete && !chat.isBlankChat && !isEditing) { view in
             view
                 .accessibilityAction(named: Text("Rename")) { onEdit() }
                 .accessibilityAction(named: Text("Delete")) { onDelete() }
@@ -1337,9 +1328,6 @@ struct ChatListItem: View {
     }
 
     private var rowAccessibilityLabel: String {
-        if chat.decryptionFailed {
-            return "Encrypted chat. Failed to decrypt, wrong key."
-        }
         var components = [chat.title.isEmpty ? "Untitled chat" : chat.title]
         if chat.projectId != nil {
             components.append("Project chat")
@@ -1378,7 +1366,7 @@ struct ChatListItem: View {
     }
 
     private var rowAccessibilityHint: String {
-        if isEditing || chat.decryptionFailed {
+        if isEditing {
             return ""
         }
         return "Opens the conversation"

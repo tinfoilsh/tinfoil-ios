@@ -114,14 +114,24 @@ struct AttachmentProcessingStoreTests {
         defer { try? FileManager.default.removeItem(at: failedFixture.rootURL) }
         let store = AttachmentProcessingStore()
 
+        var failed = false
         let successTask = store.start(id: "success", stagedFile: fixture.file) { _ in
-            _ = try? await DocumentProcessingService.shared.extractText(from: fixture.file.url)
+            _ = try? Data(contentsOf: fixture.file.url)
         }
         let failureTask = store.start(id: "failure", stagedFile: failedFixture.file) { _ in
-            _ = try? await DocumentProcessingService.shared.extractText(from: failedFixture.file.url)
+            // The file is read before the operation fails, as a conversion
+            // the harness refuses would.
+            do {
+                let data = try Data(contentsOf: failedFixture.file.url)
+                guard !data.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
+            } catch {
+                failed = true
+            }
         }
         await successTask.value
         await failureTask.value
+
+        #expect(failed)
 
         #expect(!FileManager.default.fileExists(atPath: fixture.file.url.path))
         #expect(!FileManager.default.fileExists(atPath: failedFixture.file.url.path))

@@ -59,8 +59,8 @@ extension EnclaveTransport {
 }
 
 extension EnclaveHandle: EnclaveTransport {
-    /// A handle on the enclave serving `url`, an absolute HTTPS URL such as
-    /// `Constants.Summarizer.enclaveURL`, verified against `repo`
+    /// A handle on the enclave serving `url`, an absolute HTTPS URL, verified
+    /// against `repo`
     static func enclave(at url: String, repo: String) throws -> EnclaveHandle {
         guard let components = URLComponents(string: url),
               components.scheme?.lowercased() == "https",

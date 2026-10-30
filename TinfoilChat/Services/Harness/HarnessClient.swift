@@ -281,15 +281,13 @@ actor HarnessClient {
         }
     }
 
-    private struct Empty: Encodable {}
-
     private func renewForRuns() async {
         runRenewal = nil
         defer { scheduleRunRenewal() }
         // Another request may have renewed and presented it since.
         guard let at = await credentials.chatAccessRenewsAt(), at <= Date() else { return }
         do {
-            _ = try await request(.session, json: Empty())
+            _ = try await request(.session, json: EmptyBody())
         } catch {
             if !disposed {
                 Self.logger.error("Failed to renew chat access for a running reply: \(error, privacy: .public)")
@@ -297,6 +295,9 @@ actor HarnessClient {
         }
     }
 }
+
+/// A request with no members.
+struct EmptyBody: Encodable, Sendable {}
 
 /// A multipart form with one file, as an upload sends it.
 struct MultipartForm {

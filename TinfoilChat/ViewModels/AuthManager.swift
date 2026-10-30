@@ -73,7 +73,6 @@ class AuthManager: ObservableObject {
         didSet {
             if oldValue?[Self.userIdKey] as? String != localUserId {
                 chatViewModel?.invalidateAccountPlayback()
-                SessionTokenManager.shared.clearSessionToken()
             }
             synchronizeSafeguardsAccount()
         }
@@ -145,11 +144,7 @@ class AuthManager: ObservableObject {
         )
         hasActiveSubscription = isActive
         guard shouldRefreshCredentials else { return }
-
-        SessionTokenManager.shared.clearSessionToken()
-        Task {
-            _ = await SessionTokenManager.shared.fetchFreshSessionToken()
-        }
+        chatViewModel?.subscriptionChanged()
     }
 
     private func updateSubscriptionAccess(status: String?, expiresAt: String?) {
@@ -194,7 +189,6 @@ class AuthManager: ObservableObject {
     }
 
     private func invalidateAccountLifecycle() {
-        SessionTokenManager.shared.clearSessionToken()
         chatViewModel?.invalidateAccountPlayback()
         accountLifecycleGeneration &+= 1
     }
@@ -443,28 +437,19 @@ class AuthManager: ObservableObject {
         // Handle chat state BEFORE clearing auth so the view model can still
         // save the current chat (hasChatAccess depends on isAuthenticated).
         await chatViewModel?.handleSignOut()
-        await ChatRecoveryCoordinator.shared.reset(accountId: nil)
 
         // Sign-out performs a full local wipe so that no content, encryption
         // keys, or personalization bleed into the next account on a shared
         // device. This runs before isAuthenticated is cleared below so the
         // view model can still resolve the signing-out user's id for the wipe.
-        chatViewModel?.resetSharedProfileSettingsForAccountTeardown()
-        // Reset shared settings before the profile wipe so observer-triggered
-        // profile writes are deleted by the final teardown operation.
         SettingsManager.shared.clearAllSettings()
-        await ProfileManager.shared.clearLocalProfileForAccountRemoval()
+        ProfileManager.shared.clearLocalProfileForAccountRemoval()
         if let chatViewModel {
             await chatViewModel.wipeLocalChatsForSignOut()
-        } else {
+        } else if let localUserId {
             // No chat view model is attached (e.g. sign-out resolved before
-            // the UI wired one up); run the same sync teardown handleSignOut
-            // performs via clearSyncStatus — fencing in-flight sync,
-            // clearing the checkpoint, and resetting the attested client —
-            // and only then wipe the files, so a racing sync pass cannot
-            // recreate them after the wipe.
-            await CloudSyncService.shared.clearSyncStatus(forUser: localUserId)
-            await Chat.deleteAllChatsFromStorage(userId: localUserId)
+            // the UI wired one up); wipe the files directly.
+            ChatViewModel.wipeDeviceChats(userId: localUserId)
         }
         EncryptionService.shared.clearKey()
         await DeviceEncryptionService.shared.clearKey()
