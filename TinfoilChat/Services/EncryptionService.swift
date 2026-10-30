@@ -59,9 +59,11 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
     // MARK: - Account
 
     /// Binds the key to the signed-in account, or to none when signed out.
-    /// A key another account stored is removed. A key stored before keys
-    /// recorded their account is adopted by this one: it is the only
-    /// account that can have stored it, as signing out removes the key.
+    /// A key stored for another account, or for none, is removed: keychain
+    /// items outlive the app, so a key that records no account may be one
+    /// a deleted install kept for someone else. The key an older version
+    /// kept on this install records its account through
+    /// `claimUnownedKey(for:)` first.
     func bind(userId: String?) {
         stagedPrimaryKey = nil
         owner = userId
@@ -73,20 +75,28 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
             Self.logger.error("Failed to read the encryption key's account: \(error, privacy: .public)")
             return
         }
-        guard let stored else { return }
-        switch stored.owner {
-        case userId:
+        guard let stored, stored.owner != userId else { return }
+        clearKey()
+    }
+
+    /// Records the account of a key stored before keys recorded their
+    /// account. Only this install's own record of who was signed in under
+    /// the older version may name it.
+    func claimUnownedKey(for userId: String) {
+        let stored: StoredKey?
+        do {
+            stored = try loadStoredKey()
+        } catch {
+            Self.logger.error("Failed to read the encryption key's account: \(error, privacy: .public)")
             return
-        case nil:
-            let status = SecItemUpdate(
-                itemQuery(account: keychainKey) as CFDictionary,
-                [kSecAttrGeneric as String: Data(userId.utf8)] as CFDictionary
-            )
-            if status != errSecSuccess {
-                Self.logger.error("Failed to record the encryption key's account: \(status, privacy: .public)")
-            }
-        default:
-            clearKey()
+        }
+        guard let stored, stored.owner == nil else { return }
+        let status = SecItemUpdate(
+            itemQuery(account: keychainKey) as CFDictionary,
+            [kSecAttrGeneric as String: Data(userId.utf8)] as CFDictionary
+        )
+        if status != errSecSuccess {
+            Self.logger.error("Failed to record the encryption key's account: \(status, privacy: .public)")
         }
     }
 

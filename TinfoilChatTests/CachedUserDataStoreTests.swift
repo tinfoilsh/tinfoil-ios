@@ -15,12 +15,16 @@ struct CachedUserDataStoreTests {
         let keychain = MemoryKeychain()
         let store = CachedUserDataStore(keychain: keychain, defaults: defaults)
 
-        #expect(store.load() == details)
+        let moved = store.load()
+        #expect(moved?.data == details)
+        #expect(moved?.isFromOlderVersion == true)
 
         #expect(keychain.items[item] == details)
         #expect(defaults.object(forKey: Constants.StorageKeys.Auth.userData) == nil)
         #expect(defaults.object(forKey: Constants.StorageKeys.Auth.subscription) == nil)
-        #expect(store.load() == details)
+        let kept = store.load()
+        #expect(kept?.data == details)
+        #expect(kept?.isFromOlderVersion == false)
     }
 
     @Test func keepsTheOlderCopyWhileTheKeychainIsLocked() throws {
@@ -30,7 +34,9 @@ struct CachedUserDataStoreTests {
         let keychain = MemoryKeychain()
         keychain.failure = .unavailable
 
-        #expect(CachedUserDataStore(keychain: keychain, defaults: defaults).load() == details)
+        let older = CachedUserDataStore(keychain: keychain, defaults: defaults).load()
+        #expect(older?.data == details)
+        #expect(older?.isFromOlderVersion == true)
         #expect(defaults.data(forKey: Constants.StorageKeys.Auth.userData) == details)
     }
 
@@ -43,6 +49,7 @@ struct CachedUserDataStoreTests {
         store.save(details)
         #expect(keychain.items[item] == details)
         #expect(defaults.object(forKey: Constants.StorageKeys.Auth.userData) == nil)
+        #expect(store.load()?.isFromOlderVersion == false)
 
         store.clear()
         #expect(keychain.items[item] == nil)

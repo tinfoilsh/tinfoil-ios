@@ -8,6 +8,7 @@ import Testing
 @Suite("Content key storage")
 struct EncryptionServiceTests {
     private let keyAccount = "sh.tinfoil.encryptionKey"
+    private let historyAccount = "key_history"
 
     @Test func keyIsReadOnlyForTheAccountThatStoredIt() async throws {
         let (service, _, cleanup) = try makeService()
@@ -36,18 +37,35 @@ struct EncryptionServiceTests {
         #expect(service.getKey() == nil)
     }
 
-    @Test func keyStoredWithoutAnAccountIsAdoptedOnce() throws {
+    /// Keychain items outlive the app: a key that records no account may be
+    /// one a deleted install kept for someone else.
+    @Test func keyStoredWithoutAnAccountIsRemoved() throws {
+        let (service, name, cleanup) = try makeService()
+        defer { cleanup() }
+        let key = service.generateKey()
+        try storeUnownedKey(key, replacing: [service.generateKey()], keychainService: name)
+
+        service.bind(userId: "user-a")
+        #expect(service.getKey() == nil)
+        #expect(try service.getAllKeys().alternatives.isEmpty)
+
+        service.claimUnownedKey(for: "user-a")
+        service.bind(userId: "user-a")
+        #expect(service.getKey() == nil)
+    }
+
+    @Test func keyClaimedForAnAccountIsKeptOnlyForIt() throws {
         let (service, name, cleanup) = try makeService()
         defer { cleanup() }
         let key = service.generateKey()
         try storeUnownedKey(key, keychainService: name)
 
+        service.claimUnownedKey(for: "user-a")
+        service.claimUnownedKey(for: "user-b")
         service.bind(userId: "user-a")
         #expect(service.getKey() == key)
 
         service.bind(userId: "user-b")
-        #expect(service.getKey() == nil)
-        service.bind(userId: "user-a")
         #expect(service.getKey() == nil)
     }
 
@@ -86,13 +104,21 @@ struct EncryptionServiceTests {
         })
     }
 
-    /// Stores a key as installs did before keys recorded their account.
-    private func storeUnownedKey(_ key: String, keychainService: String) throws {
+    /// Stores a key, and the keys it replaced, as installs did before keys
+    /// recorded their account.
+    private func storeUnownedKey(_ key: String, replacing history: [String] = [], keychainService: String) throws {
+        addItem(Data(key.utf8), account: keyAccount, keychainService: keychainService)
+        if !history.isEmpty {
+            addItem(try JSONEncoder().encode(history), account: historyAccount, keychainService: keychainService)
+        }
+    }
+
+    private func addItem(_ data: Data, account: String, keychainService: String) {
         let status = SecItemAdd([
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: keyAccount,
-            kSecValueData as String: Data(key.utf8),
+            kSecAttrAccount as String: account,
+            kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
         ] as CFDictionary, nil)
         #expect(status == errSecSuccess)
