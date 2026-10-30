@@ -213,21 +213,6 @@ class EncryptionService: ObservableObject, @unchecked Sendable {
         return "key_" + bytesToAlphanumeric(bytes)
     }
 
-    /// Add a decryption-only fallback key without changing the primary key.
-    func addDecryptionKey(_ keyString: String) throws {
-        let (normalizedKey, _) = try normalizeKeyInput(keyString)
-
-        if normalizedKey == (try loadKeyFromKeychain()) {
-            return
-        }
-
-        var history = try loadKeyHistory()
-        guard !history.contains(normalizedKey) else { return }
-
-        history.append(normalizedKey)
-        try saveKeyHistory(history)
-    }
-
     /// Replace the full key bundle exactly, preserving only the provided primary and fallback keys.
     func replaceKeyBundle(primary: String?, alternatives: [String]) throws {
         if let primary {
