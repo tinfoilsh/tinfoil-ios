@@ -81,6 +81,7 @@ struct LegacyStoragePurgeTests {
         let keychain = MemoryKeychain()
         let previous = MemoryKeychain.Item(Constants.Harness.Profile.keychainService, Constants.Harness.Profile.previousProfileKey)
         keychain.items[previous] = Data("{\"nickname\":\"Al\"}".utf8)
+        defaults.set("System", forKey: Constants.StorageKeys.Settings.selectedLanguage)
 
         LegacyStoragePurge.purgeIfNeeded(defaults: defaults, keychain: keychain, applicationSupport: nil)
         #expect(keychain.items[previous] != nil)
@@ -88,6 +89,21 @@ struct LegacyStoragePurgeTests {
         let profile = try DeviceProfileStorage(keychain: keychain, defaults: defaults).loadLocalProfile()
         #expect(profile["nickname"] as? String == "Al")
         #expect(keychain.items[previous] == nil)
+    }
+
+    /// Keychain items outlive the app: a previous client's profile in an
+    /// install it never ran in was left by a deleted one.
+    @Test func removesThePreviousProfileADeletedInstallLeft() throws {
+        let (defaults, cleanup) = try makeDefaults()
+        defer { cleanup() }
+        let keychain = MemoryKeychain()
+        let previous = MemoryKeychain.Item(Constants.Harness.Profile.keychainService, Constants.Harness.Profile.previousProfileKey)
+        keychain.items[previous] = Data("{\"nickname\":\"Al\"}".utf8)
+
+        LegacyStoragePurge.purgeIfNeeded(defaults: defaults, keychain: keychain, applicationSupport: nil)
+
+        #expect(keychain.items[previous] == nil)
+        #expect(defaults.bool(forKey: LegacyStoragePurge.completedKey))
     }
 
     @Test func removesAnAccountsOldDataAsItSignsOut() throws {

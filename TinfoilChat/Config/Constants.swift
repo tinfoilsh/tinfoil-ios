@@ -282,6 +282,8 @@ enum Constants {
             static let localProfileChangesKey = "tinfoil-harness-local-profile-changes"
             static let localProfileUpgradedKey = "tinfoil-harness-local-profile-upgraded"
             static let pendingProfileMergeKey = "tinfoil-harness-pending-profile-merge"
+            /// This install's id, which the local profile is stored with.
+            static let installIdKey = "tinfoil-harness-install-id"
         }
 
         /// How the chat access a signed-in account carries is minted from

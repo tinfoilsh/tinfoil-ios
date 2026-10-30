@@ -59,7 +59,7 @@ enum LegacyStoragePurge {
             keychain.delete(for: Constants.Passkey.prfCacheKeychainAccount, service: Constants.Passkey.rpId),
             profileKeychainKeys.map { keychain.delete(for: $0, service: Constants.Harness.Profile.keychainService) }.allSatisfy { $0 },
             removePromptCacheSecrets(keychain: keychain),
-            removeImportedPreviousProfile(keychain: keychain),
+            removeImportedPreviousProfile(keychain: keychain, defaults: defaults),
             removeProjectCache(applicationSupport: applicationSupport),
         ]
         if removed.allSatisfy({ $0 }) {
@@ -95,9 +95,13 @@ enum LegacyStoragePurge {
     }
 
     /// The previous client's profile goes once it was imported, which the
-    /// local profile it was imported into shows. One not yet imported is
-    /// kept for its import.
-    private static func removeImportedPreviousProfile(keychain: KeychainStore) -> Bool {
+    /// local profile it was imported into shows, or when the previous client
+    /// never ran in this install. One not yet imported is kept for its
+    /// import.
+    private static func removeImportedPreviousProfile(keychain: KeychainStore, defaults: UserDefaults) -> Bool {
+        guard PreviousClientSettings.ranInThisInstall(defaults: defaults) else {
+            return keychain.delete(for: Constants.Harness.Profile.previousProfileKey, service: Constants.Harness.Profile.keychainService)
+        }
         do {
             guard try keychain.load(for: Constants.Harness.Profile.localProfileKey, service: Constants.Harness.Profile.keychainService) != nil else {
                 return true
