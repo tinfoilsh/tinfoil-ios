@@ -7,7 +7,6 @@
 //  `render_chart` widget.
 
 import Charts
-import OpenAI
 import SwiftUI
 
 /// A `Decodable` shim that captures arbitrary `[String: String|Number]`
@@ -152,33 +151,6 @@ struct ChartWidget: GenUIWidget {
     }
 
     let name = "render_chart"
-    let description = """
-        Render a chart from tabular data. Choose `type`: "bar" for categorical \
-        comparisons, "line" for trends or sequences over time, "pie" for \
-        proportions / parts of a whole.
-        """
-    let promptHint = "a chart from tabular data — pass type \"bar\" | \"line\" | \"pie\" depending on whether you are comparing categories, showing a trend, or showing parts of a whole"
-
-    var schema: JSONSchema {
-        GenUISchema.object(
-            properties: [
-                "type": GenUISchema.string(
-                    description: "Chart type. \"bar\" for categorical comparisons, \"line\" for trends or sequences, \"pie\" for parts of a whole.",
-                    enumValues: ["bar", "line", "pie"]
-                ),
-                "data": GenUISchema.array(
-                    items: GenUISchema.openObjectOfStringOrNumber(),
-                    description: "Data points sharing the same keys, e.g. [{\"label\":\"A\",\"value\":10}, ...]",
-                    minItems: 1
-                ),
-                "xKey": GenUISchema.string(description: "For bar/line: key for the category axis. For pie: key for slice names."),
-                "yKey": GenUISchema.string(description: "For bar/line: key for the numeric axis. For pie: key for slice values."),
-                "title": GenUISchema.string(),
-                "color": GenUISchema.string(description: "Primary series color hex string (bar/line). Pie slices use a built-in palette."),
-            ],
-            required: ["type", "data"]
-        )
-    }
 
     @MainActor
     func renderInline(args: Args, context: GenUIRenderContext) -> AnyView? {

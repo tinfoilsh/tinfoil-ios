@@ -651,81 +651,6 @@ struct PasskeyCompositionTests {
         ) == key)
     }
 
-    @Test func validatedPRFSnapshotSurvivesCacheCredentialSwap() throws {
-        var cached = CachedPRFResult(
-            profile: TinfoilPasskeyProfile.current,
-            credentialId: "AQ",
-            prfOutput: Data(repeating: 4, count: 32)
-        )
-        let snapshot = try #require(LegacyBlobMigration.validatedPasskeySnapshot(
-            cached: cached,
-            credentialIds: ["AQ"]
-        ))
-        cached = CachedPRFResult(
-            profile: TinfoilPasskeyProfile.current,
-            credentialId: "Ag",
-            prfOutput: Data(repeating: 8, count: 32)
-        )
-        let manager = try PasskeyKeyManager(
-            profile: TinfoilPasskeyProfile.current,
-            relyingPartyName: Constants.Passkey.rpName,
-            presentationAnchorProvider: FakePasskeyPresentationAnchorProvider()
-        )
-        let key = Data((0..<32).map(UInt8.init))
-
-        let wrapped = try manager.wrapKeyWithPRFResult(
-            keyMaterial: key,
-            credentialId: snapshot.credentialId,
-            prfResult: snapshot.prfResult
-        )
-
-        #expect(wrapped.credentialId == "AQ")
-        #expect(try manager.unwrapKeyWithPRFResult(
-            wrappedKey: wrapped,
-            prfResult: snapshot.prfResult
-        ) == key)
-        #expect(throws: PasskeyKeyError.self) {
-            try manager.unwrapKeyWithPRFResult(
-                wrappedKey: wrapped,
-                prfResult: PRFResult(output: cached.prfOutput)
-            )
-        }
-    }
-
-    @Test func oldPRFCacheRecordReconstructsTinfoilProfile() throws {
-        let oldRecord = try JSONSerialization.data(withJSONObject: [
-            "credentialId": "AQID",
-            "prfOutput": Data(repeating: 7, count: 32).base64EncodedString(),
-            "isPlatformAuthenticator": true,
-        ], options: [.sortedKeys])
-
-        let decoded = try TinfoilPasskeyCacheMigration.decodeCachedRecord(oldRecord)
-
-        #expect(decoded.credentialId == "AQID")
-        #expect(decoded.prfOutput == Data(repeating: 7, count: 32))
-        #expect(decoded.profile == TinfoilPasskeyProfile.current)
-    }
-
-    @Test func priorGenericCacheRecordDropsPresentationName() throws {
-        let oldRecord = try JSONSerialization.data(withJSONObject: [
-            "profile": [
-                "version": 1,
-                "relyingPartyId": "tinfoil.sh",
-                "relyingPartyName": "Tinfoil Chat",
-                "prfSalt": TinfoilPasskeyProfile.prfSalt.base64EncodedString(),
-                "hkdfInfo": TinfoilPasskeyProfile.hkdfInfo.base64EncodedString(),
-            ],
-            "credentialId": "AQID",
-            "prfOutput": Data(repeating: 9, count: 32).base64EncodedString(),
-        ], options: [.sortedKeys])
-
-        let decoded = try TinfoilPasskeyCacheMigration.decodeCachedRecord(oldRecord)
-
-        #expect(decoded.profile == TinfoilPasskeyProfile.current)
-        #expect(decoded.credentialId == "AQID")
-        #expect(decoded.prfOutput == Data(repeating: 9, count: 32))
-    }
-
     @Test func bundleInventoryVerificationUsesLocalAndRemoteKeyIds() {
         let state = currentKeyState(keyId: "current-key", credentialIds: ["AQ"])
 
@@ -999,10 +924,8 @@ struct PasskeyCompositionTests {
             state: state,
             localKeyId: "current-key"
         ) == .alreadyMissing)
-        #expect(PasskeyManager.passkeyBundleRemovalError(from: SyncEnclaveError(
-            message: "missing",
-            status: 404,
-            code: WireCodes.notFound
+        #expect(PasskeyManager.passkeyBundleRemovalError(from: HarnessError(
+            code: HarnessErrorCode.threadNotFound, message: "missing", action: .stop, status: 404
         )) == .missing)
     }
 
@@ -1052,26 +975,19 @@ struct PasskeyCompositionTests {
     }
 
     @Test func passkeyRemovalErrorsRemainTyped() {
-        #expect(PasskeyManager.passkeyBundleRemovalError(from: SyncEnclaveError(
-            message: "sign in",
-            status: 401,
-            code: WireCodes.authActionRequired
-        )) == .authentication)
-        #expect(PasskeyManager.passkeyBundleRemovalError(from: SyncEnclaveError(
-            message: "rotated",
-            status: 409,
-            code: WireCodes.staleKey
+        #expect(PasskeyManager.passkeyBundleRemovalError(from: HarnessError.unauthenticated) == .authentication)
+        #expect(PasskeyManager.passkeyBundleRemovalError(from: HarnessError(
+            code: HarnessErrorCode.keyMismatch, message: "rotated", action: .unlock, status: 409
         )) == .keyMismatch)
-        #expect(PasskeyManager.passkeyBundleRemovalError(from: SyncEnclaveError(
-            message: "unavailable",
-            status: 503
+        #expect(PasskeyManager.passkeyBundleRemovalError(from: HarnessError(
+            code: HarnessErrorCode.upstreamRefused, message: "unavailable", action: .retry, status: 503
         )) == .server)
     }
 
     @Test func keyIdentifierMatchesTinfoilVector() throws {
         let cek = Data((0..<32).map(UInt8.init))
 
-        let keyId = try SyncEnclaveKeyBundle.deriveKeyIdHex(cek: cek)
+        let keyId = try ContentKeyBundle.deriveKeyIdHex(cek: cek)
 
         #expect(keyId == "960e28ca37b723e7abc19995dbef143f")
     }
@@ -1100,20 +1016,23 @@ struct PasskeyCompositionTests {
         #expect(timeout.message.contains("try again"))
     }
 
-    @Test func passkeySetupPreservesEnclaveFailureCategories() {
-        let network = SyncEnclaveError(message: "offline", code: WireCodes.network)
-        let authentication = SyncEnclaveError(message: "sign in", status: 401)
+    @Test func passkeySetupPreservesRegistryFailureCategories() {
+        let offline = HarnessError(code: HarnessErrorCode.connection, message: "offline", action: .retry)
+        let refused = HarnessError(code: HarnessErrorCode.upstreamRefused, message: "busy", action: .retry, status: 503)
+        let taken = HarnessError(code: HarnessErrorCode.keyMismatch, message: "another key", action: .unlock, status: 409)
 
-        #expect(PasskeyKeyFlow.failureFromEnclaveError(network) == .enclaveUnavailable)
-        #expect(PasskeyKeyFlow.failureFromEnclaveError(authentication) == .registerFailed)
+        #expect(PasskeyKeyFlow.failureFromRegistryError(offline) == .enclaveUnavailable)
+        #expect(PasskeyKeyFlow.failureFromRegistryError(HarnessError(HarnessErrorBody.unverified)) == .enclaveUnavailable)
+        #expect(PasskeyKeyFlow.failureFromRegistryError(refused) == .enclaveUnavailable)
+        #expect(PasskeyKeyFlow.failureFromRegistryError(taken) == .remoteKeyExists)
+        #expect(PasskeyKeyFlow.failureFromRegistryError(HarnessError.unauthenticated) == .registerFailed)
     }
 
-    @Test func sharedHexParserRejectsMalformedInputAtBothBoundaries() {
-        #expect(throws: SyncEnclaveError.self) { try hexToData("") }
-        #expect(throws: SyncEnclaveError.self) { try hexToData("0") }
-        #expect(throws: SyncEnclaveError.self) { try hexToData("zz") }
-        #expect(throws: SyncEnclaveKeyBundleError.self) {
-            try SyncEnclaveKeyBundle.unwrapLegacyJsonEnvelope(
+    @Test func malformedHexIsRefusedAtBothBoundaries() {
+        #expect(Data(lowercaseHex: "0") == nil)
+        #expect(Data(lowercaseHex: "zz") == nil)
+        #expect(throws: ContentKeyBundleError.self) {
+            try ContentKeyBundle.unwrapLegacyJsonEnvelope(
                 prfOutput: Data(repeating: 1, count: 32),
                 kekIvHex: "zz",
                 wrappedKeyHex: String(repeating: "00", count: 16)
@@ -1129,8 +1048,8 @@ struct PasskeyCompositionTests {
         #expect(!fence.isCurrent(passkeyOperation, currentUserId: "user-b"))
     }
 
-    private func bundle(id: String, wrappedByteCount: Int) -> EnclaveKeyCurrentBundle {
-        EnclaveKeyCurrentBundle(
+    private func bundle(id: String, wrappedByteCount: Int) -> KeyState.Bundle {
+        KeyState.Bundle(
             credentialId: id,
             kekIv: String(repeating: "0", count: 24),
             encryptedKeys: String(repeating: "0", count: wrappedByteCount * 2),
@@ -1143,8 +1062,8 @@ struct PasskeyCompositionTests {
     private func currentKeyState(
         keyId: String?,
         credentialIds: [String]
-    ) -> EnclaveKeyCurrentResponse {
-        EnclaveKeyCurrentResponse(
+    ) -> KeyState {
+        KeyState(
             keyId: keyId,
             etag: nil,
             bundles: Dictionary(uniqueKeysWithValues: credentialIds.map { id in
@@ -1171,7 +1090,8 @@ struct PasskeyCompositionTests {
 
 @Suite("Legacy passkey envelope fallback")
 struct LegacyPasskeyEnvelopeTests {
-    @Test func unwrapsLegacyJSONAndRetainsOnlyValidAlternatives() throws {
+    @Test(arguments: ["%02x", "%02X"])
+    func unwrapsLegacyJSONAndRetainsOnlyValidAlternatives(hexFormat: String) throws {
         let prfOutput = Data(repeating: 3, count: 32)
         let cek = Data((0..<32).map { UInt8($0 + 1) })
         let alternative = Data((0..<32).map { UInt8($0 + 40) })
@@ -1192,14 +1112,92 @@ struct LegacyPasskeyEnvelopeTests {
         var encrypted = Data(sealed.ciphertext)
         encrypted.append(sealed.tag)
 
-        let recovered = try SyncEnclaveKeyBundle.unwrapLegacyJsonEnvelope(
+        let recovered = try ContentKeyBundle.unwrapLegacyJsonEnvelope(
             prfOutput: prfOutput,
-            kekIvHex: iv.map { String(format: "%02x", $0) }.joined(),
-            wrappedKeyHex: encrypted.map { String(format: "%02x", $0) }.joined()
+            kekIvHex: iv.map { String(format: hexFormat, $0) }.joined(),
+            wrappedKeyHex: encrypted.map { String(format: hexFormat, $0) }.joined()
         )
 
         #expect(recovered.cek == cek)
         #expect(recovered.legacyAlternativeKeys == [alternativeString])
+    }
+}
+
+@MainActor
+@Suite("Generic key envelope")
+struct GenericKeyEnvelopeTests {
+    private let credentialId = "AQID"
+    private let prfResult = PRFResult(output: Data(repeating: 5, count: 32))
+    private let primaryKey = Data((0..<32).map { UInt8($0 + 1) })
+    private let alternativeKeys = [Data((0..<32).map { UInt8($0 + 60) }), Data((0..<32).map { UInt8($0 + 120) })]
+
+    @Test func readsTheEnvelopeTheWebAppWrites() throws {
+        let bundle = try envelopeBundle(primary: wrap(primaryKey), alternatives: alternativeKeys.map { try wrap($0) })
+
+        let candidates = TinfoilWrappedKeyAdapter.partition([bundle], preferredCredentialId: nil)
+
+        #expect(candidates.legacy.isEmpty)
+        #expect(candidates.credentialIds == [credentialId])
+        let current = try #require(candidates.current.first)
+        #expect(current.alternatives.count == alternativeKeys.count)
+        let unwrapped = try PasskeyKeyFlow.unwrapCurrent(current, prfResult: prfResult)
+        #expect(unwrapped.cek == primaryKey)
+        #expect(unwrapped.legacyAlternativeKeys == alternativeKeys.map(EncryptionService.shared.encodeKeyFromBytes))
+    }
+
+    @Test func refusesAnEnvelopeWrappedForAnotherPasskey() throws {
+        let bundle = try envelopeBundle(primary: wrap(primaryKey), alternatives: [wrap(alternativeKeys[0], credentialId: "Ag")])
+
+        let candidates = TinfoilWrappedKeyAdapter.partition([bundle], preferredCredentialId: nil)
+
+        #expect(candidates.current.isEmpty)
+        #expect(candidates.legacy.isEmpty)
+        #expect(candidates.credentialIds.isEmpty)
+    }
+
+    @Test func refusesAnEnvelopeWithUnexpectedMembers() throws {
+        let bundle = try envelopeBundle(primary: wrap(primaryKey), alternatives: [], extraMember: ",\"note\":\"x\"")
+
+        let candidates = TinfoilWrappedKeyAdapter.partition([bundle], preferredCredentialId: nil)
+
+        #expect(candidates.current.isEmpty)
+        #expect(candidates.legacy.isEmpty)
+    }
+
+    @Test func refusesAnEnvelopeThatNamesTheKeyTwice() throws {
+        let bundle = try envelopeBundle(primary: wrap(primaryKey), alternatives: [wrap(primaryKey)])
+        let current = try #require(TinfoilWrappedKeyAdapter.partition([bundle], preferredCredentialId: nil).current.first)
+
+        #expect(throws: ContentKeyBundleError.self) {
+            try PasskeyKeyFlow.unwrapCurrent(current, prfResult: prfResult)
+        }
+    }
+
+    private func wrap(_ key: Data, credentialId: String? = nil) throws -> WrappedKey {
+        try PasskeyKeyManager(
+            profile: TinfoilPasskeyProfile.current,
+            relyingPartyName: Constants.Passkey.rpName,
+            presentationAnchorProvider: FakePasskeyPresentationAnchorProvider()
+        ).wrapKeyWithPRFResult(keyMaterial: key, credentialId: credentialId ?? self.credentialId, prfResult: prfResult)
+    }
+
+    /// A bundle as web app v1.0.2 stores it: the primary key's IV, and the
+    /// envelope's JSON text, hex, as the wrapped keys.
+    private func envelopeBundle(primary: WrappedKey, alternatives: [WrappedKey], extraMember: String = "") throws -> KeyState.Bundle {
+        let encoder = JSONEncoder()
+        func record(_ wrappedKey: WrappedKey) throws -> String {
+            String(decoding: try encoder.encode(String(decoding: try encodeWrappedKeyRecord(wrappedKey), as: UTF8.self)), as: UTF8.self)
+        }
+        let envelope = "{\"version\":1,\"authorizationMode\":\"validated\",\"primary\":\(try record(primary)),"
+            + "\"alternatives\":[\(try alternatives.map(record).joined(separator: ","))]\(extraMember)}"
+        return KeyState.Bundle(
+            credentialId: credentialId,
+            kekIv: primary.kekIvHex,
+            encryptedKeys: Data(envelope.utf8).hexEncodedString(),
+            bundleVersion: 1,
+            createdAt: nil,
+            updatedAt: nil
+        )
     }
 }
 

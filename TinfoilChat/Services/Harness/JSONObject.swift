@@ -45,6 +45,17 @@ extension JSONValue {
     }
 }
 
+/// An encodable value of a type chosen at run time.
+struct AnyEncodable: Encodable {
+    private let encodeTo: (Encoder) throws -> Void
+
+    init<T: Encodable>(_ wrapped: T) {
+        encodeTo = wrapped.encode
+    }
+
+    func encode(to encoder: Encoder) throws { try encodeTo(encoder) }
+}
+
 /// JSON kept as its bytes and written back as they are.
 struct RawJSON: Codable, Equatable, Sendable {
     let data: Data

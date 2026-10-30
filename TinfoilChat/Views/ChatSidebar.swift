@@ -62,7 +62,6 @@ struct ChatSidebar: View {
     @State private var chatSearchTerm: String = ""
     @StateObject private var chatSearch = ChatSearchController()
     @ObservedObject private var settings = SettingsManager.shared
-    @ObservedObject private var syncHealth = SyncHealthStore.shared
 
     private var activeTab: ChatStorageTab {
         viewModel.activeStorageTab
@@ -82,9 +81,7 @@ struct ChatSidebar: View {
             source = viewModel.localSidebarSummaries
         }
         // Temporary and project chats are never listed in the root chat
-        // sidebar. Chats that failed to decrypt are hidden entirely; they
-        // stay in storage so re-decryption can recover them once the
-        // right key is active, at which point they reappear here.
+        // sidebar.
         return source.filter(isRootSidebarChat)
     }
 
@@ -340,6 +337,11 @@ struct ChatSidebar: View {
                                 .sidebarRow(top: 8)
                         }
 
+                        if let shownChatListError {
+                            chatListErrorRow(shownChatListError)
+                                .sidebarRow(top: 8)
+                        }
+
                         chatList(projectColors: projectColors)
                     }
                 }
@@ -355,7 +357,12 @@ struct ChatSidebar: View {
                     // another device never shows up here.
                     await authManager.fetchSubscriptionStatus()
                     await authManager.safeguards.refresh()
-                    await viewModel.performFullSync()
+                    // The lists are read again even when nothing changed, as
+                    // after a read that failed.
+                    viewModel.session?.list.reloadDevice()
+                    let listed = viewModel.session?.list.reload()
+                    await viewModel.account?.checkChanges()
+                    await listed?.value
                 }
                 .frame(maxHeight: .infinity)
                 .onAppear {
@@ -416,9 +423,58 @@ struct ChatSidebar: View {
         }
     }
 
+    /// Why the stored chats could not be listed, shown above the cloud
+    /// list with a retry.
+    private var shownChatListError: String? {
+        guard authManager.isAuthenticated,
+              settings.isCloudSyncEnabled,
+              activeTab == .cloud,
+              !isChatSearchActive else { return nil }
+        return viewModel.chatListError
+    }
+
+    private func chatListErrorRow(_ error: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Could not load chats.")
+                .font(.caption)
+                .fontWeight(.medium)
+            Text(error)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Try again") {
+                viewModel.retryChatList()
+            }
+            .font(.caption)
+            .foregroundColor(.accentColor)
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     @ViewBuilder
     private var chatSearchStatusRow: some View {
-        if chatSearch.isIndexing {
+        if let failure = chatSearch.failure {
+            VStack(spacing: 8) {
+                Text(failure.message)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                if failure.canRetry {
+                    Button("Try again") { chatSearch.retry(account: viewModel.account) }
+                        .font(.caption.weight(.medium))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .padding(.horizontal, 16)
+        } else if chatSearch.unreadable > 0 && !chatSearch.isSearching && !chatSearch.isIndexing {
+            Text(chatSearch.unreadable == 1 ? "1 matching chat couldn't be opened." : "\(chatSearch.unreadable) matching chats couldn't be opened.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+        } else if chatSearch.isIndexing {
             HStack(spacing: 8) {
                 ProgressView()
                     .progressViewStyle(CircularProgressViewStyle())
@@ -498,8 +554,6 @@ struct ChatSidebar: View {
                 editingTitle: $editingTitle,
                 createdTimeString: chat.isBlankChat ? "" : relativeTimeString(from: chat.createdAt),
                 updatedTimeString: chat.isBlankChat ? "" : updatedTimeString(for: chat),
-                isSyncing: chat.pendingSave,
-                syncFailed: !chat.isBlankChat && syncHealth.failedChats[chat.id] != nil,
                 isGenerating: viewModel.isChatStreaming(chat.id),
                 isPinned: viewModel.isChatPinned(chat.id),
                 projectColor: chat.projectId.flatMap { projectColors[$0] },
@@ -672,8 +726,6 @@ struct ChatSidebar: View {
             editingTitle: $editingTitle,
             createdTimeString: relativeTimeString(from: chat.createdAt),
             updatedTimeString: updatedTimeString(for: summary),
-            isSyncing: chat.pendingSave,
-            syncFailed: syncHealth.failedChats[chat.id] != nil,
             isGenerating: viewModel.isChatStreaming(chat.id),
             isPinned: true,
             showPinnedIndicator: false,
@@ -783,7 +835,7 @@ struct ChatSidebar: View {
     private var settingsGearIcon: some View {
         Image(systemName: "gear")
             .overlay(alignment: .topTrailing) {
-                if authManager.isAuthenticated && settings.isCloudSyncEnabled && syncHealth.needsAttention() {
+                if authManager.isAuthenticated && settings.isCloudSyncEnabled && viewModel.account?.keyLocked == true {
                     Circle()
                         .fill(Color.orange)
                         .frame(
@@ -1174,8 +1226,6 @@ struct ChatListItem: View {
     @Binding var editingTitle: String
     let createdTimeString: String
     let updatedTimeString: String
-    var isSyncing: Bool = false
-    var syncFailed: Bool = false
     var isGenerating: Bool = false
     var isPinned: Bool = false
     var showPinnedIndicator: Bool = true
@@ -1277,14 +1327,6 @@ struct ChatListItem: View {
                                 ProgressView()
                                     .scaleEffect(0.6)
                                     .frame(width: 12, height: 12)
-                            } else if syncFailed {
-                                Image(systemName: "exclamationmark.triangle")
-                                    .font(.caption2)
-                                    .foregroundColor(.orange)
-                            } else if isSyncing {
-                                Image(systemName: "icloud.and.arrow.up")
-                                    .font(.caption2)
-                                    .foregroundColor(.blue)
                             }
                         }
                     } else {
@@ -1350,10 +1392,6 @@ struct ChatListItem: View {
             components.append(Constants.ChatFork.sidebarSpinnerLabel)
         } else if isGenerating {
             components.append("Generating response")
-        } else if syncFailed {
-            components.append("Couldn't sync with cloud")
-        } else if isSyncing {
-            components.append("Syncing with cloud")
         }
         return components.joined(separator: ", ")
     }

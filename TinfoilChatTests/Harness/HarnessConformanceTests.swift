@@ -26,8 +26,8 @@ struct HarnessConformanceTests {
         var projection: [String: Any] = [
             "status": state.status == .error ? "error" : "idle",
             "messages": try state.messages.map { message -> [String: Any] in
-                var shown: [String: Any] = ["id": message.id, "role": message.role.rawValue]
-                if message.role == .user { shown["content"] = message.content ?? "" }
+                var shown: [String: Any] = ["id": message.id, "role": message.role.value1?.rawValue ?? ""]
+                if message.role.value1 == .user { shown["content"] = message.content ?? "" }
                 shown["timeline"] = try (message.timeline ?? []).map { step -> [String: Any] in
                     let all = try JSONSerialization.jsonObject(with: encoder.encode(step)) as! [String: Any]
                     return all.filter { stepMembers.contains($0.key) }
@@ -37,7 +37,7 @@ struct HarnessConformanceTests {
         ]
         if let thread = state.snapshot.thread {
             projection["title"] = thread.title
-            projection["titleState"] = thread.titleState.rawValue
+            projection["titleState"] = thread.titleState.value1?.rawValue ?? ""
         }
         if let error = state.error {
             var shown: [String: Any] = ["code": error.code, "message": error.message, "action": error.action.rawValue]

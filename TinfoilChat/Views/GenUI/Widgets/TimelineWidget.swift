@@ -3,7 +3,6 @@
 //  TinfoilChat
 //
 
-import OpenAI
 import SwiftUI
 
 struct TimelineWidget: GenUIWidget {
@@ -19,30 +18,6 @@ struct TimelineWidget: GenUIWidget {
     }
 
     let name = "render_timeline"
-    let description = "Display a chronological timeline of events. Use for history, news recaps, or project milestones."
-    let promptHint = "chronological events, history, news recaps, or milestones"
-
-    var schema: JSONSchema {
-        let eventSchema = GenUISchema.object(
-            properties: [
-                "date": GenUISchema.string(),
-                "title": GenUISchema.string(),
-                "description": GenUISchema.string(),
-            ],
-            required: ["date", "title"]
-        )
-        return GenUISchema.object(
-            properties: [
-                "events": GenUISchema.array(
-                    items: eventSchema,
-                    description: "Chronological events",
-                    minItems: 1
-                ),
-                "title": GenUISchema.string(),
-            ],
-            required: ["events"]
-        )
-    }
 
     @MainActor
     func renderInline(args: Args, context: GenUIRenderContext) -> AnyView? {

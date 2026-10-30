@@ -4,7 +4,7 @@ import Testing
 
 private func summary(_ id: String, title: String = "Chat", pinned: Bool = false, projectId: String? = nil, at: String = "2026-01-01T00:00:00Z") -> ThreadSummary {
     ThreadSummary(
-        id: id, title: title, titleState: .generated, createdAt: at, updatedAt: at, activityAt: at, projectId: projectId,
+        id: id, title: title, titleState: .named(.generated), createdAt: at, updatedAt: at, activityAt: at, projectId: projectId,
         model: "auto", webSearchEnabled: true, pinned: pinned, contextUsage: nil, activeRun: nil, messageCount: 1, flagged: nil
     )
 }
@@ -27,6 +27,11 @@ struct ChatListTests {
     /// A list of an account with cloud sync, whose profile has loaded so its
     /// key is ready.
     private func makeList() async -> (ChatList, ScriptedTransport) {
+        let (list, transport, _) = await makeListAndAccount()
+        return (list, transport)
+    }
+
+    private func makeListAndAccount() async -> (ChatList, ScriptedTransport, HarnessAccount) {
         let transport = ScriptedTransport([Answers.json([:])])
         let credentials = ScriptedCredentials(identities: Array(repeating: "jwt", count: 10), access: Array(repeating: .success("k"), count: 10))
         let client = HarnessClient(credentials: credentials, transport: transport, languages: { [] })
@@ -41,7 +46,7 @@ struct ChatListTests {
         let list = ChatList(account: account, device: DeviceThreadStore(directory: nil), cache: ChatListCache(directory: nil))
         await account.refreshProfile()
         #expect(account.keyReady)
-        return (list, transport)
+        return (list, transport, account)
     }
 
     @Test func readsThePagesOfStoredChatsAndTheirFavorites() async throws {
@@ -58,13 +63,31 @@ struct ChatListTests {
         #expect(requests.first?.json["key"] as? String == Data(repeating: 1, count: 32).base64EncodedString())
     }
 
+    @Test func aChangeTheHarnessReportsListsTheStoredChatsAgain() async throws {
+        let (list, transport, account) = await makeListAndAccount()
+        await transport.push(ListPage.json([summary("a")], pinned: []))
+        try await list.refresh()
+        await transport.push(Answers.json(["chats": "c2", "profile": "p2", "projects": "j2"]))
+        await transport.push(Answers.json([:]))
+        await transport.push(ListPage.json([summary("b"), summary("a")], pinned: []))
+        await account.checkChanges()
+        var waited = 0
+        while list.cloudListed.count < 2, waited < 100 {
+            try await Task.sleep(for: .milliseconds(10))
+            waited += 1
+        }
+        #expect(list.cloudListed.map(\.id) == ["b", "a"])
+        let routes = await transport.requests.map(\.route)
+        #expect(Array(routes.suffix(3)) == [.changes, .profileGet, .list])
+    }
+
     @Test func aPreviewShowsAChangeUntilItsStoreRefuses() async throws {
         let (list, transport) = await makeList()
         await transport.push(ListPage.json([summary("a", title: "Old")], pinned: []))
         try await list.refresh()
         let undo = list.preview("a", ThreadPatch(title: "New", pinned: true))
         #expect(list.cloudListed.first?.title == "New")
-        #expect(list.cloudListed.first?.titleState == .manual)
+        #expect(list.cloudListed.first?.titleState.value1 == .manual)
         #expect(list.pinnedListed.map(\.id) == ["a"])
         undo()
         #expect(list.cloudListed.first?.title == "Old")
@@ -140,6 +163,94 @@ struct ChatListTests {
         await load?.value
         #expect(!list.loading)
         #expect(list.cloudListed.last?.id == "b")
+    }
+
+    @Test func onlyAPageAfterThoseListedShowsAsLoadingMore() async throws {
+        let (list, transport) = await makeList()
+        await transport.push(ListPage.json(fullPage, pinned: [], next: "c2"))
+        await transport.hold()
+        let reload = list.reload()
+        await transport.arrived()
+        #expect(list.loading)
+        #expect(!list.loadingMore)
+        await transport.release()
+        await reload.value
+        await transport.push(ListPage.json([summary("b")], next: ""))
+        await transport.hold()
+        let load = list.loadMore()
+        await transport.arrived()
+        #expect(list.loadingMore)
+        await transport.release()
+        await load?.value
+        #expect(!list.loadingMore)
+        #expect(list.cloudListed.last?.id == "b")
+    }
+
+    @Test func aProjectsChatsAreListedApartPageByPage() async throws {
+        let (list, transport) = await makeList()
+        let firstPage = (0..<ChatList.pageSize).map { summary("p\($0)", projectId: "p") }
+        await transport.push(ListPage.json(firstPage, pinned: [], next: "c2"))
+        list.listProject("p")
+        let project = try #require(list.project)
+        var waited = 0
+        while project.cloudListed.isEmpty, waited < 100 {
+            try await Task.sleep(for: .milliseconds(10))
+            waited += 1
+        }
+        #expect(project.cloudListed == firstPage)
+        await transport.push(ListPage.json([summary("b", projectId: "p")], next: ""))
+        await project.loadMore()?.value
+        #expect(project.cloudListed == firstPage + [summary("b", projectId: "p")])
+        let requests = await transport.requests.filter { $0.route == .list }
+        #expect(requests.map { $0.json["projectId"] as? String } == ["p", "p"])
+        #expect(requests.map { $0.json["cursor"] as? String } == [nil, "c2"])
+        list.listProject(nil)
+        #expect(list.project == nil)
+    }
+
+    @Test func aProjectsListShowsTheChangesMadeThroughTheList() async throws {
+        let (list, transport) = await makeList()
+        await transport.push(ListPage.json([summary("a", projectId: "p"), summary("b", projectId: "p"), summary("r")], pinned: []))
+        try await list.refresh()
+        await transport.push(ListPage.json([summary("a", projectId: "p"), summary("b", projectId: "p")], pinned: []))
+        list.listProject("p")
+        let project = try #require(list.project)
+        var waited = 0
+        while project.cloudListed.isEmpty, waited < 100 {
+            try await Task.sleep(for: .milliseconds(10))
+            waited += 1
+        }
+        let undoTitle = list.preview("a", ThreadPatch(title: "Renamed"))
+        #expect(project.cloudListed.first { $0.id == "a" }?.title == "Renamed")
+        undoTitle()
+        #expect(project.cloudListed.first { $0.id == "a" }?.title == "Chat")
+        let undoRemoval = list.previewRemoval("b")
+        #expect(project.cloudListed.map(\.id) == ["a"])
+        undoRemoval()
+        #expect(project.cloudListed.map(\.id) == ["a", "b"])
+        // A chat moved into the project joins its list, and one moved out
+        // leaves it.
+        list.cloud.replace(summary("r", projectId: "p"))
+        list.cloud.replace(summary("a"))
+        #expect(project.cloudListed.map(\.id) == ["r", "b"])
+        list.cloud.remove("b")
+        #expect(project.cloudListed.map(\.id) == ["r"])
+    }
+
+    @Test func theProjectsListedLastAreKeptSealedUntilTheListIsCleared() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = ChatListCache(directory: directory)
+        #expect(await cache.readProjects() == nil)
+        let projects = [Project(Components.Schemas.Project(id: "p1", name: "Taxes", description: "Receipts", systemInstructions: "Be brief", color: "blue"))]
+        await cache.writeProjects(projects)
+        #expect(await cache.readProjects() == projects)
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        #expect(files.count == 1)
+        #expect(!String(decoding: try Data(contentsOf: try #require(files.first)), as: UTF8.self).contains("Taxes"))
+        cache.clear()
+        #expect(await cache.readProjects() == nil)
     }
 
     @Test func anEditDuringAReloadKeepsTheEditAndEndsTheLoad() async throws {

@@ -13,7 +13,7 @@ import Combine
 import Foundation
 import OSLog
 import SwiftUI
-import TinfoilAI
+import Tinfoil
 import VisionKit
 
 enum ChatStorageTab: String, Sendable, Hashable {
@@ -30,6 +30,22 @@ enum ChatNavigationDestination: Hashable {
 struct ChatNavigationRequest: Equatable {
     let id = UUID()
     let destination: ChatNavigationDestination
+}
+
+/// An action on a chat that failed outside the open chat's turn, as renaming
+/// or deleting a chat in the list, which an alert explains.
+struct ChatActionFailure: Identifiable, Equatable {
+    let id = UUID()
+    let title: String
+    let message: String
+}
+
+/// The rows atop the cloud and local chat lists that stand for a new chat.
+enum NewChatRow {
+    static let cloudId = "new-chat-cloud"
+    static let localId = "new-chat-local"
+
+    static func id(local: Bool) -> String { local ? localId : cloudId }
 }
 
 /// Graded reasoning effort exposed to the user, in the chat service's
@@ -124,7 +140,6 @@ class ChatViewModel: ObservableObject {
 
     @Published var activeStorageTab: ChatStorageTab = .cloud
     @Published private(set) var messageEditSession: MessageEditSession?
-    @Published var isTemporaryMode: Bool = false
     private var previousChatIdBeforeTemporary: String?
     @Published private(set) var forkingChatId: String?
     private var previousOpenChatId: String?
@@ -132,7 +147,6 @@ class ChatViewModel: ObservableObject {
     // MARK: - Settings
 
     @Published var currentModel: ModelType
-    @Published var isWebSearchEnabled: Bool = false
     @Published var reasoningEffort: ReasoningEffort = .medium {
         didSet { if !isApplyingProfile { saveSetting("reasoningEffort", reasoningEffort.rawValue) } }
     }
@@ -150,13 +164,47 @@ class ChatViewModel: ObservableObject {
         var isVerifying: Bool = false
         var isVerified: Bool = false
         var error: String? = nil
+
+        /// Follows a verification of the enclave. A success shows once the
+        /// session has opened; a failure, after a success too, says what
+        /// failed.
+        mutating func follow(_ result: EnclaveVerificationResult, sessionOpen: Bool) {
+            switch result {
+            case .success:
+                if sessionOpen { self = VerificationInfo(isVerified: true) }
+            case .failure(let error):
+                self = VerificationInfo(error: Self.failure(error))
+            }
+        }
+
+        /// What a failed verification says failed, in plain words.
+        static func failure(_ error: TinfoilError) -> String {
+            switch error {
+            case .networkError:
+                return "The enclave could not be reached to verify it. Check your connection and try again."
+            case .configurationError:
+                return "The app could not set up the enclave's verification."
+            case .attestationError(let details):
+                switch details.layer {
+                case .envelope?: return "The enclave's attestation could not be read."
+                case .provenance?: return "The enclave's published code could not be authenticated."
+                case .quote?: return "The enclave's hardware evidence could not be authenticated."
+                case .policy?: return "The enclave does not meet the required security checks."
+                default: return "The enclave could not be verified."
+                }
+            }
+        }
     }
     @Published var verification = VerificationInfo()
     @Published var enclaveVerification: Verification? = nil
+    /// The latest verification of the session's enclave, or nil before the
+    /// first.
+    private var latestVerification: EnclaveVerificationResult?
+    private var verificationWatch: Task<Void, Never>?
+    private var isRetryingSession = false
     var isVerifying: Bool { verification.isVerifying }
     var isVerified: Bool { verification.isVerified }
     var verificationError: String? { verification.error }
-    @Published var isClientInitializing: Bool = false
 
     // MARK: - UI state
 
@@ -172,33 +220,24 @@ class ChatViewModel: ObservableObject {
     @Published var showCloudSyncOnboarding: Bool = false
     @Published var cloudSyncOnboardingMode: CloudSyncOnboardingMode = .setup
     @Published var passkeySetupFailure: PasskeyFlowFailure?
-    @Published var shouldOpenCloudSync: Bool = false
     @Published var shouldExpandProjectsInSidebar: Bool = false
     @Published private(set) var navigationRequest: ChatNavigationRequest?
     @Published var isViewingProjectChat: Bool = false
-    @Published var scrollTargetMessageId: String? = nil
-    @Published var scrollTargetOffset: CGFloat = 0
     @Published var shouldFocusInput: Bool = false
     var focusInputAfterDismiss = false
     @Published var isScrollInteractionActive: Bool = false
     @Published var isAtBottom: Bool = true
     @Published var scrollToBottomTrigger: UUID = UUID()
+    @Published private(set) var isLoadingEarlierMessages = false
     @Published var scrollToUserMessageTrigger: UUID = UUID()
     @Published var imageViewerImages: [Attachment] = []
     @Published var imageViewerIndex: Int = 0
     @Published var showImageViewer: Bool = false
     @Published var showRateLimitPaywall: Bool = false
+    @Published var actionFailure: ChatActionFailure?
     @Published var verifierView: VerifierView?
-    @Published var isFirstTimeUser: Bool = false
-    @Published var showEncryptionSetup: Bool = false
     @Published var shouldShowKeyImport: Bool = false
     @Published private(set) var isPasskeyRecoverySkipped: Bool = false
-
-    // MARK: - Sync and errors
-
-    @Published var isSyncing: Bool = false
-    @Published var lastSyncDate: Date?
-    @Published var syncErrors: [String] = []
 
     // MARK: - Audio
 
@@ -232,7 +271,10 @@ class ChatViewModel: ObservableObject {
 
     @Published var projects: [Project] = []
     @Published var activeProject: Project? {
-        didSet { session?.setProject(activeProject?.id) }
+        didSet {
+            session?.setProject(activeProject?.id)
+            session?.list.listProject(activeProject?.id)
+        }
     }
     @Published var projectDocuments: [ProjectDocument] = []
     @Published var isLoadingProjects: Bool = false
@@ -249,7 +291,7 @@ class ChatViewModel: ObservableObject {
     var isAppPresentationReady = false
     var needsSignInWhenPresentationReady = false
     var signInTask: Task<Void, Never>?
-    var legacyMigrationTask: Task<Void, Never>?
+    var heldKeyRegistrationTask: Task<Void, Never>?
     var accountOperationFence = AccountOperationFence()
     let accountOperationTracker = AccountOperationTracker()
     var activeSignInToken: AccountOperationFence.Token?
@@ -257,24 +299,14 @@ class ChatViewModel: ObservableObject {
     @Published var readyForAccountActionsUserId: String? {
         didSet { if readyForAccountActionsUserId != nil { passkeyManager.resumeAccountOperations() } }
     }
-    @Published var rateLimit: RateLimitInfo? {
-        didSet {
-            guard let rateLimit, authManager?.hasActiveSubscription != true else { return }
-            if rateLimit.remaining <= 0, rateLimit.kind == .freeDaily { showRateLimitPaywall = true }
-        }
-    }
+    @Published var rateLimit: RateLimitInfo?
 
     @Published var authManager: AuthManager? {
         didSet {
             if authManager !== oldValue { speechPlayer.stop() }
             bindSafeguardsStore()
             cancelMessageEdit()
-            if authManager?.isAuthenticated == true, let userId = currentUserId {
-                lastSyncDate = UserDefaults.standard.object(forKey: Constants.StorageKeys.Sync.lastSyncDate(userId: userId)) as? Date
-            } else {
-                lastSyncDate = nil
-                clearProjectState()
-            }
+            if currentUserId == nil { clearProjectState() }
         }
     }
 
@@ -285,6 +317,26 @@ class ChatViewModel: ObservableObject {
     private var sessionGeneration = 0
     private var shownChat: (generation: Int, chat: Chat?)?
     private var shownChats: (generation: Int, chats: [Chat])?
+    /// The open chat's rows, which keep their ids while a turn replaces its
+    /// messages, as the chat table expects.
+    private var rows = ChatRows()
+    /// A reply streams a token at a time, and each change of the session
+    /// redraws every view of the chat. Changes publish on the next turn of the
+    /// main actor, and while a reply streams at most every uiUpdateInterval; a
+    /// change to what the table lays out publishes at once.
+    private var publishEvaluation: Task<Void, Never>?
+    private var trailingPublish: Task<Void, Never>?
+    private var nextPublishAt = Date.distantPast
+    private var publishedLayout: SessionLayout?
+    /// The reply whose first text ticks the haptic, and how far it got.
+    private var hapticReply: (id: String, ticks: Int, lastAt: Date, length: Int)?
+    /// The user stopped the reply, which was announced as stopped rather than
+    /// complete.
+    private var stopAnnounced = false
+    /// A reply asked for again scrolls its message to the top once its turn
+    /// starts, when the reply's row has replaced the one it regenerates.
+    private var scrollsToTurnOnStart = false
+    private lazy var streamingHaptic = UIImpactFeedbackGenerator(style: .light)
     /// Whether the account changed since a session was opened for it.
     private var sessionUserId: String?? = nil
 
@@ -293,13 +345,25 @@ class ChatViewModel: ObservableObject {
     init() {
         currentModel = ModelType.auto
         loadDeviceSettings()
+        passkeyManager.$recoverySkipped
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$isPasskeyRecoverySkipped)
         Task { await openSession() }
-        observers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { await self?.handleDidBecomeActive() }
-        })
         observers.append(NotificationCenter.default.addObserver(forName: .cloudSyncSettingChanged, object: nil, queue: .main) { [weak self] _ in
             Task { await self?.storageModeChanged() }
         })
+        // A chat service that could not be reached is tried again as the app
+        // returns and as the network does.
+        observers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.retryClientSetupIfFailed() }
+        })
+        AppConfig.shared.networkMonitor.$isConnected
+            .dropFirst()
+            .removeDuplicates()
+            .filter { $0 }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.retryClientSetupIfFailed() }
+            .store(in: &cancellables)
     }
 
     deinit {
@@ -335,20 +399,40 @@ class ChatViewModel: ObservableObject {
         let userId = currentUserId
         if case .some(let opened) = sessionUserId, opened == userId, session != nil { return }
         sessionUserId = .some(userId)
+        // The chat a signed-out caller had open stays open once it is the
+        // account's.
+        var keptOpenChatId: String?
         if let previous = session, previous.account.userId == nil, userId != nil {
             memoryChats = await Self.deviceChats(of: previous.device)
+            keptOpenChatId = previous.open.id.flatMap { id in memoryChats.contains { $0.thread.id == id } ? id : nil }
         }
         session?.account.dispose()
         sessionCancellables = []
+        verificationWatch?.cancel()
+        verificationWatch = nil
+        latestVerification = nil
+        publishEvaluation?.cancel()
+        publishEvaluation = nil
+        trailingPublish?.cancel()
+        trailingPublish = nil
+        publishedLayout = nil
+        hapticReply = nil
+        stopAnnounced = false
+        scrollsToTurnOnStart = false
+        temporarySave?.cancel()
+        temporarySave = nil
+        isSavingTemporaryChat = false
+        rows = ChatRows()
         session = nil
         verification = VerificationInfo(isVerifying: true)
-        isClientInitializing = true
+        // The account's settings load with its key as the session opens,
+        // before its sign-in runs.
+        if let userId { EncryptionService.shared.bind(userId: userId) }
         let account: HarnessAccount
         do {
             account = try Self.makeAccount(userId: userId, authManager: authManager)
         } catch {
             verification = VerificationInfo(error: error.localizedDescription)
-            isClientInitializing = false
             return
         }
         let directory = userId.flatMap { try? DeviceThreadStore.directory(userId: $0) }
@@ -356,15 +440,24 @@ class ChatViewModel: ObservableObject {
         let session = ChatSession(account: account, device: store, cache: ChatListCache(directory: directory), receipts: RunReceiptStore(userId: userId))
         self.session = session
         ProfileManager.shared.bind(account)
+        KeyRegistry.shared.bind(account)
         await LinkMetadataService.shared.bind(account)
-        session.objectWillChange.sink { [weak self] _ in
-            self?.sessionGeneration += 1
-            self?.objectWillChange.send()
-        }.store(in: &sessionCancellables)
+        session.objectWillChange.sink { [weak self] _ in self?.sessionChanged() }.store(in: &sessionCancellables)
         account.$rateLimit.receive(on: RunLoop.main).sink { [weak self] limit in self?.rateLimit = limit.flatMap(RateLimitInfo.init) }.store(in: &sessionCancellables)
         account.$profile.receive(on: RunLoop.main).sink { [weak self] _ in self?.applyProfileSettings() }.store(in: &sessionCancellables)
-        account.$session.receive(on: RunLoop.main).sink { [weak self] _ in self?.applySessionModels() }.store(in: &sessionCancellables)
-        account.$chatRevision.receive(on: RunLoop.main).sink { [weak self] _ in Task { await self?.session?.refreshIfChanged() } }.store(in: &sessionCancellables)
+        account.$session.receive(on: RunLoop.main).sink { [weak self] loaded in
+            self?.applySessionModels()
+            guard loaded != nil, let self, let latest = latestVerification else { return }
+            verification.follow(latest, sessionOpen: true)
+        }.store(in: &sessionCancellables)
+        let verifications = account.client.verifications
+        verificationWatch = Task { [weak self, weak account] in
+            for await result in verifications {
+                guard let self, let account else { return }
+                showVerification(result, of: account)
+            }
+        }
+        account.$chatRevision.receive(on: RunLoop.main).sink { [weak self] _ in Task { await self?.refreshOpenChat() } }.store(in: &sessionCancellables)
         account.$projectRevision.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in Task { await self?.loadProjects() } }.store(in: &sessionCancellables)
         account.$keyReady.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] ready in
             guard ready else { return }
@@ -374,21 +467,20 @@ class ChatViewModel: ObservableObject {
         await migrateMemoryChats(into: store)
         session.newChat(local: activeStorageTab == .local)
         session.list.reloadDevice()
+        // The stored chats listed last time show while the account loads.
+        session.list.reload()
+        if let keptOpenChatId { selectChat(id: keptOpenChatId, isLocalOnly: true) }
         do {
             try await account.refresh(credentials: true)
             guard self.session === session else { return }
-            let verified = await account.client.verification()
-            enclaveVerification = verified
-            verification = VerificationInfo(isVerified: verified != nil, error: verified == nil ? "The chat service could not be verified." : nil)
         } catch {
             guard self.session === session else { return }
-            verification = VerificationInfo(error: error.localizedDescription)
+            showSessionFailure(error)
             account.report(error)
             // The settings this device holds show even while the chat
             // service cannot be reached.
             if !account.cloud { await account.refreshProfile() }
         }
-        isClientInitializing = false
         account.watchChanges()
         Task { await upgradeOlderDeviceChats(session) }
     }
@@ -402,9 +494,14 @@ class ChatViewModel: ObservableObject {
             Task { @MainActor in quota.account?.reportMintedRateLimit(limit) }
         }
         let credentials = HarnessCredentialProvider(
+            // Requests go as the account the session was opened for, or not
+            // at all: a signed-in account never falls back to a free key.
             identity: { refresh in
-                guard userId != nil else { return nil }
-                return try await ClerkIdentity.token(refresh: refresh)
+                guard let userId else { return nil }
+                let token = try await ClerkIdentity.token(refresh: refresh)
+                guard await ClerkIdentity.userId() == userId else { throw CancellationError() }
+                guard let token else { throw HarnessError.unauthenticated }
+                return token
             },
             chatAccess: chatAccess,
             anonymousAccess: AnonymousAccessCache(controlPlane: controlPlane)
@@ -459,10 +556,6 @@ class ChatViewModel: ObservableObject {
         session.list.reloadDevice()
     }
 
-    private func handleDidBecomeActive() async {
-        await account?.checkChanges()
-    }
-
     /// Cloud sync was turned on or off in Settings.
     private func storageModeChanged() async {
         guard let session else { return }
@@ -485,9 +578,12 @@ class ChatViewModel: ObservableObject {
     // MARK: - Models and settings from the session
 
     private func applySessionModels() {
+        if let minimum = account?.session?._protocol.minimum { AppConfig.shared.harnessServes(minimumProtocol: minimum) }
         guard let models = account?.session?.models else { return }
         let available = models.map(ModelType.init)
-        if let current = available.first(where: { $0.id == currentModel.id }) {
+        if session?.open.id == nil, session?.open.modelChosen != true, let shown = openChatModel {
+            currentModel = shown
+        } else if let current = available.first(where: { $0.id == currentModel.id }) {
             currentModel = current
         } else if let picked = session.flatMap({ session in available.first { $0.id == session.pickedModel } }) {
             currentModel = picked
@@ -521,29 +617,58 @@ class ChatViewModel: ObservableObject {
         if let effort = profile.reasoningEffort.flatMap(ReasoningEffort.init(rawValue:)), effort != reasoningEffort { reasoningEffort = effort }
         if let thinking = profile.thinkingEnabled, thinking != thinkingEnabled { thinkingEnabled = thinking }
         if let level = profile.autoIntelligence.flatMap(AutoIntelligence.init(rawValue:)), level != autoIntelligence { autoIntelligence = level }
-        if let models = account?.session?.models, let selected = profile.selectedModel, let model = models.first(where: { $0.id == selected }), session?.open.modelChosen != true, session?.open.id == nil {
-            currentModel = ModelType(model)
-        }
+        if session?.open.modelChosen != true, session?.open.id == nil { showOpenChatModel() }
+    }
+
+    /// The model the open chat shows: the one it was opened with or the user
+    /// picked for it, or for a new chat the one its prompt chooses or the one
+    /// new chats follow.
+    private var openChatModel: ModelType? {
+        guard let session else { return nil }
+        let open = session.open
+        return findSelectableModel(id: session.presetChoice().model ?? (open.model.isEmpty ? session.pickedModel : open.model))
+    }
+
+    /// The model picker shows the open chat's model.
+    private func showOpenChatModel() {
+        if let model = openChatModel { currentModel = model }
     }
 
     private func saveSetting(_ field: String, _ value: Any) {
-        guard let account else { return }
-        Task {
-            do { try await account.updateProfile([field: value]) } catch { account.report(error) }
-        }
+        ProfileManager.shared.save([field: value])
     }
 
     func changeModel(to model: ModelType) {
         currentModel = model
         session?.setModel(model.id)
         saveSetting("selectedModel", model.id)
+        keepWithOpenChat(ThreadPatch(model: model.id))
     }
 
+    /// Whether the open chat searches the web, as its toggle shows it.
+    var isWebSearchEnabled: Bool { currentChat?.webSearchEnabled ?? newChatWebSearch }
+
+    /// Whether a new chat searches the web until the user or its prompt
+    /// chooses: as the profile says, which the chat service starts new chats
+    /// with.
+    private var newChatWebSearch: Bool { account?.effectiveProfile.webSearchEnabled ?? true }
+
     func setWebSearchEnabled(_ enabled: Bool) {
-        isWebSearchEnabled = enabled
         session?.setWebSearch(enabled)
-        if let id = session?.open.id, session?.open.onDevice == false {
-            Task { try? await session?.update(id, ThreadPatch(webSearchEnabled: enabled)) }
+        keepWithOpenChat(ThreadPatch(webSearchEnabled: enabled))
+    }
+
+    /// A setting changed in the open chat is kept with the chat, wherever it
+    /// is stored, so it opens with it here and on other devices. A chat not
+    /// written yet takes its settings with its first turn.
+    private func keepWithOpenChat(_ patch: ThreadPatch) {
+        guard let session, let id = session.open.id, session.open.unsaved != id else { return }
+        Task {
+            do {
+                _ = try await session.update(id, patch)
+            } catch {
+                Self.logger.error("Failed to keep a setting with the open chat: \(error, privacy: .public)")
+            }
         }
     }
 
@@ -603,6 +728,128 @@ class ChatViewModel: ObservableObject {
         return !safeguardsHaveLoaded || isCurrentChatSafeguardFlagged
     }
 
+    /// The id of the row an error shows in when no reply answers the last
+    /// message, after that message's id.
+    private static let errorRowSuffix = "-error"
+
+    // MARK: - Publishing the session
+
+    /// What the chat table lays out: a change to it publishes at once.
+    private struct SessionLayout: Equatable {
+        let chatId: String?
+        let loadingId: String?
+        let failedId: String?
+        let failed: Bool
+        /// A new chat took its id with the turn it is sending.
+        let firstTurn: Bool
+        /// The chat service titled the chat.
+        let titled: Bool
+        let status: ChatState.Status
+        let messageCount: Int
+        let lastMessageId: String?
+
+        @MainActor init(_ session: ChatSession) {
+            chatId = session.open.id
+            loadingId = session.open.loadingId
+            failedId = session.open.failedId
+            failed = session.open.failure != nil
+            firstTurn = session.isNewChatsFirstTurn
+            titled = session.state.snapshot.thread?.titleState.value1 == .generated
+            status = session.state.status
+            messageCount = session.state.messages.count
+            lastMessageId = session.state.messages.last?.id
+        }
+    }
+
+    private func sessionChanged() {
+        // What the views show is rebuilt on its next read, while the views
+        // redraw when the change publishes.
+        sessionGeneration += 1
+        guard publishEvaluation == nil else { return }
+        publishEvaluation = Task { @MainActor [weak self] in
+            self?.publishEvaluation = nil
+            self?.publishSessionChange(force: false)
+        }
+    }
+
+    private func publishSessionChange(force: Bool) {
+        let layout = session.map(SessionLayout.init)
+        let now = Date()
+        if !force, session?.state.status == .streaming, layout == publishedLayout, now < nextPublishAt {
+            guard trailingPublish == nil else { return }
+            let delay = nextPublishAt.timeIntervalSince(now)
+            trailingPublish = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(delay * Double(NSEC_PER_SEC)))
+                guard !Task.isCancelled, let self else { return }
+                self.trailingPublish = nil
+                self.publishSessionChange(force: true)
+            }
+            return
+        }
+        trailingPublish?.cancel()
+        trailingPublish = nil
+        announceGenerationStatus(from: publishedLayout, to: layout)
+        if layout?.chatId != publishedLayout?.chatId { scrollsToTurnOnStart = false }
+        if scrollsToTurnOnStart, let layout, [.submitting, .queued, .streaming].contains(layout.status) {
+            scrollsToTurnOnStart = false
+            isScrollInteractionActive = false
+            scrollToUserMessageTrigger = UUID()
+        }
+        publishedLayout = layout
+        nextPublishAt = now.addingTimeInterval(Constants.Streaming.uiUpdateInterval)
+        tickStreamingHaptic(at: now)
+        // Reading aloud stops, and an edit is given up, once its message is
+        // no longer shown, as when the chat changes or the message is
+        // regenerated or deleted.
+        if speechPlayer.snapshot.owner != nil || messageEditSession != nil {
+            let chat = currentChat
+            speechPlayer.reconcile(chatId: chat?.id, messages: chat?.messages ?? [])
+            let edit = MessageEditSessionTransition.reconcile(messageEditSession, chatId: chat?.id, messages: chat?.messages ?? [])
+            if edit != messageEditSession { messageEditSession = edit }
+        }
+        objectWillChange.send()
+    }
+
+    /// VoiceOver hears a reply start, finish or fail in the chat on screen,
+    /// as the web app's live region announces it, and a haptic marks a reply
+    /// finishing or failing and the chat taking its title.
+    private func announceGenerationStatus(from previous: SessionLayout?, to next: SessionLayout?) {
+        guard let previous, let next, previous.chatId == next.chatId || (previous.chatId == nil && next.firstTurn) else { return }
+        if previous.chatId == next.chatId, !previous.titled, next.titled { HapticFeedback.trigger(.success) }
+        guard previous.status != next.status else { return }
+        let running: Set<ChatState.Status> = [.submitting, .queued, .streaming]
+        let wasRunning = running.contains(previous.status), isRunning = running.contains(next.status)
+        if !wasRunning, isRunning {
+            stopAnnounced = false
+            AccessibilityAnnouncer.announce(Constants.Accessibility.generatingResponse)
+        } else if wasRunning, next.status == .error || next.failed {
+            AccessibilityAnnouncer.announce(Constants.Accessibility.responseFailed)
+            HapticFeedback.trigger(.error)
+        } else if wasRunning, next.status == .idle {
+            if !stopAnnounced {
+                AccessibilityAnnouncer.announce(Constants.Accessibility.responseComplete)
+                HapticFeedback.trigger(.success)
+            }
+            stopAnnounced = false
+        }
+    }
+
+    /// A light haptic ticks as a reply's first text arrives, a few times
+    /// spaced out, when haptics are on.
+    private func tickStreamingHaptic(at now: Date) {
+        guard SettingsManager.shared.hapticFeedbackEnabled, let state = session?.state, state.status == .streaming,
+              let reply = state.messages.last, reply.role.value1 == .assistant else { return }
+        let length = reply.timeline?.reduce(0) { $1._type.value1 == .content ? $0 + ($1.content?.utf8.count ?? 0) : $0 } ?? 0
+        var tick = hapticReply?.id == reply.id ? hapticReply! : (id: reply.id, ticks: 0, lastAt: .distantPast, length: 0)
+        defer { hapticReply = tick }
+        guard length > tick.length else { return }
+        tick.length = length
+        guard tick.ticks < Constants.Streaming.hapticTicks, now.timeIntervalSince(tick.lastAt) >= Constants.Streaming.hapticInterval else { return }
+        tick.ticks += 1
+        tick.lastAt = now
+        streamingHaptic.impactOccurred(intensity: Constants.Streaming.hapticIntensity)
+    }
+
     // MARK: - The open chat as the views show it
 
     var messages: [Message] {
@@ -614,20 +861,76 @@ class ChatViewModel: ObservableObject {
         session?.running == true
     }
 
+    /// The open chat starts with older messages than those shown.
+    var hasEarlierMessages: Bool {
+        guard let session else { return false }
+        return session.state.hasOlder && session.open.loadingId == nil
+    }
+
+    /// Loads the open chat's messages before those shown.
+    func loadEarlierMessages() {
+        guard let session, !isLoadingEarlierMessages, hasEarlierMessages else { return }
+        isLoadingEarlierMessages = true
+        Task {
+            defer { isLoadingEarlierMessages = false }
+            do {
+                try await session.older()
+            } catch {
+                Self.logger.error("Failed to load earlier messages: \(error, privacy: .public)")
+            }
+        }
+    }
+
+    /// The full image of an attachment of the open chat, which the chat keeps
+    /// apart from the thumbnail its message shows.
+    func fullImageData(for attachment: Attachment) async -> Data? {
+        guard let session else { return nil }
+        do {
+            return try await session.image(attachment).data
+        } catch is CancellationError {
+            // The viewer moved off the image before it loaded.
+            return nil
+        } catch {
+            Self.logger.error("Failed to load an image of the open chat: \(error, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// The harness's id of the message a row of the open chat shows.
+    func messageId(ofRow rowId: String) -> String {
+        rows.messageId(ofRow: rowId)
+    }
+
+    /// The open chat was blank until the turn it is sending gave it its id.
+    var isNewChatsFirstTurn: Bool {
+        session?.isNewChatsFirstTurn == true
+    }
+
     /// Whether the given chat has a response currently being generated,
     /// regardless of which chat is on screen.
     func isChatStreaming(_ chatId: String) -> Bool {
         guard let session else { return false }
         if session.open.id == chatId { return session.running }
-        return session.controller.deviceRuns[chatId] != nil
+        if session.controller.deviceRuns[chatId] != nil { return true }
+        let now = Date()
+        return chats.contains { $0.id == chatId && $0.activeRun?.isLive(at: now) == true }
     }
 
+    /// The chat the list shows as open: a new chat outside a project is the
+    /// new chat row of the list it will be stored in.
     var selectedChatId: String? {
         guard let session else { return nil }
-        return session.open.loadingId ?? session.open.failedId ?? session.open.id
+        if let id = session.open.loadingId ?? session.open.failedId ?? session.open.id { return id }
+        guard !session.open.temporary, activeProject == nil else { return nil }
+        return NewChatRow.id(local: session.open.local)
     }
 
-    var hydratingChatId: String? { session?.open.loadingId }
+    /// The chat loading to be shown; a fork opening shows the fork overlay
+    /// instead.
+    var hydratingChatId: String? {
+        guard let loading = session?.open.loadingId, loading != forkingChatId else { return nil }
+        return loading
+    }
 
     var chatHydrationError: String? {
         guard let session, session.open.failedId != nil else { return nil }
@@ -648,7 +951,20 @@ class ChatViewModel: ObservableObject {
 
     var canGenerateInCurrentChat: Bool {
         guard let session, canUseCurrentChatActions, !isSafeguardGenerationBlocked else { return false }
-        return session.account.profileReady && (session.open.onDevice || session.account.keyReady)
+        return session.sendBlock == nil
+    }
+
+    /// Why the open chat cannot take a turn, which the composer explains.
+    var sendBlock: SendBlock? { session?.sendBlock }
+
+    /// Whether a new chat could send a prompt now: the chat service has
+    /// opened, and the account's settings, key and safeguards a new chat
+    /// needs have loaded. A prompt asked for from outside the app waits for
+    /// this, through a locked key too, rather than being dropped.
+    var canSendInNewChat: Bool {
+        guard let session, !verification.isVerifying, safeguardsHaveLoaded || authManager?.isAuthenticated != true else { return false }
+        let local = !session.account.cloud || newChatIsLocal(projectId: activeProject?.id)
+        return session.sendBlock(onDevice: local) == nil
     }
 
     var canSendInCurrentContext: Bool {
@@ -665,14 +981,14 @@ class ChatViewModel: ObservableObject {
     /// The latest summary of the reasoning the reply is thinking through.
     var thinkingSummary: String {
         guard let state = session?.state, state.status == .streaming,
-              let last = state.messages.last, last.role == .assistant,
-              let block = last.timeline?.last, block._type == .thinking else { return "" }
+              let last = state.messages.last, last.role.value1 == .assistant,
+              let block = last.timeline?.last, block._type.value1 == .thinking else { return "" }
         return state.summaries[block.id] ?? ""
     }
 
     var webSearchSummary: String {
         guard let state = session?.state, state.status == .streaming,
-              let last = state.messages.last, let block = last.timeline?.last, block._type == .toolCall else { return "" }
+              let last = state.messages.last, let block = last.timeline?.last, block._type.value1 == .toolCall else { return "" }
         if block.name == "web_search", let query = block.display?.query { return "Searching the web: \(query)" }
         if block.name == "web_fetch", let url = block.display?.url ?? block.display?.sources.first?.url { return "Reading \(url)" }
         return ""
@@ -701,8 +1017,11 @@ class ChatViewModel: ObservableObject {
         let state = session.state
         let open = session.open
         let running = session.running
-        let messages = state.messages.enumerated().map { index, message -> Message in
-            var view = ChatViewMapping.message(message, streaming: running && index == state.messages.count - 1, summaries: state.summaries)
+        let choice = session.presetChoice()
+        let model = choice.model ?? (open.model.isEmpty ? session.pickedModel : open.model)
+        let replyModelName = findSelectableModel(id: model)?.responseDisplayName
+        let messages = rows.rows(chatId: open.id, messages: state.messages, running: running, summaries: state.summaries, replyModelName: replyModelName).map { message -> Message in
+            var view = message
             if open.onDevice, !view.attachments.isEmpty {
                 // An image the previous client stored without a thumbnail
                 // shows its bytes; others load them when opened.
@@ -715,16 +1034,14 @@ class ChatViewModel: ObservableObject {
             }
             return view
         }
-        let shownMessages = Self.withError(messages, state: state, failure: open.failure)
-        let choice = session.presetChoice()
-        let model = choice.model ?? (open.model.isEmpty ? session.pickedModel : open.model)
+        let shownMessages = Self.withError(messages, failure: Self.failure(of: session)?.error, replyRowId: rows.awaitedReplyRowId(state.messages))
         let webSearch = open.webSearch ?? choice.webSearchEnabled
         let summary = state.snapshot.thread ?? open.loadingId.flatMap { loading in
             (open.local ? session.list.deviceListed : session.list.cloudListed + session.list.pinnedListed).first { $0.id == loading }
         }
         var chat: Chat
         if let summary {
-            chat = ChatViewMapping.chat(summary, messages: shownMessages, local: open.local && !open.temporary, temporary: open.temporary, presetId: session.presetId)
+            chat = ChatViewMapping.chat(summary, messages: shownMessages, local: open.onDevice, temporary: open.temporary, presetId: session.presetId)
             if open.temporary { chat.title = Constants.Harness.temporaryTitle }
             if let webSearch { chat.webSearchEnabled = webSearch }
             chat.pendingSave = open.unsaved == summary.id
@@ -732,40 +1049,57 @@ class ChatViewModel: ObservableObject {
             let selected = open.loadingId ?? open.failedId ?? open.id
             chat = Chat(id: selected ?? "", title: open.temporary ? Constants.Harness.temporaryTitle : (open.loadingId != nil ? "Loading chat…" : Chat.defaultTitle), messages: shownMessages, createdAt: Date())
             chat.isTemporary = open.temporary
-            chat.isLocalOnly = open.local && !open.temporary
+            chat.isLocalOnly = open.onDevice
             chat.pendingSave = open.id != nil && open.unsaved == open.id
             chat.model = model
             chat.projectId = open.onDevice ? nil : open.projectId
             chat.promptPresetId = session.presetId
-            if let webSearch { chat.webSearchEnabled = webSearch }
+            chat.webSearchEnabled = webSearch ?? newChatWebSearch
         }
         if state.flagged { chat.flagged = true }
         return chat
     }
 
+    /// The open chat's error, which the card on its last reply explains, and
+    /// when its run failed. A request that failed outside a run has no time.
+    var shownFailure: (error: HarnessErrorBody, at: Date?)? {
+        session.flatMap(Self.failure(of:))
+    }
+
+    /// The open chat's error: a request's, its run's, or, for a chat opened
+    /// on a reply that did not finish or on a message no reply answers, that
+    /// the reply is unfinished.
+    private static func failure(of session: ChatSession) -> (error: HarnessErrorBody, at: Date?)? {
+        if let failure = session.open.failure { return (failure, nil) }
+        if session.state.status == .error, let error = session.state.error { return (error, session.controller.errorAt) }
+        return session.hasUnfinishedReply ? (HarnessErrorBody.unfinishedReply, nil) : nil
+    }
+
     /// A run's error shows on the reply it ended, as the message cards show
-    /// errors.
-    private static func withError(_ messages: [Message], state: ChatState, failure: HarnessErrorBody?) -> [Message] {
-        guard let error = failure ?? (state.status == .error ? state.error : nil), !messages.isEmpty else { return messages }
+    /// errors; a turn that ended before its reply started shows it in the row
+    /// the reply waited in.
+    private static func withError(_ messages: [Message], failure: HarnessErrorBody?, replyRowId: String?) -> [Message] {
+        guard let error = failure, !messages.isEmpty else { return messages }
         var shown = messages
         var last = shown[shown.count - 1]
         if last.role == .user {
-            var reply = Message(role: .assistant, content: "", timestamp: Date())
+            // The row keeps its id across rebuilds, so the table does not
+            // reload it each time the chat changes.
+            var reply = Message(id: replyRowId ?? "\(last.id)\(Self.errorRowSuffix)", role: .assistant, content: "", timestamp: Date())
             reply.modelDisplayName = nil
             shown.append(reply)
             last = shown[shown.count - 1]
         }
         last.streamError = error.message
-        last.isRequestError = true
-        last.isRateLimitError = error.code == HarnessErrorCode.quotaExhausted || error.code == HarnessErrorCode.rateLimited
+        last.isRateLimitError = error.code == HarnessErrorCode.quotaExhausted
         last.isHourlyLimitError = error.kind == "hourly"
-        last.isConnectionError = error.code == HarnessErrorCode.streamInterrupted || error.code == HarnessErrorCode.connection
         shown[shown.count - 1] = last
         return shown
     }
 
-    /// The chats the sidebar lists, the latest active first. A run this app
-    /// streams is active in the list before the list next reports it.
+    /// The chats the sidebar lists, the latest active first, under a new chat
+    /// row for each list. A run this app streams is active in the list
+    /// before the list next reports it.
     var chats: [Chat] {
         if let shownChats, shownChats.generation == sessionGeneration { return shownChats.chats }
         let chats = buildChats()
@@ -776,8 +1110,6 @@ class ChatViewModel: ObservableObject {
     private func buildChats() -> [Chat] {
         guard let session else { return [] }
         let listsCloud = session.account.cloud && !session.account.keyLocked
-        let openId = session.open.id
-        let shownRun = session.running ? session.state.runId : nil
         var listed: [Chat] = []
         if listsCloud {
             let cloud = session.list.cloudListed
@@ -785,6 +1117,18 @@ class ChatViewModel: ObservableObject {
             listed += (cloud + pins).map { ChatViewMapping.chat($0, local: false) }
         }
         listed += session.list.deviceListed.map { ChatViewMapping.chat($0, local: true) }
+        let sorted = newestFirst(listed, in: session)
+        guard hasChatAccess else { return sorted }
+        let newChats = session.account.cloud ? [Self.newChatRow(local: false), Self.newChatRow(local: true)] : [Self.newChatRow(local: true)]
+        return newChats + sorted
+    }
+
+    /// Listed chats, the latest active first. A run this app streams is
+    /// active before the list next reports it, and the open chat is as
+    /// recent as the latest message it shows.
+    func newestFirst(_ listed: [Chat], in session: ChatSession) -> [Chat] {
+        let openId = session.open.id
+        let shownRun = session.running ? session.state.runId : nil
         let shownActivity = session.state.messages.compactMap { ChatAccessCache.date(of: $0.createdAt) }.max()
         return listed.map { chat in
             var chat = chat
@@ -796,7 +1140,12 @@ class ChatViewModel: ObservableObject {
         }.sorted { $0.lastActivity > $1.lastActivity }
     }
 
-    var localChats: [Chat] { chats.filter(\.isLocalOnly) }
+    /// The row atop a chat list that starts a new chat stored there.
+    private static func newChatRow(local: Bool) -> Chat {
+        var chat = Chat(id: NewChatRow.id(local: local), title: Chat.placeholderTitle, createdAt: .distantPast)
+        chat.isLocalOnly = local
+        return chat
+    }
 
     var cloudSidebarSummaries: [ChatListSummary] {
         chats.filter { !$0.isLocalOnly }.map(ChatListSummary.init)
@@ -813,28 +1162,16 @@ class ChatViewModel: ObservableObject {
     }
 
     var hasMoreChats: Bool { session?.list.nextCursor != nil }
-    var isLoadingMore: Bool { session?.list.loading == true }
+    var isLoadingMore: Bool { session?.list.loadingMore == true }
     var chatListError: String? { session?.list.error }
 
-    func loadMoreChats() async {
-        guard let session, let cursor = session.list.nextCursor else { return }
-        try? await session.list.refresh(after: cursor)
+    /// Reads again what the chat list failed to read.
+    func retryChatList() {
+        session?.list.retry()
     }
 
-    func performFullSync() async {
-        guard let session else { return }
-        isSyncing = true
-        defer { isSyncing = false }
-        do {
-            try await session.account.refresh()
-            try await session.list.refresh()
-            session.list.reloadDevice()
-            await loadProjects()
-            lastSyncDate = Date()
-            if let userId = currentUserId { UserDefaults.standard.set(lastSyncDate, forKey: Constants.StorageKeys.Sync.lastSyncDate(userId: userId)) }
-        } catch {
-            syncErrors.append(error.localizedDescription)
-        }
+    func loadMoreChats() async {
+        await session?.list.loadMore()?.value
     }
 
     // MARK: - Navigation
@@ -862,17 +1199,23 @@ class ChatViewModel: ObservableObject {
 
     // MARK: - Chats
 
+    /// Shows the chats of the cloud or of this device, and opens the tab's
+    /// most recent chat, or a new chat stored there.
     func switchStorageTab(to tab: ChatStorageTab) {
-        guard tab == .cloud || SettingsManager.shared.isLocalOnlyModeEnabled else { return }
+        guard tab != activeStorageTab, tab == .cloud || SettingsManager.shared.isLocalOnlyModeEnabled else { return }
         activeStorageTab = tab
         UserDefaults.standard.set(tab.rawValue, forKey: Constants.StorageKeys.Settings.cloudSyncActiveTab)
-        if let session, session.open.id == nil || currentChat?.isBlankChat == true {
-            session.newChat(local: tab == .local)
+        let local = tab == .local
+        let listed = local ? localSidebarSummaries : cloudSidebarSummaries
+        if currentChat?.isBlankChat == false, let recent = listed.first(where: { isRootSidebarChat($0) && !$0.isBlankChat }) {
+            _ = selectChat(id: recent.id, isLocalOnly: local)
+        } else {
+            createNewChat(isLocalOnly: local, focusInput: false)
         }
     }
 
     func createNewRootChat() {
-        exitProject()
+        leaveProjectContext()
         createNewChat()
     }
 
@@ -882,27 +1225,27 @@ class ChatViewModel: ObservableObject {
     func createNewChat(modelType: ModelType? = nil, isLocalOnly: Bool? = nil, projectId: String? = nil, focusInput: Bool = true) {
         guard let session else { return }
         cancelMessageEdit()
-        clearPendingAttachments()
+        cancelAudioRecording()
         let projectId = projectId ?? activeProject?.id
-        let local: Bool
-        if projectId != nil {
-            local = false
-        } else if let isLocalOnly {
-            local = isLocalOnly
-        } else if !SettingsManager.shared.isCloudSyncEnabled {
-            local = true
-        } else if !SettingsManager.shared.isLocalOnlyModeEnabled {
-            local = false
-        } else {
-            local = activeStorageTab == .local
-        }
-        isTemporaryMode = false
-        session.newChat(local: local)
+        openNewChat(local: newChatIsLocal(isLocalOnly: isLocalOnly, projectId: projectId))
         session.setProject(projectId)
-        if let modelType { currentModel = modelType }
-        session.setModel(currentModel.id)
+        if let modelType {
+            currentModel = modelType
+            session.setModel(modelType.id)
+        } else {
+            showOpenChatModel()
+        }
         if focusInput { shouldFocusInput = true }
         scrollToBottomTrigger = UUID()
+    }
+
+    /// Whether a new chat is stored on this device rather than in the cloud.
+    private func newChatIsLocal(isLocalOnly: Bool? = nil, projectId: String?) -> Bool {
+        if projectId != nil { return false }
+        if let isLocalOnly { return isLocalOnly }
+        if !SettingsManager.shared.isCloudSyncEnabled { return true }
+        if !SettingsManager.shared.isLocalOnlyModeEnabled { return false }
+        return activeStorageTab == .local
     }
 
     func selectChat(_ chat: Chat) {
@@ -912,46 +1255,137 @@ class ChatViewModel: ObservableObject {
     @discardableResult
     func selectChat(id: String, isLocalOnly: Bool) -> Bool {
         guard let session else { return false }
+        if id == NewChatRow.id(local: isLocalOnly) {
+            guard selectedChatId != id else { return true }
+            leaveProjectContext()
+            createNewChat(isLocalOnly: isLocalOnly, focusInput: false)
+            return true
+        }
         if session.open.id == id, session.open.loadingId == nil { return true }
         cancelMessageEdit()
-        clearPendingAttachments()
-        isTemporaryMode = false
+        cancelAudioRecording()
+        let originals = pendingOriginals
         Task {
             do {
                 _ = try await session.openChat(id, local: isLocalOnly)
-                if let model = session.open.model.isEmpty ? nil : session.open.model, let listed = availableModels.first(where: { $0.id == model }) {
-                    currentModel = listed
-                }
-                isWebSearchEnabled = currentChat?.webSearchEnabled ?? isWebSearchEnabled
+                keepPendingOriginals(originals)
+                if !session.open.model.isEmpty { showOpenChatModel() }
                 scrollToBottomTrigger = UUID()
             } catch {
+                keepPendingOriginals(originals)
                 session.report(error)
             }
         }
         return true
     }
 
-    func openSummaryChat(id: String, projectId: String?, isLocalOnly: Bool) {
-        if let projectId, activeProject?.id != projectId, let project = projects.first(where: { $0.id == projectId }) {
-            activeProject = project
+    /// Opens a new chat in the session. What the composer holds stays for
+    /// it: the pending attachments are converted apart from any chat.
+    private func openNewChat(local: Bool) {
+        guard let session else { return }
+        let originals = pendingOriginals
+        session.newChat(local: local)
+        keepPendingOriginals(originals)
+    }
+
+    /// The original images of the pending attachments, which the open chat
+    /// holds until a turn sends them, and which opening another chat clears.
+    private var pendingOriginals: Originals {
+        session?.attachments.originalsOf(Array(uploadedAttachments.values)) ?? [:]
+    }
+
+    private func keepPendingOriginals(_ originals: Originals) {
+        for (id, original) in originals { session?.attachments.keepOriginal(id, original) }
+    }
+
+    /// An action on a chat failed outside the open chat's turn: an alert
+    /// explains it, rather than the open chat's last reply.
+    func reportActionFailure(_ title: String, _ cause: Error) {
+        guard !(cause is CancellationError), let account, !account.disposed else { return }
+        if let error = cause as? HarnessError {
+            account.reportRateLimit(error.detail.rateLimit)
+            HarnessAccount.noteAuthenticationRequired(error)
         }
-        _ = selectChat(id: id, isLocalOnly: isLocalOnly)
+        actionFailure = ChatActionFailure(title: title, message: cause.localizedDescription)
+    }
+
+    func openSummaryChat(id: String, projectId: String?, isLocalOnly: Bool) {
+        openChatInItsContext(id: id, projectId: projectId, isLocalOnly: isLocalOnly)
     }
 
     func openSearchResult(_ chat: Chat) {
-        exitProject()
-        _ = selectChat(id: chat.id, isLocalOnly: chat.isLocalOnly)
+        openChatInItsContext(id: chat.id, projectId: chat.projectId, isLocalOnly: chat.isLocalOnly)
     }
 
+    /// Opens a chat found outside the open context, as a favorite or a
+    /// search result: a project chat opens in its project, so it keeps the
+    /// project's documents and instructions, and any other chat leaves the
+    /// open project.
+    private func openChatInItsContext(id: String, projectId: String?, isLocalOnly: Bool) {
+        guard let session, PremiumProjectPolicy.includesChat(projectId: projectId, hasPremiumAccess: hasPremiumAccess) else { return }
+        guard let projectId else {
+            if activeProject != nil { leaveProjectContext() }
+            _ = selectChat(id: id, isLocalOnly: isLocalOnly)
+            return
+        }
+        guard activeProject?.id != projectId else {
+            _ = selectChat(id: id, isLocalOnly: false)
+            isViewingProjectChat = true
+            return
+        }
+        let shown = (session.opened, session.open.id, session.open.loadingId)
+        Task {
+            guard await loadActiveProject(projectId: projectId) else {
+                if let message = projectError {
+                    projectError = nil
+                    actionFailure = ChatActionFailure(title: "Couldn't Open Chat", message: message)
+                }
+                return
+            }
+            // A chat the user opened while the project loaded stays open.
+            guard self.session === session, (session.opened, session.open.id, session.open.loadingId) == shown else { return }
+            _ = selectChat(id: id, isLocalOnly: false)
+            isViewingProjectChat = true
+        }
+    }
+
+    /// Deletes a chat. Deleting the open chat opens the chat listed first in
+    /// its place; one that fails to delete opens again.
     func deleteChat(_ id: String) {
         guard let session else { return }
+        let wasOpen = session.open.id == id
+        let local = session.list.isOnDevice(id)
+        // The session leaves a deleted open chat for a new one; the user may
+        // open another while the deletion is in flight.
+        let stillLeft = { session.opened == id && session.open.id == nil && session.open.loadingId == nil }
         Task {
             do {
                 try await session.remove(id)
-                if session.open.id == nil { createNewChat(focusInput: false) }
+                if wasOpen, stillLeft() { openFirstListedChat(local: local) }
             } catch {
-                session.report(error)
+                reportActionFailure("Couldn't Delete Chat", error)
+                if wasOpen, stillLeft() { _ = selectChat(id: id, isLocalOnly: local) }
             }
+        }
+    }
+
+    /// Reads the open stored chat again after another device changed it. A
+    /// chat deleted there leaves for the chat listed first.
+    private func refreshOpenChat() async {
+        guard let session, await session.refreshIfChanged(), self.session === session,
+              session.open.id == nil, session.open.loadingId == nil else { return }
+        openFirstListedChat(local: false)
+    }
+
+    /// Opens the chat listed first where the open chat was listed: in the
+    /// open project, or in the list of the chats stored where it was. A new
+    /// chat opens there when none is listed.
+    private func openFirstListedChat(local: Bool) {
+        let listed = activeProject != nil ? activeProjectChats : (local ? localSidebarSummaries : cloudSidebarSummaries).filter { isRootSidebarChat($0) && !$0.isBlankChat }
+        if let first = listed.first {
+            _ = selectChat(id: first.id, isLocalOnly: first.isLocalOnly)
+        } else {
+            createNewChat(isLocalOnly: local, focusInput: false)
         }
     }
 
@@ -961,18 +1395,7 @@ class ChatViewModel: ObservableObject {
         createNewChat(focusInput: false)
     }
 
-    func deleteNonLocalChats() async {
-        guard let session, session.account.cloud else { return }
-        do {
-            let _: RawJSON = try await session.account.post(.deleteAll)
-            session.list.clearCloud(confirmedEmpty: true)
-            if session.open.onDevice == false { createNewChat(focusInput: false) }
-        } catch {
-            session.report(error)
-        }
-    }
-
-    func clearAllChatsFromDevice(userId: String? = nil) async {
+    func clearAllChatsFromDevice() async {
         guard let session else { return }
         _ = try? await session.device.deleteAll()
         session.list.reloadDevice()
@@ -983,7 +1406,7 @@ class ChatViewModel: ObservableObject {
         guard let session else { return }
         let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
-        do { _ = try await session.update(id, ThreadPatch(title: title)) } catch { session.report(error) }
+        do { _ = try await session.update(id, ThreadPatch(title: title)) } catch { reportActionFailure("Couldn't Rename Chat", error) }
     }
 
     func canPinChat(_ chat: Chat) -> Bool {
@@ -1009,41 +1432,79 @@ class ChatViewModel: ObservableObject {
     private func toggleChatPin(id: String) {
         guard let session else { return }
         let pinned = !isChatPinned(id)
-        Task { do { _ = try await session.update(id, ThreadPatch(pinned: pinned)) } catch { session.report(error) } }
+        Task { do { _ = try await session.update(id, ThreadPatch(pinned: pinned)) } catch { reportActionFailure("Couldn't Update Favorites", error) } }
     }
 
     // MARK: - Temporary chats
 
-    func toggleTemporaryMode() {
+    /// The open chat is temporary: it lives in memory and is never stored.
+    var isTemporaryMode: Bool { session?.open.temporary == true }
+
+    /// The open temporary chat is being kept, once its reply is stored with it.
+    @Published private(set) var isSavingTemporaryChat = false
+    /// The save in flight, which the session of another account ends.
+    private var temporarySave: Task<Void, Never>?
+
+    private func saveTemporaryChat() {
         guard let session else { return }
+        isSavingTemporaryChat = true
+        temporarySave = Task {
+            defer { if self.session === session { isSavingTemporaryChat = false } }
+            do {
+                try await session.saveTemporary()
+                previousChatIdBeforeTemporary = nil
+            } catch {
+                reportActionFailure("Couldn't Save Chat", error)
+            }
+        }
+    }
+
+    func toggleTemporaryMode() {
+        guard let session, !isSavingTemporaryChat else { return }
+        // A temporary chat with messages is kept, where new chats are stored,
+        // and stays open.
+        if isTemporaryMode, !session.state.messages.isEmpty {
+            saveTemporaryChat()
+            return
+        }
+        cancelAudioRecording()
         if isTemporaryMode {
-            isTemporaryMode = false
-            session.newChat(local: activeStorageTab == .local)
             if let previous = previousChatIdBeforeTemporary {
                 previousChatIdBeforeTemporary = nil
+                openNewChat(local: activeStorageTab == .local)
                 _ = selectChat(id: previous, isLocalOnly: session.list.isOnDevice(previous))
+            } else {
+                createNewChat()
             }
         } else {
             previousChatIdBeforeTemporary = currentChat?.isBlankChat == false ? session.open.id : nil
             cancelMessageEdit()
-            clearPendingAttachments()
-            session.newChat(local: true)
+            openNewChat(local: true)
             session.setTemporary(true)
-            isTemporaryMode = true
+            showOpenChatModel()
             shouldFocusInput = true
         }
     }
 
     // MARK: - Prompts
 
+    /// Chooses the open chat's prompt; the model picker and the web search
+    /// toggle show what the prompt chooses.
     func setPromptPreset(_ presetId: String?) {
         guard let session else { return }
-        Task { do { try await session.selectPreset(presetId) } catch { session.report(error) } }
+        Task {
+            do { try await session.selectPreset(presetId) } catch { reportActionFailure("Couldn't Change Prompt", error) }
+            showOpenChatModel()
+        }
     }
 
+    /// Starts a chat with a preset. The input is focused once the sheet it
+    /// was picked in has dismissed, so the keyboard rises in the chat rather
+    /// than inside the dismissing sheet.
     func startChat(withPresetId presetId: String) {
-        createNewChat()
+        createNewChat(focusInput: false)
         setPromptPreset(presetId)
+        focusInputAfterDismiss = true
     }
 
     // MARK: - Turns
@@ -1057,8 +1518,7 @@ class ChatViewModel: ObservableObject {
             thinking: thinkingEnabled,
             webSearch: webSearchAvailable && isWebSearchEnabled,
             piiCheck: account?.effectiveProfile.piiCheckEnabled ?? true,
-            genUI: account?.effectiveProfile.genUIEnabled ?? true,
-            cacheSecret: PromptCacheSecret.secret(userId: currentUserId)
+            genUI: account?.effectiveProfile.genUIEnabled ?? true
         )
     }
 
@@ -1068,8 +1528,10 @@ class ChatViewModel: ObservableObject {
         let content = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty || !pendingAttachments.isEmpty else { return false }
         guard attachmentsAreReadyToSend(pendingAttachments) else { return false }
+        // A message the chat cannot take now stays in the composer.
+        guard session.acceptsTurn else { return false }
         if session.running, isMessageQueueFull { return false }
-        if let rateLimit, rateLimit.kind == .freeDaily, rateLimit.remaining <= 0, authManager?.hasActiveSubscription != true {
+        if let rateLimit, rateLimit.kind == .freeDaily, rateLimit.exhausted, authManager?.hasActiveSubscription != true {
             showRateLimitPaywall = true
             return false
         }
@@ -1081,44 +1543,73 @@ class ChatViewModel: ObservableObject {
         attachmentError = nil
         acknowledgeSharedImports(in: acknowledged)
         let fields = TurnFields(kind: .send, content: content, attachments: sent.isEmpty ? nil : sent, options: turnOptions)
-        scrollToBottomTrigger = UUID()
+        // A message queued behind a reply keeps the keyboard up for the next.
+        if !session.running {
+            dismissKeyboard()
+            // A reply asked for again that never started does not scroll
+            // this message.
+            scrollsToTurnOnStart = false
+        }
         Task { await session.send(fields) }
         return true
     }
 
     func cancelGeneration() {
         guard let session else { return }
+        stopAnnounced = true
+        AccessibilityAnnouncer.announce(Constants.Accessibility.generationStopped)
         Task { do { try await session.cancel() } catch { session.report(error) } }
     }
 
+    /// Generates the chat's last reply again, or answers its last message
+    /// when it has no reply.
     func regenerateLastResponse() {
-        guard let session, canGenerateInCurrentChat else { return }
-        let messages = session.state.messages
-        guard let index = messages.lastIndex(where: { $0.role == .assistant }) ?? messages.indices.last else { return }
+        guard let session, canGenerateInCurrentChat, let index = session.state.messages.indices.last else { return }
+        startTurn(scrollingToMessage: true)
         Task { await session.regenerate(at: index, options: turnOptions) }
     }
 
+    /// Continues a reply whose run failed, or that a chat was opened on
+    /// unfinished, from what it streamed. Anything else is retried: a reply
+    /// whose stream dropped may still be running.
     func continueLastResponse() {
         guard let session, canGenerateInCurrentChat else { return }
-        let messages = session.state.messages
-        guard let index = messages.lastIndex(where: { $0.role == .assistant }) else { return }
+        let state = session.state
+        let failed = (state.status == .error && state.failedRun != nil) || session.hasUnfinishedReply
+        guard failed, let index = state.messages.indices.last, state.messages[index].role.value1 == .assistant else {
+            retryLastResponse()
+            return
+        }
+        startTurn(scrollingToMessage: false)
         Task { await session.continueReply(at: index, options: turnOptions) }
     }
 
     /// Tries the failed reply again, or reconnects to a dropped one.
     func retryLastResponse() {
-        guard let session else { return }
+        guard let session, canGenerateInCurrentChat else { return }
+        startTurn(scrollingToMessage: true)
         Task { await session.retry(options: turnOptions) }
+    }
+
+    /// A turn the user starts puts the keyboard away; one that asks for a
+    /// reply again shows its message at the top as the reply comes in.
+    private func startTurn(scrollingToMessage: Bool) {
+        dismissKeyboard()
+        scrollsToTurnOnStart = scrollingToMessage
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     func removeQueuedMessage(id: String) {
         guard let session else { return }
-        Task { do { try await session.removeQueued(id) } catch { session.report(error) } }
+        Task { do { try await session.removeQueued(id) } catch { reportActionFailure("Couldn't Remove Message", error) } }
     }
 
     func sendQueuedMessageNow(id: String) {
         guard let session else { return }
-        Task { do { try await session.sendQueued(id) } catch { session.report(error) } }
+        Task { do { try await session.sendQueued(id) } catch { reportActionFailure("Couldn't Send Message", error) } }
     }
 
     // MARK: - Message actions
@@ -1128,11 +1619,23 @@ class ChatViewModel: ObservableObject {
         return session.state.messages.indices.contains(index)
     }
 
+    /// Forks the open chat from a message and opens the fork. The fork
+    /// overlay covers the chat for at least its minimum time, then the fork
+    /// while it opens.
     func forkChat(throughMessageIndex index: Int) async {
         guard let session, canForkMessage(at: index), let id = session.open.id else { return }
+        let startedAt = Date()
         forkingChatId = id
         defer { forkingChatId = nil }
-        do { _ = try await session.fork(at: index) } catch { session.report(error) }
+        do {
+            _ = try await session.fork(at: index) { [weak self] forkId in
+                let remaining = Constants.ChatFork.overlayMinVisibleSeconds - Date().timeIntervalSince(startedAt)
+                if remaining > 0 { try? await Task.sleep(for: .seconds(remaining)) }
+                self?.forkingChatId = forkId
+            }
+        } catch {
+            session.report(error)
+        }
     }
 
     func deleteMessage(at index: Int) {
@@ -1162,16 +1665,12 @@ class ChatViewModel: ObservableObject {
         messageEditSession = nil
         let messageId = session.state.messages[index].id
         let content = newContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        startTurn(scrollingToMessage: false)
         Task {
             if session.running { try? await session.cancel() }
             await session.send(TurnFields(kind: .edit, content: content, messageId: messageId, options: turnOptions))
         }
         return true
-    }
-
-    /// A widget's answer is sent as the user's next message.
-    func resolveGenUIToolCall(toolCallId: String, resultText: String, resultData: JSONValue?) {
-        _ = sendMessage(text: resultText)
     }
 
     /// Asks the control plane again whether the hourly cap lifted.
@@ -1182,7 +1681,7 @@ class ChatViewModel: ObservableObject {
 
     /// Asks the chat service for new arguments for a widget call that
     /// could not be rendered.
-    func retryGenUIToolCall(messageId: String, toolCallId: String) {
+    func retryGenUIToolCall(toolCallId: String) {
         guard let session, genUIRetryStates[toolCallId] != .generating else { return }
         genUIRetryStates[toolCallId] = .generating
         Task {
@@ -1202,7 +1701,7 @@ class ChatViewModel: ObservableObject {
 
     @Published private var genUIRetryStates: [String: GenUIRetryState] = [:]
 
-    func genUIRetryState(messageId: String, toolCallId: String) -> GenUIRetryState? {
+    func genUIRetryState(toolCallId: String) -> GenUIRetryState? {
         genUIRetryStates[toolCallId]
     }
 
@@ -1218,17 +1717,62 @@ class ChatViewModel: ObservableObject {
         verifierView = nil
     }
 
+    /// Opens the chat service again: the session and the account's settings,
+    /// or the whole session when its client could not be made. The open
+    /// chat stays.
     func retryClientSetup() {
-        Task {
-            sessionUserId = nil
-            await openSession()
+        guard !verification.isVerifying, !isRetryingSession else { return }
+        guard let session else {
+            verification = VerificationInfo(isVerifying: true)
+            Task {
+                sessionUserId = nil
+                await openSession()
+            }
+            return
         }
+        isRetryingSession = true
+        Task {
+            defer { isRetryingSession = false }
+            do {
+                try await session.account.refresh(credentials: true)
+            } catch {
+                guard self.session === session else { return }
+                if verification.error != nil { showSessionFailure(error) }
+                session.account.report(error)
+            }
+        }
+    }
+
+    /// Tries the chat service again when it could not be verified or the
+    /// account's settings could not load.
+    private func retryClientSetupIfFailed() {
+        guard verification.error != nil || account?.profileFailed == true else { return }
+        retryClientSetup()
+    }
+
+    /// Shows how the enclave the account's session reaches was last
+    /// verified.
+    private func showVerification(_ result: EnclaveVerificationResult, of account: HarnessAccount) {
+        guard self.account === account else { return }
+        latestVerification = result
+        if case .success(let verified) = result { enclaveVerification = verified }
+        verification.follow(result, sessionOpen: account.session != nil)
+    }
+
+    /// Shows why the session could not open, unless a failed verification of
+    /// the enclave already says what failed.
+    private func showSessionFailure(_ error: Error) {
+        if case .failure? = latestVerification { return }
+        verification = VerificationInfo(error: error.localizedDescription)
     }
 }
 
 extension Notification.Name {
     /// Cloud sync was turned on or off in Settings.
     static let cloudSyncSettingChanged = Notification.Name("tinfoil.cloudSyncSettingChanged")
+    /// The chat service refused the account's identity, after it was
+    /// refreshed: the user has to sign in again.
+    static let chatAuthenticationRequired = Notification.Name("tinfoil.chatAuthenticationRequired")
 }
 
 /// Hands the quota a mint reports to the account it is for.

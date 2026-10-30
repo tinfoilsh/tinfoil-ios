@@ -1,6 +1,5 @@
 import Foundation
 import OSLog
-import TinfoilAI
 
 /// Who is asking the harness, and the chat access they hold.
 protocol HarnessCredentials: Sendable {
@@ -60,9 +59,10 @@ actor HarnessClient {
         runRenewal = nil
     }
 
-    /// The latest verification of the enclave, or nil before the first.
-    func verification() async -> Verification? {
-        await transport.verification()
+    /// The result of each verification of the enclave as it finishes. Of
+    /// those not read yet, only the latest is kept.
+    nonisolated var verifications: AsyncStream<EnclaveVerificationResult> {
+        transport.verifications
     }
 
     /// Routes requests about a chat's run to the instance a hint names, for
@@ -197,6 +197,7 @@ actor HarnessClient {
         if !anonymous { try await mint(refresh: false) }
         for attempt in 0..<2 {
             try Task.checkCancellation()
+            guard !disposed else { throw CancellationError() }
             var headers = ["Content-Type": contentType]
             let languages = languages()
             if !languages.isEmpty { headers["Accept-Language"] = languages.joined(separator: ",") }
@@ -205,6 +206,7 @@ actor HarnessClient {
             if let instance { headers[HarnessHeader.instance] = instance }
             if let lastEventId { headers[HarnessHeader.lastEventId] = String(lastEventId) }
             let response = try await transport.send(HarnessRequest(route: route, headers: headers, body: body))
+            guard response.sealed else { throw HarnessError(HarnessErrorBody.unsealedAnswer, status: nil) }
             if response.isSuccess { return response }
             // A refusal without the harness's error envelope, or one that
             // names no action, is not one the protocol allows.

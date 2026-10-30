@@ -125,10 +125,18 @@ struct ChatContainer: View {
                 dragOffset = 0
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .cloudSyncAuthenticationRequired)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .chatAuthenticationRequired)) { _ in
             if !showAuthView {
                 showAuthView = true
             }
+        }
+        .alert(viewModel.actionFailure?.title ?? "", isPresented: Binding(
+            get: { viewModel.actionFailure != nil },
+            set: { if !$0 { viewModel.actionFailure = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(viewModel.actionFailure?.message ?? "")
         }
         .sheet(isPresented: $viewModel.showVerifierSheet) {
             if let verifierView = viewModel.verifierView {
@@ -140,7 +148,8 @@ struct ChatContainer: View {
             ImageViewerOverlay(
                 images: viewModel.imageViewerImages,
                 initialIndex: viewModel.imageViewerIndex,
-                onDismiss: { viewModel.showImageViewer = false }
+                onDismiss: { viewModel.showImageViewer = false },
+                loadFullImage: { await viewModel.fullImageData(for: $0) }
             )
         }
         .sheet(isPresented: $showAuthView) {
@@ -157,10 +166,9 @@ struct ChatContainer: View {
                 .environmentObject(viewModel)
         }
         .sheet(isPresented: $viewModel.showSidebarSettings, onDismiss: {
-            viewModel.shouldOpenCloudSync = false
             viewModel.focusInputIfPending()
         }) {
-            SettingsView(shouldOpenCloudSync: viewModel.shouldOpenCloudSync)
+            SettingsView()
                 .environment(Clerk.shared)
                 .environmentObject(authManager)
                 .environmentObject(viewModel)
@@ -324,21 +332,24 @@ struct ChatContainer: View {
                     )
                 }
             }
-            // Temporary (incognito) chat toggle. Only shown when no chat is in
-            // progress (i.e. when the new-chat "+" button is hidden). Once a
-            // chat has started, the temporary state is indicated by a label
-            // in the navbar's principal slot instead.
-            if authManager.isAuthenticated && viewModel.activeProject == nil && showsChatToolbarActions && (viewModel.currentChat?.isBlankChat ?? true) {
+            // Temporary (incognito) chat toggle, shown on a new chat and on a
+            // temporary one: a temporary chat with messages is saved by it.
+            if authManager.isAuthenticated && viewModel.activeProject == nil && showsChatToolbarActions && ((viewModel.currentChat?.isBlankChat ?? true) || viewModel.isTemporaryMode) {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: toggleTemporaryMode) {
-                        GhostIcon(
-                            size: 17,
-                            color: toolbarContentColor,
-                            style: viewModel.isTemporaryMode ? .filled : .outline
-                        )
+                        if viewModel.isSavingTemporaryChat {
+                            ProgressView()
+                                .tint(toolbarContentColor)
+                        } else {
+                            GhostIcon(
+                                size: 17,
+                                color: toolbarContentColor,
+                                style: viewModel.isTemporaryMode ? .filled : .outline
+                            )
+                        }
                     }
-                    .accessibilityLabel(viewModel.isTemporaryMode ? "Exit temporary chat" : "Start temporary chat")
-                    .disabled(!viewModel.canUseCurrentChatActions)
+                    .accessibilityLabel(temporaryToggleLabel)
+                    .disabled(!viewModel.canUseCurrentChatActions || viewModel.isSavingTemporaryChat)
                     .accessibleHitTarget()
                 }
             }
@@ -631,10 +642,18 @@ struct ChatContainer: View {
         }
     }
 
-    /// Toggles the temporary (incognito) chat mode.
+    /// Toggles the temporary (incognito) chat mode. Saving a temporary chat
+    /// keeps it open with the draft.
     private func toggleTemporaryMode() {
+        let saves = viewModel.isTemporaryMode && !viewModel.messages.isEmpty
         viewModel.toggleTemporaryMode()
-        messageText = ""
+        if !saves { messageText = "" }
+    }
+
+    private var temporaryToggleLabel: String {
+        guard viewModel.isTemporaryMode else { return "Start temporary chat" }
+        if viewModel.isSavingTemporaryChat { return "Saving chat" }
+        return viewModel.messages.isEmpty ? "Exit temporary chat" : "Save chat"
     }
 }
 

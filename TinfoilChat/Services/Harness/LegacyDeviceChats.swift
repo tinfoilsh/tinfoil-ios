@@ -7,8 +7,6 @@ import OSLog
 /// of the account's cloud chats that the chat service now lists itself.
 enum LegacyDeviceChats {
     private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Harness")
-    /// Chats converted per request.
-    private static let batchSize = 20
     private static let chatExtension = "enc"
     /// The files of the previous client's directory that are not chats.
     private static let bookkeeping: Set<String> = ["index", "delete-intents", "remote-delete-tombstones", "remote-delete-tombstones.corrupt"]
@@ -35,44 +33,46 @@ enum LegacyDeviceChats {
     }
 
     /// Converts the account's chats kept by the previous client and stores
-    /// them where this client keeps device chats. A chat already stored is
-    /// left as it is. The old files go once every chat is stored; the cloud
-    /// cache goes with them.
+    /// them where this client keeps device chats, one chat per request, so a
+    /// chat the chat service refuses holds back no other. A chat already
+    /// stored is left as it is. Each old file goes once its chat is stored,
+    /// and the directory, with the cloud cache, once every chat is.
     static func upgrade(userId: String, account: HarnessAccount, into store: LocalThreadStore) async {
         guard let directory = directory(userId: userId) else { return }
         let local = directory.appendingPathComponent("local", isDirectory: true)
-        var files = ((try? FileManager.default.contentsOfDirectory(at: local, includingPropertiesForKeys: nil)) ?? [])
+        let files = ((try? FileManager.default.contentsOfDirectory(at: local, includingPropertiesForKeys: nil)) ?? [])
             .filter { $0.pathExtension == chatExtension && !bookkeeping.contains($0.deletingPathExtension().lastPathComponent) && !$0.lastPathComponent.hasSuffix(".sync.enc") }
-        var failed = false
-        while !files.isEmpty {
-            let batch = Array(files.prefix(batchSize))
-            files.removeFirst(batch.count)
-            var records: [RawJSON] = []
-            for file in batch {
-                do {
-                    if let record = try await read(file) { records.append(record) }
-                } catch {
-                    failed = true
-                    logger.error("Failed to read a chat the previous client kept: \(error, privacy: .public)")
-                }
-            }
-            guard !records.isEmpty else { continue }
+        var kept = false
+        for file in files {
             do {
-                let upgraded: Upgraded = try await account.post(.upgrade, UpgradeRequest(threads: records), keyless: true)
-                for raw in upgraded.threads {
-                    guard let thread = StoredThread(data: raw.data) else {
-                        failed = true
-                        logger.error("The chat service returned a converted chat this client cannot read")
-                        continue
-                    }
-                    _ = try await store.add(thread, originals: [:])
+                guard let row = try await read(file) else { continue }
+                let upgraded: Upgraded = try await account.post(.upgrade, UpgradeRequest(threads: [RawJSON(try JSONSerialization.data(withJSONObject: row))]), keyless: true)
+                guard upgraded.threads.count == 1, let thread = StoredThread(data: upgraded.threads[0].data) else {
+                    throw HarnessError(HarnessErrorBody.invalidResponse, status: nil)
                 }
+                _ = try await store.add(thread, originals: originals(of: row, in: thread))
+                try? FileManager.default.removeItem(at: file)
             } catch {
-                failed = true
-                logger.error("Failed to upgrade chats the previous client kept: \(error, privacy: .public)")
+                kept = true
+                logger.error("Failed to upgrade a chat the previous client kept: \(error, privacy: .public)")
             }
         }
-        if !failed { try? FileManager.default.removeItem(at: directory) }
+        if !kept { try? FileManager.default.removeItem(at: directory) }
+    }
+
+    /// The images an old chat kept, as the originals of the image
+    /// attachments the chat service converted them into, which keep their
+    /// ids; the converted chat holds the copy models read.
+    private static func originals(of row: [String: Any], in thread: StoredThread) -> Originals {
+        let images = Dictionary(thread.attachments.filter { $0.kind.value1 == .image }.map { ($0.id, $0.mimeType) }, uniquingKeysWith: { first, _ in first })
+        var originals: Originals = [:]
+        for message in row["messages"] as? [[String: Any]] ?? [] {
+            for old in message["attachments"] as? [[String: Any]] ?? [] {
+                guard let id = old["id"] as? String, let mimeType = images[id], let base64 = old["base64"] as? String, !base64.isEmpty else { continue }
+                originals[id] = AttachmentOriginal(base64: base64, mimeType: old["mimeType"] as? String ?? mimeType)
+            }
+        }
+        return originals
     }
 
     /// Removes everything the previous client kept for the account.
@@ -83,7 +83,7 @@ enum LegacyDeviceChats {
 
     /// A chat as the previous client wrote it, with its dates as the chat
     /// service reads them.
-    private static func read(_ file: URL) async throws -> RawJSON? {
+    private static func read(_ file: URL) async throws -> [String: Any]? {
         let sealed = try Data(contentsOf: file)
         let envelope = try JSONDecoder().decode(EncryptedData.self, from: sealed)
         let data = try await DeviceEncryptionService.shared.decryptData(envelope)
@@ -93,6 +93,6 @@ enum LegacyDeviceChats {
                 object[member] = StoredThread.timestamp(Date(timeIntervalSinceReferenceDate: seconds))
             }
         }
-        return RawJSON(try JSONSerialization.data(withJSONObject: object))
+        return object
     }
 }

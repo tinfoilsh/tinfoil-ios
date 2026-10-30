@@ -8,7 +8,6 @@
 //  artifact contents (URL in the browser, HTML in a sandboxed web view
 //  with its source one tap away, markdown rendered like a chat message).
 
-import OpenAI
 import SwiftUI
 
 struct ArtifactPreviewWidget: GenUIWidget {
@@ -55,44 +54,6 @@ struct ArtifactPreviewWidget: GenUIWidget {
     }
 
     let name = "render_artifact_preview"
-    let description = "Display a visual artifact in a side panel: a hosted URL, a self-contained HTML snippet, or Markdown. Use for content worth inspecting at full size — interactive demos, long-form documents, or rich HTML mockups. For SVG illustrations and Mermaid diagrams, emit a fenced `svg` or `mermaid` code block in the regular assistant message instead. The chat shows a compact summary card; clicking it opens the full artifact in the right sidebar."
-    let promptHint = "large artifacts opened in a side panel; arguments use source with type url, html, or markdown and the matching url, html, or markdown payload field"
-
-    var schema: JSONSchema {
-        let urlSource = GenUISchema.object(
-            properties: [
-                "type": GenUISchema.string(enumValues: ["url"]),
-                "url": GenUISchema.string(description: "Absolute URL for the hosted artifact"),
-            ],
-            required: ["type", "url"]
-        )
-        let htmlSource = GenUISchema.object(
-            properties: [
-                "type": GenUISchema.string(enumValues: ["html"]),
-                "html": GenUISchema.string(description: "Complete self-contained HTML artifact"),
-            ],
-            required: ["type", "html"]
-        )
-        let markdownSource = GenUISchema.object(
-            properties: [
-                "type": GenUISchema.string(enumValues: ["markdown"]),
-                "markdown": GenUISchema.string(description: "Complete Markdown artifact"),
-            ],
-            required: ["type", "markdown"]
-        )
-        return GenUISchema.object(
-            properties: [
-                "title": GenUISchema.string(),
-                "description": GenUISchema.string(),
-                "source": JSONSchema(fields: [
-                    .oneOf([urlSource, htmlSource, markdownSource]),
-                    .description("Complete artifact payload. Choose one source type and include its matching payload field."),
-                ]),
-                "footer": GenUISchema.string(),
-            ],
-            required: ["source"]
-        )
-    }
 
     @MainActor
     func renderInline(args: Args, context: GenUIRenderContext) -> AnyView? {

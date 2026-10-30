@@ -10,7 +10,7 @@
 		99AB00012FABC00100ABC001 /* TinfoilShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 99AB00032FABC00300ABC003 /* TinfoilShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		99DDBFA42F6869250038A729 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = 99DDBFA32F6869250038A729 /* Textual */; };
 		99EAB0012FC0000100EAB001 /* EHBP in Frameworks */ = {isa = PBXBuildFile; productRef = 99EAB0032FC0000300EAB003 /* EHBP */; };
-		99EEFB1B2F9EE9E8005B3D75 /* TinfoilAI in Frameworks */ = {isa = PBXBuildFile; productRef = 99EEFB1A2F9EE9E8005B3D75 /* TinfoilAI */; };
+		99EEFB1B2F9EE9E8005B3D75 /* Tinfoil in Frameworks */ = {isa = PBXBuildFile; productRef = 99EEFB1A2F9EE9E8005B3D75 /* Tinfoil */; };
 		99F154692F4F60C500E9174E /* ClerkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 99F154682F4F60C500E9174E /* ClerkKit */; };
 		99F1546B2F4F60C500E9174E /* ClerkKitUI in Frameworks */ = {isa = PBXBuildFile; productRef = 99F1546A2F4F60C500E9174E /* ClerkKitUI */; };
 		99F154702F4F610000E9174E /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = 99F1546F2F4F610000E9174E /* SwiftMath */; };
@@ -130,7 +130,7 @@
 				A1B2C3D40100000000000001 /* TinfoilPasskeyKit in Frameworks */,
 				A1B2C3D40200000000000001 /* OpenAPIRuntime in Frameworks */,
 				99EAB0012FC0000100EAB001 /* EHBP in Frameworks */,
-				99EEFB1B2F9EE9E8005B3D75 /* TinfoilAI in Frameworks */,
+				99EEFB1B2F9EE9E8005B3D75 /* Tinfoil in Frameworks */,
 				99F154822F4F632500E9174E /* Sentry in Frameworks */,
 				99DDBFA42F6869250038A729 /* Textual in Frameworks */,
 				99F154692F4F60C500E9174E /* ClerkKit in Frameworks */,
@@ -250,7 +250,7 @@
 				99F154682F4F60C500E9174E /* ClerkKit */,
 				99F1546A2F4F60C500E9174E /* ClerkKitUI */,
 				99F1546F2F4F610000E9174E /* SwiftMath */,
-				99EEFB1A2F9EE9E8005B3D75 /* TinfoilAI */,
+				99EEFB1A2F9EE9E8005B3D75 /* Tinfoil */,
 				99F154812F4F632500E9174E /* Sentry */,
 				99F154832F4F632E00E9174E /* RevenueCat */,
 				99F154852F4F633400E9174E /* RevenueCatUI */,
@@ -784,7 +784,7 @@
 			repositoryURL = "https://github.com/tinfoilsh/tinfoil-swift";
 			requirement = {
 				kind = exactVersion;
-				version = "0.9.0-rc.2";
+				version = "0.9.0-rc.4";
 			};
 		};
 		99F154672F4F60C500E9174E /* XCRemoteSwiftPackageReference "clerk-ios" */ = {
@@ -850,10 +850,10 @@
 			package = 99EAB0022FC0000200EAB002 /* XCRemoteSwiftPackageReference "encrypted-http-body-protocol" */;
 			productName = EHBP;
 		};
-		99EEFB1A2F9EE9E8005B3D75 /* TinfoilAI */ = {
+		99EEFB1A2F9EE9E8005B3D75 /* Tinfoil */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 99EEFB192F9EE9E8005B3D75 /* XCRemoteSwiftPackageReference "tinfoil-swift" */;
-			productName = TinfoilAI;
+			productName = Tinfoil;
 		};
 		99F154682F4F60C500E9174E /* ClerkKit */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -52,9 +52,4 @@ final class GenUIRegistry {
     static func widget(named name: String) -> AnyGenUIWidget? {
         shared.widget(named: name)
     }
-
-    /// True when `name` corresponds to a registered widget.
-    func isGenUIToolName(_ name: String) -> Bool {
-        widgetsByName[name] != nil
-    }
 }

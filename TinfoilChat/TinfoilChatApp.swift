@@ -23,6 +23,7 @@ struct TinfoilChatApp: App {
 
     init() {
         StorageKeysMigration.migrateIfNeeded()
+        LegacyStoragePurge.purgeIfNeeded()
         #if DEBUG
         _isReplayingOnboarding = State(initialValue: ProcessInfo.processInfo.arguments.contains(
             Constants.Onboarding.replayLaunchArgument
@@ -78,25 +79,6 @@ struct TinfoilChatApp: App {
                                     
                                     // Initialize authentication state
                                     await authManager.initializeAuthState()
-                                    
-                                    // The key registry's requests carry the account's
-                                    // identity.
-                                    await SyncEnclaveClient.shared.setTokenGetter { refresh in
-                                        try await ClerkIdentity.token(refresh: refresh)
-                                    }
-
-                                    // Pre-warm the sync-enclave attestation handshake
-                                    // so the first key request doesn't pay the
-                                    // cold-start latency.
-                                    Task.detached(priority: .utility) {
-                                        do {
-                                            try await SyncEnclaveClient.shared.ready()
-                                        } catch {
-                                            #if DEBUG
-                                            print("Failed to pre-warm sync enclave: \(error)")
-                                            #endif
-                                        }
-                                    }
 
                                     // Add observer for Clerk auth state changes
                                     NotificationCenter.default.addObserver(
@@ -139,6 +121,8 @@ struct TinfoilChatApp: App {
 // MARK: - AppDelegate
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        PrivacyCover.shared.install()
+
         // Configure RevenueCat
         RevenueCatManager.shared.configure(apiKey: "appl_NsqQinGVxyvuivFgGKjKcIqHlsk")
 
@@ -150,6 +134,13 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             // Disable PII collection for privacy
             // For more information, visit: https://docs.sentry.io/platforms/apple/data-management/data-collected/
             options.sendDefaultPii = false
+            // A failed request's event carries its headers, which include the
+            // chat access token; breadcrumbs carry the URLs of images a reply
+            // names; trace headers would tag requests to the chat service
+            // with an id Sentry's events share.
+            options.enableCaptureFailedRequests = false
+            options.enableNetworkBreadcrumbs = false
+            options.tracePropagationTargets = []
 
             // Configure profiling. Visit https://docs.sentry.io/platforms/apple/profiling/ to learn more.
             options.configureProfiling = { profileOptions in
@@ -161,6 +152,13 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             // Uncomment the following lines to add more data to your events
             // options.attachScreenshot = true // This adds a screenshot to the error events
             // options.attachViewHierarchy = true // This adds the view hierarchy to the error events
+        }
+
+        // Before any scene shows, so it cannot remove a key file being shared.
+        do {
+            try EncryptionKeyFile.removeExports()
+        } catch {
+            SentrySDK.capture(error: error)
         }
 
         Task.detached(priority: .utility) {

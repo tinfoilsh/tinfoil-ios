@@ -10,7 +10,6 @@
 
 import CoreLocation
 import MapKit
-import OpenAI
 import SwiftUI
 import UIKit
 
@@ -33,45 +32,6 @@ struct MapWidget: GenUIWidget {
     }
 
     let name = "render_map"
-    let description = """
-        Display an interactive Apple Map with one or more pinned locations and \
-        a button to open the place (or directions, when multiple stops are \
-        provided) in the Maps app. Use when the user asks about places, \
-        addresses, routes, or wants to see somewhere on a map. Provide \
-        latitude/longitude when known; otherwise an address string is \
-        geocoded automatically.
-        """
-    let promptHint = "an interactive Apple Map with one or more locations and a button to open Apple Maps"
-
-    var schema: JSONSchema {
-        let location = GenUISchema.object(
-            properties: [
-                "name": GenUISchema.string(description: "Display name shown on the pin"),
-                "address": GenUISchema.string(description: "Full address or place query (e.g. \"1 Apple Park Way, Cupertino, CA\" or \"Eiffel Tower, Paris\"). Used for geocoding when coordinates are not provided."),
-                "latitude": GenUISchema.number(description: "Latitude in degrees. Always provide when known to avoid geocoding ambiguity."),
-                "longitude": GenUISchema.number(description: "Longitude in degrees. Always provide when known to avoid geocoding ambiguity."),
-                "description": GenUISchema.string(description: "One-line subtitle"),
-            ],
-            required: ["name"]
-        )
-        return GenUISchema.object(
-            properties: [
-                "title": GenUISchema.string(),
-                "mode": GenUISchema.string(
-                    description: "`place` (default) for a single location, `search` for a POI query, `directions` for a routed list",
-                    enumValues: ["place", "search", "directions"]
-                ),
-                "query": GenUISchema.string(description: "Used when `mode === \"search\"`, e.g. \"coffee\""),
-                "locations": GenUISchema.array(items: location, minItems: 1),
-                "travelMode": GenUISchema.string(enumValues: ["driving", "walking", "transit", "cycling"]),
-                "mapType": GenUISchema.string(
-                    description: "Visual style of the map tiles",
-                    enumValues: ["standard", "hybrid", "satellite", "muted"]
-                ),
-            ],
-            required: ["locations"]
-        )
-    }
 
     @MainActor
     func renderInline(args: Args, context: GenUIRenderContext) -> AnyView? {

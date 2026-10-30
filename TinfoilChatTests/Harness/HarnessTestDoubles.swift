@@ -1,12 +1,14 @@
 import Foundation
 import Testing
-import TinfoilAI
+@testable import Tinfoil
 @testable import TinfoilChat
 
 /// A transport that answers from a script and keeps what it was sent.
 actor ScriptedTransport: HarnessTransport {
-    typealias Answer = @Sendable (HarnessRequest) -> HarnessResponse
+    typealias Answer = @Sendable (HarnessRequest) throws -> HarnessResponse
 
+    nonisolated let verifications: AsyncStream<EnclaveVerificationResult>
+    private nonisolated let verified: AsyncStream<EnclaveVerificationResult>.Continuation
     private(set) var requests: [HarnessRequest] = []
     private var answers: [Answer]
     private var holding = false
@@ -16,6 +18,13 @@ actor ScriptedTransport: HarnessTransport {
 
     init(_ answers: [Answer]) {
         self.answers = answers
+        (verifications, verified) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
+    }
+
+    /// Reports a verification of the enclave, as the SDK does as each one
+    /// finishes.
+    nonisolated func report(_ result: EnclaveVerificationResult) {
+        verified.yield(result)
     }
 
     /// Scripts the next answer.
@@ -54,10 +63,25 @@ actor ScriptedTransport: HarnessTransport {
             Issue.record("unscripted request to \(request.route.rawValue)")
             throw HarnessError(code: HarnessErrorCode.connection, message: "unscripted", action: .stop)
         }
-        return answers.removeFirst()(request)
+        return try answers.removeFirst()(request)
     }
+}
 
-    func verification() async -> Verification? { nil }
+extension Verification {
+    /// A verification as the SDK reports one that succeeded.
+    static let succeeded = Verification(
+        configRepo: Constants.Harness.configRepo,
+        codeDigest: "digest",
+        codeTag: "v1.0.0",
+        codeMeasurement: nil,
+        enclaveMeasurement: nil,
+        tlsPublicKeyFingerprint: "fingerprint",
+        hpkePublicKey: nil,
+        cryptoMaterial: [],
+        freshnessExpiresAt: .distantFuture,
+        verifiedAt: Date(),
+        verifier: SoftwareIdentity(name: "tinfoil-swift", version: "test")
+    )
 }
 
 actor ScriptedCredentials: HarnessCredentials {
@@ -131,12 +155,12 @@ final class MemoryProfileStorage: ProfileStorage, @unchecked Sendable {
 /// The JSON answers a scripted transport gives.
 enum Answers {
     static func json(_ status: Int, _ body: String) -> ScriptedTransport.Answer {
-        { _ in .collected(status: status, headers: ["content-type": "application/json"], body: Data(body.utf8)) }
+        { _ in .collected(status: status, headers: ["content-type": "application/json"], sealed: true, body: Data(body.utf8)) }
     }
 
     static func json(_ object: [String: Any]) -> ScriptedTransport.Answer {
         let body = try! JSONSerialization.data(withJSONObject: object)
-        return { _ in .collected(status: 200, headers: ["content-type": "application/json"], body: body) }
+        return { _ in .collected(status: 200, headers: ["content-type": "application/json"], sealed: true, body: body) }
     }
 
     static func events(_ frames: [[String: Any]]) -> ScriptedTransport.Answer {
@@ -145,7 +169,7 @@ enum Answers {
             let data = try! JSONSerialization.data(withJSONObject: frame)
             text += "id: \(index)\ndata: \(String(decoding: data, as: UTF8.self))\n\n"
         }
-        return { _ in .collected(status: 200, headers: ["content-type": "text/event-stream"], body: Data(text.utf8)) }
+        return { _ in .collected(status: 200, headers: ["content-type": "text/event-stream"], sealed: true, body: Data(text.utf8)) }
     }
 
     static func refusal(_ status: Int, code: String, action: String) -> ScriptedTransport.Answer {

@@ -4,18 +4,33 @@ import OSLog
 extension ChatViewModel {
     // MARK: - Signing in and out
 
+    /// Signs the account in once the app shows and the identity provider
+    /// has confirmed who is signed in. A sign-in of the same account that
+    /// is still running loads it.
     func handleSignIn() {
         guard let userId = currentUserId else { return }
-        guard isAppPresentationReady else {
+        guard isAppPresentationReady, authManager?.isLoading == false else {
             needsSignInWhenPresentationReady = true
             return
         }
+        // A key a passkey recovered, or one another device rotated to and
+        // this one applied, loads the account again.
+        passkeyManager.onRecoveryComplete = { [weak self] in self?.handleSignInUnlessTearingDown() }
+        passkeyManager.onKeyRefreshedFromBackup = { [weak self] in Task { @MainActor in self?.handleSignInUnlessTearingDown() } }
+        if let activeSignInToken, signInTask != nil, accountOperationFence.isCurrent(activeSignInToken, currentUserId: userId) { return }
         signInTask?.cancel()
         let token = accountOperationFence.begin(userId: userId)
         activeSignInToken = token
         signInTask = Task { [weak self] in
             await self?.performSignIn(token: token, userId: userId)
         }
+    }
+
+    /// A passkey that finished while the account signs out loads nothing:
+    /// the sign-in would undo the teardown's fences.
+    private func handleSignInUnlessTearingDown() {
+        guard !isAccountTeardownInProgress else { return }
+        handleSignIn()
     }
 
     private func isCurrentAccountOperation(_ token: AccountOperationFence.Token, userId: String) -> Bool {
@@ -40,6 +55,7 @@ extension ChatViewModel {
     private func finishSignIn(_ token: AccountOperationFence.Token, userId: String) {
         guard isCurrentSignIn(token, userId: userId) else { return }
         if activeSignInToken == token { activeSignInToken = nil }
+        signInTask = nil
         readyForAccountActionsUserId = userId
     }
 
@@ -47,13 +63,10 @@ extension ChatViewModel {
     /// passkey or the user, and loads its chats.
     private func performSignIn(token: AccountOperationFence.Token, userId: String) async {
         guard isCurrentSignIn(token, userId: userId) else { return }
+        EncryptionService.shared.bind(userId: userId)
         isAccountTeardownInProgress = false
         passkeyManager.resumeAccountOperations()
         await openSession()
-        guard isCurrentSignIn(token, userId: userId) else { return }
-        // Sign-out clears account-bound token providers, so restore them
-        // before passkey recovery or any other key registry request.
-        await SyncEnclaveClient.shared.setTokenGetter { refresh in try await ClerkIdentity.token(refresh: refresh) }
         guard isCurrentSignIn(token, userId: userId) else { return }
         // Local chats with messages turn the Local tab on, unless the user
         // chose otherwise.
@@ -95,16 +108,9 @@ extension ChatViewModel {
         do {
             _ = try await EncryptionService.shared.initialize()
         } catch {
-            syncErrors.append(error.localizedDescription)
+            Self.logger.error("Failed to load the encryption key: \(error, privacy: .public)")
         }
         guard isCurrentSignIn(token, userId: userId) else { return }
-        if !CloudKeyAuthorizationStore.shared.hasAuthorizedCurrentPrimaryKey(userId: userId) {
-            let validation = await CloudKeyPreflightValidator.shared.validateCurrentPrimaryKey()
-            guard isCurrentSignIn(token, userId: userId) else { return }
-            if validation.canWrite {
-                _ = CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .validated, userId: userId)
-            }
-        }
         // A local key that mismatches the enclave's registered key can never
         // open the account's chats. Converge silently via passkey when
         // possible; otherwise prompt the user to recover.
@@ -118,7 +124,7 @@ extension ChatViewModel {
         }
         await passkeyManager.checkPasskeyStateForExistingKey()
         guard isCurrentSignIn(token, userId: userId) else { return }
-        startLegacyMigration(token: token, userId: userId)
+        registerHeldKey(token: token, userId: userId)
         await keyChanged()
         guard isCurrentSignIn(token, userId: userId) else { return }
         if SettingsManager.shared.isCloudSyncEnabled, let saved = UserDefaults.standard.string(forKey: Constants.StorageKeys.Settings.cloudSyncActiveTab).flatMap(ChatStorageTab.init(rawValue:)) {
@@ -126,15 +132,15 @@ extension ChatViewModel {
         } else if !SettingsManager.shared.isCloudSyncEnabled {
             activeStorageTab = .local
         }
-        lastSyncDate = Date()
         if currentChat == nil || currentChat?.id.isEmpty == true { createNewChat(focusInput: false) }
         finishSignIn(token, userId: userId)
     }
 
     /// The content key was set, recovered or rotated: the account's chats and
-    /// settings load again with it.
+    /// settings load again with it. The key the account already read its
+    /// settings with changes nothing, so the list and the open chat stay.
     func keyChanged() async {
-        guard let session else { return }
+        guard let session, !session.account.readsHeldKey else { return }
         session.account.invalidateKey()
         session.list.clearCloud()
         if !session.open.onDevice { session.newChat(local: false) }
@@ -151,20 +157,17 @@ extension ChatViewModel {
         cancelMessageEdit()
         cancelAudioRecording()
         clearPendingAttachments()
-        let signingOutUserId = currentUserId
         isAccountTeardownInProgress = true
         clearProjectState()
-        isSyncing = false
         signInTask?.cancel()
         signInTask = nil
         activeSignInToken = nil
-        legacyMigrationTask?.cancel()
-        legacyMigrationTask = nil
+        heldKeyRegistrationTask?.cancel()
+        heldKeyRegistrationTask = nil
         await accountOperationTracker.closeAndWait()
         session?.account.dispose()
         session = nil
-        await SyncEnclaveClient.shared.reset()
-        CloudKeyAuthorizationStore.shared.clearAuthorization(userId: signingOutUserId)
+        EncryptionService.shared.bind(userId: nil)
         passkeySetupFailure = nil
         await passkeyManager.reset()
         activeStorageTab = .cloud
@@ -187,12 +190,18 @@ extension ChatViewModel {
         Self.wipeDeviceChats(userId: userId)
     }
 
+    /// Removes what this device kept for the account: its chats, cloud
+    /// settings, run receipt and prompt cache secret, and what older clients
+    /// kept for it.
     static func wipeDeviceChats(userId: String) {
         if let directory = try? DeviceThreadStore.directory(userId: userId) {
             try? FileManager.default.removeItem(at: directory)
         }
+        DeviceProfileStorage().clearCloudProfileCache(userId: userId)
         LegacyDeviceChats.wipe(userId: userId)
         PromptCacheSecret.forget(userId: userId)
+        RunReceiptStore(userId: userId).clear()
+        LegacyStoragePurge.purge(userId: userId)
     }
 
     /// The account's subscription changed: its chat access is minted again,
@@ -220,15 +229,20 @@ extension ChatViewModel {
 
     // MARK: - Legacy rows
 
-    /// Rows the previous clients sealed under earlier keys are re-sealed
-    /// by the key registry under the current one.
-    func startLegacyMigration(token: AccountOperationFence.Token, userId: String) {
-        let previousTask = legacyMigrationTask
+    /// A held key the registry does not know becomes the account's, and
+    /// rows older keys sealed are resealed under it by the harness.
+    func registerHeldKey(token: AccountOperationFence.Token, userId: String) {
+        let previousTask = heldKeyRegistrationTask
         previousTask?.cancel()
-        legacyMigrationTask = Task { [weak self] in
+        heldKeyRegistrationTask = Task { [weak self] in
             await previousTask?.value
             guard let self, isCurrentSignIn(token, userId: userId) else { return }
-            _ = await LegacyBlobMigration.runAndFinalize()
+            do {
+                try await CloudKeyAuthorizationStore.shared.registerHeldKeyIfNeeded()
+            } catch {
+                guard !(error is CancellationError) else { return }
+                Self.logger.error("Failed to register the held key: \(error, privacy: .public)")
+            }
             guard isCurrentSignIn(token, userId: userId) else { return }
             await passkeyManager.refreshBundleState()
         }
@@ -240,12 +254,8 @@ extension ChatViewModel {
         EncryptionService.shared.getKey()
     }
 
-    func reloadEncryptionKey() {
-        Task { await keyChanged() }
-    }
-
     func initializeExistingEncryptionKeyIfAvailable() async {
-        guard let operationUserId = currentUserId, EncryptionService.shared.hasEncryptionKey() else { return }
+        guard currentUserId != nil, EncryptionService.shared.hasEncryptionKey() else { return }
         let operationTask = Task {
             guard !Task.isCancelled else { return }
             _ = try? await EncryptionService.shared.initialize()
@@ -256,8 +266,6 @@ extension ChatViewModel {
         }
         defer { accountOperationTracker.end(operationToken) }
         await operationTask.value
-        guard currentUserId == operationUserId else { return }
-        await keyChanged()
     }
 
     /// Sets the content key, recovering the account's data with it or
@@ -277,7 +285,7 @@ extension ChatViewModel {
         // A v1 user activating their key on a fresh device has legacy cloud
         // data but no registered key. Re-kick migration now that a key is
         // active so adoption happens in-session.
-        startLegacyMigration(token: currentAccountOperationToken(userId: operationUserId), userId: operationUserId)
+        registerHeldKey(token: currentAccountOperationToken(userId: operationUserId), userId: operationUserId)
     }
 
     private func performSetEncryptionKey(_ key: String, mode: CloudKeyActivationMode, operationUserId: String) async throws {
@@ -285,7 +293,7 @@ extension ChatViewModel {
         do {
             switch mode {
             case .recoverExisting:
-                _ = try await CloudKeyAuthorizationStore.shared.applyPrimaryKeyWithValidation(key)
+                try await CloudKeyAuthorizationStore.shared.applyPrimaryKeyWithValidation(key)
                 try ensureCurrentAccount(operationUserId)
             case .explicitStartFresh:
                 // Stage the key in memory so the enclave handshake runs
@@ -299,16 +307,13 @@ extension ChatViewModel {
                     try ensureCurrentAccount(operationUserId)
                     try await CloudKeyAuthorizationStore.shared.registerStartFreshKeyIfNeeded()
                     remoteRegistrationCommitted = true
-                    try EncryptionService.shared.persistCurrentKeyState()
+                    try EncryptionService.shared.persistCurrentKeyState(discardingHistory: true)
                 } catch {
                     if !remoteRegistrationCommitted { EncryptionService.shared.discardStagedKeyState() }
                     throw error
                 }
-                _ = CloudKeyAuthorizationStore.shared.authorizeCurrentPrimaryKey(mode: .explicitStartFresh)
             }
             try ensureCurrentAccount(operationUserId)
-            showEncryptionSetup = false
-            isFirstTimeUser = false
             await keyChanged()
             try ensureCurrentAccount(operationUserId)
             if passkeyManager.passkeyActive {
@@ -317,7 +322,6 @@ extension ChatViewModel {
             }
         } catch {
             guard currentUserId == operationUserId else { throw CancellationError() }
-            if !(error is CancellationError) { syncErrors.append(error.localizedDescription) }
             throw error
         }
     }
@@ -346,6 +350,12 @@ extension ChatViewModel {
         return succeeded
     }
 
+    /// Clears a skipped passkey recovery and runs it again, for the
+    /// "unlock" actions of the sidebar, an error card and Settings. A key
+    /// that must be set up or recovered by hand opens the onboarding sheet,
+    /// as signing in does, and a key the passkey unlocked loads the
+    /// account again.
+    @discardableResult
     func reattemptPasskeyRecovery() async -> PasskeyRecoveryResult? {
         guard let operationUserId = currentUserId else { return nil }
         let operationTask = Task { [passkeyManager] in
@@ -359,7 +369,18 @@ extension ChatViewModel {
         defer { accountOperationTracker.end(operationToken) }
         let result = await operationTask.value
         guard currentUserId == operationUserId else { return nil }
-        if case .success = result { await keyChanged() }
+        switch result {
+        case .manualSetupRequired:
+            cloudSyncOnboardingMode = .setup
+            showCloudSyncOnboarding = true
+        case .manualRecoveryRequired:
+            cloudSyncOnboardingMode = .recovery
+            showCloudSyncOnboarding = true
+        case .success, .newUserSetupDone:
+            handleSignIn()
+        default:
+            break
+        }
         return result
     }
 
@@ -395,7 +416,7 @@ extension ChatViewModel {
         guard currentUserId == operationUserId else { return .recoveryFailed }
         switch result {
         case .success, .newUserSetupDone:
-            startLegacyMigration(token: currentAccountOperationToken(userId: operationUserId), userId: operationUserId)
+            registerHeldKey(token: currentAccountOperationToken(userId: operationUserId), userId: operationUserId)
             await keyChanged()
         default:
             break
@@ -418,7 +439,7 @@ extension ChatViewModel {
         let result = await operationTask.value
         guard currentUserId == operationUserId else { return .failure(.userCancelled) }
         guard case .success = result else { return result }
-        startLegacyMigration(token: currentAccountOperationToken(userId: operationUserId), userId: operationUserId)
+        registerHeldKey(token: currentAccountOperationToken(userId: operationUserId), userId: operationUserId)
         return .success
     }
 

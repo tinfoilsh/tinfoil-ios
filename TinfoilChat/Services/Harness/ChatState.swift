@@ -40,7 +40,7 @@ struct ChatState: Equatable, Sendable {
     /// The state before any run, of a chat as it was loaded, or of a new one.
     init(thread: ThreadWindow? = nil) {
         snapshot = RunSnapshot(thread: thread.map(ThreadSummary.init(of:)))
-        messages = thread?.messages ?? []
+        messages = thread?.messages.shown ?? []
         hasOlder = thread?.hasOlder ?? false
         status = .idle
         flagged = thread?.flagged ?? false

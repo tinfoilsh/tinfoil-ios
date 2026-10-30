@@ -3,7 +3,6 @@
 //  TinfoilChat
 //
 
-import OpenAI
 import SwiftUI
 
 struct StatCardsWidget: GenUIWidget {
@@ -18,29 +17,6 @@ struct StatCardsWidget: GenUIWidget {
     }
 
     let name = "render_stat_cards"
-    let description = "Display a grid of metrics or KPIs. Use when presenting multiple numeric summaries."
-    let promptHint = "grid of numeric KPIs or metrics"
-
-    var schema: JSONSchema {
-        let statSchema = GenUISchema.object(
-            properties: [
-                "label": GenUISchema.string(),
-                "value": GenUISchema.stringOrNumber(),
-                "trend": GenUISchema.string(enumValues: ["up", "down"]),
-            ],
-            required: ["label", "value"]
-        )
-        return GenUISchema.object(
-            properties: [
-                "stats": GenUISchema.array(
-                    items: statSchema,
-                    description: "Metrics or KPIs to display in a responsive grid",
-                    minItems: 1
-                ),
-            ],
-            required: ["stats"]
-        )
-    }
 
     @MainActor
     func renderInline(args: Args, context: GenUIRenderContext) -> AnyView? {

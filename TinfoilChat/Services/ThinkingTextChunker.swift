@@ -100,6 +100,15 @@ class ThinkingTextChunker {
         return chunker.getAllChunks()
     }
 
+    /// Chunking for thinking text that may still be streaming: its last
+    /// paragraph stays the working chunk, which redraws as it grows, while
+    /// the paragraphs before it keep their ids.
+    static func chunk(growing text: String) -> [ThinkingChunk] {
+        let chunker = ThinkingTextChunker()
+        chunker.appendToken(text)
+        return chunker.getAllChunks().filter { $0.isComplete || !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
     private func appendCompletedChunk(_ content: String) {
         for piece in Self.hardSplit(content) {
             completedChunks.append(ThinkingChunk(

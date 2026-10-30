@@ -39,6 +39,16 @@ enum OpenChatResult: Equatable {
     case superseded
 }
 
+/// Why the open chat cannot take a turn yet.
+enum SendBlock: Equatable {
+    /// The harness refused the account's key, so its stored chats are locked.
+    case locked
+    /// The account's settings could not load.
+    case failed
+    /// The account's settings, or its key, are still loading.
+    case loading
+}
+
 /// The open chat of an account: which chat is shown, its runs, the stores
 /// its chats live in, and the actions on it.
 @MainActor
@@ -83,6 +93,45 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     var state: ChatState { controller.view }
     var running: Bool { [.submitting, .streaming, .queued].contains(state.status) }
 
+    /// The open chat, at rest, ends on a reply that did not finish or on a
+    /// message no reply answers, as one left by a turn that failed.
+    var hasUnfinishedReply: Bool {
+        guard state.status == .idle, open.loadingId == nil, open.failure == nil, let last = state.messages.last else { return false }
+        return last.role.value1 == .user || last.isError == true
+    }
+
+    /// Whether the open chat takes a turn now: not while one is being
+    /// submitted, a device chat's turn is starting, the chat loads or moves.
+    var acceptsTurn: Bool {
+        guard state.status != .submitting, open.loadingId == nil else { return false }
+        if openStore().local, controller.startingThread != nil { return false }
+        if let id = open.id, moving[id] != nil { return false }
+        return true
+    }
+
+    /// The open chat is a new chat whose first turn gave it its id, and is
+    /// not stored yet: the conversation on screen is the one that was blank.
+    var isNewChatsFirstTurn: Bool { open.id != nil && open.unsaved == open.id }
+
+    /// Why the open chat cannot take a turn, if it cannot. A chat on this
+    /// device sends the settings this device holds, or kept of the
+    /// account's, and reads no key; a stored chat waits for the account's
+    /// settings and its key.
+    var sendBlock: SendBlock? {
+        sendBlock(onDevice: open.onDevice)
+    }
+
+    /// Why a chat on this device, or a stored one, could not take a turn.
+    func sendBlock(onDevice: Bool) -> SendBlock? {
+        if onDevice {
+            if account.cloud || account.profileReady { return nil }
+        } else {
+            if account.keyLocked { return .locked }
+            if account.profileReady && account.keyReady { return nil }
+        }
+        return account.profileFailed ? .failed : .loading
+    }
+
     private func patch(_ change: (inout OpenChat) -> Void) {
         var next = open
         change(&next)
@@ -93,7 +142,15 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         guard !(cause is CancellationError), !account.disposed else { return }
         if let error = cause as? HarnessError {
             account.reportRateLimit(error.detail.rateLimit)
+            // The chat changed from the copy shown, as when a reply ended
+            // before the stop sent for it: it shows as the harness has it,
+            // which a running reply's stream brings, rather than as failed.
+            if error.action == .reload, let threadId = open.id {
+                if !running { Task { await showStored(threadId) } }
+                return
+            }
             patch { $0.failure = error.detail }
+            HarnessAccount.noteAuthenticationRequired(error)
         } else {
             patch { $0.failure = HarnessErrorBody(code: HarnessErrorCode.connection, message: cause.localizedDescription, action: .retry) }
         }
@@ -247,14 +304,16 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     }
 
     /// Another device changed the open stored chat: it is read again, with
-    /// the earlier pages the view had loaded.
-    func refreshIfChanged() async {
+    /// the earlier pages the view had loaded. Returns whether the chat was
+    /// deleted there, which leaves the list and the view.
+    @discardableResult
+    func refreshIfChanged() async -> Bool {
         guard let revision = account.chatRevision, account.keyReady, !open.onDevice, let id = open.id,
-              open.loadingId == nil, open.unsaved != id, state.status == .idle else { return }
-        if let refreshed = refreshedRevision, refreshed.id == id, refreshed.revision == revision { return }
+              open.loadingId == nil, open.unsaved != id, state.status == .idle else { return false }
+        if let refreshed = refreshedRevision, refreshed.id == id, refreshed.revision == revision { return false }
         let shown = controller.track()
         do {
-            guard var result = try await cloudStore.get(id) else { return }
+            guard var result = try await cloudStore.get(id) else { return false }
             let wanted = state.messages.count
             while result.window.hasOlder, result.window.messages.count < wanted {
                 let older = try await cloudStore.older(id, before: result.window.messages.first?.id)
@@ -262,7 +321,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
                 result.window.messages.insert(contentsOf: older.messages, at: 0)
                 result.window.hasOlder = older.hasOlder
             }
-            guard shown(), state.status == .idle else { return }
+            guard shown(), state.status == .idle else { return false }
             controller.setView(ChatState(thread: result.window))
             refreshedRevision = (id, revision)
             patch {
@@ -272,14 +331,16 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
                 $0.webSearch = nil
             }
         } catch {
-            guard shown() else { return }
+            guard shown() else { return false }
             if (error as? HarnessError)?.code == HarnessErrorCode.threadNotFound {
+                list.cloud.remove(id)
                 reset()
                 patch { $0.notFound = true }
-            } else {
-                report(error)
+                return true
             }
+            report(error)
         }
+        return false
     }
 
     // MARK: - RunControllerDelegate
@@ -376,7 +437,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     private func sentMessage(_ turn: Turn) -> Components.Schemas.MessageRecord? {
         guard turn.kind == .send, state.status != .streaming, state.status != .queued else { return nil }
         let sent = (turn.attachments ?? []).compactMap(\.uploaded)
-        return Components.Schemas.MessageRecord(id: turn.clientRequestId, role: .user, createdAt: StoredThread.timestamp(Date()), content: turn.content ?? "", quote: turn.quote, attachments: sent.isEmpty ? nil : sent)
+        return Components.Schemas.MessageRecord(id: turn.clientRequestId, role: .named(.user), createdAt: StoredThread.timestamp(Date()), content: turn.content ?? "", quote: turn.quote, attachments: sent.isEmpty ? nil : sent)
     }
 
     /// A message as the view shows it, without its uploads' contents.
@@ -401,12 +462,12 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         let target = messages[index]
         switch turn.kind {
         case .regenerate, .continue:
-            guard target.role == .assistant else { return nil }
+            guard target.role.value1 == .assistant else { return nil }
             return Array(messages[..<(turn.kind == .continue ? index + 1 : index)])
         case .edit:
-            guard target.role == .user else { return nil }
+            guard target.role.value1 == .user else { return nil }
             let sent = turn.attachments.map { $0.compactMap(\.uploaded) }
-            var record = Components.Schemas.MessageRecord(id: turn.clientRequestId, role: .user, createdAt: StoredThread.timestamp(Date()), content: turn.content ?? target.content ?? "", quote: turn.quote ?? target.quote)
+            var record = Components.Schemas.MessageRecord(id: turn.clientRequestId, role: .named(.user), createdAt: StoredThread.timestamp(Date()), content: turn.content ?? target.content ?? "", quote: turn.quote ?? target.quote)
             var edited = shownMessage(record)
             if let sent { record.attachments = sent.isEmpty ? nil : sent; edited = shownMessage(record) } else { edited.attachments = target.attachments }
             return Array(messages[..<index]) + [edited]
@@ -420,14 +481,11 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     @discardableResult
     func send(_ fields: TurnFields) async -> Bool {
         let threads = openStore()
-        guard state.status != .submitting else { return false }
-        if threads.local, controller.startingThread != nil { return false }
-        if open.loadingId != nil { return false }
-        if let id = open.id, moving[id] != nil { return false }
+        guard acceptsTurn else { return false }
         patch { $0.failure = nil }
         attachments.rememberSent(fields.attachments)
-        let key: String?
-        do { key = try threads.runKey() } catch { report(error); return false }
+        // A turn the key could not be read for is not shown as sent.
+        do { _ = try threads.runKey() } catch { report(error); return false }
         if open.id == nil, open.model.isEmpty { patch { $0.model = pickedModel } }
         let settings = turnSettings()
         let choice = presetChoice()
@@ -462,6 +520,9 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
                 }
             }
             do {
+                // Each attempt reads the key it is sent with, so a retry after
+                // the key changed carries the current one.
+                let key = try threads.runKey()
                 guard let turn = try await threads.prepareTurn(threadId, defaults: defaults, fields: fields, key: key, settings: settings), shown() else {
                     unapply()
                     return false
@@ -503,7 +564,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         let messages = state.messages
         guard messages.indices.contains(index) else { return false }
         let target = messages[index]
-        let reply = target.role == .assistant ? target : (messages.indices.contains(index + 1) && messages[index + 1].role == .assistant ? messages[index + 1] : nil)
+        let reply = target.role.value1 == .assistant ? target : (messages.indices.contains(index + 1) && messages[index + 1].role.value1 == .assistant ? messages[index + 1] : nil)
         var fields = TurnFields(options: options)
         if let reply {
             fields.kind = .regenerate
@@ -522,7 +583,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// the messages after it, so the continued reply ends the chat.
     @discardableResult
     func continueReply(at index: Int, options: TurnOptions? = nil) async -> Bool {
-        guard state.messages.indices.contains(index), state.messages[index].role == .assistant else { return false }
+        guard state.messages.indices.contains(index), state.messages[index].role.value1 == .assistant else { return false }
         return await send(TurnFields(kind: .continue, content: "", messageId: state.messages[index].id, options: options))
     }
 
@@ -559,7 +620,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// stream reconnects.
     @discardableResult
     func retry(options: TurnOptions? = nil) async -> Bool {
-        guard state.failedRun != nil, state.status == .error else { return await reconnect() }
+        guard (state.failedRun != nil && state.status == .error) || hasUnfinishedReply else { return await reconnect() }
         return await send(TurnFields(kind: .retry, options: options))
     }
 
@@ -670,7 +731,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         var titled: ThreadSummary?
         if var current = shown, current.id == threadId, let title = patch.title, open.id == threadId {
             current.title = title
-            current.titleState = .manual
+            current.titleState = .named(.manual)
             titled = current
             showSummary(current)
         }
@@ -734,13 +795,16 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     }
 
     /// Forks the open chat from a message into a new chat holding the
-    /// messages through it, and opens the fork.
-    func fork(at messageIndex: Int) async throws -> String? {
+    /// messages through it, and opens the fork once `opening` has returned,
+    /// unless the view moved to another chat meanwhile.
+    func fork(at messageIndex: Int, opening: @MainActor (_ forkId: String) async -> Void = { _ in }) async throws -> String? {
         guard let threadId = open.id, !open.temporary, state.messages.indices.contains(messageIndex) else { return nil }
         let messageId = state.messages[messageIndex].id
         let store = storeOf(threadId)
         let shown = controller.track()
         guard let forkId = try await store.fork(threadId, messageId: messageId), shown() else { return nil }
+        await opening(forkId)
+        guard shown() else { return nil }
         _ = try await openChat(forkId, local: store.local)
         return forkId
     }
@@ -799,7 +863,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
 
     /// Rewrites a reply's text in place; later messages stay.
     func editReply(at index: Int, content: String) async throws {
-        guard state.messages.indices.contains(index), state.messages[index].role == .assistant else { return }
+        guard state.messages.indices.contains(index), state.messages[index].role.value1 == .assistant else { return }
         try await changeMessage(at: index) { store, threadId, messageId in
             try await store.editReply(threadId, messageId: messageId, content: content)
         } _: { messages, messageId in
@@ -812,12 +876,12 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// was.
     private static func rewrittenReply(_ message: HarnessMessage, _ text: String) -> HarnessMessage {
         let timeline = message.timeline ?? []
-        let first = timeline.firstIndex { $0._type == .content }
-        let edited = TimelineBlock(id: first.map { timeline[$0].id } ?? editedContentId, _type: .content, content: text)
+        let first = timeline.firstIndex { $0._type.value1 == .content }
+        let edited = TimelineBlock(id: first.map { timeline[$0].id } ?? editedContentId, _type: .named(.content), content: text)
         var blocks: [TimelineBlock] = []
         for (index, block) in timeline.enumerated() {
             if index == first, !text.isEmpty { blocks.append(edited) }
-            if block._type != .content { blocks.append(block) }
+            if block._type.value1 != .content { blocks.append(block) }
         }
         if first == nil, !text.isEmpty { blocks.append(edited) }
         var rewritten = message
@@ -835,12 +899,16 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     func older() async throws {
         guard let threadId = open.id else { return }
         let shown = controller.track()
+        // Each page is read from the first message of the page after it,
+        // which may be one this client leaves out.
+        var before = state.messages.first?.id
         while state.hasOlder {
-            let page = try await storeOf(threadId).older(threadId, before: state.messages.first?.id)
+            let page = try await storeOf(threadId).older(threadId, before: before)
             guard shown() else { return }
-            let earlier = page.messages.filter { message in !state.messages.contains { $0.id == message.id } }
+            let earlier = page.messages.shown.filter { message in !state.messages.contains { $0.id == message.id } }
             controller.updateView { $0.messages = earlier + $0.messages; $0.hasOlder = page.hasOlder }
-            if earlier.isEmpty { return }
+            guard let first = page.messages.first?.id, first != before else { return }
+            before = first
         }
     }
 
@@ -880,9 +948,8 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// run of it is left, so the reply is stored with it.
     func saveTemporary() async throws {
         guard let threadId = open.id, open.temporary, moving[threadId] == nil else { return }
-        while controller.deviceRuns[threadId] != nil || (open.id == threadId && running) {
-            try await Task.sleep(for: .milliseconds(200))
-        }
+        await runsEnded(threadId)
+        try Task.checkCancellation()
         guard open.id == threadId else { return }
         try requireIdle(threadId)
         let cloud = account.cloud && !open.local
@@ -899,12 +966,22 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         }
     }
 
+    /// Waits until no run of the chat is left: no device run reads it, and
+    /// the view, while it shows the chat, runs nothing.
+    private func runsEnded(_ threadId: String) async {
+        let changes = Publishers.CombineLatest3(controller.$view, controller.$deviceRuns, $open).values
+        for await (view, runs, shown) in changes {
+            let running = [.submitting, .streaming, .queued].contains(view.status)
+            if runs[threadId] == nil, !(shown.id == threadId && running) { return }
+        }
+    }
+
     /// Converts a file into the attachment the turn that uses it sends. An
     /// image's attachment carries the copy the harness gives models; the
     /// file itself is kept apart, to show and download.
     func upload(_ data: Data, fileName: String, mimeType: String) async throws -> Components.Schemas.Attachment {
         let attachment = try await HarnessUploads.upload(account, data: data, fileName: fileName, mimeType: mimeType)
-        if attachment.kind == .image {
+        if attachment.kind.value1 == .image {
             attachments.keepOriginal(attachment.id, AttachmentOriginal(base64: data.base64EncodedString(), mimeType: mimeType.isEmpty ? attachment.mimeType : mimeType))
         }
         return attachment

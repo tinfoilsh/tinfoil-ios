@@ -13,6 +13,17 @@ struct ChatViewMappingTests {
         try message(["id": "m", "role": "assistant", "createdAt": "2026-01-01T00:00:00Z", "timeline": timeline])
     }
 
+    @Test func aReplyStillThinkingHasNoSettledThinkingTime() throws {
+        // The chat service updates a thought's duration as it streams.
+        let wire = try Self.reply([["id": "t1", "type": "thinking", "content": "Hmm", "duration": 2.0, "startedAt": 1000, "endedAt": 3000]])
+        let live = ChatViewMapping.message(wire, streaming: true)
+        #expect(live.isThinking)
+        #expect(live.generationTimeSeconds == nil)
+        let settled = ChatViewMapping.message(wire, streaming: false)
+        #expect(!settled.isThinking)
+        #expect(settled.generationTimeSeconds == 2.0)
+    }
+
     @Test func aReplysBlocksBecomeItsTextThoughtsAndSegments() throws {
         let wire = try Self.reply([
             ["id": "t1", "type": "thinking", "content": "why", "duration": 1.5, "startedAt": 1000, "endedAt": 2500],
@@ -99,6 +110,42 @@ struct ChatViewMappingTests {
         #expect(shown.attachments.first?.processingState == .completed)
     }
 
+    @Test func aBlockOfATypeThisClientDoesNotKnowIsLeftOut() throws {
+        let wire = try Self.reply([
+            ["id": "x", "type": "diagram", "content": "<svg/>"],
+            ["id": "c", "type": "content", "content": "Done."],
+        ])
+        let shown = ChatViewMapping.message(wire)
+        #expect(shown.content == "Done.")
+        #expect(shown.segments == [.text("Done.")])
+    }
+
+    @Test func aToolStatusThisClientDoesNotKnowShowsAsCompleted() throws {
+        let wire = try Self.reply([
+            ["id": "s", "type": "tool_call", "toolCallId": "s", "name": "web_search", "arguments": "{}", "complete": true,
+             "display": ["query": "cats", "status": "cached", "sources": []]],
+        ])
+        #expect(ChatViewMapping.message(wire, streaming: true).webSearches?.first?.status == .completed)
+    }
+
+    @Test func anAttachmentOfAKindThisClientDoesNotKnowShowsAsAFile() throws {
+        let wire = try Self.message([
+            "id": "u", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Watch",
+            "attachments": [["id": "a", "kind": "video", "fileName": "cat.mp4", "mimeType": "video/mp4", "size": 12]],
+        ])
+        #expect(ChatViewMapping.message(wire).attachments.first?.type == .document)
+    }
+
+    @Test func aTitleOfAStateThisClientDoesNotKnowShowsAsItIs() throws {
+        let summary = try ThreadSummary(jsonObject: [
+            "id": "t", "title": "New Chat", "titleState": "translated", "activityAt": "2026-01-01T00:00:00Z",
+            "model": "auto", "webSearchEnabled": true, "pinned": false, "messageCount": 2,
+        ])
+        let chat = ChatViewMapping.chat(summary, local: false)
+        #expect(chat.title == "New Chat")
+        #expect(chat.titleState == .manual)
+    }
+
     @Test func aChatWaitingForItsTitleShowsTheDefaultOne() throws {
         var summary = try ThreadSummary(jsonObject: [
             "id": "t", "title": "New Chat", "titleState": "placeholder", "activityAt": "2026-01-01T00:00:00Z",
@@ -116,9 +163,18 @@ struct ChatViewMappingTests {
         #expect(chat.contextUsage == ContextUsage(percentage: 10, usedTokens: 10, limitTokens: 100))
         #expect(chat.activeRun?.runId == "r")
         summary.title = "Cats"
-        summary.titleState = .generated
+        summary.titleState = .named(.generated)
         chat = ChatViewMapping.chat(summary, local: true)
         #expect(chat.title == "Cats")
         #expect(chat.isLocalOnly)
+    }
+
+    @Test func aListedRunIsLiveUntilItsDeadline() throws {
+        let deadline = try #require(ChatAccessCache.date(of: "2026-01-01T00:01:00Z"))
+        let listed = ActiveRun(runId: "r", expiresAt: "2026-01-01T00:01:00Z", instance: "i")
+        #expect(listed.isLive(at: deadline.addingTimeInterval(-1)))
+        #expect(!listed.isLive(at: deadline))
+        // A run this app streams is live without a deadline.
+        #expect(ActiveRun(runId: "r", expiresAt: "", instance: "").isLive(at: deadline))
     }
 }

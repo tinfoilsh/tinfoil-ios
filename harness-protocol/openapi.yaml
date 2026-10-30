@@ -29,6 +29,10 @@ info:
       removed, and does not change meaning, while a supported client uses it.
     - A client ignores members and events it does not know. It handles an
       error code it does not know by the error's action.
+    - A list of values a response holds may gain values: such a list is an
+      anyOf of the values it names and any string. The harness sends only
+      the values named; a client treats one it does not know as the list's
+      description says.
     - A client keeps a ThreadRecord whole, members it does not know included,
       and sends it back as it was returned.
     - A change to what a ThreadRecord or a stored row holds changes its
@@ -37,7 +41,10 @@ info:
       refuses any other with RECORD_UNSUPPORTED. A member of a stored row it
       does not name is read past, since other clients of the same rows write
       members of their own; the harness leaves such members out when it
-      writes the row back.
+      writes the row back, except in the profile row. There it keeps them,
+      and for each field it changes it advances the edit clock the apps'
+      own profile sync keeps in fieldClocks, marking the clocks current
+      with clockVersion, so those apps can still merge the row.
     - The harness ignores request members it does not know, except in a
       profile patch, which refuses them.
     - Optional behavior is announced in the session's `features`. A client
@@ -80,7 +87,7 @@ tags:
   - name: projects
     description: Projects and their documents.
   - name: keys
-    description: The account's content key and its passkey bundles, which sync keeps.
+    description: The account's content key and its passkey bundles, as the control plane keeps them.
   - name: attachments
     description: Uploads and attachment downloads.
   - name: archives
@@ -274,7 +281,7 @@ paths:
                 limit: {type: integer}
       responses:
         "200":
-          description: The stored chats that match, how many more match that the harness could not open, and whether the search index is still being built. A chat sync could not fetch in time fails the search with UPSTREAM_REFUSED, and a failed rebuild of the search index with SEARCH_INDEX_FAILED.
+          description: The stored chats that match, how many more match that the harness could not open, and whether the search index is still being built. A chat the control plane could not serve in time fails the search with UPSTREAM_REFUSED, and a failed rebuild of the search index with SEARCH_INDEX_FAILED.
           content:
             application/json:
               schema:
@@ -631,13 +638,13 @@ paths:
       operationId: profileUpdate
       summary: Change the profile
       tags: [profile]
+      description: Sets the fields a patch names, then applies the saved prompt and favorite edits to the profile as stored when they apply. A client changes saved prompts and favorites by these edits while the session's features.promptPresetEdits is true, rather than sending whole lists it read earlier.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [patch]
               properties:
                 key: {type: string, description: "The account's content key, base64. Absent for device chats and signed-out callers."}
                 patch:
@@ -671,6 +678,10 @@ paths:
                     hasSeenOnboarding: {type: boolean}
                     hasSeenWebSearchIntro: {type: boolean}
                     dismissed: {type: object, additionalProperties: {type: boolean}}
+                savePromptPresets: {type: array, items: {$ref: "#/components/schemas/CustomPreset"}, description: "Saved prompts to add, each replacing the stored one with its id where it stands."}
+                deletePromptPresetIds: {type: array, items: {type: string}, description: "Saved prompts to remove. A removed prompt is no longer a favorite, and the default prompt it was is cleared."}
+                addFavoritePromptPresetIds: {type: array, items: {type: string}, description: "Prompts to add to the end of the favorites, unless they already are favorites."}
+                removeFavoritePromptPresetIds: {type: array, items: {type: string}, description: "Prompts to remove from the favorites."}
       responses:
         "200": {$ref: "#/components/responses/Profile"}
         default: {$ref: "#/components/responses/Error"}
@@ -903,7 +914,7 @@ paths:
       operationId: keysCurrent
       summary: Read the current content key
       tags: [keys]
-      description: The account's current content key id and its passkey bundles, as sync reports them.
+      description: The account's current content key id and its passkey bundles.
       requestBody:
         content:
           application/json:
@@ -996,7 +1007,11 @@ paths:
       operationId: keysMigrateAll
       summary: Reseal stored data under the current key
       tags: [keys]
-      description: Seals every row an older key sealed under the target key.
+      description: |
+        Seals every row an older key sealed under the target key, which must
+        be the account's registered key, in the background. A call while the
+        reseal runs, or shortly after it ends, reports on that reseal rather
+        than starting another.
       requestBody:
         required: true
         content:
@@ -1009,10 +1024,10 @@ paths:
                 target: {$ref: "#/components/schemas/KeyRef"}
       responses:
         "200":
-          description: Sync's report of the migration.
+          description: The harness's report of the reseal when the call returns.
           content:
             application/json:
-              schema: {type: object}
+              schema: {$ref: "#/components/schemas/ResealReport"}
         default: {$ref: "#/components/responses/Error"}
 
   /v1/attachments/upload:
@@ -1225,7 +1240,7 @@ paths:
             schema: {$ref: "#/components/schemas/PageRequest"}
       responses:
         "200":
-          description: The site's favicon, as the metadata enclave reports it.
+          description: The site's favicon, which the harness reads from DuckDuckGo by the site's host.
           content:
             application/json:
               schema:
@@ -1456,48 +1471,52 @@ components:
           chat.
         - stop: nothing the client or the user does makes the request succeed
           now. Tell the user, and do not offer to try again.
-      type: string
-      enum: [reauthenticate, reload, retry, wait, unlock, revise, stop]
+      anyOf:
+        - {type: string, enum: [reauthenticate, reload, retry, wait, unlock, revise, stop]}
+        - {type: string}
 
     ErrorCode:
-      type: string
-      enum:
-        - ALREADY_APPLIED
-        - ARCHIVE_TOO_LARGE
-        - ATTACHMENT_TOO_LARGE
-        - ATTACHMENT_UNSUPPORTED
-        - ATTACHMENTS_UNAVAILABLE
-        - BAD_REQUEST
-        - CHAT_FLAGGED
-        - CONTEXT_TOO_LARGE
-        - CREDENTIAL_REQUIRED
-        - IMPORT_INVALID
-        - IMPORT_TOO_LARGE
-        - KEY_MISMATCH
-        - KEY_REQUIRED
-        - MAX_TURNS
-        - MISSING_ATTACHMENT
-        - MODEL_UNAVAILABLE
-        - PAYLOAD_TOO_LARGE
-        - PROJECTS_REQUIRE_CLOUD
-        - QUEUE_FULL
-        - QUOTA_EXHAUSTED
-        - RATE_LIMITED
-        - RECORD_UNSUPPORTED
-        - REQUEST_TIMEOUT
-        - REVISION_CONFLICT
-        - RUN_IN_FLIGHT
-        - RUN_LOG_FULL
-        - RUN_NOT_FOUND
-        - SEARCH_INDEX_FAILED
-        - SYNC_OUTCOME_UNKNOWN
-        - TEMP_SPACE_BUSY
-        - THREAD_EXISTS
-        - THREAD_NOT_FOUND
-        - THREAD_TOO_LARGE
-        - TOOL_UNAVAILABLE
-        - UNAUTHENTICATED
-        - UPSTREAM_REFUSED
+      description: A client handles a code it does not know by the error's action.
+      anyOf:
+        - type: string
+          enum:
+            - ALREADY_APPLIED
+            - ARCHIVE_TOO_LARGE
+            - ATTACHMENT_TOO_LARGE
+            - ATTACHMENT_UNSUPPORTED
+            - ATTACHMENTS_UNAVAILABLE
+            - BAD_REQUEST
+            - CHAT_FLAGGED
+            - CONTEXT_TOO_LARGE
+            - CREDENTIAL_REQUIRED
+            - IMPORT_INVALID
+            - IMPORT_TOO_LARGE
+            - KEY_MISMATCH
+            - KEY_REQUIRED
+            - MAX_TURNS
+            - MISSING_ATTACHMENT
+            - MODEL_UNAVAILABLE
+            - PAYLOAD_TOO_LARGE
+            - PROJECTS_REQUIRE_CLOUD
+            - QUEUE_FULL
+            - QUOTA_EXHAUSTED
+            - RATE_LIMITED
+            - RECORD_UNSUPPORTED
+            - REQUEST_TIMEOUT
+            - REVISION_CONFLICT
+            - RUN_IN_FLIGHT
+            - RUN_LOG_FULL
+            - RUN_NOT_FOUND
+            - SEARCH_INDEX_FAILED
+            - SYNC_OUTCOME_UNKNOWN
+            - TEMP_SPACE_BUSY
+            - THREAD_EXISTS
+            - THREAD_NOT_FOUND
+            - THREAD_TOO_LARGE
+            - TOOL_UNAVAILABLE
+            - UNAUTHENTICATED
+            - UPSTREAM_REFUSED
+        - {type: string}
 
     # --- Session --------------------------------------------------------------
 
@@ -1560,7 +1579,11 @@ components:
             type: object
             required: [kind, label, tooltip]
             properties:
-              kind: {type: string, enum: [experimental, deprecated]}
+              kind:
+                description: A client shows no badge of a kind it does not know.
+                anyOf:
+                  - {type: string, enum: [experimental, deprecated]}
+                  - {type: string}
               label: {type: string}
               tooltip: {type: string}
         reasoning:
@@ -1608,7 +1631,11 @@ components:
       type: object
       required: [kind]
       properties:
-        kind: {type: [string, "null"], enum: [free_daily, hourly, null]}
+        kind:
+          description: A client shows no quota of a kind it does not know.
+          anyOf:
+            - {type: [string, "null"], enum: [free_daily, hourly, null]}
+            - {type: string}
         maxRequests: {type: integer}
         remaining: {type: integer}
         resetsAt: {$ref: "#/components/schemas/Timestamp"}
@@ -2014,7 +2041,11 @@ components:
 
     # --- Threads --------------------------------------------------------------
 
-    TitleState: {type: string, enum: [placeholder, generated, manual]}
+    TitleState:
+      description: How a chat came by its title. A client shows the title of a state it does not know as it is.
+      anyOf:
+        - {type: string, enum: [placeholder, generated, manual]}
+        - {type: string}
 
     ContextUsage:
       description: How much of the model's window the chat's last prompt filled.
@@ -2116,7 +2147,11 @@ components:
         annotations: {type: array, items: {$ref: "#/components/schemas/Annotation"}}
         attachments: {type: array, items: {$ref: "#/components/schemas/AttachmentView"}}
 
-    Role: {type: string, enum: [user, assistant]}
+    Role:
+      description: Who wrote a message. A client leaves out a message whose role it does not know.
+      anyOf:
+        - {type: string, enum: [user, assistant]}
+        - {type: string}
 
     MessageUsage:
       type: object
@@ -2131,7 +2166,11 @@ components:
       required: [id, type]
       properties:
         id: {type: string}
-        type: {type: string, enum: [content, thinking, tool_call]}
+        type:
+          description: A client leaves out a block of a type it does not know.
+          anyOf:
+            - {type: string, enum: [content, thinking, tool_call]}
+            - {type: string}
         content: {type: string}
         toolCallId: {type: string}
         name: {type: string}
@@ -2154,7 +2193,11 @@ components:
       properties:
         query: {type: string}
         url: {type: string}
-        status: {type: string, enum: [running, completed, failed]}
+        status:
+          description: A client shows a status it does not know as completed.
+          anyOf:
+            - {type: string, enum: [running, completed, failed]}
+            - {type: string}
         sources:
           type: array
           items:
@@ -2180,7 +2223,11 @@ components:
             start_index: {type: integer}
             end_index: {type: integer}
 
-    AttachmentKind: {type: string, enum: [image, document, audio]}
+    AttachmentKind:
+      description: What an attachment holds. A client shows an attachment of a kind it does not know as a file.
+      anyOf:
+        - {type: string, enum: [image, document, audio]}
+        - {type: string}
 
     AttachmentView:
       description: An attachment's metadata, thumbnail and any text it holds inline.
@@ -2383,8 +2430,16 @@ components:
       description: The account's settings. A field a profile leaves out takes its value from the session's profileDefaults.
       type: object
       properties:
-        themeMode: {type: string, enum: [light, dark, system]}
-        chatFont: {type: string, enum: [system, serif, mono, dyslexic]}
+        themeMode:
+          description: A client applies its own default for a value it does not know, and keeps the value.
+          anyOf:
+            - {type: string, enum: [light, dark, system]}
+            - {type: string}
+        chatFont:
+          description: A client applies its own default for a value it does not know, and keeps the value.
+          anyOf:
+            - {type: string, enum: [system, serif, mono, dyslexic]}
+            - {type: string}
         language: {type: string}
         nickname: {type: string}
         profession: {type: string}
@@ -2414,8 +2469,16 @@ components:
     ProfileView:
       type: object
       properties:
-        themeMode: {type: string, enum: [light, dark, system]}
-        chatFont: {type: string, enum: [system, serif, mono, dyslexic]}
+        themeMode:
+          description: A client applies its own default for a value it does not know, and keeps the value.
+          anyOf:
+            - {type: string, enum: [light, dark, system]}
+            - {type: string}
+        chatFont:
+          description: A client applies its own default for a value it does not know, and keeps the value.
+          anyOf:
+            - {type: string, enum: [system, serif, mono, dyslexic]}
+            - {type: string}
         language: {type: string}
         nickname: {type: string}
         profession: {type: string}
@@ -2449,7 +2512,7 @@ components:
       additionalProperties: true
 
     CustomPreset:
-      description: A prompt the user saved. Its timestamps are kept as the client wrote them.
+      description: A prompt the user saved. Its timestamps are kept as the client wrote them. A stored prompt always has a description and systemPrompt, empty when unset, and numeric timestamps, set when it is stored without them, as the apps' own profile sync requires.
       type: object
       required: [id, name]
       properties:
@@ -2493,7 +2556,11 @@ components:
 
     # --- Keys -----------------------------------------------------------------
 
-    KeyOrigin: {type: string, enum: [passkey, manual, recovery, start_fresh]}
+    KeyOrigin:
+      description: How the account's key was set up. A client treats an origin it does not know as unknown.
+      anyOf:
+        - {type: string, enum: [passkey, manual, recovery, start_fresh]}
+        - {type: string}
 
     KeyRef:
       type: object
@@ -2531,6 +2598,21 @@ components:
         created_via: {$ref: "#/components/schemas/KeyOrigin"}
         created_at: {type: string}
         has_data: {type: boolean, description: "The account has rows not sealed under this key."}
+
+    ResealReport:
+      description: "Where a reseal stands: the rows resealed so far, the rows still to try, and the rows no given key opens."
+      type: object
+      required: [status, migrated, remaining, blocked, partial]
+      properties:
+        status:
+          description: A client treats a status it does not know as running.
+          anyOf:
+            - {type: string, enum: [running, complete, failed]}
+            - {type: string}
+        migrated: {type: integer}
+        remaining: {type: integer}
+        blocked: {type: integer}
+        partial: {type: boolean, description: "The reseal's time or the account's credential ran out before every row was tried; a later call continues it."}
 
     # --- Archives -------------------------------------------------------------
 

@@ -8,7 +8,6 @@
 //  opens an in-app full-screen viewer (paging + pinch-to-zoom) unless
 //  the model supplied a `link`, in which case the link wins.
 
-import OpenAI
 import SwiftUI
 
 struct ImageWidget: GenUIWidget {
@@ -26,35 +25,6 @@ struct ImageWidget: GenUIWidget {
     }
 
     let name = "render_image"
-    let description = "Display one or more images. Pass a single item for a large standalone image; pass multiple items to render a responsive grid (galleries, comparisons, multi-visual references)."
-    let promptHint = "one or more images — pass a single item for a large standalone image, or multiple items for a responsive grid"
-
-    var schema: JSONSchema {
-        let item = GenUISchema.object(
-            properties: [
-                "url": GenUISchema.string(description: "Image URL"),
-                "alt": GenUISchema.string(description: "Accessible alt text"),
-                "caption": GenUISchema.string(),
-                "link": GenUISchema.string(description: "Optional destination when tapped"),
-            ],
-            required: ["url"]
-        )
-        return GenUISchema.object(
-            properties: [
-                "images": GenUISchema.array(
-                    items: item,
-                    description: "One or more images. A single image renders large with an optional caption; multiple images render in a responsive grid.",
-                    minItems: 1
-                ),
-                "title": GenUISchema.string(),
-                "aspectRatio": GenUISchema.string(
-                    description: "Single-image only. Container shape: square (1:1), video (16:9), or auto. Ignored when multiple images are provided.",
-                    enumValues: ["square", "video", "auto"]
-                ),
-            ],
-            required: ["images"]
-        )
-    }
 
     @MainActor
     func renderInline(args: Args, context: GenUIRenderContext) -> AnyView? {

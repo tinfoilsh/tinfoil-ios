@@ -41,6 +41,14 @@ private struct Fixture {
 
 private let threadId = "0000000000001_00000000-0000-4000-8000-000000000001"
 
+/// The session the harness opens for a signed-in account.
+private let signedInSession: [String: Any] = [
+    "protocol": ["version": 1, "minimum": 1], "user": ["id": "user-1", "anonymous": false], "rateLimit": ["kind": NSNull()],
+    "models": [], "auto": ["default": "", "levels": []], "defaultModel": "gpt-oss-120b", "widgets": [], "profileDefaults": [:],
+    "composer": ["attachments": [], "projectDocuments": [], "pasteAsFileChars": 1000, "dictationMaxSeconds": 60],
+    "presets": [], "features": [:],
+]
+
 private func summary(id: String = threadId, title: String = "Kept title", titleState: String = "generated", messageCount: Int = 1) -> [String: Any] {
     ["id": id, "title": title, "titleState": titleState, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": NSNull(),
      "activityAt": "2026-01-01T00:00:00Z", "projectId": NSNull(), "model": "kimi-k3", "webSearchEnabled": false, "pinned": false,
@@ -87,7 +95,7 @@ struct ChatSessionTests {
         let transport = fixture.transport
         await transport.push { request in
             let turn = request.json
-            return Answers.events(deviceRun(id: turn["threadId"] as! String, question: "second question", questionId: turn["clientRequestId"] as! String))(request)
+            return try Answers.events(deviceRun(id: turn["threadId"] as! String, question: "second question", questionId: turn["clientRequestId"] as! String))(request)
         }
         let finished = await session.send(TurnFields(kind: .send, content: "second question", options: TurnOptions(model: "kimi-k3")))
         #expect(finished)
@@ -101,6 +109,9 @@ struct ChatSessionTests {
         // A new chat has no copy to send; the harness makes it.
         #expect(turn["thread"] == nil)
         #expect((turn["options"] as? [String: Any])?["model"] as? String == "kimi-k3")
+        // Every turn is scoped to the caller's prompt cache as it is sent.
+        let secret = try #require(PromptCacheSecret.secret(userId: nil))
+        #expect((turn["options"] as? [String: Any])?["cacheSecret"] as? String == secret)
         let opened = try #require(session.open.id)
         #expect(turn["threadId"] as? String == opened)
         #expect(session.open.unsaved == nil)
@@ -128,7 +139,7 @@ struct ChatSessionTests {
         #expect(session.open.id == threadId)
         #expect(session.open.model == "kimi-k3")
         #expect(session.state.messages.map(\.id) == ["u1", "a1"])
-        #expect(session.state.snapshot.thread?.titleState == .generated)
+        #expect(session.state.snapshot.thread?.titleState.value1 == .generated)
 
         var renamed = stored
         renamed["title"] = .string("Dogs")
@@ -143,6 +154,46 @@ struct ChatSessionTests {
         #expect(request.json["thread"] != nil)
         #expect(try await session.device.get(threadId)?.title == "Dogs")
         #expect(session.state.snapshot.thread?.title == "Dogs")
+    }
+
+    @Test func aChatOpenedOnAnUnansweredMessageAsksTheHarnessToAnswerIt() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        let stored = StoredThread(json: record(messages: [
+            ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "second question"],
+        ]))!
+        _ = try await session.device.add(stored, originals: [:])
+        session.list.reloadDevice()
+        #expect(try await session.openChat(threadId, local: true) == .opened)
+        #expect(session.hasUnfinishedReply)
+
+        await fixture.transport.push(Answers.events(deviceRun(id: threadId, question: "second question", questionId: "u1")))
+        #expect(await session.retry())
+        let request = try #require(await fixture.transport.requests.last)
+        #expect(request.route == .turn)
+        #expect(request.json["kind"] as? String == "retry")
+        #expect(session.state.messages.count == 2)
+        #expect(!session.hasUnfinishedReply)
+    }
+
+    @Test func aTemporaryChatIsKeptOnceItsReplyIsStored() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        session.newChat()
+        session.setTemporary(true)
+        await fixture.transport.push { request in
+            let turn = request.json
+            return try Answers.events(deviceRun(id: turn["threadId"] as! String, question: "hello", questionId: turn["clientRequestId"] as! String))(request)
+        }
+        #expect(await session.send(TurnFields(kind: .send, content: "hello")))
+        let threadId = try #require(session.open.id)
+        #expect(try await session.device.get(threadId) == nil)
+
+        try await session.saveTemporary()
+        #expect(!session.open.temporary)
+        #expect(session.open.id == threadId)
+        #expect(try await session.device.get(threadId)?.messages.count == 2)
+        #expect(session.state.messages.count == 2)
     }
 
     @Test func aStoredChatIsNamedByItsKey() async throws {
@@ -177,6 +228,71 @@ struct ChatSessionTests {
         #expect(session.state.messages.last?.timeline?.first?.content == "Hi.")
     }
 
+    @Test func aStopThatArrivesAfterTheReplyEndedReadsTheChatAgainRatherThanFailing() async throws {
+        let window: [String: Any] = summary().merging([
+            "revision": "rev-1", "presetId": NSNull(), "flagged": false,
+            "messages": [["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"]],
+            "hasOlder": false,
+        ]) { $1 }
+        let (rereads, reread) = AsyncStream<HarnessRoute>.makeStream()
+        let fixture = Fixture(userId: "user-1", answers: [
+            Answers.json(window),
+            Answers.refusal(409, code: HarnessErrorCode.runInFlight, action: "reload"),
+            { request in
+                reread.yield(request.route)
+                return try Answers.json(window)(request)
+            },
+        ])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        do { try await session.cancel() } catch { session.report(error) }
+        try #require(session.open.failure == nil)
+        var routes = rereads.makeAsyncIterator()
+        #expect(await routes.next() == .get)
+    }
+
+    @Test func olderMessagesAreReadPastAPageThisClientShowsNothingOf() async throws {
+        func page(_ messages: [[String: Any]], hasOlder: Bool) -> [String: Any] {
+            summary().merging(["revision": "rev-1", "presetId": NSNull(), "flagged": false, "messages": messages, "hasOlder": hasOlder]) { $1 }
+        }
+        let fixture = Fixture(userId: "user-1", answers: [
+            Answers.json(page([["id": "u3", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "third question"]], hasOlder: true)),
+            Answers.json(page([["id": "n2", "role": "narrator", "createdAt": "2026-01-01T00:00:00Z", "content": "a later role"]], hasOlder: true)),
+            Answers.json(page([["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"]], hasOlder: false)),
+        ])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        try await session.older()
+        #expect(session.state.messages.map(\.id) == ["u1", "u3"])
+        #expect(!session.state.hasOlder)
+        #expect(await fixture.transport.requests.map { $0.json["before"] as? String } == [nil, "u3", "n2"])
+    }
+
+    @Test func aForkOpensOnceItsOpeningReturnsUnlessTheViewMoved() async throws {
+        let forkId = "0000000000002_00000000-0000-4000-8000-000000000002"
+        func window(_ id: String) -> [String: Any] {
+            summary(id: id).merging([
+                "revision": "rev-1", "presetId": NSNull(), "flagged": false,
+                "messages": [["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"]],
+                "hasOlder": false,
+            ]) { $1 }
+        }
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(window(threadId)), Answers.json(summary(id: forkId)), Answers.json(window(forkId))])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        var shownWhileOpening: String?
+        let forked = try await session.fork(at: 0) { _ in shownWhileOpening = session.open.id }
+        #expect(forked == forkId)
+        #expect(shownWhileOpening == threadId)
+        #expect(session.open.id == forkId)
+
+        await fixture.transport.push(Answers.json(summary(id: "0000000000003_00000000-0000-4000-8000-000000000003")))
+        let moved = try await session.fork(at: 0) { _ in session.newChat() }
+        #expect(moved == nil)
+        #expect(session.open.id == nil)
+        #expect(await fixture.transport.requests.map(\.route) == [.get, .fork, .get, .fork])
+    }
+
     @Test func aRefusedTurnLeavesTheChatAsItWasWithTheError() async throws {
         let fixture = Fixture(answers: [Answers.refusal(429, code: "QUOTA_EXHAUSTED", action: "wait")])
         let session = fixture.session
@@ -191,5 +307,74 @@ struct ChatSessionTests {
         #expect(session.open.unsaved == nil)
         #expect(session.controller.pending?.input.content == "hello")
         #expect(try await session.device.get(session.open.id!)?.messages.count == 1)
+    }
+
+    @Test func aChatOnThisDeviceSendsWhileTheAccountsKeyIsRefused() async throws {
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(signedInSession), Answers.refusal(409, code: HarnessErrorCode.keyMismatch, action: "unlock")])
+        let session = fixture.session
+        // A chat on this device sends with the settings this device kept,
+        // while a stored chat waits for the account's.
+        session.newChat(local: true)
+        #expect(session.sendBlock == nil)
+        session.newChat(local: false)
+        #expect(session.sendBlock == .loading)
+        try await fixture.account.refresh()
+        #expect(fixture.account.keyLocked)
+        #expect(session.sendBlock == .locked)
+        session.newChat(local: true)
+        #expect(session.sendBlock == nil)
+        // A stored chat opened from this one would wait for the key.
+        #expect(session.sendBlock(onDevice: false) == .locked)
+        session.newChat(local: false)
+        session.setTemporary(true)
+        #expect(session.sendBlock == nil)
+    }
+
+    @Test func aStoredChatWaitsForSettingsThatFailedToLoad() async throws {
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(signedInSession), Answers.refusal(503, code: "UPSTREAM_UNAVAILABLE", action: "retry")])
+        let session = fixture.session
+        try await fixture.account.refresh()
+        session.newChat(local: false)
+        #expect(session.sendBlock == .failed)
+        session.newChat(local: true)
+        #expect(session.sendBlock == nil)
+    }
+
+    @Test func anAccountSignedOutOfSendsNothingMore() async throws {
+        let fixture = Fixture(userId: "user", answers: [])
+        fixture.account.dispose()
+        await #expect(throws: CancellationError.self) {
+            let _: RawJSON = try await fixture.account.post(.session, keyless: true)
+        }
+        #expect(await fixture.transport.requests.isEmpty)
+    }
+
+    @Test func anUploadIsTheAttachmentTheHarnessConvertedItTo() async throws {
+        let sessionAnswer: [String: Any] = [
+            "protocol": ["version": 1, "minimum": 1], "user": ["id": "", "anonymous": true], "rateLimit": ["kind": NSNull()],
+            "models": [], "auto": ["default": "", "levels": []], "defaultModel": "gpt-oss-120b", "widgets": [], "profileDefaults": [:],
+            "composer": ["attachments": [["accept": [".txt"], "maxBytes": 1000]], "projectDocuments": [], "pasteAsFileChars": 1000, "dictationMaxSeconds": 60],
+            "presets": [], "features": [:],
+        ]
+        let converted: [String: Any] = ["id": "att_1", "kind": "document", "fileName": "notes.txt", "mimeType": "text/plain", "textContent": "Notes"]
+        let fixture = Fixture(answers: [Answers.json(sessionAnswer), Answers.json(["attachment": converted])])
+        try await fixture.account.refresh()
+        let attachment = try await fixture.session.upload(Data("Notes".utf8), fileName: "notes.txt", mimeType: "text/plain")
+        #expect(attachment.id == "att_1")
+        #expect(attachment.textContent == "Notes")
+        #expect(await fixture.transport.requests.last?.route == .attachmentUpload)
+    }
+
+    @Test func aFilePickedBeforeTheSessionLoadsIsCheckedAgainstItOnceItHas() async throws {
+        var opened = signedInSession
+        opened["user"] = ["id": "", "anonymous": true]
+        opened["composer"] = ["attachments": [["accept": [".txt"], "maxBytes": 1000]], "projectDocuments": [], "pasteAsFileChars": 1000, "dictationMaxSeconds": 60]
+        let converted: [String: Any] = ["id": "att_1", "kind": "document", "fileName": "notes.txt", "mimeType": "text/plain", "textContent": "Notes"]
+        let fixture = Fixture(answers: [Answers.json(opened), Answers.json(["attachment": converted])])
+        #expect(fixture.account.session == nil)
+        let attachment = try await fixture.session.upload(Data("Notes".utf8), fileName: "notes.txt", mimeType: "text/plain")
+        #expect(attachment.id == "att_1")
+        #expect(await fixture.transport.requests.map(\.route) == [.session, .attachmentUpload])
+        #expect(fixture.account.session != nil)
     }
 }

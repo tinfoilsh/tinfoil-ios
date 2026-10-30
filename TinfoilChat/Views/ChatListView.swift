@@ -25,6 +25,9 @@ struct ChatListView: View {
     @State private var scrollTrigger = UUID()
     @State private var scrollToUserTrigger = UUID()
     @State private var tableOpacity = 1.0
+    /// The first message shown, by which messages loaded before it are told
+    /// apart from messages added after the last.
+    @State private var shownFirstMessageId: String?
 
     private var isCurrentChatReadOnly: Bool {
         viewModel.isCurrentChatSafeguardFlagged
@@ -199,6 +202,13 @@ struct ChatListView: View {
             keyboardHeight = 0
         }
         .onChange(of: messages.count) { oldCount, newCount in
+            let previousFirstId = shownFirstMessageId
+            shownFirstMessageId = messages.first?.id
+            // Messages loaded before those shown leave the reader in place.
+            if oldCount > 0, let previousFirstId, messages.first?.id != previousFirstId,
+               messages.contains(where: { $0.id == previousFirstId }) {
+                return
+            }
             if newCount > oldCount {
                 let newMessages = messages.suffix(newCount - oldCount)
                 let hasUserMessage = newMessages.contains { $0.role == .user }
@@ -210,18 +220,26 @@ struct ChatListView: View {
                     if hasUserMessage && viewModel.isLoading {
                         scrollToUserTrigger = UUID()
                     } else {
+                        // A chat's messages arriving after it opened stay
+                        // hidden until the scroll to the end has placed them.
+                        if wasInitialLoad { tableOpacity = 0 }
                         scrollTrigger = UUID()
                     }
                 }
             }
         }
-        // Keyed off the chat id: reassigning the same chat (e.g. the disk
-        // reload after a stream's backup completes) must not read as a chat
-        // switch, since this handler force-scrolls to the bottom. Timestamps
-        // are unsuitable as the key because createdAt loses sub-millisecond
-        // precision through the cloud sync ISO8601 round-trip, making
-        // reloaded copies of the same chat compare unequal.
-        .onChange(of: viewModel.currentChat?.id) { _, _ in
+        // Keyed off the chat id: the open chat is rebuilt with every change
+        // to it, which must not read as a chat switch, since this handler
+        // force-scrolls to the bottom.
+        .onChange(of: viewModel.currentChat?.id) { oldId, _ in
+            // Another chat may open with as many messages as the one before,
+            // which changes no count; older messages loaded into it are told
+            // from new ones by its own first message.
+            shownFirstMessageId = messages.first?.id
+            // A new chat's first message gives the chat its id: the same
+            // conversation stays on screen, positioned by the message count
+            // change that came with it.
+            if oldId?.isEmpty ?? true, viewModel.isNewChatsFirstTurn { return }
             userHasScrolled = false
             viewModel.isScrollInteractionActive = false
 

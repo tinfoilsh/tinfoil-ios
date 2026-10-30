@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import OSLog
 import UIKit
@@ -48,6 +49,10 @@ final class HarnessAccount: ObservableObject {
     private var profileVersion = 0
     private var profileWrites: Task<Void, Never>?
     private var profileSource: ProfileSource?
+    /// A digest of the content key the account was opened with, or its
+    /// settings last loaded or were asked for with, empty for no key; nil
+    /// once the key changed.
+    private var profileKey: Data?
     private var storedProfile: ProfileFields = [:]
     private var unsavedProfile: [ProfileFields] = []
     private var changeTokens: ChangeTokens?
@@ -78,7 +83,17 @@ final class HarnessAccount: ObservableObject {
         self.settings = settings
         self.cloudSync = cloudSync
         cloud = userId != nil && cloudSync
-        profile = cloud ? settings.cloudProfileCache(userId: userId) : [:]
+        if cloud {
+            profile = settings.cloudProfileCache(userId: userId)
+            profileKey = heldKeyDigest()
+        } else if let local = try? settings.loadLocalProfile() {
+            // The settings this device holds show, and turns can use them,
+            // before the session loads.
+            profileSource = .local
+            keyReady = userId == nil
+            profileReady = true
+            showProfile(local)
+        }
     }
 
     func dispose() {
@@ -111,6 +126,7 @@ final class HarnessAccount: ObservableObject {
         changeTokens = nil
         keyGeneration += 1
         profileVersion += 1
+        profileKey = nil
         keyReady = false
         keyLocked = false
         profileReady = false
@@ -123,10 +139,30 @@ final class HarnessAccount: ObservableObject {
         cloud ? settings.cloudProfileCache(userId: userId) : [:]
     }
 
+    /// The settings could not load for a reason other than the key, and
+    /// load again as the session is refreshed.
+    var profileFailed: Bool {
+        !profileReady && !keyLocked && error != nil
+    }
+
+    /// The account was opened, or its settings read, with the content key
+    /// this device holds now, so nothing the key opens needs loading again.
+    /// Settings this device holds read no key.
+    var readsHeldKey: Bool {
+        !cloud || profileKey == heldKeyDigest()
+    }
+
+    private func heldKeyDigest() -> Data {
+        guard var bytes = keyBytes() else { return Data() }
+        defer { bytes.resetBytes(in: 0..<bytes.count) }
+        return Data(SHA256.hash(data: bytes))
+    }
+
     // MARK: - Requests
 
     /// A request's body with the content key, unless the route reads none.
     private func keyed(_ body: some Encodable, keyless: Bool) throws -> JSONObject {
+        guard !disposed else { throw CancellationError() }
         var object = try body.jsonObject()
         if !keyless, let key = try key() { object["key"] = key }
         return JSONObject(object)
@@ -195,7 +231,7 @@ final class HarnessAccount: ObservableObject {
     /// reported, until the access is minted again with the control plane's
     /// count.
     func reportUsage(_ usage: Components.Schemas.RunMetadata.UsagePayload?) {
-        guard !disposed, var limit = rateLimit, limit.kind == .hourly, let usage else { return }
+        guard !disposed, var limit = rateLimit, limit.kind?.value1 == .hourly, let usage else { return }
         func spend(_ budget: Components.Schemas.TokenBudget?, _ tokens: Int) -> Components.Schemas.TokenBudget? {
             guard let budget, tokens > 0 else { return budget }
             return Components.Schemas.TokenBudget(max: budget.max, used: budget.used + tokens, remaining: max(0, budget.remaining - tokens))
@@ -220,18 +256,26 @@ final class HarnessAccount: ObservableObject {
         return session
     }
 
-    // MARK: - Settings
+    /// The session, read now when it has not loaded yet, as when a file is
+    /// picked while the app is still opening.
+    func loadedSession() async throws -> HarnessSession {
+        if let session { return session }
+        let loaded: HarnessSession = try await post(.session, keyless: true)
+        guard !disposed else { throw CancellationError() }
+        if session == nil {
+            session = loaded
+            reportRateLimit(loaded.rateLimit)
+        }
+        return session ?? loaded
+    }
 
-    /// The members of a profile this client does not read, whose values a
-    /// later harness may extend.
-    private static let unreadProfileMembers = ["themeMode", "chatFont"]
+    // MARK: - Settings
 
     /// The settings shown: the session's defaults under the profile. A
     /// profile this client cannot read shows the defaults, and is reported.
     var effectiveProfile: Components.Schemas.Profile {
         var fields = (try? session?.profileDefaults.jsonObject()) ?? [:]
         fields.merge(profile) { $1 }
-        for member in Self.unreadProfileMembers { fields[member] = nil }
         do {
             return try Components.Schemas.Profile(jsonObject: fields)
         } catch {
@@ -254,9 +298,16 @@ final class HarnessAccount: ObservableObject {
         let version = profileVersion
         if !cloud {
             profileSource = .local
-            let local = settings.loadLocalProfile()
             keyReady = userId == nil
             keyLocked = false
+            let local: ProfileFields
+            do {
+                local = try settings.loadLocalProfile()
+            } catch {
+                profileReady = false
+                self.error = error.localizedDescription
+                return false
+            }
             profileReady = true
             error = nil
             showProfile(local)
@@ -266,12 +317,13 @@ final class HarnessAccount: ObservableObject {
         if !background {
             keyLocked = false
             error = nil
+            profileKey = heldKeyDigest()
         }
         do {
             let merging = settings.pendingProfileMerge == userId
             let fields: ProfileFields
             if merging {
-                let local = settings.loadLocalProfile()
+                let local = try settings.loadLocalProfile()
                 let merged: RawJSON = try await post(.profileMerge, JSONObject(["profile": JSONValue(any: local), "changedFields": JSONValue(any: settings.localProfileChanges())]))
                 fields = try Self.object(of: merged)
             } else {
@@ -293,10 +345,6 @@ final class HarnessAccount: ObservableObject {
             return true
         } catch {
             guard !disposed, version == profileVersion else { return false }
-            if background {
-                Self.logger.error("Failed to refresh the profile: \(error, privacy: .public)")
-                return false
-            }
             // Only the key's refusal takes the key away; a request that
             // failed for another reason leaves it as it was.
             let keyRefused = (error as? HarnessError).map { $0.code == HarnessErrorCode.keyRequired || $0.code == HarnessErrorCode.keyMismatch } ?? false
@@ -304,8 +352,13 @@ final class HarnessAccount: ObservableObject {
                 keyReady = false
                 keyLocked = true
             }
+            if background {
+                Self.logger.error("Failed to refresh the profile: \(error, privacy: .public)")
+                return false
+            }
             profileReady = false
             self.error = error.localizedDescription
+            Self.noteAuthenticationRequired(error)
             showProfile(keptProfile())
             return false
         }
@@ -321,7 +374,7 @@ final class HarnessAccount: ObservableObject {
                 let sent = try JSONSerialization.data(withJSONObject: local, options: [.sortedKeys])
                 let upgraded: RawJSON = try await post(.profileUpgrade, JSONObject(["profile": JSONValue(any: local)]), keyless: true)
                 guard !disposed else { return }
-                let current = try JSONSerialization.data(withJSONObject: settings.loadLocalProfile(), options: [.sortedKeys])
+                let current = try JSONSerialization.data(withJSONObject: try settings.loadLocalProfile(), options: [.sortedKeys])
                 guard current == sent else { return }
                 let fields = try Self.object(of: upgraded)
                 let saved = try settings.saveLocalProfile(fields, replace: true)
@@ -367,6 +420,30 @@ final class HarnessAccount: ObservableObject {
     /// change is taken back.
     @discardableResult
     func updateProfile(_ patch: ProfileFields) async throws -> ProfileFields {
+        try await saveProfile(patch, edits: nil)
+    }
+
+    /// Saved prompts and favorites change by id on the profile as the
+    /// harness stores it, so a list this device read before another changed
+    /// it, or before the profile loaded, never replaces the stored one.
+    @discardableResult
+    func editPrompts(_ edits: PromptEdits) async throws -> ProfileFields {
+        let patch = edits.applied(to: profile)
+        guard cloud else { return try await saveProfile(patch, edits: nil) }
+        if session?.features.additionalProperties["promptPresetEdits"] == true {
+            return try await saveProfile(patch, edits: edits)
+        }
+        // A chat service without edits takes whole lists, which only the
+        // loaded profile holds.
+        guard profileReady else {
+            throw HarnessError(code: HarnessErrorCode.profileLoading, message: "Wait for your settings to load, then try again.", action: .wait)
+        }
+        return try await saveProfile(patch, edits: nil)
+    }
+
+    /// Shows and saves a change, sending the harness its fields, or the
+    /// prompt edits that make it.
+    private func saveProfile(_ patch: ProfileFields, edits: PromptEdits?) async throws -> ProfileFields {
         guard !disposed else { throw CancellationError() }
         let cloud = cloud
         let generation = keyGeneration
@@ -383,7 +460,7 @@ final class HarnessAccount: ObservableObject {
                 let version = profileVersion
                 let saved: ProfileFields
                 if cloud {
-                    let answer: RawJSON = try await post(.profileUpdate, JSONObject(["patch": JSONValue(any: patch)]))
+                    let answer: RawJSON = try await post(.profileUpdate, edits?.body ?? JSONObject(["patch": JSONValue(any: patch)]))
                     saved = try Self.object(of: answer)
                 } else {
                     saved = try settings.saveLocalProfile(patch, replace: false)
@@ -396,7 +473,10 @@ final class HarnessAccount: ObservableObject {
                 return .success(saved)
             } catch {
                 settle(patch)
-                if !disposed { showProfile(storedProfile) }
+                if !disposed {
+                    showProfile(storedProfile)
+                    Self.noteAuthenticationRequired(error)
+                }
                 return .failure(error)
             }
         }
@@ -420,8 +500,7 @@ final class HarnessAccount: ObservableObject {
     // MARK: - Changes
 
     /// Polls what the harness holds of the account, so a change another
-    /// device made shows here: on a timer, and as the app comes to the
-    /// foreground.
+    /// device made shows here: on a timer, and as the app becomes active.
     func watchChanges() {
         changeWatcher?.cancel()
         changeWatcher = Task { [weak self] in
@@ -432,7 +511,7 @@ final class HarnessAccount: ObservableObject {
             }
         }
         if observers.isEmpty {
-            observers.append(NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            observers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
                 Task { await self?.checkChanges() }
             })
         }
@@ -466,6 +545,14 @@ final class HarnessAccount: ObservableObject {
     func report(_ cause: Error) {
         guard !disposed, !(cause is CancellationError) else { return }
         error = cause.localizedDescription
+        Self.noteAuthenticationRequired(cause)
+    }
+
+    /// An identity the harness refused even once refreshed asks for a
+    /// sign-in, which the app shows.
+    static func noteAuthenticationRequired(_ cause: Error) {
+        guard let error = cause as? HarnessError, error.action == .reauthenticate else { return }
+        NotificationCenter.default.post(name: .chatAuthenticationRequired, object: nil)
     }
 }
 
@@ -474,7 +561,7 @@ final class HarnessAccount: ObservableObject {
 /// upgraded, a merge into the cloud still pending, and the cloud profile
 /// last seen.
 protocol ProfileStorage: AnyObject {
-    func loadLocalProfile() -> ProfileFields
+    func loadLocalProfile() throws -> ProfileFields
     func saveLocalProfile(_ patch: ProfileFields, replace: Bool) throws -> ProfileFields
     func localProfileChanges() -> [String]
     func clearLocalProfileChanges()

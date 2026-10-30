@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import OSLog
 
@@ -22,9 +23,11 @@ struct ChatListSnapshot: Codable, Equatable {
     var pinned: [ThreadSummary]
 }
 
-/// Keeps the last listing of each scope in an encrypted file under the
-/// account's directory.
+/// Keeps the last listing of each scope, and of the account's projects, in
+/// an encrypted file under the account's directory.
 final class ChatListCache: Sendable {
+    private static let projectsFileName = "projects.cache"
+
     private let directory: URL?
     private let encryptor: ChatEncryptor
 
@@ -38,16 +41,33 @@ final class ChatListCache: Sendable {
     }
 
     func read(projectId: String?) async -> ChatListSnapshot? {
-        guard let url = file(projectId), let sealed = try? Data(contentsOf: url),
-              let envelope = try? JSONDecoder().decode(EncryptedData.self, from: sealed),
-              let data = try? await encryptor.decryptData(envelope) else { return nil }
-        return try? JSONDecoder().decode(ChatListSnapshot.self, from: data)
+        await read(ChatListSnapshot.self, from: file(projectId))
     }
 
     func write(_ snapshot: ChatListSnapshot, projectId: String?) async {
-        guard let url = file(projectId), let data = try? JSONEncoder().encode(snapshot),
+        await write(snapshot, to: file(projectId))
+    }
+
+    /// The account's projects as they were last listed.
+    func readProjects() async -> [Project]? {
+        await read([Project].self, from: directory?.appendingPathComponent(Self.projectsFileName))
+    }
+
+    func writeProjects(_ projects: [Project]) async {
+        await write(projects, to: directory?.appendingPathComponent(Self.projectsFileName))
+    }
+
+    private func read<T: Decodable>(_ type: T.Type, from url: URL?) async -> T? {
+        guard let url, let sealed = try? Data(contentsOf: url),
+              let envelope = try? JSONDecoder().decode(EncryptedData.self, from: sealed),
+              let data = try? await encryptor.decryptData(envelope) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
+    }
+
+    private func write(_ value: some Encodable, to url: URL?) async {
+        guard let url, let data = try? JSONEncoder().encode(value),
               let envelope = try? await encryptor.encryptData(data), let sealed = try? JSONEncoder().encode(envelope) else { return }
-        try? sealed.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try? sealed.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
     }
 
     func clear() {
@@ -71,11 +91,13 @@ final class ChatList: ObservableObject {
     @Published private(set) var deviceListed: [ThreadSummary] = []
     @Published private(set) var nextCursor: String?
     @Published private(set) var loading = false
+    /// A page after those listed is loading, as Load More asked.
+    @Published private(set) var loadingMore = false
     @Published private(set) var error: String?
 
     private let account: HarnessAccount
     private let device: LocalThreadStore
-    private let cache: ChatListCache
+    let cache: ChatListCache
     private var projectId: String?
     private var restored = false
     private var loaded = false
@@ -90,24 +112,48 @@ final class ChatList: ObservableObject {
     /// turn, so undoing an edit a later one already replaced hands the later
     /// edit the copy to go back to.
     private var previews: [String: [(before: ThreadSummary, after: ThreadSummary)]] = [:]
+    /// Reads the stored chats again as the harness reports a change to them,
+    /// such as one another device made.
+    private var revisionWatch: AnyCancellable?
+    /// The list of one project's stored chats, which the project's page
+    /// shows. It loads page by page as this list does, and shows the changes
+    /// made through this list as they are made.
+    @Published private(set) var project: ChatList?
+    private var projectWatch: AnyCancellable?
 
     let cloud: CloudEdits
     let deviceEdits: DeviceEdits
 
-    init(account: HarnessAccount, device: LocalThreadStore, cache: ChatListCache) {
+    init(account: HarnessAccount, device: LocalThreadStore, cache: ChatListCache, projectId: String? = nil) {
         self.account = account
         self.device = device
         self.cache = cache
+        self.projectId = projectId
         cloud = CloudEdits()
         deviceEdits = DeviceEdits()
         cloud.list = self
         deviceEdits.list = self
+        revisionWatch = account.$chatRevision.dropFirst().removeDuplicates().sink { [weak self] _ in self?.reload() }
     }
 
     var isCloud: Bool { account.cloud }
 
     func isOnDevice(_ threadId: String) -> Bool {
         deviceListed.contains { $0.id == threadId }
+    }
+
+    /// Lists a project's stored chats beside these, or no project's.
+    func listProject(_ projectId: String?) {
+        guard projectId != project?.projectId else { return }
+        projectWatch = nil
+        guard let projectId else {
+            project = nil
+            return
+        }
+        let listed = ChatList(account: account, device: device, cache: cache, projectId: projectId)
+        project = listed
+        projectWatch = listed.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        listed.reload()
     }
 
     // MARK: - Listing
@@ -135,6 +181,9 @@ final class ChatList: ObservableObject {
         guard account.cloud else { return }
         await restore(projectId: projectId)
         guard account.keyReady else { return }
+        // The project's list is read again with this one when it has not
+        // been read since it was cleared, or failed to be.
+        if cursor == nil, let project, project.refreshing == 0, !project.loaded || project.error != nil { project.reload() }
         if cursor == nil { listing += 1 }
         let version = listing
         if error != nil { error = nil; loaded = false }
@@ -195,8 +244,13 @@ final class ChatList: ObservableObject {
 
     @discardableResult
     func loadMore() -> Task<Void, Never>? {
-        guard let nextCursor else { return nil }
-        return reload(after: nextCursor)
+        guard let nextCursor, !loadingMore else { return nil }
+        loadingMore = true
+        let load = reload(after: nextCursor)
+        return Task {
+            await load.value
+            loadingMore = false
+        }
     }
 
     /// Reads the chats this device keeps again, as they change.
@@ -224,6 +278,7 @@ final class ChatList: ObservableObject {
         cloudListed = []
         pinnedListed = []
         nextCursor = nil
+        project?.clearCloud(confirmedEmpty: confirmedEmpty)
     }
 
     private func persist() async {
@@ -250,7 +305,7 @@ final class ChatList: ObservableObject {
         guard patch.title != nil || patch.pinned != nil else { return {} }
         func changed(_ summary: ThreadSummary, titleOnly: Bool = false) -> ThreadSummary {
             var next = summary
-            if let title = patch.title { next.title = title; next.titleState = .manual }
+            if let title = patch.title { next.title = title; next.titleState = .named(.manual) }
             if !titleOnly, let pinned = patch.pinned { next.pinned = pinned }
             return next
         }
@@ -269,6 +324,7 @@ final class ChatList: ObservableObject {
         } else if let stored = cloudListed.first(where: { $0.id == threadId }), patch.pinned == true {
             undo.append(appendShown(\.pinnedListed, changed(stored)))
         }
+        if let project { undo.append(project.preview(threadId, patch)) }
         return { [weak self] in
             undo.forEach { $0() }
             Task { await self?.persist() }
@@ -282,6 +338,7 @@ final class ChatList: ObservableObject {
         for path in [\ChatList.cloudListed, \ChatList.pinnedListed, \ChatList.deviceListed] {
             if let before = self[keyPath: path].first(where: { $0.id == threadId }) { undo.append(removeShown(path, before)) }
         }
+        if let project { undo.append(project.previewRemoval(threadId)) }
         return { [weak self] in
             undo.forEach { $0() }
             Task { await self?.persist() }
@@ -325,7 +382,8 @@ final class ChatList: ObservableObject {
 
     // MARK: - Edits
 
-    /// The changes a store makes to the stored chats it lists.
+    /// The changes a store makes to the stored chats it lists, which the
+    /// project's list shows too.
     @MainActor
     final class CloudEdits: ListEdits {
         weak var list: ChatList?
@@ -335,18 +393,25 @@ final class ChatList: ObservableObject {
             if list.inScope(summary) { list.cloudListed = [summary] + list.cloudListed.filter { $0.id != summary.id } }
             if summary.pinned { list.pin(summary) }
             list.touched()
+            list.project?.cloud.add(summary)
         }
 
+        /// A chat moved into the project a list is of joins it.
         func replace(_ summary: ThreadSummary) {
             guard let list else { return }
             list.settlePreviews(summary.id)
             if list.inScope(summary) {
-                list.cloudListed = list.cloudListed.map { $0.id == summary.id ? summary : $0 }
+                if list.projectId != nil, !list.cloudListed.contains(where: { $0.id == summary.id }) {
+                    list.cloudListed = [summary] + list.cloudListed
+                } else {
+                    list.cloudListed = list.cloudListed.map { $0.id == summary.id ? summary : $0 }
+                }
             } else {
                 list.cloudListed.removeAll { $0.id == summary.id }
             }
             if summary.pinned { list.pin(summary) } else { list.pinnedListed.removeAll { $0.id == summary.id } }
             list.touched()
+            list.project?.cloud.replace(summary)
         }
 
         func remove(_ threadId: String) {
@@ -354,6 +419,7 @@ final class ChatList: ObservableObject {
             list.cloudListed.removeAll { $0.id == threadId }
             list.pinnedListed.removeAll { $0.id == threadId }
             list.touched()
+            list.project?.cloud.remove(threadId)
         }
 
         /// A stored chat as the open chat's run reports it, which is newer
@@ -367,6 +433,7 @@ final class ChatList: ObservableObject {
             if list.inScope(shown) { list.cloudListed = [shown] + list.cloudListed.filter { $0.id != shown.id } }
             if shown.pinned { list.pinnedListed = list.pinnedListed.map { $0.id == shown.id ? shown : $0 } }
             list.touched()
+            list.project?.cloud.reported(summary)
         }
     }
 

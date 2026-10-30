@@ -2,7 +2,7 @@
 
 **Available on:** [App Store](https://apps.apple.com/us/app/tinfoil-private-ai/id6745201750)
 
-The iOS app for Tinfoil Chat, a private AI assistant. Before sending a message, the app verifies that the model runs in an attested secure enclave and encrypts the message to that enclave with the [Tinfoil Swift SDK](https://github.com/tinfoilsh/tinfoil-swift). Saved chats are encrypted on the device with a key only the user controls before they sync to the cloud.
+The iOS app for Tinfoil Chat, a private AI assistant. Its chats run in the attested [chat harness](https://github.com/tinfoilsh/confidential-tinfoil-harness) inside a secure enclave, which also stores them when cloud sync is on. The app verifies the enclave and seals every request to it.
 
 - [Tinfoil Chat overview](https://docs.tinfoil.sh/chat/overview)
 - [Cloud sync and encryption](https://docs.tinfoil.sh/chat/cloud-sync)

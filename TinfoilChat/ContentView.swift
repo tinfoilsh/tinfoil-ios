@@ -21,7 +21,6 @@ struct ContentView: View {
     @Environment(\.scenePhase) var scenePhase
     @Environment(\.requestReview) private var requestReview
     @State private var showKeyInputModal = false
-    @State private var lastSyncTime: Date?
 
     private struct SafeguardsRefreshID: Equatable {
         let userId: String?
@@ -194,22 +193,6 @@ struct ContentView: View {
                 importSharedAttachmentsIfReady()
                 performPendingIntentActionsIfReady()
             }
-
-            if newPhase == .active && authManager.isAuthenticated {
-                // Sync when app becomes active if authenticated
-                // Only sync if it's been more than 30 seconds since last sync
-                let shouldSync = lastSyncTime == nil || Date().timeIntervalSince(lastSyncTime!) > 30
-                
-                if shouldSync {
-                    Task {
-                        // Sync chats
-                        await chatViewModel.performFullSync()
-                        await MainActor.run {
-                            lastSyncTime = Date()
-                        }
-                    }
-                }
-            }
         }
         .onChange(of: authManager.needsOnboarding) { _, needsOnboarding in
             updateAppPresentationReadiness()
@@ -249,6 +232,10 @@ struct ContentView: View {
         }
         .onChange(of: chatViewModel.isLoading) { _, isLoading in
             guard !isLoading, !intentCoordinator.pendingActions.isEmpty else { return }
+            performPendingIntentActionsIfReady()
+        }
+        .onChange(of: chatViewModel.canSendInNewChat) { _, canSend in
+            guard canSend, !intentCoordinator.pendingActions.isEmpty else { return }
             performPendingIntentActionsIfReady()
         }
         .onChange(of: authManager.hasActiveSubscription) { _, hasSubscription in
@@ -321,10 +308,12 @@ struct ContentView: View {
     private func canPerform(intentAction: AppIntentCoordinator.Action) -> Bool {
         switch intentAction {
         case .askQuestion:
-            // Signed-out users cannot get a fresh chat from createNewChat, so
-            // their single chat must finish streaming before the next prompt,
-            // otherwise sendMessage's isLoading guard would drop it.
-            return chatViewModel.hasChatAccess || !chatViewModel.isLoading
+            // The prompt is sent once a new chat could send it, or it would
+            // be dropped. Signed-out users cannot get a fresh chat from
+            // createNewChat, so their single chat must finish streaming
+            // before the next prompt, otherwise sendMessage's isLoading guard
+            // would drop it.
+            return chatViewModel.canSendInNewChat && (chatViewModel.hasChatAccess || !chatViewModel.isLoading)
         case .newChat, .startDictation, .showProjects, .showFavorites:
             return true
         }

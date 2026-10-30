@@ -8,7 +8,13 @@ typealias TimelineBlock = Components.Schemas.Block
 typealias ThreadSummary = Components.Schemas.ThreadSummary
 typealias QueueItem = Components.Schemas.QueueItem
 typealias HarnessRateLimit = Components.Schemas.RateLimit
-typealias ErrorAction = Components.Schemas.ErrorAction
+typealias RateLimitKind = Components.Schemas.RateLimit.KindPayload.Value1Payload
+/// How a content key came to be registered.
+typealias KeyOrigin = Components.Schemas.KeyOrigin.Value1Payload
+/// A passkey bundle as it is registered: the key wrapped under the
+/// passkey's PRF output.
+typealias KeyBundleInput = Components.Schemas.KeyBundleInput
+typealias ErrorAction = Components.Schemas.ErrorAction.Value1Payload
 typealias ToolActivity = Components.Schemas.ToolActivity
 typealias CommittedReply = Components.Schemas.CommittedReply
 typealias HarnessSession = Components.Schemas.Session
@@ -137,6 +143,13 @@ enum HarnessErrorCode {
     /// The safeguards flagged the chat, which takes no more turns.
     static let chatFlagged = "CHAT_FLAGGED"
     static let queueFull = "QUEUE_FULL"
+    /// The turn does not fit the model's context window.
+    static let contextTooLarge = "CONTEXT_TOO_LARGE"
+    /// The chat is too large to store.
+    static let threadTooLarge = "THREAD_TOO_LARGE"
+    static let modelUnavailable = "MODEL_UNAVAILABLE"
+    /// The chats could not be indexed for search.
+    static let searchIndexFailed = "SEARCH_INDEX_FAILED"
     static let upstreamRefused = "UPSTREAM_REFUSED"
     /// The request needs the chat access the client mints, which it lacked
     /// or which expired.
@@ -146,6 +159,8 @@ enum HarnessErrorCode {
     // never sends.
     static let configuration = "CONFIGURATION"
     static let connection = "CONNECTION"
+    /// The enclave could not be verified, so the request was not sent.
+    static let attestation = "ATTESTATION"
     static let invalidStream = "INVALID_STREAM"
     /// A refusal or a run's error without the members the protocol requires
     /// of it.
@@ -154,6 +169,38 @@ enum HarnessErrorCode {
     static let streamInterrupted = "STREAM_INTERRUPTED"
     /// A reply this device could not store.
     static let localSaveFailed = "LOCAL_SAVE_FAILED"
+    /// A change that needs the account's settings before they have loaded.
+    static let profileLoading = "PROFILE_LOADING"
+    /// The chat ends on a reply that did not finish or on a message no reply
+    /// answers.
+    static let unfinishedReply = "UNFINISHED_REPLY"
+}
+
+/// A list of values the protocol leaves open to values a later harness
+/// sends: the value this client names, if it does, and the value as sent.
+protocol OpenValue {
+    associatedtype Named: RawRepresentable where Named.RawValue == String
+    init(value1: Named?, value2: String?)
+}
+
+extension OpenValue {
+    /// A value as it is decoded from the harness.
+    init(raw: String) { self.init(value1: Named(rawValue: raw), value2: raw) }
+
+    /// A value this client names, equal to the same value decoded.
+    static func named(_ value: Named) -> Self { Self(raw: value.rawValue) }
+}
+
+extension Components.Schemas.Role: OpenValue {}
+extension Components.Schemas.Block._TypePayload: OpenValue {}
+extension Components.Schemas.TitleState: OpenValue {}
+extension Components.Schemas.AttachmentKind: OpenValue {}
+extension Components.Schemas.RateLimit.KindPayload: OpenValue {}
+
+extension Array where Element == HarnessMessage {
+    /// The messages a chat shows: a message whose role this client does not
+    /// know is left out, as the protocol says.
+    var shown: [HarnessMessage] { filter { $0.role.value1 != nil } }
 }
 
 extension ErrorAction {

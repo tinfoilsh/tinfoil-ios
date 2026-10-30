@@ -444,12 +444,7 @@ private struct BackupCodesView: View {
 
 @MainActor
 private func copySensitiveTextToClipboard(_ text: String, copied: Binding<Bool>) {
-    UIPasteboard.general.setItems(
-        [[UIPasteboard.typeAutomatic: text]],
-        options: [
-            .expirationDate: Date().addingTimeInterval(Constants.CloudSync.clipboardExpirationSeconds)
-        ]
-    )
+    SensitiveClipboard.copy(text)
     copied.wrappedValue = true
     DispatchQueue.main.asyncAfter(deadline: .now() + Constants.Share.copyFeedbackDurationSeconds) {
         copied.wrappedValue = false

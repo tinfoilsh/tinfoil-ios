@@ -1,5 +1,5 @@
 {
-  "originHash" : "0bb3393e12f1691d4ec9baa167736897c556b1f3b727f7da7dc2cf2cdef9172e",
+  "originHash" : "86e695d7e552ccf28f5c6b7a44d4c92e3d5bc6294e696ce918ca8d01bc8718af",
   "pins" : [
     {
       "identity" : "clerk-ios",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/encrypted-http-body-protocol.git",
       "state" : {
-        "revision" : "8528a8dc5ad45c213f14f9bab46a748fda7e18cc",
-        "version" : "0.3.2"
+        "revision" : "4a42bea81a80fae21afb9d80fdf0614e82d40f4f",
+        "version" : "0.4.2"
       }
     },
     {
@@ -150,8 +150,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/tinfoil-swift",
       "state" : {
-        "revision" : "98200681e464a9c12c026bcfb01b5d5b608478dc",
-        "version" : "0.9.0-rc.2"
+        "revision" : "e49a0a4b22e3b500759e4997381ca031c894aeae",
+        "version" : "0.9.0-rc.4"
       }
     }
   ],

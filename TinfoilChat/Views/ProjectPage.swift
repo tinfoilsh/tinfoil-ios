@@ -88,13 +88,30 @@ struct ProjectPage: View {
                     }
                     .disabled(project == nil || !viewModel.hasPremiumAccess)
 
-                    if viewModel.activeProjectChats.isEmpty {
-                        Text("No project chats yet")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                    // A project whose listed chats are all left out still
+                    // offers the chats after them.
+                    if viewModel.activeProjectChats.isEmpty && (viewModel.isLoadingProjectChats || !viewModel.hasMoreProjectChats) {
+                        if viewModel.isLoadingProjectChats {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Text("No project chats yet")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
                     } else {
                         ForEach(viewModel.activeProjectChats) { chat in
                             chatRow(chat)
+                        }
+                        if viewModel.hasMoreProjectChats {
+                            if viewModel.isLoadingMoreProjectChats {
+                                ProgressView()
+                                    .frame(maxWidth: .infinity)
+                            } else {
+                                Button("Load More") {
+                                    Task { await viewModel.loadMoreProjectChats() }
+                                }
+                            }
                         }
                     }
                 } header: {

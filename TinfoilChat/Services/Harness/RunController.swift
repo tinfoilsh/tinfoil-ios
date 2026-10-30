@@ -58,6 +58,9 @@ struct RunOptions {
     var rejoined = false
     /// The view the run was started for, which a rejoin keeps.
     var version: Int?
+    /// What a rejoined run continues from while the view shows another
+    /// chat: the run's own state, whose cursor it resumes after.
+    var state: ChatState?
     /// The run started before this stream: one followed by its id is, unless
     /// a stream that only queued it is rejoined.
     var started: Bool?
@@ -211,12 +214,12 @@ final class RunController: ObservableObject {
         let follower = UUID()
         let version = options.version ?? generation
         let attached = { [weak self] in version == self?.generation }
-        let initial = Outcome(runId: body.runId, threadId: body.threadId, started: options.started ?? (body.runId != nil), state: view)
+        let initial = Outcome(runId: body.runId, threadId: body.threadId, started: options.started ?? (body.runId != nil), state: options.state ?? view)
         let task = Task { [weak self] () -> Outcome in
             var outcome = initial
             guard let self else { return outcome }
             do {
-                let frames = try await account.events(route, body.sent(cursors: outcome.state.cursors), threadId: outcome.threadId, lastEventId: body.lastEventId(cursors: outcome.state.cursors))
+                let frames = try await account.events(route, body.sent(cursors: outcome.state.cursors, cacheSecret: PromptCacheSecret.secret(userId: account.userId)), threadId: outcome.threadId, lastEventId: body.lastEventId(cursors: outcome.state.cursors))
                 for try await frame in frames {
                     let shown = attached()
                     if !shown, device == nil { break }
@@ -305,6 +308,7 @@ final class RunController: ObservableObject {
             again.rejoined = true
             again.started = outcome.started
             again.version = version
+            again.state = attached() ? nil : outcome.state
             return await run(.follow, follow, options: again)
         }
         if attached() {
@@ -327,9 +331,11 @@ final class RunController: ObservableObject {
         return false
     }
 
+    /// A stream that broke, or a request that could not reach the harness:
+    /// the run may go on.
     private static func interrupted(_ cause: Error) -> Bool {
         guard let error = cause as? HarnessError else { return true }
-        return error.code == HarnessErrorCode.streamInterrupted
+        return error.code == HarnessErrorCode.streamInterrupted || error.code == HarnessErrorCode.connection
     }
 
     /// The chat changed from the copy this client shows, as when the harness
@@ -447,11 +453,18 @@ enum RunBody {
         }
     }
 
-    /// The body as sent. Following a run resumes after the last frame of it
-    /// this client applied, when it applied one.
-    func sent(cursors: [String: Int]) -> some Encodable {
+    /// The body as sent. A turn is scoped to this device's prompt cache, so
+    /// every turn of the account shares it. Following a run resumes after the
+    /// last frame of it this client applied, when it applied one.
+    func sent(cursors: [String: Int], cacheSecret: String?) -> some Encodable {
         switch self {
-        case .turn(let turn): return AnyEncodable(turn)
+        case .turn(var turn):
+            if let cacheSecret {
+                var options = turn.options ?? TurnOptions()
+                options.cacheSecret = cacheSecret
+                turn.options = options
+            }
+            return AnyEncodable(turn)
         case .follow(let key, let threadId, let runId): return AnyEncodable(RunRequest(key: key, threadId: threadId, runId: runId))
         }
     }

@@ -9,7 +9,7 @@ struct PerformanceInstrumentationTests {
         let sink = RecordingPerformanceSink()
         let instrumentation = PerformanceInstrumentation(sink: sink)
 
-        let token = instrumentation.begin(.chatIndexLoad)
+        let token = instrumentation.begin(.remoteConfigLoad)
         instrumentation.end(token)
 
         #expect(sink.recordedEvents == [
@@ -23,8 +23,8 @@ struct PerformanceInstrumentationTests {
         let sink = RecordingPerformanceSink()
         let instrumentation = PerformanceInstrumentation(sink: sink)
 
-        let first = instrumentation.begin(.fullChatLoad)
-        let second = instrumentation.begin(.fullChatLoad)
+        let first = instrumentation.begin(.remoteConfigLoad)
+        let second = instrumentation.begin(.remoteConfigLoad)
         instrumentation.end(first)
         instrumentation.end(second)
 
@@ -63,27 +63,12 @@ struct PerformanceInstrumentationTests {
         #expect(beginToken == endToken)
     }
 
-    @Test("exposes only fixed phase names")
-    func exposesFixedPhaseNames() {
-        let expectedNames: Set<String> = [
-            "remoteConfigLoad",
-            "chatIndexLoad",
-            "fullChatLoad",
-            "cloudSyncCycle",
-            "firstChatPageLoad",
-            "streamSnapshotBuild",
-            "selectedChatImageHydration",
-        ]
-
-        #expect(Set(PerformancePhase.allCases.map(\.rawValue)) == expectedNames)
-    }
-
     @Test("does not record disabled intervals")
     func skipsDisabledIntervals() {
         let sink = RecordingPerformanceSink(isEnabled: false)
         let instrumentation = PerformanceInstrumentation(sink: sink)
 
-        let token = instrumentation.begin(.streamSnapshotBuild)
+        let token = instrumentation.begin(.remoteConfigLoad)
         instrumentation.end(token)
 
         #expect(sink.recordedEvents.isEmpty)
@@ -94,7 +79,7 @@ struct PerformanceInstrumentationTests {
         let sink = RecordingPerformanceSink()
         let instrumentation = PerformanceInstrumentation(sink: sink)
         let task = Task {
-            let token = instrumentation.begin(.fullChatLoad)
+            let token = instrumentation.begin(.remoteConfigLoad)
             defer { instrumentation.end(token) }
             while !Task.isCancelled {
                 await Task.yield()

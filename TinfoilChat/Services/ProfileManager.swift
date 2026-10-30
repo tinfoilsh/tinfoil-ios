@@ -5,7 +5,8 @@
 //  The account's settings as the views bind to them. The chat service holds
 //  the profile, or this device does for an account without cloud sync and
 //  for a signed-out caller; the account's session keeps either, and this
-//  mirrors it and writes the user's changes back as patches.
+//  mirrors it and writes the user's changes back as patches, or as edits by
+//  id for saved prompts and favorites.
 //
 
 import Combine
@@ -97,7 +98,12 @@ class ProfileManager: ObservableObject {
     @Published private(set) var customPromptPresets: [SyncedPromptPreset] = ProfileDefaults.customPromptPresets
     @Published private(set) var favoritePromptPresetIds: [String] = ProfileDefaults.favoritePromptPresetIds
     @Published private(set) var defaultPromptPresetId: String = ProfileDefaults.defaultPromptPresetId
-    @Published private(set) var syncError: String?
+    @Published private(set) var webSearchAvailable: Bool = ProfileDefaults.webSearchAvailable
+    @Published private(set) var piiCheckEnabled: Bool = ProfileDefaults.piiCheckEnabled
+    @Published private(set) var genUIEnabled: Bool = ProfileDefaults.genUIEnabled
+    /// Why the last change the chat service or this device refused was not
+    /// saved, until the user has seen it.
+    @Published var saveError: String?
 
     private weak var account: HarnessAccount?
     private var cancellable: AnyCancellable?
@@ -108,6 +114,7 @@ class ProfileManager: ObservableObject {
     func bind(_ account: HarnessAccount?) {
         cancellable?.cancel()
         self.account = account
+        saveError = nil
         guard let account else {
             apply(Components.Schemas.Profile())
             return
@@ -130,42 +137,43 @@ class ProfileManager: ObservableObject {
         customPromptPresets = (profile.customPromptPresets ?? []).map(SyncedPromptPreset.init)
         favoritePromptPresetIds = profile.favoritePromptPresetIds ?? ProfileDefaults.favoritePromptPresetIds
         defaultPromptPresetId = profile.defaultPromptPresetId ?? ProfileDefaults.defaultPromptPresetId
-        // The toggles Settings keeps follow the profile only where it holds
-        // them: a profile not loaded yet leaves them as they were.
-        let settings = SettingsManager.shared
-        settings.isApplyingSharedProfile = true
-        defer { settings.isApplyingSharedProfile = false }
-        if let webSearchAvailable = profile.webSearchAvailable, settings.webSearchAvailable != webSearchAvailable {
-            settings.webSearchAvailable = webSearchAvailable
-        }
-        if let piiCheckEnabled = profile.piiCheckEnabled, settings.piiCheckEnabled != piiCheckEnabled {
-            settings.piiCheckEnabled = piiCheckEnabled
-        }
-        if let genUIEnabled = profile.genUIEnabled, settings.genUIEnabled != genUIEnabled {
-            settings.genUIEnabled = genUIEnabled
-        }
-        if let language = profile.language, settings.selectedLanguage != language { settings.selectedLanguage = language }
+        webSearchAvailable = profile.webSearchAvailable ?? ProfileDefaults.webSearchAvailable
+        piiCheckEnabled = profile.piiCheckEnabled ?? ProfileDefaults.piiCheckEnabled
+        genUIEnabled = profile.genUIEnabled ?? ProfileDefaults.genUIEnabled
     }
 
     /// Saves a change to the profile. The change shows at once through the
     /// account's session; one the chat service refuses is taken back, and
-    /// reported here.
-    private func save(_ patch: ProfileFields) {
+    /// shown to the user as not saved.
+    func save(_ patch: ProfileFields) {
         guard let account else { return }
         Task {
             do {
                 try await account.updateProfile(patch)
-                syncError = nil
             } catch {
-                guard !(error is CancellationError) else { return }
+                guard !(error is CancellationError), self.account === account else { return }
                 Self.logger.error("Failed to save the profile: \(error, privacy: .public)")
-                syncError = error.localizedDescription
+                saveError = error.localizedDescription
             }
         }
     }
 
-    private static func encoded<T: Encodable>(_ value: T) -> Any {
-        (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(value), options: [.fragmentsAllowed])) ?? NSNull()
+    /// Saves a change to saved prompts or favorites, by id. It shows and is
+    /// taken back as a patch saved with `save` is.
+    private func edit(_ edits: PromptEdits) {
+        guard let account else { return }
+        Task {
+            do {
+                try await account.editPrompts(edits)
+            } catch {
+                guard !(error is CancellationError), self.account === account else { return }
+                // An edit refused before the account showed it, as one made
+                // before the settings loaded is, is taken back here.
+                apply(account.effectiveProfile)
+                Self.logger.error("Failed to save the profile: \(error, privacy: .public)")
+                saveError = error.localizedDescription
+            }
+        }
     }
 
     // MARK: - Settings
@@ -176,23 +184,22 @@ class ProfileManager: ObservableObject {
         save(["language": language])
     }
 
-    /// A toggle Settings shares with the profile.
-    enum SharedSetting: String {
-        case webSearchAvailable
-        case piiCheckEnabled
-        case genUIEnabled
+    func setWebSearchAvailable(_ available: Bool) {
+        guard available != webSearchAvailable else { return }
+        webSearchAvailable = available
+        save(["webSearchAvailable": available])
     }
 
-    /// A shared toggle changed in Settings.
-    func sharedSettingDidChange(_ setting: SharedSetting) {
-        let settings = SettingsManager.shared
-        let value: Bool
-        switch setting {
-        case .webSearchAvailable: value = settings.webSearchAvailable
-        case .piiCheckEnabled: value = settings.piiCheckEnabled
-        case .genUIEnabled: value = settings.genUIEnabled
-        }
-        save([setting.rawValue: value])
+    func setPIICheckEnabled(_ enabled: Bool) {
+        guard enabled != piiCheckEnabled else { return }
+        piiCheckEnabled = enabled
+        save(["piiCheckEnabled": enabled])
+    }
+
+    func setGenUIEnabled(_ enabled: Bool) {
+        guard enabled != genUIEnabled else { return }
+        genUIEnabled = enabled
+        save(["genUIEnabled": enabled])
     }
 
     var personalizationDraft: PersonalizationDraft {
@@ -253,8 +260,21 @@ class ProfileManager: ObservableObject {
         return "\(PromptPreset.userIdPrefix)\(timestamp)-\(random)"
     }
 
-    private func savePresets() {
-        save(["customPromptPresets": Self.encoded(customPromptPresets)])
+    /// The saved prompts as the profile holds them, each as its client
+    /// wrote it.
+    private var storedPromptPresets: [Any] {
+        account?.profile["customPromptPresets"] as? [Any] ?? []
+    }
+
+    /// The saved prompts with one prompt's fields changed, and a field set
+    /// to nil removed. The other prompts, and the members of the changed one
+    /// this client does not set, stay as the profile holds them.
+    nonisolated static func updatingPreset(_ id: String, in presets: [Any], with fields: [String: Any?]) -> [Any] {
+        presets.map { element in
+            guard var preset = element as? ProfileFields, preset["id"] as? String == id else { return element }
+            for (name, value) in fields { preset[name] = value }
+            return preset
+        }
     }
 
     /// Create a new user preset and return its library representation.
@@ -278,7 +298,7 @@ class ProfileManager: ObservableObject {
             webSearchEnabled: webSearchEnabled
         )
         customPromptPresets.append(preset)
-        savePresets()
+        edit(PromptEdits(save: [(try? preset.jsonObject()) ?? [:]]))
         return PromptPreset(from: preset)
     }
 
@@ -292,28 +312,34 @@ class ProfileManager: ObservableObject {
         webSearchEnabled: Bool?
     ) {
         guard let index = customPromptPresets.firstIndex(where: { $0.id == id }) else { return }
+        let updatedAt = Date().timeIntervalSince1970 * 1000
         customPromptPresets[index].name = name
         customPromptPresets[index].description = description
         customPromptPresets[index].systemPrompt = systemPrompt
         customPromptPresets[index].model = model
         customPromptPresets[index].webSearchEnabled = webSearchEnabled
-        customPromptPresets[index].updatedAt = Date().timeIntervalSince1970 * 1000
-        savePresets()
+        customPromptPresets[index].updatedAt = updatedAt
+        let presets = Self.updatingPreset(id, in: storedPromptPresets, with: [
+            "name": name,
+            "description": description,
+            "systemPrompt": systemPrompt,
+            "model": model,
+            "webSearchEnabled": webSearchEnabled,
+            "updatedAt": updatedAt,
+        ])
+        guard let edited = presets.lazy.compactMap({ $0 as? ProfileFields }).first(where: { $0["id"] as? String == id }) else { return }
+        edit(PromptEdits(save: [edited]))
     }
 
-    /// Delete a user preset.
+    /// Delete a user preset, which is then no longer a favorite or the
+    /// default.
     func deletePromptPreset(id: String) {
         customPromptPresets.removeAll { $0.id == id }
         favoritePromptPresetIds.removeAll { $0 == id }
-        var patch: ProfileFields = [
-            "customPromptPresets": Self.encoded(customPromptPresets),
-            "favoritePromptPresetIds": favoritePromptPresetIds,
-        ]
         if defaultPromptPresetId == id {
             defaultPromptPresetId = ProfileDefaults.defaultPromptPresetId
-            patch["defaultPromptPresetId"] = defaultPromptPresetId
         }
-        save(patch)
+        edit(PromptEdits(delete: [id]))
     }
 
     // MARK: - Default Preset
@@ -368,12 +394,11 @@ class ProfileManager: ObservableObject {
     func toggleFavoritePreset(_ id: String) {
         if let index = favoritePromptPresetIds.firstIndex(of: id) {
             favoritePromptPresetIds.remove(at: index)
+            edit(PromptEdits(removeFavorites: [id]))
         } else if canAddFavorite {
             favoritePromptPresetIds.append(id)
-        } else {
-            return
+            edit(PromptEdits(addFavorites: [id]))
         }
-        save(["favoritePromptPresetIds": favoritePromptPresetIds])
     }
 
     /// Duplicate a built-in or user preset into a new editable user preset.

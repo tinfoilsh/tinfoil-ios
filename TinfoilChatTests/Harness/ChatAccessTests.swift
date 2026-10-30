@@ -55,7 +55,7 @@ struct ChatAccessTests {
         #expect(try await access.get(identity: "jwt") == "tok_1")
         #expect(try await access.get(identity: "jwt") == "tok_1")
         #expect(await plane.calls == [.init(path: Constants.API.SessionToken.chatPath, identity: "jwt")])
-        #expect(reported.limits.first?.kind == .hourly)
+        #expect(reported.limits.first?.kind?.value1 == .hourly)
         #expect(reported.limits.first?.inputTokens?.remaining == 990)
         let renewal = try #require(await access.renewsAt())
         #expect(renewal == ChatAccessCache.date(of: inAnHour)!.addingTimeInterval(-Constants.Harness.ChatAccess.renewBeforeExpirySeconds))
@@ -70,7 +70,7 @@ struct ChatAccessTests {
         let access = cache(plane, reported: reported)
         #expect(try await access.get(identity: "jwt") == "free_1")
         #expect(await plane.calls.map(\.path) == [Constants.API.SessionToken.chatPath, Constants.Harness.ChatAccess.freeKeyPath])
-        #expect(reported.limits.first?.kind == .freeDaily)
+        #expect(reported.limits.first?.kind?.value1 == .freeDaily)
         #expect(reported.limits.first?.remaining == 19)
         // A free key renews with the request that needs it, not ahead.
         #expect(await access.renewsAt() == nil)

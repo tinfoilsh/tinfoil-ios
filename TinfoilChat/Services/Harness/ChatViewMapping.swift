@@ -14,9 +14,11 @@ enum ChatViewMapping {
     /// A message as the view shows it, with the latest summary of each
     /// thinking block's reasoning. A reply thinks only in its last block:
     /// reasoning ends once the reply goes on to text or a tool call.
-    static func message(_ wire: HarnessMessage, streaming: Bool = false, summaries: [String: String] = [:]) -> Message {
-        let role: MessageRole = wire.role == .user ? .user : .assistant
-        var message = Message(id: wire.id, role: role, content: wire.content ?? "", timestamp: ChatAccessCache.date(of: wire.createdAt) ?? .distantPast)
+    /// shownAs is the id the message's row was first shown with, when a turn
+    /// replaced the message's own.
+    static func message(_ wire: HarnessMessage, streaming: Bool = false, summaries: [String: String] = [:], shownAs id: String? = nil) -> Message {
+        let role: MessageRole = wire.role.value1 == .user ? .user : .assistant
+        var message = Message(id: id ?? wire.id, role: role, content: wire.content ?? "", timestamp: ChatAccessCache.date(of: wire.createdAt) ?? .distantPast)
         message.modelDisplayName = wire.modelDisplayName
         message.isError = wire.isError
         message.annotations = wire.annotations?.compactMap { annotation in
@@ -38,7 +40,10 @@ enum ChatViewMapping {
         var thinking = false
         for (index, block) in blocks.enumerated() {
             let last = index == blocks.count - 1
-            switch block._type {
+            // A block of a type this client does not know is left out.
+            switch block._type.value1 {
+            case nil:
+                continue
             case .thinking:
                 let content = block.content ?? ""
                 let isThinking = streaming && last && block.complete != true
@@ -83,7 +88,8 @@ enum ChatViewMapping {
         message.thoughts = thoughts.isEmpty ? nil : thoughts
         message.isThinking = thinking
         message.isStreaming = streaming
-        message.generationTimeSeconds = thinkingSeconds > 0 ? thinkingSeconds : nil
+        // A reply still thinking has thought for no settled time yet.
+        message.generationTimeSeconds = !thinking && thinkingSeconds > 0 ? thinkingSeconds : nil
         message.thinkingDuration = thinkingSeconds > 0 ? thinkingSeconds : nil
         message.segments = segments
         message.webSearches = searches.isEmpty ? nil : searches
@@ -100,10 +106,12 @@ enum ChatViewMapping {
     /// call it reports nothing of yet runs while its reply streams; one
     /// still running once the reply stopped was cut off.
     private static func toolStatus(_ block: TimelineBlock, streaming: Bool) -> ToolStatus {
-        switch block.display?.status {
-        case .completed: return .completed
+        guard let status = block.display?.status else { return streaming ? .running : .failed }
+        // A status this client does not know shows as completed.
+        switch status.value1 {
+        case .completed, nil: return .completed
         case .failed: return .failed
-        case .running, nil: return streaming ? .running : .failed
+        case .running: return streaming ? .running : .failed
         }
     }
 
@@ -162,7 +170,7 @@ enum ChatViewMapping {
     ) -> Attachment {
         var attachment = Attachment(
             id: id,
-            type: kind == .image ? .image : .document,
+            type: kind.value1 == .image ? .image : .document,
             fileName: fileName,
             mimeType: mimeType,
             fileSize: Int64(size ?? 0)
@@ -185,13 +193,18 @@ enum ChatViewMapping {
 
     /// A chat waiting for its generated title shows the default one.
     static func title(_ summary: ThreadSummary) -> String {
-        summary.titleState == .placeholder && summary.title == Constants.Harness.placeholderTitle ? Chat.defaultTitle : summary.title
+        summary.titleState.value1 == .placeholder && summary.title == Constants.Harness.placeholderTitle ? Chat.defaultTitle : summary.title
     }
 
     /// A chat as the view shows it, from its summary and the messages shown.
     static func chat(_ summary: ThreadSummary, messages: [Message] = [], local: Bool, temporary: Bool = false, presetId: String? = nil) -> Chat {
         var chat = Chat(id: summary.id, title: title(summary), messages: messages, createdAt: summary.createdAt.flatMap(ChatAccessCache.date(of:)) ?? Date())
-        chat.titleState = summary.titleState == .manual ? .manual : summary.titleState == .generated ? .generated : .placeholder
+        // A title state this client does not know shows its title as it is.
+        switch summary.titleState.value1 {
+        case .placeholder: chat.titleState = .placeholder
+        case .generated: chat.titleState = .generated
+        case .manual, nil: chat.titleState = .manual
+        }
         chat.isLocalOnly = local
         chat.isTemporary = temporary
         chat.projectId = summary.projectId
@@ -214,4 +227,11 @@ struct ActiveRun: Equatable, Sendable {
     let runId: String
     let expiresAt: String
     let instance: String
+
+    /// Whether the run may still be streaming: until its deadline, or while
+    /// this app streams it, which names no deadline.
+    func isLive(at now: Date) -> Bool {
+        guard let deadline = ChatAccessCache.date(of: expiresAt) else { return true }
+        return deadline > now
+    }
 }

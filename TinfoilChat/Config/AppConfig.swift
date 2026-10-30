@@ -58,11 +58,6 @@ enum AutoIntelligence: String, CaseIterable, Codable, Sendable {
 /// Remote configuration structure (mobile-specific settings only)
 struct RemoteConfig: Codable {
     let minSupportedVersion: String
-    let syncProtocolVersion: Int?
-
-    var effectiveSyncProtocolVersion: Int {
-        min(syncProtocolVersion ?? Constants.Sync.protocolVersion, Constants.Sync.documentAttachmentsProtocolVersion)
-    }
 }
 
 /// A model as the chat service's session offers it.
@@ -75,10 +70,12 @@ struct ModelType: Identifiable, Hashable, Equatable {
         self.model = model
     }
 
+    private static let autoDescription = "Routes to the best model for the chosen intelligence level"
+
     /// The entry that has the router choose a model for each turn.
     static let auto = ModelType(Components.Schemas.SessionModel(
         id: AutoModel.id, label: "Auto", shortLabel: "Auto", icon: "",
-        description: "Routes to the best model for the chosen intelligence level",
+        description: autoDescription,
         badges: [], reasoning: nil, deprecated: false, auto: true
     ))
 
@@ -107,8 +104,11 @@ struct ModelType: Identifiable, Hashable, Equatable {
 
     var description: String { model.description }
 
-    /// Short blurb for the model picker.
-    var pickerDescription: String { model.description }
+    /// Short blurb for the model picker. The chat service offers Auto
+    /// without one, so Auto describes itself.
+    var pickerDescription: String {
+        isAuto && model.description.isEmpty ? Self.autoDescription : model.description
+    }
 
     // Full model name
     var fullName: String { model.label }
@@ -154,7 +154,7 @@ struct ModelType: Identifiable, Hashable, Equatable {
 }
 
 /// The app's remote configuration: the version the control plane still
-/// supports, and the sync protocol version the key registry speaks.
+/// supports.
 @MainActor
 class AppConfig: ObservableObject {
     static let shared = AppConfig()
@@ -215,23 +215,29 @@ class AppConfig: ObservableObject {
         loadedConfig.minSupportedVersion
     }
 
-    var syncProtocolVersion: Int {
-        config?.effectiveSyncProtocolVersion ?? Constants.Sync.protocolVersion
-    }
-
     /// Current app version from bundle
     var currentAppVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
     }
 
-    /// Check if current app version is supported
-    var isAppVersionSupported: Bool {
-        return compareVersions(currentAppVersion, minSupportedVersion) != .orderedAscending
+    /// Whether the chat service still serves the protocol this app was built
+    /// from, as the last session it opened said.
+    @Published private(set) var isHarnessProtocolSupported = true
+
+    /// The oldest protocol version the chat service serves, from a session.
+    func harnessServes(minimumProtocol minimum: Int) {
+        let supported = Constants.Harness.protocolVersion >= minimum
+        if supported != isHarnessProtocolSupported { isHarnessProtocolSupported = supported }
     }
 
-    /// Check if app update is required
-    var isUpdateRequired: Bool {
-        return !isAppVersionSupported
+    /// The app version required, when this one is older.
+    var requiredAppVersion: String? {
+        compareVersions(currentAppVersion, minSupportedVersion) == .orderedAscending ? minSupportedVersion : nil
+    }
+
+    /// Check if current app version is supported
+    var isAppVersionSupported: Bool {
+        requiredAppVersion == nil && isHarnessProtocolSupported
     }
 
     /// Compare two version strings (e.g., "1.0.5" vs "1.0.3")

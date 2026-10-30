@@ -1,13 +1,19 @@
 import Foundation
+import ImageIO
+import UIKit
 import UniformTypeIdentifiers
 import VisionKit
 
 extension ChatViewModel {
     // MARK: - Attachments
 
-    var isProcessingAttachment: Bool {
-        pendingAttachments.contains { $0.processingState == .processing }
-    }
+    /// An upload the change of account stopped before the chat service
+    /// converted the file.
+    static let uploadInterrupted = HarnessError(
+        code: HarnessErrorCode.connection,
+        message: "The upload stopped before it finished. Remove the file and attach it again.",
+        action: .retry
+    )
 
     /// Marks the share-inbox requests behind these attachments as handled.
     /// Single funnel for every path that consumes or discards attachments,
@@ -21,12 +27,14 @@ extension ChatViewModel {
     /// Reserves a pending attachment, then has the chat service convert the
     /// file into the attachment the next turn sends. A file the service
     /// refuses leaves the row failed, or is reported to the batch it came
-    /// in.
+    /// in: `onProcessingFailure` removes its row, and `onFailedRow` leaves
+    /// the row failed.
     private func addAttachment(
         type: AttachmentType,
         fileName: String,
         sharedImportRequestID: UUID? = nil,
         managedFile: ManagedStagedFile? = nil,
+        onFailedRow: (@MainActor (ManagedFileError) -> Void)? = nil,
         errorPublicationGeneration: Int? = nil,
         onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil,
         load: @escaping () async throws -> (data: Data, mimeType: String)
@@ -43,7 +51,11 @@ extension ChatViewModel {
                 try Task.checkCancellation()
                 let file = try await load()
                 try Task.checkCancellation()
-                guard let session else { throw CancellationError() }
+                if type == .image, let thumbnail = await Self.previewThumbnail(of: file.data), publication.isCurrent {
+                    pendingImageThumbnails[attachmentId] = thumbnail
+                }
+                try Task.checkCancellation()
+                guard let session else { throw Self.uploadInterrupted }
                 let uploaded = try await session.upload(file.data, fileName: fileName, mimeType: file.mimeType)
                 try Task.checkCancellation()
                 guard publication.isCurrent else { return }
@@ -58,9 +70,11 @@ extension ChatViewModel {
                     pendingAttachments[index] = attachment
                 }
                 if let thumbnail = uploaded.thumbnail { pendingImageThumbnails[attachmentId] = thumbnail }
-            } catch is CancellationError {
             } catch {
+                // A row the user removed is gone; one whose upload the
+                // account's change stopped shows as failed.
                 guard publication.isCurrent else { return }
+                let error = error is CancellationError ? Self.uploadInterrupted : error
                 let failure = ManagedFileError(fileName: fileName, error: error)
                 if let onProcessingFailure {
                     pendingAttachments.removeAll { $0.id == attachmentId }
@@ -74,7 +88,11 @@ extension ChatViewModel {
                     pendingAttachments[index] = attachment
                 }
                 guard attachmentErrorPublicationFence.accepts(errorPublicationGeneration) else { return }
-                attachmentError = error.localizedDescription
+                if let onFailedRow {
+                    onFailedRow(failure)
+                } else {
+                    attachmentError = failure.message
+                }
             }
         }
         if let managedFile {
@@ -82,6 +100,22 @@ extension ChatViewModel {
         } else {
             attachmentProcessingStore.start(id: attachmentId, operation: process)
         }
+    }
+
+    /// A picked image's preview, made on the device so it shows while the
+    /// image uploads: a PNG no longer on either side than the preview
+    /// thumbnail takes, drawn upright.
+    nonisolated static func previewThumbnail(of data: Data) async -> String? {
+        await Task.detached(priority: .userInitiated) {
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: Constants.Attachments.thumbnailMaxDimension,
+            ]
+            guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            return UIImage(cgImage: thumbnail).pngData()?.base64EncodedString()
+        }.value
     }
 
     private static func mimeType(of handle: ManagedStagedFile) -> String {
@@ -93,6 +127,7 @@ extension ChatViewModel {
         fileName: String,
         sharedImportRequestID: UUID? = nil,
         managedFile: ManagedStagedFile? = nil,
+        onFailedRow: (@MainActor (ManagedFileError) -> Void)? = nil,
         errorPublicationGeneration: Int? = nil,
         onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil
     ) {
@@ -102,6 +137,7 @@ extension ChatViewModel {
             fileName: fileName,
             sharedImportRequestID: sharedImportRequestID,
             managedFile: managedFile,
+            onFailedRow: onFailedRow,
             errorPublicationGeneration: errorPublicationGeneration,
             onProcessingFailure: onProcessingFailure
         ) {
@@ -111,6 +147,7 @@ extension ChatViewModel {
 
     func addDocumentAttachment(
         handle: ManagedStagedFile,
+        onFailedRow: (@MainActor (ManagedFileError) -> Void)? = nil,
         errorPublicationGeneration: Int? = nil,
         onProcessingFailure: (@MainActor (ManagedFileError) -> Void)? = nil
     ) {
@@ -118,6 +155,7 @@ extension ChatViewModel {
             url: handle.url,
             fileName: handle.fileName,
             managedFile: handle,
+            onFailedRow: onFailedRow,
             errorPublicationGeneration: errorPublicationGeneration,
             onProcessingFailure: onProcessingFailure
         )
@@ -128,17 +166,20 @@ extension ChatViewModel {
         let admission = DocumentPickerBatchAdmission.admit(batch.files, modelSupportsImages: currentModel.isMultimodal)
         var failures = batch.failures + admission.failures
         var successCount = admission.files.count
+        // A document or image that fails adds its line to those of every
+        // other file picked with it.
+        let reportFailure = { [weak self] (failure: ManagedFileError) in
+            guard let self else { return }
+            successCount -= 1
+            failures.append(failure)
+            attachmentError = ManagedFileBatchErrorMessage.attachments(successCount: successCount, failures: failures)
+        }
         for (handle, kind) in admission.files {
             switch kind {
             case .document:
-                addDocumentAttachment(handle: handle, errorPublicationGeneration: errorPublicationGeneration)
+                addDocumentAttachment(handle: handle, onFailedRow: reportFailure, errorPublicationGeneration: errorPublicationGeneration)
             case .image:
-                addImageAttachment(handle: handle, errorPublicationGeneration: errorPublicationGeneration) { [weak self] failure in
-                    guard let self else { return }
-                    successCount -= 1
-                    failures.append(failure)
-                    attachmentError = ManagedFileBatchErrorMessage.attachments(successCount: successCount, failures: failures)
-                }
+                addImageAttachment(handle: handle, errorPublicationGeneration: errorPublicationGeneration, onAdmissionFailure: reportFailure)
             }
         }
         attachmentError = ManagedFileBatchErrorMessage.attachments(successCount: successCount, failures: failures)

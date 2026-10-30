@@ -101,25 +101,12 @@ func freeRequestsRemainingText(_ remaining: Int) -> String {
 
 private struct RateLimitNoticeBackground: ViewModifier {
     let color: Color
-    let isIntegrated: Bool
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if isIntegrated {
-            content
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .background(color)
-        } else {
-            content
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.Dimensions.cornerRadiusSmall, style: .continuous)
-                        .fill(color)
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal)
-                .padding(.top, 8)
-        }
+        content
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .background(color)
     }
 }
 
@@ -144,9 +131,11 @@ struct MessageInputView: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @EnvironmentObject private var authManager: AuthManager
+    @ObservedObject private var profileManager = ProfileManager.shared
     @State private var textHeight: CGFloat = Layout.defaultHeight
     @State private var messageTextHasNonWhitespace = false
     @State private var isCheckingRateLimit = false
+    @State private var isUnlockingChats = false
     /// Reflects whether the editor has grown beyond a single line, so callers
     /// can hide content that would otherwise be pushed off-screen.
     var isInputExpanded: Binding<Bool>? = nil
@@ -355,7 +344,7 @@ struct MessageInputView: View {
 
     @ViewBuilder
     var body: some View {
-        inputContent
+        standardInputContent
             .onAppear {
                 messageTextHasNonWhitespace = hasNonWhitespaceContent(messageText)
                 handleMessageEditSessionChange(viewModel.messageEditSession)
@@ -512,8 +501,8 @@ struct MessageInputView: View {
 
     /// Small label shown with the input when remaining free requests are low
     @ViewBuilder
-    private func rateLimitLabel(isIntegrated: Bool) -> some View {
-        if let rl = viewModel.rateLimit, rl.kind == .hourly {
+    private var rateLimitLabel: some View {
+        if let rl = viewModel.rateLimit, rl.kind == .hourly, rl.exhausted {
             HStack {
                 Text("Hourly limit reached")
                 Button(isCheckingRateLimit ? Constants.RateLimit.checkingLabel : Constants.RateLimit.checkAgainLabel) {
@@ -531,23 +520,22 @@ struct MessageInputView: View {
                 .foregroundColor(.orange)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .modifier(RateLimitNoticeBackground(color: Color.orange.opacity(0.08), isIntegrated: isIntegrated))
+                .modifier(RateLimitNoticeBackground(color: Color.orange.opacity(0.08)))
                 .transition(.opacity)
-        } else if let rl = viewModel.rateLimit, rl.remaining <= Constants.RateLimit.warningThreshold {
-            let isOutOfRequests = rl.remaining <= 0
-            Text(freeRequestsRemainingText(rl.remaining))
+        } else if let rl = viewModel.rateLimit, let remaining = rl.remaining, remaining <= Constants.RateLimit.warningThreshold {
+            let isOutOfRequests = remaining <= 0
+            Text(freeRequestsRemainingText(remaining))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(isOutOfRequests ? .orange : .secondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .modifier(
                     RateLimitNoticeBackground(
-                        color: isOutOfRequests ? Color.orange.opacity(0.08) : Color.secondary.opacity(0.06),
-                        isIntegrated: isIntegrated
+                        color: isOutOfRequests ? Color.orange.opacity(0.08) : Color.secondary.opacity(0.06)
                     )
                 )
                 .transition(.opacity)
-                .animation(.easeInOut(duration: 0.25), value: rl.remaining)
+                .animation(.easeInOut(duration: 0.25), value: remaining)
                 .onTapGesture {
                     if isOutOfRequests {
                         viewModel.showRateLimitPaywall = true
@@ -563,6 +551,72 @@ struct MessageInputView: View {
         }
     }
 
+    /// What the composer says about the account: why it cannot send, and a
+    /// settings change that was not saved.
+    @ViewBuilder
+    private var accountNotices: some View {
+        sendBlockNotice
+        settingsSaveNotice
+    }
+
+    /// A settings change, made in the composer or elsewhere, that was not
+    /// saved and was taken back.
+    @ViewBuilder
+    private var settingsSaveNotice: some View {
+        if profileManager.saveError != nil {
+            HStack(spacing: 6) {
+                Text("Your settings change was not saved")
+                Button("OK") { profileManager.saveError = nil }
+                    .buttonStyle(.plain)
+                    .underline()
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(.orange)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .modifier(RateLimitNoticeBackground(color: Color.orange.opacity(0.08)))
+            .transition(.opacity)
+        }
+    }
+
+    /// Says why the open chat cannot send: its chats are locked until the
+    /// key is unlocked, the account could not load, or, once there is a
+    /// draft, the chat service is still connecting.
+    @ViewBuilder
+    private var sendBlockNotice: some View {
+        if viewModel.canUseCurrentChatActions, let block = viewModel.sendBlock, block != .loading || hasDraftContent {
+            HStack(spacing: 6) {
+                switch block {
+                case .locked:
+                    Text("Unlock your chats to send messages")
+                    Button(isUnlockingChats ? "Unlocking…" : "Unlock") {
+                        isUnlockingChats = true
+                        Task { @MainActor in
+                            defer { isUnlockingChats = false }
+                            await viewModel.reattemptPasskeyRecovery()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .underline()
+                    .disabled(isUnlockingChats)
+                case .failed:
+                    Text("Couldn't connect to the chat service")
+                    Button("Retry") { viewModel.retryClientSetup() }
+                        .buttonStyle(.plain)
+                        .underline()
+                case .loading:
+                    Text("Connecting…")
+                }
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(block == .loading ? .secondary : .orange)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .modifier(RateLimitNoticeBackground(color: block == .loading ? Color.secondary.opacity(0.06) : Color.orange.opacity(0.08)))
+            .transition(.opacity)
+        }
+    }
+
     /// The indicator is hidden on a blank chat, matching the webapp's
     /// welcome screen behavior.
     private var showContextIndicator: Bool {
@@ -573,57 +627,6 @@ struct MessageInputView: View {
     /// against the model's budget.
     private var contextUsage: ContextUsage {
         viewModel.currentChat?.contextUsage ?? ContextUsage(percentage: 0, usedTokens: 0, limitTokens: 0)
-    }
-
-    /// When the latest assistant message ends in an input-surface
-    /// GenUI tool call, the chat input is replaced by the widget.
-    private var pendingInputToolCall: PendingInputToolCall? {
-        viewModel.currentChat?.pendingInputToolCall()
-    }
-
-    @ViewBuilder
-    private var inputContent: some View {
-        if isEditingMessage {
-            standardInputContent
-        } else if let pending = pendingInputToolCall {
-            genUIInputContainer(pending: pending)
-        } else {
-            standardInputContent
-        }
-    }
-
-    @ViewBuilder
-    private func genUIInputContainer(pending: PendingInputToolCall) -> some View {
-        VStack(spacing: 8) {
-            rateLimitLabel(isIntegrated: false)
-
-            GenUIInputAreaView(
-                pending: pending,
-                isDarkMode: isDarkMode,
-                onResolve: { toolCallId, resultText, resultData in
-                    viewModel.resolveGenUIToolCall(
-                        toolCallId: toolCallId,
-                        resultText: resultText,
-                        resultData: resultData
-                    )
-                },
-                onCancel: nil
-            )
-            .frame(maxWidth: .infinity)
-        }
-        .padding(.top, 10)
-        .padding(.bottom, max(inputBottomPadding, 12))
-        .frame(maxWidth: .infinity)
-        .background {
-            UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28)
-                .fill(.thickMaterial)
-                .ignoresSafeArea(edges: .bottom)
-        }
-        .overlay(alignment: .top) {
-            Rectangle()
-                .frame(height: 1)
-                .foregroundColor(GenUIStyle.borderColor(isDarkMode))
-        }
     }
 
     @ViewBuilder
@@ -676,7 +679,9 @@ struct MessageInputView: View {
                 // controller's view, which UIKit warns against for hosted cells.
                 GlassEffectContainer {
                 VStack(spacing: 0) {
-                rateLimitLabel(isIntegrated: true)
+                rateLimitLabel
+
+                accountNotices
 
                 // Attachment preview bar
                 if !viewModel.pendingAttachments.isEmpty {
@@ -709,7 +714,9 @@ struct MessageInputView: View {
             // Older iOS with material effect
             VStack(spacing: 4) {
                 VStack(spacing: 0) {
-                rateLimitLabel(isIntegrated: true)
+                rateLimitLabel
+
+                accountNotices
 
                 // Attachment preview bar
                 if !viewModel.pendingAttachments.isEmpty {
@@ -820,7 +827,6 @@ struct MessageInputView: View {
                 .foregroundColor(.secondary)
                 .frame(width: 24, height: 24)
         }
-        .disabled(viewModel.isProcessingAttachment)
         .accessibilityLabel("Add to chat")
         .accessibleHitTarget()
         .padding(.leading, 8)
@@ -1543,7 +1549,6 @@ private final class FloatingRecordingBubbleView: UIView {
 struct AddToSheetView: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @EnvironmentObject private var authManager: AuthManager
-    @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var profileManager = ProfileManager.shared
     let isDarkMode: Bool
     let contextUsage: ContextUsage?
@@ -1603,7 +1608,7 @@ struct AddToSheetView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
 
-                if settings.webSearchAvailable {
+                if profileManager.webSearchAvailable {
                     Toggle(isOn: Binding(
                         get: { viewModel.isWebSearchEnabled },
                         set: { viewModel.setWebSearchEnabled($0) }

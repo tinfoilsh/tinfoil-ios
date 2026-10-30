@@ -3,7 +3,7 @@
 //  TinfoilChat
 //
 //  Protocol for encrypting/decrypting raw data.
-//  Implemented by DeviceEncryptionService (local chats) and EncryptionService (cloud chats).
+//  Implemented by DeviceEncryptionService (local chats).
 //
 
 import Foundation
@@ -20,7 +20,7 @@ protocol ChatEncryptor: Sendable {
 // MARK: - Shared AES-GCM helpers
 
 /// Single-source-of-truth for the byte-level AES-GCM seal/open operations
-/// used by both DeviceEncryptionService and EncryptionService.
+/// DeviceEncryptionService uses.
 enum AESGCMHelper {
     static func seal(_ data: Data, using key: SymmetricKey) throws -> EncryptedData {
         let nonce = AES.GCM.Nonce()

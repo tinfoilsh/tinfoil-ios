@@ -27,6 +27,7 @@ enum SpeechError: Error, Equatable, LocalizedError {
         if let error = error as? SpeechError { return error }
         if let error = error as? URLError, error.code == .timedOut { return .timedOut }
         if let error = error as? HarnessError {
+            if error.urlErrorCode == .timedOut { return .timedOut }
             switch error.code {
             case HarnessErrorCode.quotaExhausted, HarnessErrorCode.rateLimited: return .rateLimited
             case HarnessErrorCode.toolUnavailable: return .unavailable

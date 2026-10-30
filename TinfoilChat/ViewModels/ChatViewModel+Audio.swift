@@ -15,8 +15,9 @@ extension ChatViewModel {
         guard canUseReadAloud,
               let message = chat.messages.first(where: { $0.id == messageId }),
               SpeechTextProcessor.canRead(message) else { throw SpeechError.unavailable }
+        let harnessMessageId = self.messageId(ofRow: messageId)
         let service = HarnessSpeechStream { @MainActor in
-            try await session.speak(messageId)
+            try await session.speak(harnessMessageId)
         }
         try speechPlayer.read(owner: owner, content: SpeechTextProcessor.source(for: message), service: service)
     }

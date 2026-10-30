@@ -16,20 +16,41 @@ extension ChatViewModel {
         leaveProjectContext()
     }
 
-    private func leaveProjectContext() {
+    func leaveProjectContext() {
         activeProject = nil
         projectDocuments = []
         projectError = nil
         isViewingProjectChat = false
     }
 
+    /// Projects need a subscription. Once it ends, the open project chat's
+    /// reply stops, and the project is left for a new chat.
+    private func revokeProjectAccess() {
+        guard let session, activeProject != nil || currentChat?.projectId != nil else { return }
+        if session.running { cancelGeneration() }
+        shouldExpandProjectsInSidebar = false
+        leaveProjectContext()
+        createNewChat(focusInput: false)
+    }
+
+    /// Lists the account's projects. The projects this device listed last
+    /// show until the chat service lists them, while the key is checked.
     func loadProjects() async {
         guard let session else { return }
         projectListLoadGeneration += 1
         let generation = projectListLoadGeneration
-        guard canUseProjects else {
+        guard hasPremiumAccess, session.account.cloud, !session.account.keyLocked else {
             projects = []
             projectError = nil
+            isLoadingProjects = false
+            if !hasPremiumAccess { revokeProjectAccess() }
+            return
+        }
+        if projects.isEmpty, let cached = await session.list.cache.readProjects(),
+           generation == projectListLoadGeneration, self.session === session, projects.isEmpty {
+            projects = cached
+        }
+        guard canUseProjects else {
             isLoadingProjects = false
             return
         }
@@ -40,6 +61,7 @@ extension ChatViewModel {
             let listed = try await HarnessProjects.list(session.account)
             guard generation == projectListLoadGeneration, self.session === session else { return }
             projects = listed.map(Project.init)
+            keepProjectList()
             if let active = activeProject, let current = projects.first(where: { $0.id == active.id }) {
                 activeProject = current
             } else if activeProject != nil {
@@ -51,6 +73,15 @@ extension ChatViewModel {
         }
     }
 
+    /// Keeps the projects listed on this device, to show on the next launch
+    /// before the chat service lists them.
+    private func keepProjectList() {
+        guard let session else { return }
+        let listed = projects
+        Task { await session.list.cache.writeProjects(listed) }
+    }
+
+    /// Creates a project and opens it.
     @discardableResult
     func createProject(name: String? = nil, color: String? = nil) async -> Project? {
         guard let session, canUseProjects else { return nil }
@@ -65,6 +96,8 @@ extension ChatViewModel {
             ))
             guard self.session === session else { return nil }
             projects.insert(created, at: 0)
+            keepProjectList()
+            await enterProject(projectId: created.id)
             return created
         } catch {
             projectError = error.localizedDescription
@@ -77,9 +110,9 @@ extension ChatViewModel {
         createNewChat(isLocalOnly: false, projectId: projectId, focusInput: false)
     }
 
-    /// Loads a project and its documents, and makes it the active context.
-    /// A newer load supersedes one in flight, which neither changes the
-    /// context nor reports success.
+    /// Loads a project and its documents, and makes it the active context,
+    /// which shows the project's page. A newer load supersedes one in
+    /// flight, which neither changes the context nor reports success.
     @discardableResult
     func loadActiveProject(projectId: String) async -> Bool {
         guard let session, canUseProjects else { return false }
@@ -94,6 +127,7 @@ extension ChatViewModel {
             let project = Project(loaded)
             projects = projects.map { $0.id == project.id ? project : $0 }
             if !projects.contains(where: { $0.id == project.id }) { projects.insert(project, at: 0) }
+            isViewingProjectChat = false
             activeProject = project
             projectDocuments = (loaded.documents ?? []).map(ProjectDocument.init)
             return true
@@ -128,10 +162,21 @@ extension ChatViewModel {
         isViewingProjectChat = true
     }
 
-    /// The stored chats of the active project, the latest active first.
+    /// The stored chats of the active project, the latest active first, as
+    /// the project's own list loads them.
     var activeProjectChats: [ChatListSummary] {
-        guard let projectId = activeProject?.id else { return [] }
-        return cloudSidebarSummaries.filter { $0.projectId == projectId && !$0.isTemporary && !$0.isBlankChat }
+        guard let projectId = activeProject?.id, let session, let listed = session.list.project else { return [] }
+        return newestFirst(listed.cloudListed.map { ChatViewMapping.chat($0, local: false) }, in: session)
+            .filter { $0.projectId == projectId && !$0.isTemporary && !$0.isBlankChat }
+            .map(ChatListSummary.init)
+    }
+
+    var isLoadingProjectChats: Bool { session?.list.project?.loading == true }
+    var hasMoreProjectChats: Bool { session?.list.project?.nextCursor != nil }
+    var isLoadingMoreProjectChats: Bool { session?.list.project?.loadingMore == true }
+
+    func loadMoreProjectChats() async {
+        await session?.list.project?.loadMore()?.value
     }
 
     func updateActiveProject(name: String? = nil, color: String? = nil, description: String? = nil, systemInstructions: String? = nil) async {
@@ -148,6 +193,7 @@ extension ChatViewModel {
             ))
             guard self.session === session else { return }
             projects = projects.map { $0.id == updated.id ? updated : $0 }
+            keepProjectList()
             if activeProject?.id == updated.id { activeProject = updated }
         } catch {
             projectError = error.localizedDescription
@@ -161,6 +207,7 @@ extension ChatViewModel {
             try await HarnessProjects.delete(session.account, id: project.id)
             guard self.session === session else { return }
             projects.removeAll { $0.id == project.id }
+            keepProjectList()
             if activeProject?.id == project.id { exitProject() }
             session.list.reload()
         } catch {
@@ -168,11 +215,14 @@ extension ChatViewModel {
         }
     }
 
+    /// Deletes every project the account stores. It needs no subscription:
+    /// an account whose subscription ended still deletes its projects.
     func deleteAllProjects() async throws {
-        guard let session, canUseProjects else { return }
+        guard let session else { throw CancellationError() }
         try await HarnessProjects.deleteAll(session.account)
         guard self.session === session else { return }
         projects = []
+        keepProjectList()
         if activeProject != nil { exitProject() }
         session.list.reload()
     }
@@ -222,27 +272,38 @@ extension ChatViewModel {
     }
 
     /// A chat on this device moves to the cloud first, as a project's chats
-    /// are stored.
+    /// are stored; when the move into the project fails, it returns to the
+    /// device as it was. The open chat moved out of the open context leaves
+    /// a new chat open in its place.
     private func updateChatProject(chatId: String, projectId: String?) async {
         guard let session, canUseProjects else { return }
+        var original: DeviceChatCopy?
         do {
             if session.list.isOnDevice(chatId) {
                 guard projectId != nil else { return }
-                try await session.moveToCloud(chatId)
+                original = try await session.moveToCloud(chatId)
             }
             _ = try await session.update(chatId, ThreadPatch(projectId: Nullable(projectId)))
             if session.open.id == chatId {
                 session.setProject(projectId)
-                if let projectId, activeProject?.id != projectId {
-                    _ = await loadActiveProject(projectId: projectId)
-                    isViewingProjectChat = true
-                } else if projectId == nil, activeProject != nil {
-                    leaveProjectContext()
-                }
+                if activeProject?.id != projectId { createNewChat(focusInput: false) }
             }
             session.list.reload()
         } catch {
-            session.report(error)
+            // A session signed out of, whose chats this device wiped, gets
+            // none of them back.
+            if let original, self.session === session {
+                do {
+                    try await session.moveToDevice(chatId, original: original)
+                } catch {
+                    Self.logger.error("Failed to return a chat to this device after it failed to join a project: \(error, privacy: .public)")
+                    // The lists show every copy the failed return left, on
+                    // this device and in the cloud.
+                    session.list.reloadDevice()
+                    session.list.reload()
+                }
+            }
+            reportActionFailure("Couldn't Move Chat", error)
         }
     }
 }

@@ -299,8 +299,7 @@ struct SourceRowView: View {
     }
 
     private func openURL() {
-        guard let url = URL(string: source.url) else { return }
-        UIApplication.shared.open(url)
+        LinkOpener.open(source.url)
     }
 }
 

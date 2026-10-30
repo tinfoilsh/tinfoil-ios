@@ -68,7 +68,30 @@ struct ChatReducerTests {
             ]],
         ])
         #expect(state.snapshot.thread?.title == "Cats")
-        #expect(state.snapshot.thread?.titleState == .generated)
+        #expect(state.snapshot.thread?.titleState.value1 == .generated)
+    }
+
+    @Test func aTitleStateThisClientDoesNotKnowIsKept() throws {
+        let state = try Self.reduce([
+            Self.started(), Self.snapshot(),
+            ["type": "STATE_DELTA", "delta": [["op": "replace", "path": "/thread/titleState", "value": "translated"]]],
+        ])
+        #expect(state.snapshot.thread?.titleState == Components.Schemas.TitleState(raw: "translated"))
+        #expect(state.snapshot.thread?.titleState.value1 == nil)
+    }
+
+    @Test func aMessageOfARoleThisClientDoesNotKnowIsLeftOut() throws {
+        let messages: [[String: Any]] = [
+            ["id": "u", "role": "user", "createdAt": "", "content": "hi"],
+            ["id": "n", "role": "narrator", "createdAt": "", "content": "meanwhile"],
+            ["id": "a", "role": "assistant", "createdAt": "", "timeline": []],
+        ]
+        let streamed = try Self.reduce([Self.started(), ["type": "MESSAGES_SNAPSHOT", "messages": messages, "hasOlder": false]])
+        #expect(streamed.messages.map(\.id) == ["u", "a"])
+        var window = Self.thread
+        window.merge(["revision": "1", "presetId": NSNull(), "messages": messages, "hasOlder": false]) { $1 }
+        let loaded = ChatState(thread: try ThreadWindow(jsonObject: window))
+        #expect(loaded.messages.map(\.id) == ["u", "a"])
     }
 
     @Test func aPatchTheProtocolDoesNotNameFailsTheStream() throws {
@@ -127,7 +150,7 @@ struct ChatReducerTests {
     @Test func textAfterASealedReplyStartsANewBlock() throws {
         let before = try Self.reduce([Self.started("r1"), Self.snapshot(), Self.text("first"), Self.finished("r1")])
         var sealed = before
-        sealed.messages[0].timeline?.append(TimelineBlock(id: "tool", _type: .toolCall, toolCallId: "tool", name: "web_search"))
+        sealed.messages[0].timeline?.append(TimelineBlock(id: "tool", _type: .named(.toolCall), toolCallId: "tool", name: "web_search"))
         let continued = try Self.reduce([Self.started("r2", messageId: "m"), Self.text("second")], into: sealed)
         #expect(Self.blocks(continued).map(\.content) == ["first", nil, "second"])
     }
@@ -204,8 +227,8 @@ struct ChatReducerTests {
     @Test func aMessagesSnapshotKeepsTheOlderPagesTheViewLoaded() throws {
         var view = ChatState()
         view.messages = [
-            HarnessMessage(id: "old", role: .user, createdAt: "", content: "old"),
-            HarnessMessage(id: "m1", role: .user, createdAt: "", content: "first"),
+            HarnessMessage(id: "old", role: .named(.user), createdAt: "", content: "old"),
+            HarnessMessage(id: "m1", role: .named(.user), createdAt: "", content: "first"),
         ]
         view.hasOlder = true
         let state = try Self.reduce([

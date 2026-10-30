@@ -11,11 +11,9 @@ import AVFoundation
 struct CloudSyncSettingsView: View {
     @Environment(\.colorScheme) var colorScheme
     @ObservedObject var viewModel: ChatViewModel
-    @ObservedObject var authManager: AuthManager
     let onRequestCloseSettings: () -> Void
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject private var passkeyManager = PasskeyManager.shared
-    @ObservedObject private var syncHealth = SyncHealthStore.shared
 
     private var cloudSyncBinding: Binding<Bool> {
         Binding(
@@ -24,15 +22,12 @@ struct CloudSyncSettingsView: View {
                 if newValue {
                     if EncryptionService.shared.hasEncryptionKey() {
                         settings.isCloudSyncEnabled = true
-                        viewModel.reloadEncryptionKey()
-                        Task { await viewModel.performFullSync() }
                     } else {
                         Task { await enableCloudSync() }
                     }
                 } else {
                     settings.isCloudSyncEnabled = false
                     viewModel.activeStorageTab = .local
-                    Task { await viewModel.deleteNonLocalChats() }
                 }
             }
         )
@@ -53,7 +48,7 @@ struct CloudSyncSettingsView: View {
     @State private var removingPasskeyId: String? = nil
     @State private var passkeyBundleError: String? = nil
 
-    private var passkeyBundles: [EnclaveKeyCurrentBundle] {
+    private var passkeyBundles: [KeyState.Bundle] {
         passkeyInventoryState.bundles
     }
     
@@ -68,82 +63,15 @@ struct CloudSyncSettingsView: View {
                         ProgressView()
                     }
                 }
+
+                keyLockedRow
             } footer: {
                 Text("Encrypt and back up your chats so they sync across devices.")
                     .font(.caption)
             }
             .listRowBackground(Color.cardSurface(for: colorScheme))
 
-            // Sync Status Section
             if settings.isCloudSyncEnabled {
-            Section {
-                    HStack {
-                        Text("Sync Status")
-                        Spacer()
-                        if viewModel.isSyncing {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                        } else if !viewModel.syncErrors.isEmpty {
-                            Text("Error")
-                                .foregroundColor(.red)
-                        } else if viewModel.lastSyncDate != nil {
-                            Text("Synced")
-                                .foregroundColor(.green)
-                        } else {
-                            Text("Not synced")
-                                .foregroundColor(.gray)
-                        }
-                    }
-                    
-                    HStack {
-                        Text("Last Sync")
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        if let lastSync = viewModel.lastSyncDate {
-                            Text(lastSync, style: .relative)
-                                .foregroundColor(.secondary)
-                        } else {
-                            Text("Never")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    
-                    if !viewModel.syncErrors.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Sync Errors:")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            ForEach(viewModel.syncErrors, id: \.self) { error in
-                                Text("• \(error)")
-                                    .font(.caption)
-                                    .foregroundColor(.red)
-                            }
-                        }
-                    }
-
-                    syncHealthRows
-
-                    if settings.isCloudSyncEnabled &&
-                        CloudKeyAuthorizationStore.shared.currentMode() == nil {
-                        Text("Cloud sync writes are paused until this device verifies the current encryption key.")
-                            .font(.caption)
-                            .foregroundColor(.orange)
-                    }
-                    
-                    Button(action: {
-                        Task {
-                            await viewModel.performFullSync()
-                        }
-                    }) {
-                        Label("Sync Now", systemImage: "arrow.clockwise")
-                            .foregroundColor(.primary)
-                    }
-                    .disabled(viewModel.isSyncing || !authManager.isAuthenticated)
-                } header: {
-                    Text("Synchronization")
-            }
-            .listRowBackground(Color.cardSurface(for: colorScheme))
-            
             // Encryption Key Section
             Section {
                     if let key = viewModel.getCurrentEncryptionKey() {
@@ -160,7 +88,7 @@ struct CloudSyncSettingsView: View {
                                 Spacer()
                                 
                                 Button(action: {
-                                    UIPasteboard.general.string = key
+                                    SensitiveClipboard.copy(key)
                                     copiedToClipboard = true
                                     
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
@@ -234,12 +162,6 @@ struct CloudSyncSettingsView: View {
         .task(id: [settings.isCloudSyncEnabled, passkeyManager.passkeyActive]) {
             await refreshPasskeyBundles()
         }
-        .onAppear {
-            // Kick off a quick sync so Last Sync is fresh when opening this screen
-            Task {
-                await viewModel.performFullSync()
-            }
-        }
         .alert(cloudSyncSetupErrorTitle, isPresented: Binding(
             get: { cloudSyncSetupError != nil },
             set: {
@@ -288,9 +210,11 @@ struct CloudSyncSettingsView: View {
                 cloudSyncSetupError = "The encryption key could not be loaded. Please try again."
                 return
             }
-            settings.isCloudSyncEnabled = true
-            viewModel.reloadEncryptionKey()
-            await viewModel.performFullSync()
+            // Turning cloud sync on loads the account with the key; with
+            // cloud sync already on, the view model loaded the key it set.
+            if !settings.isCloudSyncEnabled {
+                settings.isCloudSyncEnabled = true
+            }
         case .some(.manualSetupRequired):
             viewModel.cloudSyncOnboardingMode = .setup
             viewModel.showCloudSyncOnboarding = true
@@ -315,83 +239,36 @@ struct CloudSyncSettingsView: View {
         }
     }
     
-    /// Gate-driven status rows from the sync-health store: explains
-    /// why sync is blocked, offers the recovery wizard for key
-    /// problems, and counts chats stuck on terminal upload failures.
+    /// The chat service refused this device's key for the account's
+    /// stored data: the key is missing or another one sealed the data.
     @ViewBuilder
-    private var syncHealthRows: some View {
-        switch syncHealth.gate {
-        case .actionRequired(let reason, _):
+    private var keyLockedRow: some View {
+        if viewModel.account?.keyLocked == true {
             VStack(alignment: .leading, spacing: 8) {
-                Label(actionRequiredMessage(for: reason), systemImage: "exclamationmark.circle")
+                Label(
+                    viewModel.getCurrentEncryptionKey() == nil
+                        ? "Sync is paused because your encryption key needs to be recovered."
+                        : "This device's encryption key doesn't match your cloud data and needs to be recovered.",
+                    systemImage: "exclamationmark.circle"
+                )
                     .font(.caption)
-                    .foregroundColor(reason == .accountBlocked ? .red : .orange)
-                if keyRecoveryApplies(to: reason) {
-                    Button {
-                        viewModel.cloudSyncOnboardingMode = .recovery
-                        viewModel.showCloudSyncOnboarding = true
-                        onRequestCloseSettings()
-                    } label: {
-                        Text("Recover Key")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.orange)
-                            .cornerRadius(6)
-                    }
-                    .buttonStyle(.plain)
+                    .foregroundColor(.orange)
+                Button {
+                    viewModel.cloudSyncOnboardingMode = .recovery
+                    viewModel.showCloudSyncOnboarding = true
+                    onRequestCloseSettings()
+                } label: {
+                    Text("Recover Key")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.orange)
+                        .cornerRadius(6)
                 }
+                .buttonStyle(.plain)
             }
-        case .paused(let reason, _):
-            Label(
-                reason == .attestation
-                    ? "The sync server couldn't be verified. Retrying automatically."
-                    : "Having trouble reaching the cloud. Retrying automatically.",
-                systemImage: "exclamationmark.triangle"
-            )
-            .font(.caption)
-            .foregroundColor(.orange)
-        case .ok:
-            EmptyView()
-        }
-
-        if !syncHealth.failedChats.isEmpty {
-            Text(
-                syncHealth.failedChats.count == 1
-                    ? "1 chat couldn't be synced. It's marked in the sidebar."
-                    : "\(syncHealth.failedChats.count) chats couldn't be synced. They're marked in the sidebar."
-            )
-            .font(.caption)
-            .foregroundColor(.orange)
-        }
-    }
-
-    /// Reasons the recovery wizard can actually fix. An explicit
-    /// allow-list so a future reason defaults to NOT offering key
-    /// recovery until someone decides it applies.
-    private func keyRecoveryApplies(to reason: SyncHealthStore.ActionReason) -> Bool {
-        switch reason {
-        case .keyRecovery, .keyMismatch, .keyConflict:
-            return true
-        case .accountBlocked, .upgradeRequired:
-            return false
-        }
-    }
-
-    private func actionRequiredMessage(for reason: SyncHealthStore.ActionReason) -> String {
-        switch reason {
-        case .keyRecovery:
-            return "Sync is paused because your encryption key needs to be recovered."
-        case .keyMismatch:
-            return "This device's encryption key is out of date and needs to be recovered."
-        case .keyConflict:
-            return "Your cloud data is protected by a different key than this device's."
-        case .accountBlocked:
-            return "Sync is unavailable for this account. Please contact support if this persists."
-        case .upgradeRequired:
-            return "Sync is paused because this version of the app is out of date. Update the app to resume syncing."
         }
     }
 
@@ -552,7 +429,7 @@ struct CloudSyncSettingsView: View {
     }
 
     private func passkeyBundleRow(
-        bundle: EnclaveKeyCurrentBundle,
+        bundle: KeyState.Bundle,
         isCurrentPlatform: Bool
     ) -> some View {
         let credLabel = bundle.credentialId.count <= 12
@@ -851,12 +728,7 @@ private struct BackupEncryptionKeySheet: View {
     }
 
     private func copyKey(_ key: String) {
-        UIPasteboard.general.setItems(
-            [[UIPasteboard.typeAutomatic: key]],
-            options: [
-                .expirationDate: Date().addingTimeInterval(Constants.CloudSync.clipboardExpirationSeconds)
-            ]
-        )
+        SensitiveClipboard.copy(key)
         isCopied = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             isCopied = false

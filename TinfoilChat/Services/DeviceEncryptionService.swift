@@ -41,11 +41,6 @@ actor DeviceEncryptionService: ChatEncryptor {
         return try AESGCMHelper.open(encrypted, using: key)
     }
 
-    func getKeyBytesOrThrow() throws -> Data {
-        let key = try getExistingKey()
-        return key.withUnsafeBytes { Data($0) }
-    }
-
     // MARK: - Key Management
 
     /// Removes the device key from the keychain (used during destructive cleanup).
@@ -58,13 +53,15 @@ actor DeviceEncryptionService: ChatEncryptor {
 
     private func getExistingKey() throws -> SymmetricKey {
         if let key = cachedKey { return key }
-        guard let key = loadKeyFromKeychain() else {
+        guard let key = try loadKeyFromKeychain() else {
             throw EncryptionError.keyNotInitialized
         }
         cachedKey = key
         return key
     }
 
+    /// The device key, made only when the keychain holds none: a key that
+    /// cannot be read, as while the device is locked, fails the write.
     private func getOrCreateKey() throws -> SymmetricKey {
         do {
             return try getExistingKey()
@@ -76,7 +73,7 @@ actor DeviceEncryptionService: ChatEncryptor {
         }
     }
 
-    private func loadKeyFromKeychain() -> SymmetricKey? {
+    private func loadKeyFromKeychain() throws -> SymmetricKey? {
         var query = baseKeychainQuery
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -84,8 +81,9 @@ actor DeviceEncryptionService: ChatEncryptor {
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
 
+        if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess, let data = result as? Data else {
-            return nil
+            throw KeychainError(status: status)
         }
         return SymmetricKey(data: data)
     }

@@ -46,6 +46,8 @@ enum LegacyPasskeyCredentialLookup: Sendable {
 }
 
 enum LegacyPasskeyCredentials {
+    /// The answer carries wrapped keys, which no cache may keep.
+    private static let session = URLSession.ephemeralRefusingRedirects()
 
     /// Fetch the legacy passkey credentials for the authenticated user.
     /// Returns an empty array on any non-success for recovery callers.
@@ -67,7 +69,7 @@ enum LegacyPasskeyCredentials {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else { return .unverified }
             if http.statusCode == 404 { return .available([]) }
             guard (200...299).contains(http.statusCode) else { return .unverified }

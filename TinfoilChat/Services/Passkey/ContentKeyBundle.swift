@@ -1,20 +1,20 @@
 //
-//  SyncEnclaveKeyBundle.swift
+//  ContentKeyBundle.swift
 //  TinfoilChat
 //
 //  Wrap / unwrap the user's content encryption key (CEK) under a
-//  passkey-PRF-derived KEK, in the shape the sync enclave expects.
+//  passkey-PRF-derived KEK, in the shape the key registry expects.
 //
-//  The enclave wire (Go `internal/server/types.go`) carries one wrapped
-//  CEK per registered passkey credential. There is no
-//  list of "alternative" keys: the enclave is the single source of truth,
-//  and legacy alternatives are handled by opportunistic migration.
+//  The registry carries one wrapped CEK per registered passkey
+//  credential. There is no list of "alternative" keys: the registry is
+//  the single source of truth, and rows older keys sealed are resealed
+//  by the chat service.
 //
 
 import CryptoKit
 import Foundation
 
-struct SyncEnclaveBundleBody {
+struct WrappedKeyBundle {
     /// Base64url-encoded credential id (matches WebAuthn convention).
     let credentialId: String
     /// 12-byte AES-GCM IV, hex-encoded.
@@ -23,9 +23,10 @@ struct SyncEnclaveBundleBody {
     let wrappedKeyHex: String
 }
 
-enum SyncEnclaveKeyBundleError: LocalizedError {
+enum ContentKeyBundleError: LocalizedError {
     case wrongCekLength(Int)
     case wrongIvLength(Int)
+    case duplicateKey
 
     var errorDescription: String? {
         switch self {
@@ -33,21 +34,23 @@ enum SyncEnclaveKeyBundleError: LocalizedError {
             return "CEK must be 32 bytes (got \(got))"
         case .wrongIvLength(let got):
             return "AES-GCM IV must be 12 bytes (got \(got))"
+        case .duplicateKey:
+            return "The passkey bundle names a key more than once"
         }
     }
 }
 
-/// Result of unwrapping a bundle that turned out to carry the legacy
-/// pre-v2 JSON envelope instead of raw CEK bytes. Besides the primary
-/// CEK, the envelope can list historical `key_<base36>` alternatives
-/// that older rows may still be sealed under; callers feed those into
-/// the decrypt-only key history so the migration sweep can unseal them.
-struct SyncEnclaveUnwrappedCek {
+/// Result of unwrapping a bundle. Besides the primary CEK, an envelope
+/// (the legacy pre-v2 JSON envelope or the generic key envelope) can
+/// list historical `key_<base36>` alternatives that older rows may
+/// still be sealed under; callers feed those into the decrypt-only key
+/// history so the migration sweep can unseal them.
+struct UnwrappedContentKey {
     let cek: Data
     let legacyAlternativeKeys: [String]
 }
 
-enum SyncEnclaveKeyBundle {
+enum ContentKeyBundle {
 
     static let cekByteCount = 32
     static let aesGcmIvByteCount = 12
@@ -66,24 +69,18 @@ enum SyncEnclaveKeyBundle {
         prfOutput: Data,
         kekIvHex: String,
         wrappedKeyHex: String
-    ) throws -> SyncEnclaveUnwrappedCek {
-        let iv: Data
-        do {
-            iv = try hexToData(kekIvHex)
-        } catch {
-            throw SyncEnclaveKeyBundleError.wrongIvLength(kekIvHex.count / 2)
+    ) throws -> UnwrappedContentKey {
+        guard let iv = Data(lowercaseHex: kekIvHex.lowercased()), !iv.isEmpty else {
+            throw ContentKeyBundleError.wrongIvLength(kekIvHex.count / 2)
         }
         guard iv.count == aesGcmIvByteCount else {
-            throw SyncEnclaveKeyBundleError.wrongIvLength(iv.count)
+            throw ContentKeyBundleError.wrongIvLength(iv.count)
         }
-        let encrypted: Data
-        do {
-            encrypted = try hexToData(wrappedKeyHex)
-        } catch {
-            throw SyncEnclaveKeyBundleError.wrongCekLength(wrappedKeyHex.count / 2)
+        guard let encrypted = Data(lowercaseHex: wrappedKeyHex.lowercased()), !encrypted.isEmpty else {
+            throw ContentKeyBundleError.wrongCekLength(wrappedKeyHex.count / 2)
         }
         guard encrypted.count >= aesGcmTagByteCount else {
-            throw SyncEnclaveKeyBundleError.wrongCekLength(encrypted.count)
+            throw ContentKeyBundleError.wrongCekLength(encrypted.count)
         }
         let sealed = try AES.GCM.SealedBox(
             nonce: AES.GCM.Nonce(data: iv),
@@ -100,7 +97,7 @@ enum SyncEnclaveKeyBundle {
         if let legacy = legacyJsonEnvelopeCek(plaintext) {
             return legacy
         }
-        throw SyncEnclaveKeyBundleError.wrongCekLength(plaintext.count)
+        throw ContentKeyBundleError.wrongCekLength(plaintext.count)
     }
 
     /// Best-effort decode of the legacy `{primary, alternatives: [...]}`
@@ -116,7 +113,7 @@ enum SyncEnclaveKeyBundle {
     /// history they feed (`addDecryptionKey`) only accepts that shape
     /// and would silently drop a raw base64 string, stranding any
     /// legacy row still sealed under it.
-    private static func legacyJsonEnvelopeCek(_ plaintext: Data) -> SyncEnclaveUnwrappedCek? {
+    private static func legacyJsonEnvelopeCek(_ plaintext: Data) -> UnwrappedContentKey? {
         struct LegacyEnvelope: Decodable {
             let primary: String?
             let alternatives: [String]?
@@ -135,7 +132,7 @@ enum SyncEnclaveKeyBundle {
             guard normalized != primaryNormalized, seen.insert(normalized).inserted else { continue }
             alternatives.append(normalized)
         }
-        return SyncEnclaveUnwrappedCek(cek: cek, legacyAlternativeKeys: alternatives)
+        return UnwrappedContentKey(cek: cek, legacyAlternativeKeys: alternatives)
     }
 
     /// Decode one legacy envelope key string to raw CEK bytes.
@@ -160,7 +157,7 @@ enum SyncEnclaveKeyBundle {
     /// enclave's `crypto.DeriveKeyID` byte-for-byte.
     static func deriveKeyIdHex(cek: Data) throws -> String {
         guard cek.count == cekByteCount else {
-            throw SyncEnclaveKeyBundleError.wrongCekLength(cek.count)
+            throw ContentKeyBundleError.wrongCekLength(cek.count)
         }
         let keyId = HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: cek),
@@ -168,6 +165,6 @@ enum SyncEnclaveKeyBundle {
             info: keyIdInfo,
             outputByteCount: keyIdByteCount
         )
-        return keyId.withUnsafeBytes { dataToHex(Data($0)) }
+        return keyId.withUnsafeBytes { Data($0).hexEncodedString() }
     }
 }

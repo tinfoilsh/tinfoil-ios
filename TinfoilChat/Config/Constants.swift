@@ -36,21 +36,17 @@ enum Constants {
 
     enum Config {
         static let configURL = URL(string: "https://api.tinfoil.sh/api/config/mobile")!
-        static let modelsURL = URL(string: "https://api.tinfoil.sh/api/config/models?mobile=true&chat=true")!
-        static let allModelsURL = URL(string: "https://api.tinfoil.sh/api/config/models")!
-        static let systemPromptURL = URL(string: "https://api.tinfoil.sh/api/config/system-prompt")!
 
         enum ErrorDomain {
             static let domain = "Tinfoil"
             static let configNotFoundCode = 1
-            static let configNotFoundDescription = "Configuration file not found"
-            static let configNotFoundRecoverySuggestion = "Please check network connection or try again later."
         }
     }
 
     enum UI {
         static let scrollToBottomButtonSize: CGFloat = 27
-        static let scrollToBottomIconSize: CGFloat = 16
+        /// The row above a chat's messages that loads those before them.
+        static let earlierMessagesHeaderHeight: CGFloat = 44
         static let tableMaximumColumnWidthRatio: CGFloat = 0.5
         static let tableCellHorizontalPadding: CGFloat = 12
         static let tableDividerThickness: CGFloat = 1
@@ -121,9 +117,6 @@ enum Constants {
     }
 
     enum Rendering {
-        /// Code blocks larger than this skip JS-based syntax highlighting
-        /// to avoid blocking the main thread via JavaScriptCore.
-        static let maxSyntaxHighlightCharacters = 15_000
         /// Messages larger than this skip LaTeX/table regex parsing
         /// and render as plain markdown.
         static let maxFullParsingCharacters = 50_000
@@ -166,6 +159,18 @@ enum Constants {
         static let maxWidthFraction: CGFloat = 0.6
     }
 
+    enum Streaming {
+        /// Minimum interval between redraws of the chat while a reply streams.
+        /// Redrawing on every token makes SwiftUI rebuild the transcript's
+        /// markdown each time, which stalls scrolling; 100 ms is not perceived
+        /// as a delay.
+        static let uiUpdateInterval: TimeInterval = 0.1
+        /// A reply's first text ticks a light haptic a few times, spaced out.
+        static let hapticTicks = 5
+        static let hapticInterval: TimeInterval = 0.1
+        static let hapticIntensity: CGFloat = 0.5
+    }
+
     enum StreamingBuffer {
         static let initialMultiplier: CGFloat = 50.0
         static let multiplierIncrement: CGFloat = 10.0
@@ -200,56 +205,42 @@ enum Constants {
     }
 
     enum API {
-        static let successStatusCodes = 200...299
-        static let tooManyRequestsStatusCode = 429
-        static let chatCompletionsEndpoint = "/v1/chat/completions"
         static let baseURL = "https://api.tinfoil.sh"
-        /// Carries the chat id on completion requests so the router's
-        /// safeguards submission can identify the conversation: a continued
-        /// conversation is then counted at most once toward an acceptable
-        /// use policy violation, and a flag can be linked back to the chat.
-        /// The router strips it before the request reaches the model.
-        static let conversationIdHeader = "X-Tinfoil-Conversation-Id"
-        static let dailyRateLimitMessage = "You've reached your daily rate limit."
         /// Read-only recovery endpoint for passkeys registered on the
         /// pre-enclave (v1) webapp. Consulted only when the enclave key
         /// registry has no usable bundle for this device.
         static let legacyPasskeyCredentialsPath = "/api/passkey-credentials/"
-        static let sessionTokenExpiryBufferSeconds: TimeInterval = 300  // 5 minutes
 
         enum SessionToken {
             static let chatPath = "/api/chat/token"
-            static let requestTimeoutSeconds: TimeInterval = 60
-            static let rateLimitFallbackSeconds: TimeInterval = 60
-            static let maximumCooldownSeconds: TimeInterval = 60 * 60
             static let retryAfterHeader = "Retry-After"
-            static let serverDateHeader = "Date"
-            static let httpDateFormat = "EEE, dd MMM yyyy HH:mm:ss z"
-            static let httpDateLocale = "en_US_POSIX"
         }
 
         enum ErrorCode {
-            static let invalidAPIKey = "invalid_api_key"
-            static let missingAPIKey = "missing_api_key"
             /// Wire code returned with a 429 when a subscriber exceeds the
             /// per-account hourly inference-token cap.
             static let hourlyLimitReached = "HOURLY_LIMIT_REACHED"
-            /// OpenAI-style structured codes carried in the error body when
-            /// a request is rejected for quota or rate-limit reasons.
-            static let insufficientQuota = "insufficient_quota"
-            static let rateLimitExceeded = "rate_limit_exceeded"
-        }
-
-        enum ErrorType {
-            static let rateLimit = "rate_limit_error"
         }
     }
 
     enum Harness {
         static let url = "https://chat-api.tinfoil.sh"
         static let configRepo = "tinfoilsh/confidential-tinfoil-harness"
-        /// An attestation that has not finished by then is abandoned: the
-        /// request fails, and the next one verifies the enclave again.
+
+        enum Keys {
+            /// The registry answers an account without a key with this.
+            static let notFoundStatus = 404
+            /// Statuses from here up are the registry's own failures.
+            static let serverErrorStatus = 500
+        }
+
+        /// A chat's id starts with the time it was made, reversed so the
+        /// latest sorts first, as the web app makes them.
+        static let maxReverseTimestamp: Int = 9999999999999
+        static let reverseTimestampDigits: Int = String(maxReverseTimestamp).count
+        /// Making the chat service's client, which verifies the enclave
+        /// first, is abandoned after this long: the requests waiting on it
+        /// fail, and the next one tries again.
         static let attestationTimeoutSeconds: TimeInterval = 20
         /// A live run's chat access that could not be minted again, for a
         /// reason that names no time to ask again, is asked for again after
@@ -258,13 +249,10 @@ enum Constants {
         /// How long a run's stream may go without a byte before the
         /// connection is given up.
         static let streamIdleTimeoutSeconds: TimeInterval = 120
-        static let hpkePublicKeyBytes = 32
-        /// A refusal of the key requests are sealed to, which an enclave whose
-        /// key rotated since it was verified answers with.
-        static let keyConfigurationErrorStatus = 422
-        static let keyConfigurationErrorType = "urn:ietf:params:ehbp:error:key-config"
-        static let problemContentType = "application/problem+json"
-        static let maximumDiagnosticBytes = 4 * 1024
+        /// The version of the protocol this client was built from, the
+        /// info.version of harness-protocol/openapi.yaml. A harness that no
+        /// longer serves it asks the user to update the app.
+        static let protocolVersion = 1
 
         /// How often the harness is asked what changed on other devices.
         static let changePollSeconds: TimeInterval = 20
@@ -319,21 +307,6 @@ enum Constants {
         }
     }
 
-    enum SyncEnclave {
-        static let url = "https://sync.tinfoil.sh"
-        static let configRepo = "tinfoilsh/confidential-sync"
-        static let chatListLimit = 100
-        static let projectListLimit = 100
-        static let projectChatListLimit = 100
-        static let plaintextChatFormatVersion = 2
-        /// Hard per-page cap the enclave's list-status endpoint
-        /// enforces; requests above it are clamped server-side.
-        static let listStatusPageLimit = 500
-        /// How many full chat blobs to request per pull call. Keeps
-        /// individual response payloads bounded when syncing many chats.
-        static let pullBatchSize = 20
-    }
-
     enum Onboarding {
         static let completionMetadataKey = "has_completed_onboarding"
         static let bannerAssetName = "onboarding-banner"
@@ -373,7 +346,6 @@ enum Constants {
     enum Legal {
         static let termsOfServiceURL = URL(string: "https://tinfoil.sh/terms")!
         static let privacyPolicyURL = URL(string: "https://tinfoil.sh/privacy")!
-        static let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
         static let consentRequiredMessage = "Please confirm that you have read and agree to the Terms of Service and Privacy Policy."
         static let consentAccessibilityLabel = "I have read and agree to the Terms of Service and Privacy Policy"
         static let checkboxSize: CGFloat = 22
@@ -426,10 +398,6 @@ enum Constants {
         static let maxFavorites = 3
         /// Number of prompt suggestions shown on the welcome screen.
         static let homeSuggestionCount = 3
-        /// Name and description given to a legacy custom system prompt when
-        /// it is converted into a library preset.
-        static let migratedCustomPromptName = "My default prompt"
-        static let migratedCustomPromptDescription = "Migrated from the custom system prompt setting"
         /// Label for an unset per-preset model or web search override, shown
         /// in the editor pickers and the detail view.
         static let noOverrideLabel = "No override set"
@@ -441,17 +409,18 @@ enum Constants {
     }
 
     enum Context {
-        /// Approximate characters per token used by the estimation heuristic.
-        static let charsPerToken: Double = 4
-        /// Fraction of the model's context window usable by conversation
-        /// history. The remainder is headroom for the system prompt and the
-        /// model's response. Mirrors the webapp's CONTEXT_WINDOW_USAGE_RATIO.
-        static let contextWindowUsageRatio: Double = 0.8
-        /// Fallback context window size when a model doesn't report one.
-        static let defaultContextWindowTokens = 128_000
         /// Usage percentage at which the context indicator switches to the
         /// warning color.
         static let warningThresholdPercent = 80
+    }
+
+    /// The cover shown while the app is not active, and the placeholder
+    /// over keys while the screen is recorded or shared.
+    enum Privacy {
+        static let coverLogoHeight: CGFloat = 48
+        static let concealedLabel = "Hidden"
+        static let concealedAccessibilityLabel = "Hidden while the screen is recorded or shared"
+        static let concealedLabelMinimumScale: CGFloat = 0.5
     }
 
     enum CloudSync {
@@ -461,7 +430,6 @@ enum Constants {
     }
 
     enum ChatFork {
-        static let titleSuffix = " (fork)"
         /// The "forking" overlay stays up at least this long so a fast fork
         /// still reads as an action instead of a flicker.
         static let overlayMinVisibleSeconds: TimeInterval = 0.6
@@ -483,41 +451,11 @@ enum Constants {
         static let continueLabel = "Continue"
         static let continueSystemImage = "forward"
         static let tryAgainLabel = "Try again"
+        static let resendLabel = "Resend message"
         static let tryAgainSystemImage = "arrow.clockwise"
     }
 
-    enum Sync {
-        static let protocolVersion = 2
-        static let documentAttachmentsProtocolVersion = 3
-        static let maxConcurrentChatUploads = 2
-        static let chatSyncIntervalSeconds: TimeInterval = 20.0
-        static let profileSyncIntervalSeconds: TimeInterval = 60.0  // 1 minute
-        static let profileSyncProtocolVersion = 2
-        static let clientInitTimeoutSeconds: TimeInterval = 60.0
-        static let backgroundTaskName = "CompleteStreamingResponse"
-        static let maxReverseTimestamp: Int = 9999999999999
-        static let reverseTimestampDigits: Int = String(maxReverseTimestamp).count
-
-        static let createdAtFallbackThresholdSeconds: TimeInterval = 5.0
-        static let uploadBaseDelaySeconds: TimeInterval = 1.0
-        static let uploadMaxDelaySeconds: TimeInterval = 8.0
-        static let uploadMaxRetries: Int = 3
-
-        // Poll cadence and deadline for the enclave's async
-        // migrate-all coordinator. Mirrors the webapp constants so
-        // both clients keep the same drain budget.
-        static let migrationPollIntervalSeconds: TimeInterval = 2.0
-        static let migrationPollTimeoutSeconds: TimeInterval = 15 * 60.0
-
-        // How long sync must stay paused before the UI escalates from
-        // the quiet settings status line to the attention badge.
-        // Transient network blips and enclave restarts resolve well
-        // inside this window; anything longer deserves attention.
-        static let pausedAttentionWindowSeconds: TimeInterval = 5 * 60.0
-    }
-
     enum Verification {
-        static let networkRetryDelaySeconds: TimeInterval = 2.0
         static let collapseDelaySeconds: TimeInterval = 3.0
     }
 
@@ -586,13 +524,13 @@ enum Constants {
 
     enum Share {
         static let shareBaseURL = "https://chat.tinfoil.sh"
-        static let shareAPIPath = "/api/shares"
         static let copyFeedbackDurationSeconds: TimeInterval = 2.0
     }
 
     enum Passkey {
         static let rpId = "tinfoil.sh"
         static let rpName = "Tinfoil Chat"
+        /// Where older versions kept the passkey's PRF output.
         static let prfCacheKeychainAccount = "sh.tinfoil.passkey-prf-cache"
         static let syncCheckIntervalSeconds: TimeInterval = 30
     }
@@ -642,58 +580,15 @@ enum Constants {
             static let customSystemPrompt = "tinfoil-user-prefs-custom-system-prompt"
         }
 
-        // MARK: - Sync / Data State
-        enum Sync {
-            static func revisionCheckpoint(userId: String) -> String {
-                "tinfoil-sync-revision-checkpoint-v2-\(userId)"
-            }
-            static func lastSyncDate(userId: String) -> String {
-                "tinfoil-sync-last-sync-date-\(userId)"
-            }
-            static func paginationToken(userId: String) -> String {
-                "tinfoil-sync-pagination-token-\(userId)"
-            }
-            static func paginationHasMore(userId: String) -> String {
-                "tinfoil-sync-pagination-has-more-\(userId)"
-            }
-            static func paginationActive(userId: String) -> String {
-                "tinfoil-sync-pagination-active-\(userId)"
-            }
-            static func paginationLoadedFirst(userId: String) -> String {
-                "tinfoil-sync-pagination-loaded-first-\(userId)"
-            }
-            static func paginationAttempted(userId: String) -> String {
-                "tinfoil-sync-pagination-attempted-\(userId)"
-            }
-        }
-
         // MARK: - Secret / Sensitive
         enum Secret {
             static let encryptionKeySetUp = "tinfoil-secret-encryption-key-set-up"
             static let passkeyEnclaveKeyId = "tinfoil-secret-passkey-enclave-key-id"
             static let passkeyEnclaveCredentialId = "tinfoil-secret-passkey-enclave-credential-id"
             static let passkeyRecoveryDismissedKeyId = "tinfoil-secret-passkey-recovery-dismissed-key-id"
-
-            static func cloudKeyAuthorization(userId: String) -> String {
-                "tinfoil-secret-cloud-key-authorization-\(userId)"
-            }
         }
 
         // MARK: - One-shot migration flags
-        enum Migration {
-            /// Set the first time a build evicts locally-cached cloud chats
-            /// that the legacy v0/v1 decrypt path used to handle. The enclave
-            /// rewraps any orphan rows server-side; the next sync repopulates.
-            static let legacyCloudChatsEvicted = "tinfoil-migration-legacy-cloud-chats-evicted"
-            /// Per-user fingerprint (suffixed with the clerk user id) of the
-            /// migration candidate key set whose last completed sweep left
-            /// rows blocked under every key this client holds. While it
-            /// matches the current key set the launch sweep is skipped so a
-            /// doomed migrate-all is not re-driven every launch; a changed
-            /// key set no longer matches and the sweep runs again. Cleared
-            /// once a sweep fully migrates with nothing blocked.
-            static let migrationExhaustedKeyset = "tinfoil-migration-exhausted-keyset"
-        }
 
         /// Legacy UserDefaults keys that should be purged on app
         /// launch. These named the v1 sync state (passkey JSONB
@@ -710,7 +605,11 @@ enum Constants {
             "tinfoil-sync-chat-deletes-watermark",
             "tinfoil-chat-sync-status",
             "tinfoil-all-chats-sync-status",
+            "tinfoil-migration-legacy-cloud-chats-evicted",
         ]
+        /// The previous client's record, by account, of a resealing sweep
+        /// that could not go further; the harness owns the sweep now.
+        static let legacyMigrationKeyPrefix = "tinfoil-migration-exhausted-keyset"
     }
 
     enum AppReview {
@@ -739,20 +638,17 @@ enum Constants {
     }
 
     enum Attachments {
-        static let maxConcurrentImageDownloads = 3
-        static let maxImageDimension: CGFloat = 1536
         static let imageCompressionQuality: CGFloat = 0.85
         static let maxFileSizeBytes = SharedImportConfiguration.maximumDocumentSizeBytes
-        static let maxImageSizeBytes = SharedImportConfiguration.maximumImageSizeBytes
         static let previewThumbnailSize: CGFloat = 60
-        static let thumbnailMaxDimension: CGFloat = 300
+        /// The longest side of the preview a picked image shows while it
+        /// uploads.
+        static let thumbnailMaxDimension = 300
         static let previewMaxWidth: CGFloat = 200
         static let messageThumbnailSize: CGFloat = 80
         static let messageThumbnailColumns: Int = 3
         static let supportedDocumentExtensions = SharedImportConfiguration.supportedDocumentExtensions
-        static let supportedImageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "heic"]
         static let defaultImageMimeType = "image/jpeg"
-        static let scannedDocumentPageMimeType = "image/png"
     }
 
     /// Tiles that stand in for a file: an image thumbnail, a miniature
@@ -804,7 +700,7 @@ enum StorageKeysMigration {
             UserDefaults.standard.removeObject(forKey: key)
         }
         for key in UserDefaults.standard.dictionaryRepresentation().keys
-            where key.hasPrefix(legacyProjectChatStatusPrefix) {
+            where key.hasPrefix(legacyProjectChatStatusPrefix) || key.hasPrefix(Constants.StorageKeys.legacyMigrationKeyPrefix) {
             UserDefaults.standard.removeObject(forKey: key)
         }
 

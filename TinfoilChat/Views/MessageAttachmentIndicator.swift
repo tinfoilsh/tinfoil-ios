@@ -29,6 +29,17 @@ private enum Base64ImageDecoder {
 
         return image
     }
+
+    static func decode(data: Data, cacheKey: String) async -> UIImage? {
+        if let cached = cachedImage(for: cacheKey) {
+            return cached
+        }
+        let image = await Task.detached(priority: .utility) { UIImage(data: data) }.value
+        if let image {
+            cache.setObject(image, forKey: cacheKey as NSString)
+        }
+        return image
+    }
 }
 
 struct DecodedBase64ImageView<Placeholder: View>: View {
@@ -106,9 +117,10 @@ struct MessageAttachmentIndicator: View {
     }
 
     private func openImageViewer(for attachment: Attachment) {
-        let allImages = (viewModel.currentChat?.messages ?? [])
-            .flatMap { $0.attachments }
-            .filter { $0.type == .image && $0.base64 != nil }
+        let messages: [Message] = viewModel.currentChat?.messages ?? []
+        let allImages = messages.flatMap(\.attachments).filter { (image: Attachment) -> Bool in
+            image.type == .image && (image.base64 != nil || image.thumbnailBase64 != nil)
+        }
         if let index = allImages.firstIndex(where: { $0.id == attachment.id }) {
             viewModel.imageViewerImages = allImages
             viewModel.imageViewerIndex = index
@@ -199,15 +211,18 @@ struct ImageViewerOverlay: View {
     let images: [Attachment]
     let initialIndex: Int
     let onDismiss: () -> Void
+    /// Loads an image the chat keeps apart from its thumbnail.
+    let loadFullImage: ((Attachment) async -> Data?)?
     @State private var currentIndex: Int
     @State private var dragOffset: CGFloat = 0
     @State private var isDraggingVertically = false
     @State private var isImageZoomed = false
 
-    init(images: [Attachment], initialIndex: Int, onDismiss: @escaping () -> Void) {
+    init(images: [Attachment], initialIndex: Int, onDismiss: @escaping () -> Void, loadFullImage: ((Attachment) async -> Data?)? = nil) {
         self.images = images
         self.initialIndex = initialIndex
         self.onDismiss = onDismiss
+        self.loadFullImage = loadFullImage
         _currentIndex = State(initialValue: initialIndex)
     }
 
@@ -224,7 +239,8 @@ struct ImageViewerOverlay: View {
                     ZoomableImagePage(
                         attachment: attachment,
                         isZoomed: $isImageZoomed,
-                        isActive: index == currentIndex
+                        isActive: index == currentIndex,
+                        loadFullImage: loadFullImage
                     )
                     .tag(index)
                 }
@@ -336,6 +352,7 @@ struct ZoomableImagePage: View {
     let attachment: Attachment
     @Binding var isZoomed: Bool
     let isActive: Bool
+    let loadFullImage: ((Attachment) async -> Data?)?
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
@@ -411,11 +428,22 @@ struct ZoomableImagePage: View {
 
             if let cached = Base64ImageDecoder.cachedImage(for: cacheKey) {
                 decodedImage = cached
-                return
+            } else {
+                guard !Task.isCancelled else { return }
+                decodedImage = await Base64ImageDecoder.decode(base64: fullSizeBase64, cacheKey: cacheKey)
             }
 
-            guard !Task.isCancelled else { return }
-            decodedImage = await Base64ImageDecoder.decode(base64: fullSizeBase64, cacheKey: cacheKey)
+            // An image shown from its thumbnail is replaced by the full image
+            // once it loads.
+            guard attachment.base64 == nil, let loadFullImage else { return }
+            let loadedKey = "attachment-loaded-\(attachment.id)"
+            if let cached = Base64ImageDecoder.cachedImage(for: loadedKey) {
+                decodedImage = cached
+                return
+            }
+            guard let data = await loadFullImage(attachment), !Task.isCancelled,
+                  let image = await Base64ImageDecoder.decode(data: data, cacheKey: loadedKey) else { return }
+            decodedImage = image
         }
     }
 

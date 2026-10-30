@@ -1,6 +1,7 @@
 import EHBP
 import Foundation
-import TinfoilAI
+import OSLog
+import Tinfoil
 
 /// A request to the harness, as the transport sends it: its route, the
 /// headers beyond who is asking, and its body, sealed to the enclave.
@@ -15,6 +16,10 @@ struct HarnessRequest: Sendable {
 struct HarnessResponse: Sendable {
     let status: Int
     let headers: [String: String]
+    /// Whether the enclave sealed the answer. Every answer the harness
+    /// gives is; one that is not came from whatever stands in front of the
+    /// enclave.
+    let sealed: Bool
     let body: AsyncThrowingStream<Data, Error>
 
     var isSuccess: Bool { (200..<300).contains(status) }
@@ -28,119 +33,151 @@ struct HarnessResponse: Sendable {
         return data
     }
 
-    static func collected(status: Int, headers: [String: String], body: Data) -> HarnessResponse {
-        HarnessResponse(status: status, headers: headers, body: AsyncThrowingStream { continuation in
+    static func collected(status: Int, headers: [String: String], sealed: Bool, body: Data) -> HarnessResponse {
+        HarnessResponse(status: status, headers: headers, sealed: sealed, body: AsyncThrowingStream { continuation in
             continuation.yield(body)
             continuation.finish()
         })
     }
 }
 
+/// The result of a verification of the enclave.
+typealias EnclaveVerificationResult = Result<Verification, TinfoilError>
+
 /// Carries requests to the harness through an attested, sealed channel.
 protocol HarnessTransport: Sendable {
     func send(_ request: HarnessRequest) async throws -> HarnessResponse
-    /// The latest verification of the enclave, or nil before the first.
-    func verification() async -> Verification?
+    /// The result of each verification of the enclave as it finishes. Of
+    /// those not read yet, only the latest is kept.
+    var verifications: AsyncStream<EnclaveVerificationResult> { get }
 }
 
 /// The transport to the harness enclave: each request's body is sealed to
-/// the X25519 key the enclave's attestation endorses, which is verified
-/// again as its freshness ends or as the enclave refuses a key it rotated.
-final class SealedTransport: HarnessTransport {
-    private struct Problem: Decodable {
-        let type: String?
-    }
+/// the X25519 key the enclave's attestation endorses, which the client
+/// verifies again as its freshness ends or as the enclave refuses a key it
+/// rotated.
+actor SealedTransport: HarnessTransport {
+    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Harness")
 
-    private let origin: String
-    private let handle: EnclaveHandle
-    private let session: URLSession
+    nonisolated let verifications: AsyncStream<EnclaveVerificationResult>
+    private let verified: AsyncStream<EnclaveVerificationResult>.Continuation
+    private let origin: URL
+    private let enclave: String
+    private let repo: String
+    /// The enclave's client, made and verified by the first request and
+    /// shared by every request after it.
+    private var connecting: Task<EnclaveHTTPClient, Error>?
 
     init(url: String = Constants.Harness.url, repo: String = Constants.Harness.configRepo) throws {
         guard let parsed = URL(string: url), parsed.scheme == "https", let host = parsed.host,
               parsed.user == nil, parsed.password == nil, parsed.path.isEmpty || parsed.path == "/",
-              parsed.query == nil, parsed.fragment == nil else {
+              parsed.query == nil, parsed.fragment == nil,
+              let origin = URL(string: "https://\(host)" + (parsed.port.map { ":\($0)" } ?? "")) else {
             throw HarnessError(
                 code: HarnessErrorCode.configuration,
                 message: "Configure an HTTPS origin for the chat service.",
                 action: .stop
             )
         }
-        origin = "https://\(host)" + (parsed.port.map { ":\($0)" } ?? "")
-        handle = try EnclaveHandle(enclave: parsed.port.map { "\(host):\($0)" } ?? host, repo: repo)
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = Constants.Harness.streamIdleTimeoutSeconds
-        configuration.waitsForConnectivity = true
-        configuration.httpCookieStorage = nil
-        configuration.urlCache = nil
-        session = URLSession(configuration: configuration)
+        self.origin = origin
+        enclave = parsed.port.map { "\(host):\($0)" } ?? host
+        self.repo = repo
+        (verifications, verified) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
     }
 
-    func verification() async -> Verification? {
-        await handle.verification
+    deinit {
+        verified.finish()
     }
 
+    /// Sends a request, failing with a harness error, or with
+    /// CancellationError once cancelled. An answer's body fails as the SDK
+    /// reads it, so a stream that breaks shows as interrupted.
     func send(_ request: HarnessRequest) async throws -> HarnessResponse {
-        for attempt in 0..<2 {
-            let key = try await publicKey()
-            try Task.checkCancellation()
-            let client = try EHBPClient(baseURL: origin, publicKey: key, session: session)
-            let (stream, response) = try await client.requestStream(
-                method: "POST",
-                path: request.route.rawValue,
-                headers: request.headers,
-                body: request.body
-            )
-            // The enclave may have rotated its key since it was verified. A
-            // refusal of the key is the only answer verified again; every
-            // other is the harness's.
-            if attempt == 0, Self.mayRefuseKey(response) {
-                let body = try await Self.diagnostic(of: stream)
-                if Self.refusesKey(response, body) {
-                    _ = try await verified(again: true)
-                    continue
+        do {
+            let client = try await client()
+            var sent = URLRequest(url: origin.appending(path: request.route.rawValue))
+            sent.httpMethod = "POST"
+            sent.allHTTPHeaderFields = request.headers
+            sent.httpBody = request.body
+            sent.timeoutInterval = Constants.Harness.streamIdleTimeoutSeconds
+            let answer = try await client.recoverableBytes(for: sent)
+            let response = answer.response
+            let sealed = response.value(forHTTPHeaderField: EHBPProtocol.responseNonceHeader) != nil
+            return HarnessResponse(status: response.statusCode, headers: Self.headers(of: response), sealed: sealed, body: answer.body)
+        } catch {
+            let failure = Self.harnessError(for: error)
+            if !(failure is CancellationError) {
+                Self.logger.error("Failed to send a request to the chat service: \(error, privacy: .public)")
+            }
+            throw failure
+        }
+    }
+
+    /// The error a request that could not be carried fails with, so the rest
+    /// of the app meets only harness errors.
+    static func harnessError(for error: Error) -> Error {
+        switch error {
+        case is CancellationError:
+            return CancellationError()
+        case let error as URLError:
+            return error.code == .cancelled ? CancellationError() : HarnessError(HarnessErrorBody.unreachable, urlErrorCode: error.code)
+        case let error as TinfoilError:
+            switch error {
+            case .networkError(let details): return HarnessError(HarnessErrorBody.unreachable, urlErrorCode: details.urlError?.code)
+            case .attestationError: return HarnessError(HarnessErrorBody.unverified)
+            case .configurationError: return misconfigured
+            }
+        case is EHBPError:
+            // The enclave refused even the key verified again, or its answer
+            // was not sealed to this request.
+            return HarnessError(HarnessErrorBody.unsealedAnswer)
+        default:
+            return HarnessError(HarnessErrorBody.unreachable)
+        }
+    }
+
+    private static let misconfigured = HarnessError(
+        code: HarnessErrorCode.configuration,
+        message: "The chat service is not configured correctly.",
+        action: .stop
+    )
+
+    /// The enclave's client, verified once it is made. One that has not been
+    /// made within the attestation timeout, or failed, fails the requests
+    /// waiting on it; the next request makes it again.
+    private func client() async throws -> EnclaveHTTPClient {
+        let task = connecting ?? connect()
+        connecting = task
+        do {
+            return try await task.value
+        } catch {
+            if connecting == task { connecting = nil }
+            throw error
+        }
+    }
+
+    private func connect() -> Task<EnclaveHTTPClient, Error> {
+        let enclave = enclave
+        let repo = repo
+        let verified = verified
+        return Task {
+            try await withThrowingTaskGroup(of: EnclaveHTTPClient.self) { group in
+                group.addTask {
+                    try await EnclaveHTTPClient(
+                        enclave: enclave,
+                        repo: repo,
+                        transportMode: .ehbp,
+                        onVerificationResult: { verified.yield($0) }
+                    )
                 }
-                return .collected(status: response.statusCode, headers: Self.headers(of: response), body: body)
+                group.addTask {
+                    try await Task.sleep(for: .seconds(Constants.Harness.attestationTimeoutSeconds))
+                    throw URLError(.timedOut)
+                }
+                let first = try await group.next()!
+                group.cancelAll()
+                return first
             }
-            return HarnessResponse(status: response.statusCode, headers: Self.headers(of: response), body: stream)
-        }
-        throw HarnessError(
-            code: HarnessErrorCode.connection,
-            message: "The chat service refused the key it was verified with.",
-            action: .retry
-        )
-    }
-
-    /// The key requests are sealed to, from the enclave's verification.
-    private func publicKey() async throws -> Data {
-        let verification = try await verified(again: false)
-        guard let hex = verification.hpkePublicKey, let key = Data(lowercaseHex: hex),
-              key.count == Constants.Harness.hpkePublicKeyBytes else {
-            throw HarnessError(
-                code: HarnessErrorCode.configuration,
-                message: "The chat service endorses no key to seal requests to.",
-                action: .stop
-            )
-        }
-        return key
-    }
-
-    /// The enclave's verification, fresh or made again, within the
-    /// attestation timeout. One that has not finished by then fails the
-    /// request; the next one asks again.
-    private func verified(again: Bool) async throws -> Verification {
-        try await withThrowingTaskGroup(of: Verification.self) { group in
-            group.addTask { try await again ? self.handle.verify() : self.handle.verifyIfNeeded() }
-            group.addTask {
-                try await Task.sleep(for: .seconds(Constants.Harness.attestationTimeoutSeconds))
-                throw HarnessError(
-                    code: HarnessErrorCode.connection,
-                    message: "The chat service could not be verified in time. Check your connection and try again.",
-                    action: .retry
-                )
-            }
-            let first = try await group.next()!
-            group.cancelAll()
-            return first
         }
     }
 
@@ -150,30 +187,5 @@ final class SealedTransport: HarnessTransport {
             if let name = name as? String, let value = value as? String { headers[name.lowercased()] = value }
         }
         return headers
-    }
-
-    private static func mayRefuseKey(_ response: HTTPURLResponse) -> Bool {
-        let contentType = response.value(forHTTPHeaderField: "Content-Type")?
-            .split(separator: ";", maxSplits: 1).first?
-            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return response.statusCode == Constants.Harness.keyConfigurationErrorStatus
-            && contentType == Constants.Harness.problemContentType
-            && response.expectedContentLength >= 0
-            && response.expectedContentLength <= Constants.Harness.maximumDiagnosticBytes
-    }
-
-    private static func refusesKey(_ response: HTTPURLResponse, _ body: Data) -> Bool {
-        guard body.count == response.expectedContentLength,
-              let problem = try? JSONDecoder().decode(Problem.self, from: body) else { return false }
-        return problem.type == Constants.Harness.keyConfigurationErrorType
-    }
-
-    private static func diagnostic(of stream: AsyncThrowingStream<Data, Error>) async throws -> Data {
-        var body = Data()
-        for try await chunk in stream {
-            guard body.count + chunk.count <= Constants.Harness.maximumDiagnosticBytes else { return body }
-            body.append(chunk)
-        }
-        return body
     }
 }

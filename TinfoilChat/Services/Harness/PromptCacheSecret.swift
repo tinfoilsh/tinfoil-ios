@@ -12,8 +12,9 @@ enum PromptCacheSecret {
     private static let lock = NSLock()
     private static var anonymous: String?
 
-    /// The secret, 64 hex characters, or nil when none can be kept, in which
-    /// case the chat service gives each chat a cache of its own.
+    /// The secret, 64 hex characters, or nil when none can be kept or the
+    /// kept one cannot be read, in which case the chat service gives each
+    /// chat a cache of its own.
     static func secret(userId: String?) -> String? {
         lock.lock()
         defer { lock.unlock() }
@@ -22,8 +23,14 @@ enum PromptCacheSecret {
             return anonymous
         }
         let key = Constants.Harness.promptCacheSecretKeyPrefix + userId
-        if let stored = KeychainHelper.shared.loadString(for: key), isSecret(stored) { return stored }
-        guard let secret = make(), KeychainHelper.shared.save(secret, for: key) else { return nil }
+        let stored: String?
+        do {
+            stored = try KeychainHelper.shared.loadString(for: key)
+        } catch {
+            return nil
+        }
+        if let stored, isSecret(stored) { return stored }
+        guard let secret = make(), (try? KeychainHelper.shared.save(secret, for: key)) != nil else { return nil }
         return secret
     }
 

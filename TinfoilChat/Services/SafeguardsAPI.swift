@@ -3,12 +3,7 @@ import Foundation
 
 @MainActor
 enum SafeguardsAPI {
-    private static let session: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.urlCache = nil
-        configuration.timeoutIntervalForRequest = Constants.Safeguards.requestTimeoutSeconds
-        return URLSession(configuration: configuration)
-    }()
+    private static let session = URLSession.ephemeralRefusingRedirects(timeout: Constants.Safeguards.requestTimeoutSeconds)
 
     static func fetchFlags(userId: String) async throws -> SafeguardFlagsReport {
         guard Clerk.shared.user?.id == userId,

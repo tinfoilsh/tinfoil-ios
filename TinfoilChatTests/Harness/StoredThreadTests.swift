@@ -25,7 +25,7 @@ struct StoredThreadTests {
         #expect(written == NSDictionary(dictionary: Self.record))
         #expect(thread.id == "t")
         #expect(thread.title == "Cats")
-        #expect(thread.titleState == .generated)
+        #expect(thread.titleState.value1 == .generated)
         #expect(thread.recordVersion == 3)
         #expect(!thread.webSearchEnabled)
         #expect(thread.presetId == "user:p")
@@ -120,7 +120,7 @@ struct StoredThreadTests {
     @Test func aNewChatListsUnderThePlaceholderTitle() {
         let thread = StoredThread.new(id: "n", createdAt: Date(timeIntervalSince1970: 1_700_000_000))
         #expect(thread.title == Constants.Harness.placeholderTitle)
-        #expect(thread.titleState == .placeholder)
+        #expect(thread.titleState.value1 == .placeholder)
         #expect(thread.messages.isEmpty)
         #expect(thread.summary.activityAt == "2023-11-14T22:13:20.000Z")
         #expect(thread.recordVersion == nil)
