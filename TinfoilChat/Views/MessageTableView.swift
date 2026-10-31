@@ -358,12 +358,8 @@ struct MessageTableView: UIViewRepresentable {
 
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     if context.coordinator.shouldScrollToUserMessageAfterLayout {
-                        context.coordinator.scrollToUserMessage(animated: false)
                         context.coordinator.shouldScrollToUserMessageAfterLayout = false
-
-                        withAnimation(.easeIn(duration: 0.2)) {
-                            self.tableOpacity = 1.0
-                        }
+                        context.coordinator.reveal { $0.scrollToUserMessage(animated: false) }
                     }
                 }
             }
@@ -381,12 +377,8 @@ struct MessageTableView: UIViewRepresentable {
 
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     if context.coordinator.shouldScrollToBottomAfterLayout {
-                        context.coordinator.scrollToBottom(animated: false)
                         context.coordinator.shouldScrollToBottomAfterLayout = false
-
-                        withAnimation(.easeIn(duration: 0.2)) {
-                            self.tableOpacity = 1.0
-                        }
+                        context.coordinator.reveal { $0.scrollToBottom(animated: false) }
                     }
                 }
             }
@@ -433,6 +425,17 @@ struct MessageTableView: UIViewRepresentable {
         var shownMessageIds: Set<String> = []
         var isKeyboardTransitioning = false
 
+        /// A hidden table waiting, frame by frame, for its rows' layout to
+        /// settle before it shows.
+        private struct PendingReveal {
+            let link: CADisplayLink
+            let place: (Coordinator) -> Void
+            var contentHeight: CGFloat
+            var frames = 0
+            var stableFrames = 0
+        }
+        private var pendingReveal: PendingReveal?
+
         init(_ parent: MessageTableView) {
             self.parent = parent
         }
@@ -446,7 +449,10 @@ struct MessageTableView: UIViewRepresentable {
             } else {
                 let isFirstTimeShown = !shownMessageIds.contains(message.id)
                 shownMessageIds.insert(message.id)
-                let wrapper = ObservableMessageWrapper(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, shouldAnimateAppearance: isFirstTimeShown, messageIndex: messageIndex)
+                // Rows laid out while the table is hidden appear with it
+                // rather than each fading in on its own.
+                let animatesAppearance = isFirstTimeShown && parent.tableOpacity > 0
+                let wrapper = ObservableMessageWrapper(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, shouldAnimateAppearance: animatesAppearance, messageIndex: messageIndex)
                 messageWrappers[message.id] = wrapper
                 return wrapper
             }
@@ -615,12 +621,8 @@ struct MessageTableView: UIViewRepresentable {
                 let numberOfRows = tableView.numberOfRows(inSection: 0)
                 if indexPath.row == numberOfRows - 1 {
                     DispatchQueue.main.async {
-                        self.scrollToBottom(animated: false)
                         self.shouldScrollToBottomAfterLayout = false
-
-                        withAnimation(.easeIn(duration: 0.2)) {
-                            self.parent.tableOpacity = 1.0
-                        }
+                        self.reveal { $0.scrollToBottom(animated: false) }
                     }
                 }
             }
@@ -629,15 +631,55 @@ struct MessageTableView: UIViewRepresentable {
                 let numberOfRows = tableView.numberOfRows(inSection: 0)
                 if indexPath.row == numberOfRows - 1 {
                     DispatchQueue.main.async {
-                        self.scrollToUserMessage(animated: false)
                         self.shouldScrollToUserMessageAfterLayout = false
-
-                        withAnimation(.easeIn(duration: 0.2)) {
-                            self.parent.tableOpacity = 1.0
-                        }
+                        self.reveal { $0.scrollToUserMessage(animated: false) }
                     }
                 }
             }
+        }
+
+        /// Scrolls the rows into place with `place`, then shows the table if
+        /// it was hidden for them. A row can still change height a frame or
+        /// two after it first appears, so a hidden table is placed again each
+        /// frame its content height changes, and shows once that holds still.
+        /// A chat still opening stays hidden until its messages have loaded.
+        func reveal(placing place: @escaping (Coordinator) -> Void) {
+            cancelReveal()
+            place(self)
+            guard let tableView, parent.tableOpacity == 0, !parent.viewModel.isOpeningChat else { return }
+            let link = CADisplayLink(target: self, selector: #selector(revealFrame))
+            pendingReveal = PendingReveal(link: link, place: place, contentHeight: tableView.contentSize.height)
+            link.add(to: .main, forMode: .common)
+        }
+
+        @objc private func revealFrame() {
+            guard var pending = pendingReveal, let tableView else {
+                cancelReveal()
+                return
+            }
+            tableView.layoutIfNeeded()
+            let contentHeight = tableView.contentSize.height
+            pending.frames += 1
+            if contentHeight == pending.contentHeight {
+                pending.stableFrames += 1
+            } else {
+                pending.contentHeight = contentHeight
+                pending.stableFrames = 0
+                pending.place(self)
+            }
+            pendingReveal = pending
+            guard pending.stableFrames >= Constants.ChatReveal.stableFrames
+                    || pending.frames >= Constants.ChatReveal.maxFrames else { return }
+            cancelReveal()
+            guard !parent.viewModel.isOpeningChat else { return }
+            withAnimation(.easeIn(duration: Constants.ChatReveal.fadeSeconds)) {
+                parent.tableOpacity = 1.0
+            }
+        }
+
+        private func cancelReveal() {
+            pendingReveal?.link.invalidate()
+            pendingReveal = nil
         }
 
         func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {

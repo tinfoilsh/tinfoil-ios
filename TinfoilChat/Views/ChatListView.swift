@@ -28,9 +28,16 @@ struct ChatListView: View {
     /// The first message shown, by which messages loaded before it are told
     /// apart from messages added after the last.
     @State private var shownFirstMessageId: String?
+    /// A chat that opens stays behind the loading spinner until its messages
+    /// have been laid out and scrolled into place.
+    @State private var isPlacingOpenedChat = false
 
     private var isCurrentChatReadOnly: Bool {
         viewModel.isCurrentChatSafeguardFlagged
+    }
+
+    private var isShowingChatLoading: Bool {
+        viewModel.hydratingChatId != nil || (isPlacingOpenedChat && tableOpacity == 0)
     }
 
     private var messages: [Message] {
@@ -243,7 +250,9 @@ struct ChatListView: View {
             userHasScrolled = false
             viewModel.isScrollInteractionActive = false
 
-            let isNewEmptyChat = viewModel.currentChat?.isBlankChat ?? true
+            // A chat still opening has no messages yet, and stays hidden
+            // until they have loaded and been placed.
+            let isNewEmptyChat = (viewModel.currentChat?.isBlankChat ?? true) && !viewModel.isOpeningChat
 
             if !isNewEmptyChat {
                 tableOpacity = 0
@@ -253,6 +262,23 @@ struct ChatListView: View {
                 tableOpacity = 1.0
                 isAtBottom = true
             }
+        }
+        // The table is hidden while a chat opens, and shows once it has
+        // placed the messages the chat opened with. A chat that opened with
+        // none, or failed to open, has nothing to place.
+        .onChange(of: viewModel.hydratingChatId) { _, loadingId in
+            if loadingId != nil {
+                isPlacingOpenedChat = true
+                tableOpacity = 0
+            } else if messages.isEmpty {
+                isPlacingOpenedChat = false
+                tableOpacity = 1.0
+            } else {
+                scrollTrigger = UUID()
+            }
+        }
+        .onChange(of: tableOpacity) { _, opacity in
+            if opacity > 0 { isPlacingOpenedChat = false }
         }
         .onChange(of: viewModel.scrollToBottomTrigger) { _, _ in
             userHasScrolled = false
@@ -265,9 +291,9 @@ struct ChatListView: View {
             scrollToUserTrigger = UUID()
         }
         .overlay {
-            if viewModel.hydratingChatId != nil || viewModel.chatHydrationError != nil {
+            if isShowingChatLoading || viewModel.chatHydrationError != nil {
                 VStack(spacing: 12) {
-                    if viewModel.hydratingChatId != nil {
+                    if isShowingChatLoading {
                         ProgressView()
                     }
                     if let error = viewModel.chatHydrationError {
@@ -286,6 +312,7 @@ struct ChatListView: View {
                 .background(Color.chatBackground(isDarkMode: isDarkMode))
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(viewModel.chatHydrationError ?? "Loading conversation")
+                .transition(.opacity)
             }
         }
         .overlay {
