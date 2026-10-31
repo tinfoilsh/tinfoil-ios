@@ -1899,7 +1899,7 @@ struct CustomTextEditor: UIViewRepresentable {
             }
         }
 
-        if text.isEmpty && !isCurrentlyEditing && uiView.textColor != .lightGray {
+        if text.isEmpty && !isCurrentlyEditing && (uiView.textColor != .lightGray || uiView.text != placeholderText) {
             uiView.text = placeholderText
             uiView.textColor = .lightGray
             context.coordinator.currentTextSnapshot = ""
