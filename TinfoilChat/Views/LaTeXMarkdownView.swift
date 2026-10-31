@@ -1042,19 +1042,26 @@ enum MarkdownTableLayout {
 /// widths. Measuring the rendered cells keeps the columns in step with the
 /// text's actual font, Dynamic Type size, and inline markdown.
 struct MarkdownTableGrid: Layout {
+    typealias Tracks = (columnWidths: [CGFloat], rowHeights: [CGFloat])
+
     let columnCount: Int
     let availableWidth: CGFloat?
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let tracks = measureTracks(subviews)
-        return CGSize(
+    /// The tracks are measured once for the cells as they are, rather than
+    /// each time the table is sized and placed: measuring asks every cell to
+    /// lay its text out twice.
+    func makeCache(subviews: Subviews) -> Tracks {
+        measureTracks(subviews)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache tracks: inout Tracks) -> CGSize {
+        CGSize(
             width: tracks.columnWidths.reduce(0, +),
             height: tracks.rowHeights.reduce(0, +)
         )
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let tracks = measureTracks(subviews)
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache tracks: inout Tracks) {
         var y = bounds.minY
         for row in tracks.rowHeights.indices {
             var x = bounds.minX
@@ -1075,7 +1082,7 @@ struct MarkdownTableGrid: Layout {
         }
     }
 
-    private func measureTracks(_ subviews: Subviews) -> (columnWidths: [CGFloat], rowHeights: [CGFloat]) {
+    private func measureTracks(_ subviews: Subviews) -> Tracks {
         guard columnCount > 0 else { return ([], []) }
 
         var columnWidths = Array(repeating: CGFloat.zero, count: columnCount)
