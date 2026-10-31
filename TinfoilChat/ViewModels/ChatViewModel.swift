@@ -1647,14 +1647,16 @@ class ChatViewModel: ObservableObject {
         guard let session, canUseCurrentChatActions, session.open.id != nil,
               !isCurrentChatSafeguardFlagged, !session.running, session.acceptsTurn,
               messageEditSession == nil, session.state.messages.count > 1 else { return false }
-        return session.state.messages.contains { $0.id == id }
+        let messageId = messageId(ofRow: id)
+        return session.state.messages.contains { $0.id == messageId }
     }
 
     func deleteMessage(id: String, in chatId: String) {
         guard let session, session.open.id == chatId else { return }
+        let messageId = messageId(ofRow: id)
         Task {
-            guard self.session === session, session.open.id == chatId, canDeleteMessage(id: id),
-                  let index = session.state.messages.firstIndex(where: { $0.id == id }) else { return }
+            guard self.session === session, session.open.id == chatId, canDeleteMessage(id: messageId),
+                  let index = session.state.messages.firstIndex(where: { $0.id == messageId }) else { return }
             do {
                 try await session.deleteMessage(at: index)
             } catch {
