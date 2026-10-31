@@ -1264,7 +1264,9 @@ class ChatViewModel: ObservableObject {
         cancelMessageEdit()
         cancelAudioRecording()
         // The composer shows the chat's listed model while the chat opens.
-        if let listed = chats.first(where: { $0.id == id }), let model = findSelectableModel(id: listed.model) {
+        let listedModel = chats.first(where: { $0.id == id })?.model
+            ?? session.list.project?.cloudListed.first(where: { $0.id == id })?.model
+        if let listedModel, let model = findSelectableModel(id: listedModel) {
             currentModel = model
         }
         let originals = pendingOriginals
