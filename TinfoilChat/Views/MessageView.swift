@@ -91,6 +91,8 @@ struct MessageView: View {
     @State private var showRawContentModal = false
     @State private var showSourcesSheet = false
     @State private var showShareSheet = false
+    @State private var showDeleteConfirmation = false
+    @State private var messagePendingDeletion: (chatId: String, messageId: String)?
 
     private var isAnyMessageSheetPresented: Bool {
         showLongMessageSheet || showRawContentModal || showSourcesSheet || showShareSheet
@@ -123,11 +125,15 @@ struct MessageView: View {
     }
 
     private var canShareAssistantMessage: Bool {
-        isLastMessage && !viewModel.isLoading
+        message.hasVisibleAssistantContent && isLastMessage && !viewModel.isLoading
+    }
+
+    private var canDeleteMessage: Bool {
+        viewModel.canDeleteMessage(id: message.id)
     }
 
     private var showsAssistantMoreMenu: Bool {
-        canShareAssistantMessage || viewModel.canForkMessage(at: messageIndex)
+        canShareAssistantMessage || viewModel.canForkMessage(at: messageIndex) || canDeleteMessage
     }
 
     private var canRegenerateAssistantResponse: Bool {
@@ -176,10 +182,21 @@ struct MessageView: View {
         }
     }
 
-    /// An empty failed response needs no action row: its error box already
-    /// offers to generate it again.
     private var showsAssistantActionSection: Bool {
-        !isRenderingStream && message.hasVisibleAssistantContent
+        message.role == .assistant && !isRenderingStream && (message.hasVisibleAssistantContent || canDeleteMessage)
+    }
+
+    @ViewBuilder
+    private var deleteMessageButton: some View {
+        if canDeleteMessage {
+            Button(role: .destructive) {
+                guard let chatId = viewModel.currentChat?.id else { return }
+                messagePendingDeletion = (chatId: chatId, messageId: message.id)
+                showDeleteConfirmation = true
+            } label: {
+                Label(Constants.MessageActions.deleteLabel, systemImage: Constants.MessageActions.deleteSystemImage)
+            }
+        }
     }
 
     /// Secondary actions for assistant messages live behind an ellipsis so the
@@ -205,6 +222,8 @@ struct MessageView: View {
                     )
                 }
             }
+
+            deleteMessageButton
         } label: {
             Image(systemName: Constants.MessageActions.moreSystemImage)
                 .font(.system(size: Constants.MessageActions.iconSize))
@@ -519,6 +538,11 @@ struct MessageView: View {
                     attachments: message.attachments,
                     isDarkMode: isDarkMode
                 )
+                .if(message.content.isEmpty && canDeleteMessage) { view in
+                    view.contextMenu {
+                        deleteMessageButton
+                    }
+                }
             }
 
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
@@ -704,10 +728,12 @@ struct MessageView: View {
                 // Add action buttons for assistant messages (only when not streaming)
                 if showsAssistantActionSection {
                     VStack(alignment: .leading) {
-                        MessageSecurityMetadataView(
-                            modelDisplayName: message.modelDisplayName,
-                            isDarkMode: isDarkMode
-                        )
+                        if message.hasVisibleAssistantContent {
+                            MessageSecurityMetadataView(
+                                modelDisplayName: message.modelDisplayName,
+                                isDarkMode: isDarkMode
+                            )
+                        }
 
                         if !viewModel.isCurrentChatSafeguardFlagged {
                             HStack(spacing: 16) {
@@ -755,7 +781,7 @@ struct MessageView: View {
                                     .accessibleHitTarget()
                                 }
 
-                                if message.hasVisibleAssistantContent && showsAssistantMoreMenu {
+                                if showsAssistantMoreMenu {
                                     assistantMoreMenu
                                 }
 
@@ -837,6 +863,8 @@ struct MessageView: View {
                                 )
                             }
                         }
+
+                        deleteMessageButton
                     }
                 }
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
@@ -848,6 +876,19 @@ struct MessageView: View {
         // calls, action buttons, text selection) individually accessible.
         .accessibilityElement(children: .contain)
         .accessibilityLabel(message.role == .user ? "You said" : "Assistant said")
+        .confirmationDialog(
+            Constants.MessageActions.deleteConfirmationTitle,
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible,
+            presenting: messagePendingDeletion
+        ) { target in
+            Button(Constants.MessageActions.deleteLabel, role: .destructive) {
+                viewModel.deleteMessage(id: target.messageId, in: target.chatId)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text(Constants.MessageActions.deleteConfirmationMessage)
+        }
         .sheet(isPresented: $showLongMessageSheet, onDismiss: {
             selectLongMessageOnPresentation = false
         }) {
