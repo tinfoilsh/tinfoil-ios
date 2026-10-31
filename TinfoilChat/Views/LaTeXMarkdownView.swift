@@ -136,11 +136,6 @@ private class MarkdownRenderCache: @unchecked Sendable {
 
 /// A view that renders mixed Markdown and LaTeX content
 struct LaTeXMarkdownView: View, Equatable {
-    struct ParsingIdentity: Equatable {
-        let content: String
-        let isStreaming: Bool
-    }
-
     let content: String
     let isDarkMode: Bool
     let horizontalPadding: CGFloat
@@ -151,8 +146,6 @@ struct LaTeXMarkdownView: View, Equatable {
     // Any standard markdown link whose href matches one of these URLs is rewritten
     // to [domain](url) so it matches the visual style of legacy #cite- citations.
     let citationUrls: Set<String>?
-
-    @State private var segments: [ContentSegment]? = nil
 
     // Pre-compiled regex patterns (compiled once, reused across all renders)
     private nonisolated static let codeBlockRegex = try? NSRegularExpression(pattern: "```[\\s\\S]*?```", options: [])
@@ -177,25 +170,14 @@ struct LaTeXMarkdownView: View, Equatable {
         self.isStreaming = isStreaming
         self.textSelectionEnabled = textSelectionEnabled
         self.citationUrls = citationUrls
-
-        // Resolve segments synchronously from cache when available so the
-        // first render already has the final view tree. This prevents
-        // UIHostingConfiguration from calculating the cell height based on
-        // the fallback view and then never recalculating after the async
-        // .task swaps in the parsed segments.
-        if !isStreaming {
-            if let cached = MarkdownRenderCache.shared.get(for: content) {
-                _segments = State(initialValue: cached)
-            }
-        }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if isStreaming {
-                markdownFallback(content: content)
-            } else if let segments = segments {
-                ForEach(segments, id: \.id) { segment in
+                streamingText(content: content)
+            } else {
+                ForEach(Self.segments(of: content), id: \.id) { segment in
                     SegmentView(
                         segment: segment,
                         isDarkMode: isDarkMode,
@@ -205,8 +187,6 @@ struct LaTeXMarkdownView: View, Equatable {
                     )
                         .id(segment.id)
                 }
-            } else {
-                markdownFallback(content: content)
             }
         }
         .padding(.horizontal, horizontalPadding)
@@ -214,42 +194,22 @@ struct LaTeXMarkdownView: View, Equatable {
         .transaction { transaction in
             transaction.animation = nil
         }
-        .task(id: ParsingIdentity(content: content, isStreaming: isStreaming)) {
-            guard !isStreaming else { return }
-            if let cached = MarkdownRenderCache.shared.get(for: content) {
-                segments = cached
-                return
-            }
-            segments = nil
-            let contentToProcess = content
-            let parsingTask = Task.detached(priority: .userInitiated) {
-                Self.parseContent(contentToProcess)
-            }
-            let parsed = await withTaskCancellationHandler {
-                await parsingTask.value
-            } onCancel: {
-                parsingTask.cancel()
-            }
-            guard !Task.isCancelled else { return }
-            MarkdownRenderCache.shared.set(
-                parsed,
-                for: contentToProcess,
-                cost: contentToProcess.utf8.count
-            )
-            segments = parsed
-        }
     }
 
-    private func markdownFallback(content: String) -> some View {
-        let strippedText = isStreaming
-            ? LaTeXMarkdownView.stripCitations(from: content)
-            : LaTeXMarkdownView.rewriteAnnotatedLinks(
-                in: LaTeXMarkdownView.stripCitations(from: content),
-                citationUrls: citationUrls
-            )
-        return citationStructuredText(
-            strippedText,
-            isStreaming: isStreaming,
+    /// Finished content shows parsed from its first draw. Parsing takes a
+    /// fraction of a millisecond, while drawing the content unparsed first
+    /// and parsed after would lay a long reply out twice as it finishes.
+    private static func segments(of content: String) -> [ContentSegment] {
+        if let cached = MarkdownRenderCache.shared.get(for: content) { return cached }
+        let parsed = parseContent(content)
+        MarkdownRenderCache.shared.set(parsed, for: content, cost: content.utf8.count)
+        return parsed
+    }
+
+    private func streamingText(content: String) -> some View {
+        citationStructuredText(
+            LaTeXMarkdownView.stripCitations(from: content),
+            isStreaming: true,
             citationUrls: citationUrls,
             textSelectionEnabled: textSelectionEnabled
         )
@@ -1082,19 +1042,26 @@ enum MarkdownTableLayout {
 /// widths. Measuring the rendered cells keeps the columns in step with the
 /// text's actual font, Dynamic Type size, and inline markdown.
 struct MarkdownTableGrid: Layout {
+    typealias Tracks = (columnWidths: [CGFloat], rowHeights: [CGFloat])
+
     let columnCount: Int
     let availableWidth: CGFloat?
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let tracks = measureTracks(subviews)
-        return CGSize(
+    /// The tracks are measured once for the cells as they are, rather than
+    /// each time the table is sized and placed: measuring asks every cell to
+    /// lay its text out twice.
+    func makeCache(subviews: Subviews) -> Tracks {
+        measureTracks(subviews)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache tracks: inout Tracks) -> CGSize {
+        CGSize(
             width: tracks.columnWidths.reduce(0, +),
             height: tracks.rowHeights.reduce(0, +)
         )
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let tracks = measureTracks(subviews)
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache tracks: inout Tracks) {
         var y = bounds.minY
         for row in tracks.rowHeights.indices {
             var x = bounds.minX
@@ -1115,7 +1082,7 @@ struct MarkdownTableGrid: Layout {
         }
     }
 
-    private func measureTracks(_ subviews: Subviews) -> (columnWidths: [CGFloat], rowHeights: [CGFloat]) {
+    private func measureTracks(_ subviews: Subviews) -> Tracks {
         guard columnCount > 0 else { return ([], []) }
 
         var columnWidths = Array(repeating: CGFloat.zero, count: columnCount)

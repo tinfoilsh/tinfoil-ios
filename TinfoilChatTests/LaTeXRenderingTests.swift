@@ -38,10 +38,4 @@ struct LaTeXRenderingTests {
         }
         #expect(markdown == source)
     }
-
-    @Test func endingStreamInvalidatesParsingEvenWithoutAnotherToken() {
-        let content = #"\[A = b h\]"#
-        #expect(LaTeXMarkdownView.ParsingIdentity(content: content, isStreaming: true)
-            != LaTeXMarkdownView.ParsingIdentity(content: content, isStreaming: false))
-    }
 }
