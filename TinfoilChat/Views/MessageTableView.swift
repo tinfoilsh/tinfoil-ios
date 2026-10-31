@@ -16,7 +16,6 @@ struct MessageTableView: UIViewRepresentable {
     let onRequestSignIn: () -> Void
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @Binding var isAtBottom: Bool
-    @Binding var userHasScrolled: Bool
     let scrollTrigger: UUID
     let scrollToUserTrigger: UUID
     @Binding var tableOpacity: Double
@@ -408,7 +407,6 @@ struct MessageTableView: UIViewRepresentable {
         var lastIsDarkMode: Bool = false
         var lastChatId: String? = nil
         var lastMessageIds: Set<String> = []
-        private var isDragging = false
         private var isUpdatingContentInset = false
         var messageWrappers: [String: ObservableMessageWrapper] = [:]
         var shouldScrollToBottomAfterLayout = false
@@ -832,29 +830,11 @@ struct MessageTableView: UIViewRepresentable {
         }
 
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-            isDragging = true
-            parent.userHasScrolled = true
-            parent.viewModel.isScrollInteractionActive = true
             shouldScrollToBottomAfterLayout = false
             shouldScrollToUserMessageAfterLayout = false
 
             UIView.animate(withDuration: 0.3) {
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-            }
-        }
-
-        func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-            isDragging = false
-            if !decelerate {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    self.parent.viewModel.isScrollInteractionActive = false
-                }
-            }
-        }
-
-        func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                self.parent.viewModel.isScrollInteractionActive = false
             }
         }
 
@@ -1021,10 +1001,6 @@ struct MessageTableView: UIViewRepresentable {
             if parent.isAtBottom != isVisible {
                 DispatchQueue.main.async {
                     self.parent.isAtBottom = isVisible
-                    self.parent.viewModel.isAtBottom = isVisible
-                    if isVisible {
-                        self.parent.userHasScrolled = false
-                    }
                 }
             }
         }
@@ -1163,8 +1139,16 @@ struct ObservableMessageCell: View {
                     isLastMessage: wrapper.isLastMessage,
                     isLoading: wrapper.isLoading,
                     messageIndex: wrapper.messageIndex,
-                    stepExpansion: wrapper.stepExpansion
+                    stepExpansion: wrapper.stepExpansion,
+                    context: MessageRowContext(
+                        viewModel,
+                        message: wrapper.message,
+                        messageIndex: wrapper.messageIndex,
+                        isRenderingStream: wrapper.isLoading && wrapper.isLastMessage
+                    ),
+                    viewModel: viewModel
                 )
+                .equatable()
                 .environmentObject(viewModel)
                 .markdownStyleHost(isDarkMode: wrapper.isDarkMode)
                 .padding(.vertical, 8)

@@ -126,6 +126,26 @@ final class TranscriptChanges: ObservableObject {
     let objectWillChange = ObservableObjectPublisher()
 }
 
+/// The chat's changes for a view that is not always on screen, such as the
+/// sidebar: changes made while it is hidden publish once as it shows.
+@MainActor
+final class ChangesWhileShown: ObservableObject {
+    let objectWillChange = ObservableObjectPublisher()
+    private var missed = false
+
+    var isShown = false {
+        didSet {
+            guard isShown, missed else { return }
+            missed = false
+            objectWillChange.send()
+        }
+    }
+
+    func changed() {
+        if isShown { objectWillChange.send() } else { missed = true }
+    }
+}
+
 @MainActor
 class ChatViewModel: ObservableObject {
     static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Chat")
@@ -229,8 +249,6 @@ class ChatViewModel: ObservableObject {
     @Published var isViewingProjectChat: Bool = false
     @Published var shouldFocusInput: Bool = false
     var focusInputAfterDismiss = false
-    @Published var isScrollInteractionActive: Bool = false
-    @Published var isAtBottom: Bool = true
     @Published var scrollToBottomTrigger: UUID = UUID()
     @Published private(set) var isLoadingEarlierMessages = false
     @Published var scrollToUserMessageTrigger: UUID = UUID()
@@ -341,6 +359,9 @@ class ChatViewModel: ObservableObject {
     /// the chat table draws: a streaming reply then redraws neither the
     /// sidebar nor the composer.
     let transcript = TranscriptChanges()
+    /// Publishes the chat's changes to the sidebar while it is open, so a
+    /// closed sidebar does not redraw every chat it lists.
+    let sidebarChanges = ChangesWhileShown()
     /// The reply whose first text ticks the haptic, and how far it got.
     private var hapticReply: (id: String, ticks: Int, lastAt: Date, length: Int)?
     /// The user stopped the reply, which was announced as stopped rather than
@@ -362,6 +383,7 @@ class ChatViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .assign(to: &$isPasskeyRecoverySkipped)
         Task { await openSession() }
+        objectWillChange.sink { [weak self] _ in self?.sidebarChanges.changed() }.store(in: &cancellables)
         observers.append(NotificationCenter.default.addObserver(forName: .cloudSyncSettingChanged, object: nil, queue: .main) { [weak self] _ in
             Task { await self?.storageModeChanged() }
         })
@@ -834,7 +856,6 @@ class ChatViewModel: ObservableObject {
         if layout?.chatId != publishedLayout?.chatId { scrollsToTurnOnStart = false }
         if scrollsToTurnOnStart, let layout, [.submitting, .queued, .streaming].contains(layout.status) {
             scrollsToTurnOnStart = false
-            isScrollInteractionActive = false
             scrollToUserMessageTrigger = UUID()
         }
         publishedLayout = layout
