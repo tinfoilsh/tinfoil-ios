@@ -315,7 +315,7 @@ class ChatViewModel: ObservableObject {
     /// per change rather than on every read.
     private var sessionGeneration = 0
     private var shownChat: (generation: Int, chat: Chat?)?
-    private var shownChats: (generation: Int, chats: [Chat])?
+    private var shownChats: ListedChats?
     /// The open chat's rows, which keep their ids while a turn replaces its
     /// messages, as the chat table expects.
     private var rows = ChatRows()
@@ -911,8 +911,7 @@ class ChatViewModel: ObservableObject {
         guard let session else { return false }
         if session.open.id == chatId { return session.running }
         if session.controller.deviceRuns[chatId] != nil { return true }
-        let now = Date()
-        return chats.contains { $0.id == chatId && $0.activeRun?.isLive(at: now) == true }
+        return listedChats?.activeRuns[chatId]?.isLive(at: Date()) == true
     }
 
     /// The chat the list shows as open: a new chat outside a project is the
@@ -1096,18 +1095,74 @@ class ChatViewModel: ObservableObject {
         return shown
     }
 
+    /// What the chat lists are built from. A reply streaming into the open
+    /// chat changes none of it, so the lists are not built again for each
+    /// part of the reply.
+    private struct ChatListInputs: Equatable {
+        let cloud: Bool
+        let keyLocked: Bool
+        let hasChatAccess: Bool
+        let cloudListed: [ThreadSummary]
+        let pinnedListed: [ThreadSummary]
+        let deviceListed: [ThreadSummary]
+        let openId: String?
+        let shownRun: String?
+        /// The run of each device chat this app reads, by chat.
+        let deviceRuns: [String: String]
+        /// Stand for when the open chat's latest message was written: a
+        /// message keeps that time once it is shown.
+        let messageCount: Int
+        let lastMessageId: String?
+
+        @MainActor init(_ session: ChatSession, hasChatAccess: Bool) {
+            cloud = session.account.cloud
+            keyLocked = session.account.keyLocked
+            self.hasChatAccess = hasChatAccess
+            cloudListed = session.list.cloudListed
+            pinnedListed = session.list.pinnedListed
+            deviceListed = session.list.deviceListed
+            openId = session.open.id
+            shownRun = session.running ? session.state.runId : nil
+            deviceRuns = session.controller.deviceRuns.compactMapValues { $0.run?.runId }
+            messageCount = session.state.messages.count
+            lastMessageId = session.state.messages.last?.id
+        }
+    }
+
+    /// The chat lists as built from their inputs.
+    private struct ListedChats {
+        let inputs: ChatListInputs
+        let chats: [Chat]
+        let cloudSummaries: [ChatListSummary]
+        let localSummaries: [ChatListSummary]
+        /// The run each listed chat reports, by chat.
+        let activeRuns: [String: ActiveRun]
+    }
+
+    private var listedChats: ListedChats? {
+        guard let session else { return nil }
+        let inputs = ChatListInputs(session, hasChatAccess: hasChatAccess)
+        if let shownChats, shownChats.inputs == inputs { return shownChats }
+        let chats = buildChats(session)
+        let listed = ListedChats(
+            inputs: inputs,
+            chats: chats,
+            cloudSummaries: chats.filter { !$0.isLocalOnly }.map(ChatListSummary.init),
+            localSummaries: chats.filter(\.isLocalOnly).map(ChatListSummary.init),
+            activeRuns: Dictionary(chats.compactMap { chat in chat.activeRun.map { (chat.id, $0) } }) { first, _ in first }
+        )
+        shownChats = listed
+        return listed
+    }
+
     /// The chats the sidebar lists, the latest active first, under a new chat
     /// row for each list. A run this app streams is active in the list
     /// before the list next reports it.
     var chats: [Chat] {
-        if let shownChats, shownChats.generation == sessionGeneration { return shownChats.chats }
-        let chats = buildChats()
-        shownChats = (sessionGeneration, chats)
-        return chats
+        listedChats?.chats ?? []
     }
 
-    private func buildChats() -> [Chat] {
-        guard let session else { return [] }
+    private func buildChats(_ session: ChatSession) -> [Chat] {
         let listsCloud = session.account.cloud && !session.account.keyLocked
         var listed: [Chat] = []
         if listsCloud {
@@ -1147,11 +1202,11 @@ class ChatViewModel: ObservableObject {
     }
 
     var cloudSidebarSummaries: [ChatListSummary] {
-        chats.filter { !$0.isLocalOnly }.map(ChatListSummary.init)
+        listedChats?.cloudSummaries ?? []
     }
 
     var localSidebarSummaries: [ChatListSummary] {
-        chats.filter(\.isLocalOnly).map(ChatListSummary.init)
+        listedChats?.localSummaries ?? []
     }
 
     /// The favorites, the most recently pinned first.
