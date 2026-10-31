@@ -66,10 +66,11 @@ struct ChatSidebar: View, Equatable {
     @StateObject private var chatSearch = ChatSearchController()
     @ObservedObject private var settings = SettingsManager.shared
 
-    /// The sidebar draws as what it observes changes, not each time the
-    /// view around it does.
+    /// The sidebar draws as what it observes changes, or as it is asked to
+    /// show a section, not each time the view around it draws.
     static func == (lhs: ChatSidebar, rhs: ChatSidebar) -> Bool {
         lhs.viewModel === rhs.viewModel && lhs.changes === rhs.changes && lhs.authManager === rhs.authManager
+            && lhs.navigationRequest == rhs.navigationRequest
     }
 
     private var activeTab: ChatStorageTab {
