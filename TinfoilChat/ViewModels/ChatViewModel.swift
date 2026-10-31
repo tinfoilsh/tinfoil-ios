@@ -121,6 +121,11 @@ enum MessageEditSessionTransition {
     }
 }
 
+/// Changes to the open chat's transcript that nothing else shows.
+final class TranscriptChanges: ObservableObject {
+    let objectWillChange = ObservableObjectPublisher()
+}
+
 @MainActor
 class ChatViewModel: ObservableObject {
     static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Chat")
@@ -327,6 +332,15 @@ class ChatViewModel: ObservableObject {
     private var trailingPublish: Task<Void, Never>?
     private var nextPublishAt = Date.distantPast
     private var publishedLayout: SessionLayout?
+    private var publishedChrome: SessionChrome?
+    /// The session's changes since the last publish, and how many of them
+    /// were the open chat's state changing.
+    private var unpublishedChanges = 0
+    private var unpublishedStateChanges = 0
+    /// Publishes a change to the open chat's transcript alone, which only
+    /// the chat table draws: a streaming reply then redraws neither the
+    /// sidebar nor the composer.
+    let transcript = TranscriptChanges()
     /// The reply whose first text ticks the haptic, and how far it got.
     private var hapticReply: (id: String, ticks: Int, lastAt: Date, length: Int)?
     /// The user stopped the reply, which was announced as stopped rather than
@@ -415,6 +429,9 @@ class ChatViewModel: ObservableObject {
         trailingPublish?.cancel()
         trailingPublish = nil
         publishedLayout = nil
+        publishedChrome = nil
+        unpublishedChanges = 0
+        unpublishedStateChanges = 0
         hapticReply = nil
         stopAnnounced = false
         scrollsToTurnOnStart = false
@@ -442,6 +459,7 @@ class ChatViewModel: ObservableObject {
         KeyRegistry.shared.bind(account)
         await LinkMetadataService.shared.bind(account)
         session.objectWillChange.sink { [weak self] _ in self?.sessionChanged() }.store(in: &sessionCancellables)
+        session.controller.$view.dropFirst().sink { [weak self] _ in self?.unpublishedStateChanges += 1 }.store(in: &sessionCancellables)
         account.$rateLimit.receive(on: RunLoop.main).sink { [weak self] limit in self?.rateLimit = limit.flatMap(RateLimitInfo.init) }.store(in: &sessionCancellables)
         account.$profile.receive(on: RunLoop.main).sink { [weak self] _ in self?.applyProfileSettings() }.store(in: &sessionCancellables)
         account.$session.receive(on: RunLoop.main).sink { [weak self] loaded in
@@ -760,10 +778,27 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    /// The open chat's state as the views besides the chat table read it:
+    /// all of it but the transcript, and the rows the table shows.
+    private struct SessionChrome: Equatable {
+        let state: ChatState
+        let rowIds: [String]
+
+        @MainActor init(_ session: ChatSession, rows: [Message]) {
+            var state = session.state
+            state.messages = []
+            state.summaries = [:]
+            state.cursors = [:]
+            self.state = state
+            rowIds = rows.map(\.id)
+        }
+    }
+
     private func sessionChanged() {
         // What the views show is rebuilt on its next read, while the views
         // redraw when the change publishes.
         sessionGeneration += 1
+        unpublishedChanges += 1
         guard publishEvaluation == nil else { return }
         publishEvaluation = Task { @MainActor [weak self] in
             self?.publishEvaluation = nil
@@ -787,6 +822,14 @@ class ChatViewModel: ObservableObject {
         }
         trailingPublish?.cancel()
         trailingPublish = nil
+        // Only the chat table redraws when nothing changed but the open
+        // chat's transcript.
+        let chrome = session.map { SessionChrome($0, rows: messages) }
+        let transcriptOnly = chrome != nil && layout == publishedLayout && chrome == publishedChrome
+            && unpublishedChanges == unpublishedStateChanges
+        publishedChrome = chrome
+        unpublishedChanges = 0
+        unpublishedStateChanges = 0
         announceGenerationStatus(from: publishedLayout, to: layout)
         if layout?.chatId != publishedLayout?.chatId { scrollsToTurnOnStart = false }
         if scrollsToTurnOnStart, let layout, [.submitting, .queued, .streaming].contains(layout.status) {
@@ -806,7 +849,11 @@ class ChatViewModel: ObservableObject {
             let edit = MessageEditSessionTransition.reconcile(messageEditSession, chatId: chat?.id, messages: chat?.messages ?? [])
             if edit != messageEditSession { messageEditSession = edit }
         }
-        objectWillChange.send()
+        if transcriptOnly {
+            transcript.objectWillChange.send()
+        } else {
+            objectWillChange.send()
+        }
     }
 
     /// VoiceOver hears a reply start, finish or fail in the chat on screen,
