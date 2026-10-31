@@ -121,6 +121,11 @@ enum MessageEditSessionTransition {
     }
 }
 
+/// Changes to the open chat's transcript that nothing else shows.
+final class TranscriptChanges: ObservableObject {
+    let objectWillChange = ObservableObjectPublisher()
+}
+
 @MainActor
 class ChatViewModel: ObservableObject {
     static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Chat")
@@ -315,7 +320,7 @@ class ChatViewModel: ObservableObject {
     /// per change rather than on every read.
     private var sessionGeneration = 0
     private var shownChat: (generation: Int, chat: Chat?)?
-    private var shownChats: (generation: Int, chats: [Chat])?
+    private var shownChats: ListedChats?
     /// The open chat's rows, which keep their ids while a turn replaces its
     /// messages, as the chat table expects.
     private var rows = ChatRows()
@@ -327,6 +332,15 @@ class ChatViewModel: ObservableObject {
     private var trailingPublish: Task<Void, Never>?
     private var nextPublishAt = Date.distantPast
     private var publishedLayout: SessionLayout?
+    private var publishedChrome: SessionChrome?
+    /// The session's changes since the last publish, and how many of them
+    /// were the open chat's state changing.
+    private var unpublishedChanges = 0
+    private var unpublishedStateChanges = 0
+    /// Publishes a change to the open chat's transcript alone, which only
+    /// the chat table draws: a streaming reply then redraws neither the
+    /// sidebar nor the composer.
+    let transcript = TranscriptChanges()
     /// The reply whose first text ticks the haptic, and how far it got.
     private var hapticReply: (id: String, ticks: Int, lastAt: Date, length: Int)?
     /// The user stopped the reply, which was announced as stopped rather than
@@ -415,6 +429,9 @@ class ChatViewModel: ObservableObject {
         trailingPublish?.cancel()
         trailingPublish = nil
         publishedLayout = nil
+        publishedChrome = nil
+        unpublishedChanges = 0
+        unpublishedStateChanges = 0
         hapticReply = nil
         stopAnnounced = false
         scrollsToTurnOnStart = false
@@ -442,6 +459,7 @@ class ChatViewModel: ObservableObject {
         KeyRegistry.shared.bind(account)
         await LinkMetadataService.shared.bind(account)
         session.objectWillChange.sink { [weak self] _ in self?.sessionChanged() }.store(in: &sessionCancellables)
+        session.controller.$view.dropFirst().sink { [weak self] _ in self?.unpublishedStateChanges += 1 }.store(in: &sessionCancellables)
         account.$rateLimit.receive(on: RunLoop.main).sink { [weak self] limit in self?.rateLimit = limit.flatMap(RateLimitInfo.init) }.store(in: &sessionCancellables)
         account.$profile.receive(on: RunLoop.main).sink { [weak self] _ in self?.applyProfileSettings() }.store(in: &sessionCancellables)
         account.$session.receive(on: RunLoop.main).sink { [weak self] loaded in
@@ -760,10 +778,27 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    /// The open chat's state as the views besides the chat table read it:
+    /// all of it but the transcript, and the rows the table shows.
+    private struct SessionChrome: Equatable {
+        let state: ChatState
+        let rowIds: [String]
+
+        @MainActor init(_ session: ChatSession, rows: [Message]) {
+            var state = session.state
+            state.messages = []
+            state.summaries = [:]
+            state.cursors = [:]
+            self.state = state
+            rowIds = rows.map(\.id)
+        }
+    }
+
     private func sessionChanged() {
         // What the views show is rebuilt on its next read, while the views
         // redraw when the change publishes.
         sessionGeneration += 1
+        unpublishedChanges += 1
         guard publishEvaluation == nil else { return }
         publishEvaluation = Task { @MainActor [weak self] in
             self?.publishEvaluation = nil
@@ -787,6 +822,14 @@ class ChatViewModel: ObservableObject {
         }
         trailingPublish?.cancel()
         trailingPublish = nil
+        // Only the chat table redraws when nothing changed but the open
+        // chat's transcript.
+        let chrome = session.map { SessionChrome($0, rows: messages) }
+        let transcriptOnly = chrome != nil && layout == publishedLayout && chrome == publishedChrome
+            && unpublishedChanges == unpublishedStateChanges
+        publishedChrome = chrome
+        unpublishedChanges = 0
+        unpublishedStateChanges = 0
         announceGenerationStatus(from: publishedLayout, to: layout)
         if layout?.chatId != publishedLayout?.chatId { scrollsToTurnOnStart = false }
         if scrollsToTurnOnStart, let layout, [.submitting, .queued, .streaming].contains(layout.status) {
@@ -806,7 +849,11 @@ class ChatViewModel: ObservableObject {
             let edit = MessageEditSessionTransition.reconcile(messageEditSession, chatId: chat?.id, messages: chat?.messages ?? [])
             if edit != messageEditSession { messageEditSession = edit }
         }
-        objectWillChange.send()
+        if transcriptOnly {
+            transcript.objectWillChange.send()
+        } else {
+            objectWillChange.send()
+        }
     }
 
     /// VoiceOver hears a reply start, finish or fail in the chat on screen,
@@ -911,8 +958,7 @@ class ChatViewModel: ObservableObject {
         guard let session else { return false }
         if session.open.id == chatId { return session.running }
         if session.controller.deviceRuns[chatId] != nil { return true }
-        let now = Date()
-        return chats.contains { $0.id == chatId && $0.activeRun?.isLive(at: now) == true }
+        return listedChats?.activeRuns[chatId]?.isLive(at: Date()) == true
     }
 
     /// The chat the list shows as open: a new chat outside a project is the
@@ -1096,18 +1142,74 @@ class ChatViewModel: ObservableObject {
         return shown
     }
 
+    /// What the chat lists are built from. A reply streaming into the open
+    /// chat changes none of it, so the lists are not built again for each
+    /// part of the reply.
+    private struct ChatListInputs: Equatable {
+        let cloud: Bool
+        let keyLocked: Bool
+        let hasChatAccess: Bool
+        let cloudListed: [ThreadSummary]
+        let pinnedListed: [ThreadSummary]
+        let deviceListed: [ThreadSummary]
+        let openId: String?
+        let shownRun: String?
+        /// The run of each device chat this app reads, by chat.
+        let deviceRuns: [String: String]
+        /// Stand for when the open chat's latest message was written: a
+        /// message keeps that time once it is shown.
+        let messageCount: Int
+        let lastMessageId: String?
+
+        @MainActor init(_ session: ChatSession, hasChatAccess: Bool) {
+            cloud = session.account.cloud
+            keyLocked = session.account.keyLocked
+            self.hasChatAccess = hasChatAccess
+            cloudListed = session.list.cloudListed
+            pinnedListed = session.list.pinnedListed
+            deviceListed = session.list.deviceListed
+            openId = session.open.id
+            shownRun = session.running ? session.state.runId : nil
+            deviceRuns = session.controller.deviceRuns.compactMapValues { $0.run?.runId }
+            messageCount = session.state.messages.count
+            lastMessageId = session.state.messages.last?.id
+        }
+    }
+
+    /// The chat lists as built from their inputs.
+    private struct ListedChats {
+        let inputs: ChatListInputs
+        let chats: [Chat]
+        let cloudSummaries: [ChatListSummary]
+        let localSummaries: [ChatListSummary]
+        /// The run each listed chat reports, by chat.
+        let activeRuns: [String: ActiveRun]
+    }
+
+    private var listedChats: ListedChats? {
+        guard let session else { return nil }
+        let inputs = ChatListInputs(session, hasChatAccess: hasChatAccess)
+        if let shownChats, shownChats.inputs == inputs { return shownChats }
+        let chats = buildChats(session)
+        let listed = ListedChats(
+            inputs: inputs,
+            chats: chats,
+            cloudSummaries: chats.filter { !$0.isLocalOnly }.map(ChatListSummary.init),
+            localSummaries: chats.filter(\.isLocalOnly).map(ChatListSummary.init),
+            activeRuns: Dictionary(chats.compactMap { chat in chat.activeRun.map { (chat.id, $0) } }) { first, _ in first }
+        )
+        shownChats = listed
+        return listed
+    }
+
     /// The chats the sidebar lists, the latest active first, under a new chat
     /// row for each list. A run this app streams is active in the list
     /// before the list next reports it.
     var chats: [Chat] {
-        if let shownChats, shownChats.generation == sessionGeneration { return shownChats.chats }
-        let chats = buildChats()
-        shownChats = (sessionGeneration, chats)
-        return chats
+        listedChats?.chats ?? []
     }
 
-    private func buildChats() -> [Chat] {
-        guard let session else { return [] }
+    private func buildChats(_ session: ChatSession) -> [Chat] {
         let listsCloud = session.account.cloud && !session.account.keyLocked
         var listed: [Chat] = []
         if listsCloud {
@@ -1147,11 +1249,11 @@ class ChatViewModel: ObservableObject {
     }
 
     var cloudSidebarSummaries: [ChatListSummary] {
-        chats.filter { !$0.isLocalOnly }.map(ChatListSummary.init)
+        listedChats?.cloudSummaries ?? []
     }
 
     var localSidebarSummaries: [ChatListSummary] {
-        chats.filter(\.isLocalOnly).map(ChatListSummary.init)
+        listedChats?.localSummaries ?? []
     }
 
     /// The favorites, the most recently pinned first.

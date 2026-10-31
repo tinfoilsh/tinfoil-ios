@@ -45,19 +45,21 @@ struct ChatListView: View {
     }
 
     var body: some View {
-        MessageTableView(
-            messages: messages,
-            isDarkMode: isDarkMode,
-            isLoading: isLoading,
-            onRequestSignIn: onRequestSignIn,
-            viewModel: viewModel,
-            isAtBottom: $isAtBottom,
-            userHasScrolled: $userHasScrolled,
-            scrollTrigger: scrollTrigger,
-            scrollToUserTrigger: scrollToUserTrigger,
-            tableOpacity: $tableOpacity,
-            keyboardHeight: keyboardHeight
-        )
+        TranscriptObserver(transcript: viewModel.transcript) {
+            MessageTableView(
+                messages: messages,
+                isDarkMode: isDarkMode,
+                isLoading: isLoading,
+                onRequestSignIn: onRequestSignIn,
+                viewModel: viewModel,
+                isAtBottom: $isAtBottom,
+                userHasScrolled: $userHasScrolled,
+                scrollTrigger: scrollTrigger,
+                scrollToUserTrigger: scrollToUserTrigger,
+                tableOpacity: $tableOpacity,
+                keyboardHeight: keyboardHeight
+            )
+        }
         .opacity(tableOpacity)
         .background {
             ZStack {
@@ -357,5 +359,16 @@ struct ChatListView: View {
         .accessibilityAddTraits(.updatesFrequently)
         .transition(.opacity)
         .animation(.easeInOut(duration: Constants.ChatFork.overlayFadeSeconds), value: viewModel.forkingChatId)
+    }
+}
+
+/// Draws the chat table again as the open chat's transcript changes, which
+/// the views around it do not show.
+private struct TranscriptObserver<Content: View>: View {
+    @ObservedObject var transcript: TranscriptChanges
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        content()
     }
 }
