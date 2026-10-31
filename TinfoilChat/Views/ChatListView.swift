@@ -103,9 +103,37 @@ struct ChatListView: View {
                 .transition(.opacity)
             }
         }
+        // Covers the messages only: the input stays in place below it.
+        .overlay {
+            if isShowingChatLoading || viewModel.chatHydrationError != nil {
+                VStack(spacing: 12) {
+                    if isShowingChatLoading {
+                        ProgressView()
+                    }
+                    if let error = viewModel.chatHydrationError {
+                        Text(error)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    if viewModel.chatHydrationError != nil && viewModel.canRetryFailedChatHydration {
+                        Button("Try Again") {
+                            viewModel.retryFailedChatHydration()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.chatBackground(isDarkMode: isDarkMode))
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(viewModel.chatHydrationError ?? "Loading conversation")
+                .transition(.opacity)
+            }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
-                if messages.isEmpty && !isInputExpanded && !isKeyboardVisible && !isCurrentChatReadOnly {
+                // A chat that is opening, or failed to, is not a new chat.
+                if messages.isEmpty && !isShowingChatLoading && viewModel.chatHydrationError == nil
+                    && !isInputExpanded && !isKeyboardVisible && !isCurrentChatReadOnly {
                     PromptSuggestionsBar(
                         viewModel: viewModel,
                         onOpenLibrary: { showPromptLibrary = true }
@@ -289,31 +317,6 @@ struct ChatListView: View {
             userHasScrolled = false
             viewModel.isScrollInteractionActive = false
             scrollToUserTrigger = UUID()
-        }
-        .overlay {
-            if isShowingChatLoading || viewModel.chatHydrationError != nil {
-                VStack(spacing: 12) {
-                    if isShowingChatLoading {
-                        ProgressView()
-                    }
-                    if let error = viewModel.chatHydrationError {
-                        Text(error)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    if viewModel.chatHydrationError != nil && viewModel.canRetryFailedChatHydration {
-                        Button("Try Again") {
-                            viewModel.retryFailedChatHydration()
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.chatBackground(isDarkMode: isDarkMode))
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel(viewModel.chatHydrationError ?? "Loading conversation")
-                .transition(.opacity)
-            }
         }
         .overlay {
             if isForkingCurrentChat {
