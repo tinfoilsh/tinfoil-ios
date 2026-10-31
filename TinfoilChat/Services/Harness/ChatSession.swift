@@ -853,7 +853,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// Removes one message; its reply, or the message it answers, stays. A
     /// chat keeps its last message.
     func deleteMessage(at index: Int) async throws {
-        guard state.messages.count > 1 else { return }
+        guard state.messages.count > 1 || state.hasOlder else { return }
         try await changeMessage(at: index) { store, threadId, messageId in
             try await store.deleteMessage(threadId, messageId: messageId)
         } _: { messages, messageId in

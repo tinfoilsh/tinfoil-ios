@@ -1646,7 +1646,7 @@ class ChatViewModel: ObservableObject {
     func canDeleteMessage(id: String) -> Bool {
         guard let session, canUseCurrentChatActions, session.open.id != nil,
               !isCurrentChatSafeguardFlagged, !session.running, session.acceptsTurn,
-              messageEditSession == nil, session.state.messages.count > 1 else { return false }
+              messageEditSession == nil, session.state.messages.count > 1 || session.state.hasOlder else { return false }
         let messageId = messageId(ofRow: id)
         return session.state.messages.contains { $0.id == messageId }
     }
