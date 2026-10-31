@@ -61,6 +61,7 @@ struct MessageTableView: UIViewRepresentable {
     }
 
     func updateUIView(_ tableView: UITableView, context: Context) {
+        let shownRowIds = context.coordinator.parent.messages.map(\.id)
         context.coordinator.parent = self
 
         let keyboardHeightChanged = context.coordinator.lastKeyboardHeight != keyboardHeight
@@ -90,6 +91,15 @@ struct MessageTableView: UIViewRepresentable {
         let currentMessageIds = Set(messages.map { $0.id })
         let isIdConversion = chatIdChanged && !currentMessageIds.isEmpty &&
             currentMessageIds == context.coordinator.lastMessageIds
+
+        // Rows added after those the table shows, as a sent message and the
+        // reply it waits for, are inserted: reloading would draw every
+        // message on screen again. A stream that ends as rows are added still
+        // reloads, so the finished reply is measured without its buffer.
+        let appendsRows = !chatIdChanged && !context.coordinator.lastUsesStreamingLayout
+            && !shownRowIds.isEmpty && messages.count > shownRowIds.count
+            && messages.prefix(shownRowIds.count).map(\.id) == shownRowIds
+            && tableView.numberOfRows(inSection: 0) == shownRowIds.count
 
         // Track which row is streaming synchronously, before any reload below
         // measures cells. A queued message dispatched right as a stream ends
@@ -176,7 +186,9 @@ struct MessageTableView: UIViewRepresentable {
                 }
             }
             context.coordinator.lastMessageIds = currentMessageIds
-            tableView.reloadData()
+            if !appendsRows {
+                tableView.reloadData()
+            }
         }
 
         let isDarkModeChanged = context.coordinator.lastIsDarkMode != isDarkMode
@@ -191,7 +203,25 @@ struct MessageTableView: UIViewRepresentable {
             }
         }
 
-        if messageCountChanged || (chatIdChanged && !isIdConversion) {
+        if appendsRows {
+            context.coordinator.lastMessageCount = messages.count
+            UIView.performWithoutAnimation {
+                tableView.insertRows(
+                    at: (shownRowIds.count..<messages.count).map { IndexPath(row: $0, section: 0) },
+                    with: .none
+                )
+            }
+            // The row that was last no longer is.
+            for (index, message) in messages.prefix(shownRowIds.count).enumerated() {
+                context.coordinator.messageWrappers[message.id]?.update(
+                    message: message,
+                    isDarkMode: isDarkMode,
+                    isLastMessage: false,
+                    isLoading: false,
+                    messageIndex: index
+                )
+            }
+        } else if messageCountChanged || (chatIdChanged && !isIdConversion) {
             // Messages loaded before those shown keep the reader in place: the
             // message that was first stays at the top.
             let firstShownIndex = chatIdChanged ? nil : context.coordinator.lastFirstMessageId.flatMap { firstId in
