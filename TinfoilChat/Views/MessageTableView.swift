@@ -124,6 +124,8 @@ struct MessageTableView: UIViewRepresentable {
                 // retained, so a stream that ends across the conversion must
                 // still collapse its buffer through the normal path.
                 context.coordinator.lastUsesStreamingLayout = usesStreamingLayout
+                // The new chat shows once its own messages are placed.
+                context.coordinator.cancelReveal()
                 context.coordinator.messageWrappers.removeAll()
                 context.coordinator.shownMessageIds.removeAll()
                 context.coordinator.heightCache.removeAll()
@@ -677,7 +679,7 @@ struct MessageTableView: UIViewRepresentable {
             }
         }
 
-        private func cancelReveal() {
+        func cancelReveal() {
             pendingReveal?.link.invalidate()
             pendingReveal = nil
         }
