@@ -62,6 +62,11 @@ struct ChatContainer: View {
             && viewModel.activeStorageTab == .local
     }
 
+    /// The sidebar is on screen while open and while dragged open.
+    private var isSidebarShown: Bool {
+        isSidebarOpen || dragOffset != 0
+    }
+
     private var showsSidebarLogo: Bool {
         isSidebarOpen && viewModel.activeProject == nil
     }
@@ -388,6 +393,9 @@ struct ChatContainer: View {
                     }
                 } : nil
         )
+        .onChange(of: isSidebarShown, initial: true) { _, shown in
+            viewModel.sidebarChanges.isShown = shown
+        }
         .onChange(of: isSidebarOpen) { _, isOpen in
             if !isOpen {
                 // Snap any stray offset back to zero when we finish closing
@@ -472,10 +480,12 @@ struct ChatContainer: View {
             isOpen: $isSidebarOpen,
             navigationRequest: $sidebarNavigationRequest,
             viewModel: viewModel,
+            changes: viewModel.sidebarChanges,
             authManager: authManager,
             onSubscribe: { showPremiumModal = true },
             onRequestSignIn: showAuthenticationView
         )
+        .equatable()
         // VoiceOver's escape gesture (two-finger scrub) closes the menu.
         .accessibilityAction(.escape) {
             withAnimation {

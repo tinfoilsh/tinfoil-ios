@@ -40,12 +40,15 @@ func isSidebarChatSearchEnabled(
     isAuthenticated && isCloudSyncEnabled && activeTab == .cloud
 }
 
-struct ChatSidebar: View {
+struct ChatSidebar: View, Equatable {
     @Environment(\.colorScheme) var colorScheme
     @Environment(Clerk.self) private var clerk
     @Binding var isOpen: Bool
     @Binding var navigationRequest: ChatNavigationRequest?
-    @ObservedObject var viewModel: TinfoilChat.ChatViewModel
+    /// Read as the sidebar draws, which it does as the chat changes while
+    /// the sidebar is open.
+    let viewModel: TinfoilChat.ChatViewModel
+    @ObservedObject var changes: ChangesWhileShown
     @ObservedObject var authManager: AuthManager
     let onSubscribe: () -> Void
     let onRequestSignIn: () -> Void
@@ -62,6 +65,12 @@ struct ChatSidebar: View {
     @State private var chatSearchTerm: String = ""
     @StateObject private var chatSearch = ChatSearchController()
     @ObservedObject private var settings = SettingsManager.shared
+
+    /// The sidebar draws as what it observes changes, not each time the
+    /// view around it does.
+    static func == (lhs: ChatSidebar, rhs: ChatSidebar) -> Bool {
+        lhs.viewModel === rhs.viewModel && lhs.changes === rhs.changes && lhs.authManager === rhs.authManager
+    }
 
     private var activeTab: ChatStorageTab {
         viewModel.activeStorageTab
