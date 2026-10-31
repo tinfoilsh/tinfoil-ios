@@ -1139,8 +1139,16 @@ struct ObservableMessageCell: View {
                     isLastMessage: wrapper.isLastMessage,
                     isLoading: wrapper.isLoading,
                     messageIndex: wrapper.messageIndex,
-                    stepExpansion: wrapper.stepExpansion
+                    stepExpansion: wrapper.stepExpansion,
+                    context: MessageRowContext(
+                        viewModel,
+                        message: wrapper.message,
+                        messageIndex: wrapper.messageIndex,
+                        isRenderingStream: wrapper.isLoading && wrapper.isLastMessage
+                    ),
+                    viewModel: viewModel
                 )
+                .equatable()
                 .environmentObject(viewModel)
                 .markdownStyleHost(isDarkMode: wrapper.isDarkMode)
                 .padding(.vertical, 8)

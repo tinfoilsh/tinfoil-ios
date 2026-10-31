@@ -77,14 +77,61 @@ private struct MessageSecurityMetadataView: View {
     }
 }
 
-struct MessageView: View {
+/// What a message's row shows of the chat around it. The row redraws when
+/// its message or this changes, rather than on every change of the chat.
+struct MessageRowContext: Equatable {
+    var canGenerateInCurrentChat = false
+    var isChatLoading = false
+    var isEditingMessage = false
+    var hasPendingAttachments = false
+    var isSafeguardFlagged = false
+    var canDelete = false
+    var canFork = false
+    var canUseReadAloud = false
+    var chatId: String?
+    /// The live summaries of the reply streaming, which only its row shows.
+    var thinkingSummary = ""
+    var webSearchSummary = ""
+    var genUIRetryStates: [String: GenUIRetryState] = [:]
+    /// The open chat's error, which only the row that failed shows.
+    var failure: HarnessErrorBody?
+    var failureAt: Date?
+
+    @MainActor init(_ viewModel: ChatViewModel, message: Message, messageIndex: Int, isRenderingStream: Bool) {
+        canGenerateInCurrentChat = viewModel.canGenerateInCurrentChat
+        isChatLoading = viewModel.isLoading
+        isEditingMessage = viewModel.messageEditSession != nil
+        hasPendingAttachments = !viewModel.pendingAttachments.isEmpty
+        isSafeguardFlagged = viewModel.isCurrentChatSafeguardFlagged
+        canDelete = viewModel.canDeleteMessage(id: message.id)
+        canFork = viewModel.canForkMessage(at: messageIndex)
+        canUseReadAloud = viewModel.canUseReadAloud
+        chatId = viewModel.currentChat?.id
+        if isRenderingStream {
+            thinkingSummary = viewModel.thinkingSummary
+            webSearchSummary = viewModel.webSearchSummary
+        }
+        for toolCall in message.toolCalls {
+            if let state = viewModel.genUIRetryState(toolCallId: toolCall.id) { genUIRetryStates[toolCall.id] = state }
+        }
+        if shouldShowStreamError(message: message), let shown = viewModel.shownFailure {
+            failure = shown.error
+            failureAt = shown.at
+        }
+    }
+}
+
+struct MessageView: View, Equatable {
     let message: Message
     let isDarkMode: Bool
     let isLastMessage: Bool
     let isLoading: Bool
     let messageIndex: Int
     let stepExpansion: WorkStepExpansion
-    @EnvironmentObject var viewModel: TinfoilChat.ChatViewModel
+    let context: MessageRowContext
+    /// Carries out the row's actions. The row does not observe it: what it
+    /// shows of the chat comes in its context.
+    let viewModel: TinfoilChat.ChatViewModel
     @State private var showLongMessageSheet = false
     @State private var selectLongMessageOnPresentation = false
     @State private var userTextSelectionRequest = 0
@@ -93,6 +140,17 @@ struct MessageView: View {
     @State private var showShareSheet = false
     @State private var showDeleteConfirmation = false
     @State private var messagePendingDeletion: (chatId: String, messageId: String)?
+
+    static func == (lhs: MessageView, rhs: MessageView) -> Bool {
+        lhs.message == rhs.message
+            && lhs.isDarkMode == rhs.isDarkMode
+            && lhs.isLastMessage == rhs.isLastMessage
+            && lhs.isLoading == rhs.isLoading
+            && lhs.messageIndex == rhs.messageIndex
+            && lhs.stepExpansion === rhs.stepExpansion
+            && lhs.context == rhs.context
+            && lhs.viewModel === rhs.viewModel
+    }
 
     private var isAnyMessageSheetPresented: Bool {
         showLongMessageSheet || showRawContentModal || showSourcesSheet || showShareSheet
@@ -108,16 +166,16 @@ struct MessageView: View {
     }
 
     private var canUseUserMessageActions: Bool {
-        viewModel.canGenerateInCurrentChat
-            && !viewModel.isLoading
-            && viewModel.messageEditSession == nil
-            && viewModel.pendingAttachments.isEmpty
+        context.canGenerateInCurrentChat
+            && !context.isChatLoading
+            && !context.isEditingMessage
+            && !context.hasPendingAttachments
     }
 
     private var canShowUserMessageMenu: Bool {
-        !viewModel.isCurrentChatSafeguardFlagged
-            && !viewModel.isLoading
-            && viewModel.messageEditSession == nil
+        !context.isSafeguardFlagged
+            && !context.isChatLoading
+            && !context.isEditingMessage
     }
 
     private func forkFromHere() {
@@ -125,22 +183,22 @@ struct MessageView: View {
     }
 
     private var canShareAssistantMessage: Bool {
-        message.hasVisibleAssistantContent && isLastMessage && !viewModel.isLoading
+        message.hasVisibleAssistantContent && isLastMessage && !context.isChatLoading
     }
 
     private var canDeleteMessage: Bool {
-        viewModel.canDeleteMessage(id: message.id)
+        context.canDelete
     }
 
     private var showsAssistantMoreMenu: Bool {
-        canShareAssistantMessage || viewModel.canForkMessage(at: messageIndex) || canDeleteMessage
+        canShareAssistantMessage || context.canFork || canDeleteMessage
     }
 
     private var canRegenerateAssistantResponse: Bool {
         AssistantMessageActionPolicy.canRegenerate(
             isLastMessage: isLastMessage,
-            canGenerateInCurrentChat: viewModel.canGenerateInCurrentChat,
-            isLoading: viewModel.isLoading,
+            canGenerateInCurrentChat: context.canGenerateInCurrentChat,
+            isLoading: context.isChatLoading,
             messageIndex: messageIndex,
             isRateLimitError: message.isRateLimitError,
             isHourlyLimitError: message.isHourlyLimitError
@@ -214,7 +272,7 @@ struct MessageView: View {
                 }
             }
 
-            if viewModel.canForkMessage(at: messageIndex) {
+            if context.canFork {
                 Button(action: forkFromHere) {
                     Label(
                         Constants.ChatFork.actionLabel,
@@ -413,8 +471,8 @@ struct MessageView: View {
                         isActive: isRenderingStream && identifiedRun.id == runs.last?.id,
                         isStreaming: isRenderingStream,
                         isDarkMode: isDarkMode,
-                        thinkingSummary: isRenderingStream ? viewModel.thinkingSummary : nil,
-                        webSearchSummary: isRenderingStream ? viewModel.webSearchSummary : nil,
+                        thinkingSummary: isRenderingStream ? context.thinkingSummary : nil,
+                        webSearchSummary: isRenderingStream ? context.webSearchSummary : nil,
                         expansion: stepExpansion
                     )
                 }
@@ -430,8 +488,8 @@ struct MessageView: View {
             rowId: rowId,
             isActive: isActive,
             isDarkMode: isDarkMode,
-            thinkingSummary: isActive ? viewModel.thinkingSummary : nil,
-            webSearchSummary: isActive ? viewModel.webSearchSummary : nil,
+            thinkingSummary: isActive ? context.thinkingSummary : nil,
+            webSearchSummary: isActive ? context.webSearchSummary : nil,
             expansion: stepExpansion
         )
     }
@@ -473,8 +531,8 @@ struct MessageView: View {
                 isRenderingStream: isRenderingStream
             ),
             isDarkMode: isDarkMode,
-            retryState: viewModel.genUIRetryState(toolCallId: toolCall.id),
-            onRetry: (isRenderingStream || !viewModel.canGenerateInCurrentChat) ? nil : {
+            retryState: context.genUIRetryStates[toolCall.id],
+            onRetry: (isRenderingStream || !context.canGenerateInCurrentChat) ? nil : {
                 viewModel.retryGenUIToolCall(toolCallId: toolCall.id)
             }
         )
@@ -711,12 +769,12 @@ struct MessageView: View {
 
                 // Show an error box if the stream failed, with a button that
                 // continues the partial response or generates it again.
-                if shouldShowStreamError(message: message), let failure = viewModel.shownFailure {
-                    let presentation = StreamErrorPresentation(failure.error, occurredAt: failure.at)
+                if shouldShowStreamError(message: message), let failure = context.failure {
+                    let presentation = StreamErrorPresentation(failure, occurredAt: context.failureAt)
                     ErrorMessageView(
                         presentation: presentation,
-                        details: failure.error.message,
-                        occurredAt: failure.at,
+                        details: failure.message,
+                        occurredAt: context.failureAt,
                         isDarkMode: isDarkMode,
                         onUpgrade: { viewModel.showRateLimitPaywall = true },
                         onUnlock: { Task { await viewModel.reattemptPasskeyRecovery() } },
@@ -735,7 +793,7 @@ struct MessageView: View {
                             )
                         }
 
-                        if !viewModel.isCurrentChatSafeguardFlagged {
+                        if !context.isSafeguardFlagged {
                             HStack(spacing: 16) {
                                 if message.hasVisibleAssistantContent {
                                     Button {
@@ -751,9 +809,9 @@ struct MessageView: View {
                                     .accessibilityLabel("Copy")
                                     .accessibleHitTarget()
 
-                                    if viewModel.canUseReadAloud,
+                                    if context.canUseReadAloud,
                                        SpeechTextProcessor.canRead(message),
-                                       let chatId = viewModel.currentChat?.id {
+                                       let chatId = context.chatId {
                                         ReadAloudButton(
                                             player: viewModel.speechPlayer,
                                             owner: SpeechOwner(chatId: chatId, messageId: message.id),
@@ -855,7 +913,7 @@ struct MessageView: View {
                             }
                         }
 
-                        if viewModel.canForkMessage(at: messageIndex) {
+                        if context.canFork {
                             Button(action: forkFromHere) {
                                 Label(
                                     "Fork",
