@@ -270,9 +270,11 @@ struct ChatListView: View {
                     if viewModel.hydratingChatId != nil {
                         ProgressView()
                     }
-                    Text(viewModel.chatHydrationError ?? "Loading conversation...")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                    if let error = viewModel.chatHydrationError {
+                        Text(error)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
                     if viewModel.chatHydrationError != nil && viewModel.canRetryFailedChatHydration {
                         Button("Try Again") {
                             viewModel.retryFailedChatHydration()
