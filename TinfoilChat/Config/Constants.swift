@@ -199,6 +199,17 @@ enum Constants {
         static let maxCellHeight: CGFloat = 200_000
     }
 
+    /// How a hidden chat shows once its messages are scrolled into place.
+    enum ChatReveal {
+        /// Frames the messages' height must hold still before they show:
+        /// a row can still resize a frame or two after it first appears.
+        static let stableFrames = 2
+        /// The messages show after this many frames even while rows still
+        /// resize, as they do under a streaming reply.
+        static let maxFrames = 20
+        static let fadeSeconds: TimeInterval = 0.2
+    }
+
     /// Heuristics for estimating a message row's height before it has been
     /// measured by the table. Accurate estimates keep the scroll view's
     /// `contentSize` stable while scrolling up through never-displayed rows,

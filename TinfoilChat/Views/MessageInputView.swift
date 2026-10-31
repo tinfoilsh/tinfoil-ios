@@ -645,7 +645,7 @@ struct MessageInputView: View {
     /// growing list of paste/send hooks stays defined in one place.
     private var messageTextEditor: some View {
         CustomTextEditor(text: $messageText,
-                         placeholderText: viewModel.currentChat?.messages.isEmpty ?? true ? "How can I help you?" : "Reply to Al...",
+                         placeholderText: (viewModel.currentChat?.messages.isEmpty ?? true) && !viewModel.isOpeningChat ? "How can I help you?" : "Reply to Al...",
                          shouldFocusInput: viewModel.shouldFocusInput,
                          handle: editorHandle,
                          allowsImagePaste: !isEditingMessage && viewModel.currentModel.isMultimodal,
@@ -1899,7 +1899,7 @@ struct CustomTextEditor: UIViewRepresentable {
             }
         }
 
-        if text.isEmpty && !isCurrentlyEditing && uiView.textColor != .lightGray {
+        if text.isEmpty && !isCurrentlyEditing && (uiView.textColor != .lightGray || uiView.text != placeholderText) {
             uiView.text = placeholderText
             uiView.textColor = .lightGray
             context.coordinator.currentTextSnapshot = ""
