@@ -268,6 +268,38 @@ struct ChatSessionTests {
         #expect(await fixture.transport.requests.map { $0.json["before"] as? String } == [nil, "u3", "n2"])
     }
 
+    @Test func theOnlyLoadedMessageCanBeDeletedWhileOlderMessagesRemain() async throws {
+        func page(_ message: [String: Any], hasOlder: Bool) -> [String: Any] {
+            summary(messageCount: hasOlder ? 2 : 1).merging([
+                "revision": hasOlder ? "rev-1" : "rev-2", "presetId": NSNull(), "flagged": false,
+                "messages": [message], "hasOlder": hasOlder,
+            ]) { $1 }
+        }
+        let question: [String: Any] = ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Keep this question"]
+        let reply: [String: Any] = ["id": "a1", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "content": "Delete this reply"]
+        let fixture = Fixture(userId: "user-1", answers: [
+            Answers.json(page(reply, hasOlder: true)),
+            Answers.json(page(question, hasOlder: false)),
+        ])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        #expect(session.state.messages.map(\.id) == ["a1"])
+        try #require(session.state.hasOlder)
+
+        try await session.deleteMessage(at: 0)
+        let request = try #require(await fixture.transport.requests.last)
+        #expect(request.route == .messageDelete)
+        #expect(request.json["threadId"] as? String == threadId)
+        #expect(request.json["messageId"] as? String == "a1")
+        #expect(session.state.messages.map(\.id) == ["u1"])
+        #expect(session.state.messages.first?.content == "Keep this question")
+        #expect(!session.state.hasOlder)
+
+        try await session.deleteMessage(at: 0)
+        #expect(await fixture.transport.requests.map(\.route) == [.get, .messageDelete])
+        #expect(session.state.messages.map(\.id) == ["u1"])
+    }
+
     @Test func aForkOpensOnceItsOpeningReturnsUnlessTheViewMoved() async throws {
         let forkId = "0000000000002_00000000-0000-4000-8000-000000000002"
         func window(_ id: String) -> [String: Any] {
