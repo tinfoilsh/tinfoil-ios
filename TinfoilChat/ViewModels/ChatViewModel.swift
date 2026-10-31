@@ -1263,6 +1263,10 @@ class ChatViewModel: ObservableObject {
         if session.open.id == id, session.open.loadingId == nil { return true }
         cancelMessageEdit()
         cancelAudioRecording()
+        // The composer shows the chat's listed model while the chat opens.
+        if let listed = chats.first(where: { $0.id == id }), let model = findSelectableModel(id: listed.model) {
+            currentModel = model
+        }
         let originals = pendingOriginals
         Task {
             do {
