@@ -229,8 +229,6 @@ class ChatViewModel: ObservableObject {
     @Published var isViewingProjectChat: Bool = false
     @Published var shouldFocusInput: Bool = false
     var focusInputAfterDismiss = false
-    @Published var isScrollInteractionActive: Bool = false
-    @Published var isAtBottom: Bool = true
     @Published var scrollToBottomTrigger: UUID = UUID()
     @Published private(set) var isLoadingEarlierMessages = false
     @Published var scrollToUserMessageTrigger: UUID = UUID()
@@ -834,7 +832,6 @@ class ChatViewModel: ObservableObject {
         if layout?.chatId != publishedLayout?.chatId { scrollsToTurnOnStart = false }
         if scrollsToTurnOnStart, let layout, [.submitting, .queued, .streaming].contains(layout.status) {
             scrollsToTurnOnStart = false
-            isScrollInteractionActive = false
             scrollToUserMessageTrigger = UUID()
         }
         publishedLayout = layout

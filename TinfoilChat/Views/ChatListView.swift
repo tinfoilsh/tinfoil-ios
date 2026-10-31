@@ -16,7 +16,6 @@ struct ChatListView: View {
     @Binding var messageText: String
 
     @State private var isAtBottom = true
-    @State private var userHasScrolled = false
     @State private var isInputExpanded = false
     @State private var showPromptLibrary = false
     @State private var showSafeguardsSettings = false
@@ -53,7 +52,6 @@ struct ChatListView: View {
                 onRequestSignIn: onRequestSignIn,
                 viewModel: viewModel,
                 isAtBottom: $isAtBottom,
-                userHasScrolled: $userHasScrolled,
                 scrollTrigger: scrollTrigger,
                 scrollToUserTrigger: scrollToUserTrigger,
                 tableOpacity: $tableOpacity,
@@ -74,8 +72,6 @@ struct ChatListView: View {
                 Group {
                     if #available(iOS 26, *) {
                         Button(action: {
-                            userHasScrolled = false
-                            viewModel.isScrollInteractionActive = false
                             scrollTrigger = UUID()
                         }) {
                             Image(systemName: "arrow.down")
@@ -87,8 +83,6 @@ struct ChatListView: View {
                         .accessibilityLabel(Constants.Accessibility.scrollToLatestMessage)
                     } else {
                         Button(action: {
-                            userHasScrolled = false
-                            viewModel.isScrollInteractionActive = false
                             scrollTrigger = UUID()
                         }) {
                             Image(systemName: "arrow.down.circle.fill")
@@ -215,9 +209,6 @@ struct ChatListView: View {
             guard !viewModel.hasActiveStreams, authManager.isAuthenticated, !Task.isCancelled else { return }
             await authManager.safeguards.refresh()
         }
-        .onDisappear {
-            viewModel.isScrollInteractionActive = false
-        }
         .onChange(of: isCurrentChatReadOnly, initial: true) { _, isReadOnly in
             guard isReadOnly else { return }
             messageText = ""
@@ -252,8 +243,6 @@ struct ChatListView: View {
                 let wasInitialLoad = oldCount == 0
 
                 if hasUserMessage || wasInitialLoad {
-                    userHasScrolled = false
-                    viewModel.isScrollInteractionActive = false
                     if hasUserMessage && viewModel.isLoading {
                         scrollToUserTrigger = UUID()
                     } else {
@@ -277,8 +266,6 @@ struct ChatListView: View {
             // conversation stays on screen, positioned by the message count
             // change that came with it.
             if oldId?.isEmpty ?? true, viewModel.isNewChatsFirstTurn { return }
-            userHasScrolled = false
-            viewModel.isScrollInteractionActive = false
 
             // A chat still opening has no messages yet, and stays hidden
             // until they have loaded and been placed.
@@ -311,13 +298,9 @@ struct ChatListView: View {
             if opacity > 0 { isPlacingOpenedChat = false }
         }
         .onChange(of: viewModel.scrollToBottomTrigger) { _, _ in
-            userHasScrolled = false
-            viewModel.isScrollInteractionActive = false
             scrollTrigger = UUID()
         }
         .onChange(of: viewModel.scrollToUserMessageTrigger) { _, _ in
-            userHasScrolled = false
-            viewModel.isScrollInteractionActive = false
             scrollToUserTrigger = UUID()
         }
         .overlay {
