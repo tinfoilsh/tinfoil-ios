@@ -1643,9 +1643,25 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    func deleteMessage(at index: Int) {
-        guard let session, canUseCurrentChatActions, !session.running else { return }
-        Task { do { try await session.deleteMessage(at: index) } catch { session.report(error) } }
+    func canDeleteMessage(id: String) -> Bool {
+        guard let session, canUseCurrentChatActions, session.open.id != nil,
+              !isCurrentChatSafeguardFlagged, !session.running, session.acceptsTurn,
+              messageEditSession == nil, session.state.messages.count > 1 else { return false }
+        return session.state.messages.contains { $0.id == id }
+    }
+
+    func deleteMessage(id: String, in chatId: String) {
+        guard let session, session.open.id == chatId else { return }
+        Task {
+            guard self.session === session, session.open.id == chatId, canDeleteMessage(id: id),
+                  let index = session.state.messages.firstIndex(where: { $0.id == id }) else { return }
+            do {
+                try await session.deleteMessage(at: index)
+            } catch {
+                guard self.session === session, session.open.id == chatId else { return }
+                session.report(error)
+            }
+        }
     }
 
     func editReply(at index: Int, content: String) {
