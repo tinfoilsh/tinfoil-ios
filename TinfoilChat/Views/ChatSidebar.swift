@@ -455,9 +455,7 @@ struct ChatSidebar: View, Equatable {
             Button("Try again") {
                 viewModel.retryChatList()
             }
-            .font(.caption)
-            .foregroundColor(.accentColor)
-            .buttonStyle(.plain)
+            .buttonStyle(StatusActionButtonStyle(color: .orange))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
