@@ -93,9 +93,14 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     var state: ChatState { controller.view }
     var running: Bool { [.submitting, .streaming, .queued].contains(state.status) }
 
+    /// The open chat ends on a reply explicitly marked as failed.
+    var hasUnfinishedReply: Bool {
+        hasRetryableMessage && state.messages.last?.isError == true
+    }
+
     /// The open chat, at rest, ends on a reply that did not finish or on a
     /// message no reply answers, as one left by a turn that failed.
-    var hasUnfinishedReply: Bool {
+    private var hasRetryableMessage: Bool {
         guard state.status == .idle, open.loadingId == nil, open.failure == nil, let last = state.messages.last else { return false }
         return last.role.value1 == .user || last.isError == true
     }
@@ -620,7 +625,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// stream reconnects.
     @discardableResult
     func retry(options: TurnOptions? = nil) async -> Bool {
-        guard (state.failedRun != nil && state.status == .error) || hasUnfinishedReply else { return await reconnect() }
+        guard (state.failedRun != nil && state.status == .error) || hasRetryableMessage else { return await reconnect() }
         return await send(TurnFields(kind: .retry, options: options))
     }
 
