@@ -165,7 +165,7 @@ struct ChatSessionTests {
         _ = try await session.device.add(stored, originals: [:])
         session.list.reloadDevice()
         #expect(try await session.openChat(threadId, local: true) == .opened)
-        #expect(session.hasUnfinishedReply)
+        #expect(!session.hasUnfinishedReply)
 
         await fixture.transport.push(Answers.events(deviceRun(id: threadId, question: "second question", questionId: "u1")))
         #expect(await session.retry())
@@ -268,6 +268,51 @@ struct ChatSessionTests {
         #expect(await fixture.transport.requests.map { $0.json["before"] as? String } == [nil, "u3", "n2"])
     }
 
+    @Test(arguments: [false, true], [false, true])
+    func deletingAReplyDoesNotMarkTheRemainingQuestionAsFailed(local: Bool, failedReply: Bool) async throws {
+        let question: [String: Any] = ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Keep this question"]
+        let reply: [String: Any] = ["id": "a1", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "content": "Delete this reply", "isError": failedReply]
+        func window(_ messages: [[String: Any]]) -> [String: Any] {
+            summary(messageCount: messages.count).merging([
+                "revision": "rev-\(messages.count)", "presetId": NSNull(), "flagged": false,
+                "messages": messages, "hasOlder": false,
+            ]) { $1 }
+        }
+        let fixture = Fixture(userId: local ? nil : "user-1", answers: [])
+        let session = fixture.session
+        if local {
+            let stored = try #require(StoredThread(json: record(messages: [question, reply])))
+            _ = try await session.device.add(stored, originals: [:])
+        } else {
+            await fixture.transport.push(Answers.json(window([question, reply])))
+        }
+        #expect(try await session.openChat(threadId, local: local) == .opened)
+        #expect(session.hasUnfinishedReply == failedReply)
+
+        await fixture.transport.push(Answers.json(local ? ["thread": record(messages: [question])] : window([question])))
+        await fixture.transport.hold()
+        let deletion = Task { try await session.deleteMessage(at: 1) }
+        await fixture.transport.arrived()
+        #expect(session.state.messages.map(\.id) == ["u1"])
+        #expect(!session.hasUnfinishedReply)
+        await fixture.transport.release()
+        try await deletion.value
+
+        let request = try #require(await fixture.transport.requests.last)
+        #expect(request.route == .messageDelete)
+        #expect(request.json["messageId"] as? String == "a1")
+        #expect(session.state.messages.map(\.id) == ["u1"])
+        #expect(!session.hasUnfinishedReply)
+        #expect(session.open.failure == nil)
+        #expect(session.state.error == nil)
+
+        if !local { await fixture.transport.push(Answers.json(window([question]))) }
+        let reopened = ChatSession(account: fixture.account, device: session.device, cache: ChatListCache(directory: nil), receipts: nil)
+        #expect(try await reopened.openChat(threadId, local: local) == .opened)
+        #expect(reopened.state.messages.map(\.id) == ["u1"])
+        #expect(!reopened.hasUnfinishedReply)
+    }
+
     @Test func theOnlyLoadedMessageCanBeDeletedWhileOlderMessagesRemain() async throws {
         func page(_ message: [String: Any], hasOlder: Bool) -> [String: Any] {
             summary(messageCount: hasOlder ? 2 : 1).merging([
@@ -294,6 +339,7 @@ struct ChatSessionTests {
         #expect(session.state.messages.map(\.id) == ["u1"])
         #expect(session.state.messages.first?.content == "Keep this question")
         #expect(!session.state.hasOlder)
+        #expect(!session.hasUnfinishedReply)
 
         try await session.deleteMessage(at: 0)
         #expect(await fixture.transport.requests.map(\.route) == [.get, .messageDelete])

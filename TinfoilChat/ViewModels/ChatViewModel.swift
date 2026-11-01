@@ -1132,9 +1132,8 @@ class ChatViewModel: ObservableObject {
         session.flatMap(Self.failure(of:))
     }
 
-    /// The open chat's error: a request's, its run's, or, for a chat opened
-    /// on a reply that did not finish or on a message no reply answers, that
-    /// the reply is unfinished.
+    /// The open chat's error: a request's, its run's, or a stored reply's
+    /// explicit failure marker.
     private static func failure(of session: ChatSession) -> (error: HarnessErrorBody, at: Date?)? {
         if let failure = session.open.failure { return (failure, nil) }
         if session.state.status == .error, let error = session.state.error { return (error, session.controller.errorAt) }
