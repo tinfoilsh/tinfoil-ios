@@ -251,21 +251,12 @@ struct CloudSyncSettingsView: View {
                 )
                     .font(.caption)
                     .foregroundColor(.orange)
-                Button {
+                Button("Recover Key") {
                     viewModel.cloudSyncOnboardingMode = .recovery
                     viewModel.showCloudSyncOnboarding = true
                     onRequestCloseSettings()
-                } label: {
-                    Text("Recover Key")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.orange)
-                        .cornerRadius(6)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(StatusActionButtonStyle(color: .orange))
             }
         }
     }
