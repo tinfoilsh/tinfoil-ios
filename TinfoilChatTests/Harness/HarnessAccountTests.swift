@@ -14,6 +14,8 @@ private struct FreeKeyControlPlane: ControlPlaneTransport {
 @MainActor
 private final class HeldKey {
     var bytes: Data? = Data(repeating: 7, count: 32)
+    /// The key cannot be read, as while the device is locked.
+    var unreadable = false
 }
 
 /// How many times the app was asked to show the sign-in.
@@ -49,7 +51,10 @@ private func makeAccount(
         userId: userId,
         client: client,
         credentials: credentials,
-        keyBytes: { key.bytes },
+        keyBytes: {
+            if key.unreadable { throw KeychainError.unavailable }
+            return key.bytes
+        },
         settings: settings,
         cloudSync: cloudSync
     )
@@ -93,6 +98,23 @@ struct HarnessAccountTests {
         #expect(account.readsHeldKey)
         key.bytes = nil
         #expect(!account.readsHeldKey)
+    }
+
+    @Test func aKeyTheLockedDeviceCannotReadIsNotTakenForAMissingOne() async throws {
+        let key = HeldKey()
+        key.unreadable = true
+        let (account, _) = makeAccount(userId: "user-1", answers: [
+            Answers.json(sessionAnswer),
+            Answers.json(sessionAnswer), Answers.json(["language": "French"]),
+        ], key: key)
+        try await account.refresh()
+        #expect(!account.keyLocked)
+        #expect(account.profileFailed)
+        key.unreadable = false
+        try await account.refresh(credentials: true)
+        #expect(!account.profileFailed)
+        #expect(account.keyReady)
+        #expect(account.profile["language"] as? String == "French")
     }
 
     @Test func aKeyRefusedWhenTheSettingsAreReadAgainInTheBackgroundIsLocked() async throws {

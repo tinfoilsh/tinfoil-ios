@@ -551,7 +551,16 @@ class ChatViewModel: ObservableObject {
             userId: userId,
             client: client,
             credentials: credentials,
-            keyBytes: { try? EncryptionService.shared.getKeyBytesOrThrow() },
+            keyBytes: {
+                do {
+                    return try EncryptionService.shared.getKeyBytesOrThrow()
+                } catch let error as KeychainError {
+                    // A key the locked device cannot read may still be held.
+                    throw error
+                } catch {
+                    return nil
+                }
+            },
             settings: DeviceProfileStorage(),
             cloudSync: SettingsManager.shared.isCloudSyncEnabled
         )
