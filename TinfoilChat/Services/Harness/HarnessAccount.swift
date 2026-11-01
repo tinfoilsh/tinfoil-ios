@@ -19,7 +19,9 @@ final class HarnessAccount: ObservableObject {
     let userId: String?
     let client: HarnessClient
     let credentials: HarnessCredentialProvider
-    private let keyBytes: @MainActor () -> Data?
+    /// The held content key, or nil when none is held. Throws when the key
+    /// cannot be read now, as while the device is locked.
+    private let keyBytes: @MainActor () throws -> Data?
     private let settings: ProfileStorage
 
     @Published private(set) var session: HarnessSession?
@@ -72,7 +74,7 @@ final class HarnessAccount: ObservableObject {
         userId: String?,
         client: HarnessClient,
         credentials: HarnessCredentialProvider,
-        keyBytes: @escaping @MainActor () -> Data?,
+        keyBytes: @escaping @MainActor () throws -> Data?,
         settings: ProfileStorage,
         cloudSync: Bool
     ) {
@@ -113,7 +115,7 @@ final class HarnessAccount: ObservableObject {
     func key() throws -> String? {
         guard !disposed else { throw CancellationError() }
         guard userId != nil else { return nil }
-        guard var bytes = keyBytes() else {
+        guard var bytes = try keyBytes() else {
             throw HarnessError(code: HarnessErrorCode.keyRequired, message: "Unlock your encryption key in Settings to continue.", action: .unlock)
         }
         defer { bytes.resetBytes(in: 0..<bytes.count) }
@@ -153,7 +155,7 @@ final class HarnessAccount: ObservableObject {
     }
 
     private func heldKeyDigest() -> Data {
-        guard var bytes = keyBytes() else { return Data() }
+        guard var bytes = try? keyBytes() else { return Data() }
         defer { bytes.resetBytes(in: 0..<bytes.count) }
         return Data(SHA256.hash(data: bytes))
     }
