@@ -130,12 +130,6 @@ struct ChatListView: View {
                 // A chat that is opening, or failed to, is not a new chat.
                 if messages.isEmpty && !isShowingChatLoading && viewModel.chatHydrationError == nil
                     && !isInputExpanded && !isKeyboardVisible && !isCurrentChatReadOnly {
-                    PromptSuggestionsBar(
-                        viewModel: viewModel,
-                        onOpenLibrary: { showPromptLibrary = true }
-                    )
-                    .transition(.opacity)
-
                     if !authManager.isAuthenticated {
                         BalancedTextLayout {
                             Text("By using this chat, you agree to our [Terms of Service](\(Constants.Legal.termsOfServiceURL.absoluteString)) and [Privacy Policy](\(Constants.Legal.privacyPolicyURL.absoluteString)).")
@@ -148,6 +142,12 @@ struct ChatListView: View {
                         .padding(.horizontal)
                         .padding(.bottom)
                     }
+
+                    PromptSuggestionsBar(
+                        viewModel: viewModel,
+                        onOpenLibrary: { showPromptLibrary = true }
+                    )
+                    .transition(.opacity)
                 }
                 if authManager.isAuthenticated, let chatId = viewModel.currentChat?.id {
                     SafeguardFlagBanner(
