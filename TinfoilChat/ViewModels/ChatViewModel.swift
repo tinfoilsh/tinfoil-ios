@@ -554,9 +554,9 @@ class ChatViewModel: ObservableObject {
             keyBytes: {
                 do {
                     return try EncryptionService.shared.getKeyBytesOrThrow()
-                } catch let error as KeychainError {
+                } catch KeychainError.unavailable {
                     // A key the locked device cannot read may still be held.
-                    throw error
+                    throw KeychainError.unavailable
                 } catch {
                     return nil
                 }
