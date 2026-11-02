@@ -97,6 +97,9 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     private var answerWrites: [String: Task<Void, Never>] = [:]
     /// Why each chat's answers last could not be saved.
     private var answerFailures: [String: any Error] = [:]
+    /// Why a chat refused a widget's answers, which shows the chat as stored
+    /// once its other answers are saved.
+    private var answerRefusals: [String: HarnessError] = [:]
 
     private lazy var cloudStore = CloudThreads(account: account, list: list.cloud, attachments: attachments)
     private lazy var deviceStore = DeviceThreads(account: account, store: device, controller: controller, attachments: attachments, list: list.deviceEdits) { [weak self] in self?.markSaved($0) }
@@ -1024,6 +1027,9 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         answerWrites[threadId] = Task { [weak self] in
             while await self?.saveNextAnswers(threadId) == true {}
             self?.answerWrites[threadId] = nil
+            // A chat that refused a widget's answers is read again only once
+            // its other answers are saved, so the read holds them.
+            if let self, let refusal = self.answerRefusals.removeValue(forKey: threadId), self.open.id == threadId { self.report(refusal) }
         }
     }
 
@@ -1048,7 +1054,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             // other widgets go on saving theirs.
             answerDrafts[threadId]?.widgets[toolCallId] = nil
             if answerDrafts[threadId]?.widgets.isEmpty == true { answerDrafts[threadId] = nil }
-            if open.id == threadId { report(error) }
+            answerRefusals[threadId] = error
             return true
         } catch {
             Self.logger.error("Failed to save the answers to a chat's questions: \(error, privacy: .public)")
