@@ -210,7 +210,7 @@ struct MessageInputView: View {
     /// so the stream can always be cancelled. Mirrors the webapp.
     private var showStopAction: Bool {
         shouldShowMessageStopAction(
-            isStreaming: viewModel.isLoading,
+            isStreaming: viewModel.isLoading && !viewModel.isStopping,
             hasSubmittableContent: hasSubmittableContent,
             isMessageQueueFull: viewModel.isMessageQueueFull
         )

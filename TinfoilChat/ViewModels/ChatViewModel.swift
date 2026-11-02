@@ -779,6 +779,7 @@ class ChatViewModel: ObservableObject {
     /// The id of the row an error shows in when no reply answers the last
     /// message, after that message's id.
     private static let errorRowSuffix = "-error"
+    private static let stoppedRowSuffix = "-stopped"
 
     // MARK: - Publishing the session
 
@@ -935,6 +936,11 @@ class ChatViewModel: ObservableObject {
     /// A reply of the open chat is being generated.
     var isLoading: Bool {
         session?.running == true
+    }
+
+    /// The user stopped the open chat's reply, which has not ended yet.
+    var isStopping: Bool {
+        session?.stopping == true
     }
 
     /// The open chat starts with older messages than those shown.
@@ -1095,8 +1101,18 @@ class ChatViewModel: ObservableObject {
         let choice = session.presetChoice()
         let model = choice.model ?? (open.model.isEmpty ? session.pickedModel : open.model)
         let replyModelName = findSelectableModel(id: model)?.responseDisplayName
-        let messages = rows.rows(chatId: open.id, messages: state.messages, running: running, summaries: state.summaries, replyModelName: replyModelName).map { message -> Message in
+        let canceled = session.controller.canceled
+        // A reply the user stopped shows as stopped at once, before the
+        // harness ends it: the reply, or the message it had not begun
+        // answering.
+        let stopping = session.stopping
+        let stoppedId = stopping ? state.messages.last?.id : nil
+        var messages = rows.rows(chatId: open.id, messages: state.messages, running: running && !stopping, summaries: state.summaries, replyModelName: replyModelName).map { message -> Message in
             var view = message
+            // A reply the user stopped here says so, until a continuation
+            // finishes it.
+            let id = rows.messageId(ofRow: view.id)
+            if view.role == .assistant, id == stoppedId || (view.replyStop != nil && canceled.contains(id)) { view.replyStop = .canceledByUser }
             if open.onDevice, !view.attachments.isEmpty {
                 // An image the previous client stored without a thumbnail
                 // shows its bytes; others load them when opened.
@@ -1108,6 +1124,14 @@ class ChatViewModel: ObservableObject {
                 }
             }
             return view
+        }
+        // A message whose reply the user stopped before it began shows so in
+        // the row the reply waited in.
+        if let last = state.messages.last, last.role.value1 == .user, stopping || (!running && canceled.contains(last.id)) {
+            let rowId = rows.awaitedReplyRowId(state.messages) ?? "\(last.id)\(Self.stoppedRowSuffix)"
+            var stopped = Message(id: rowId, role: .assistant, content: "", timestamp: ChatAccessCache.date(of: last.createdAt) ?? .distantPast)
+            stopped.replyStop = .canceledByUser
+            messages.append(stopped)
         }
         let shownMessages = Self.withError(messages, failure: Self.failure(of: session)?.error, replyRowId: rows.awaitedReplyRowId(state.messages))
         let webSearch = open.webSearch ?? choice.webSearchEnabled

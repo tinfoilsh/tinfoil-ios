@@ -1077,6 +1077,7 @@ class ObservableMessageWrapper: ObservableObject {
                             self.message.isThinking != message.isThinking ||
                             self.message.generationTimeSeconds != message.generationTimeSeconds ||
                             self.message.streamError != message.streamError ||
+                            self.message.replyStop != message.replyStop ||
                             self.message.webSearchState != message.webSearchState ||
                             self.message.urlFetches != message.urlFetches ||
                             self.message.segments != message.segments ||

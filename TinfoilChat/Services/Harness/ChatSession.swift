@@ -119,6 +119,8 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
 
     var state: ChatState { controller.view }
     var running: Bool { [.submitting, .streaming, .queued].contains(state.status) }
+    /// The user stopped the open chat's reply, which has not ended yet.
+    var stopping: Bool { state.isStopping }
 
     /// The open chat ends on a reply explicitly marked as failed.
     var hasUnfinishedReply: Bool {
@@ -133,9 +135,10 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     }
 
     /// Whether the open chat takes a turn now: not while one is being
-    /// submitted, a device chat's turn is starting, the chat loads or moves.
+    /// submitted or waits for the reply to stop, a device chat's turn is
+    /// starting, the chat loads or moves.
     var acceptsTurn: Bool {
-        guard state.status != .submitting, open.loadingId == nil else { return false }
+        guard state.status != .submitting, !controller.holding, open.loadingId == nil else { return false }
         if openStore().local, controller.startingThread != nil { return false }
         if let id = open.id, moving[id] != nil { return false }
         return true
@@ -335,7 +338,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             if let result {
                 controller.setView(ChatState(thread: result.window))
             } else {
-                controller.updateView { $0.status = .idle; $0.error = nil }
+                controller.updateView { $0.status = .idle; $0.error = nil; $0.stopping = false }
             }
         } catch {
             report(error)
@@ -526,6 +529,17 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// while the view still showed the chat.
     @discardableResult
     func send(_ fields: TurnFields) async -> Bool {
+        // A turn sent while the reply stops goes once it stopped, since the
+        // harness ends the turns queued behind a reply it stops.
+        if stopping {
+            guard !controller.holding else { return false }
+            controller.holding = true
+            let shown = controller.track()
+            await controller.stopped()
+            controller.holding = false
+            guard shown() else { return false }
+            return await send(fields)
+        }
         let threads = openStore()
         guard acceptsTurn else { return false }
         patch { $0.failure = nil }
@@ -557,12 +571,12 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             controller.retryPreparation = nil
             if let submission {
                 controller.submission = submission
-                controller.updateView { $0.status = .submitting; $0.runId = nil; $0.error = nil }
+                controller.updateView { $0.status = .submitting; $0.runId = nil; $0.error = nil; $0.stopping = false }
             }
             defer {
                 if let submission, controller.submission === submission {
                     controller.submission = nil
-                    controller.updateView { if $0.status == .submitting { $0.status = .idle } }
+                    controller.updateView { if $0.status == .submitting { $0.status = .idle; $0.stopping = false } }
                 }
             }
             do {
@@ -586,6 +600,9 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
                 if !shown() || submission?.cancelled == true {
                     if let run = turn.run { controller.settle(run) }
                     if shown() { controller.pending = nil }
+                    // The message a device chat kept shows the reply it never
+                    // asked for as stopped.
+                    if shown(), let sent, turn.keep != nil { controller.markCanceled([sent.id]) }
                     unapply()
                     return false
                 }
@@ -613,8 +630,25 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         return await send(TurnFields(kind: .send, options: options))
     }
 
+    /// Stops the open chat's reply. The chat shows it stopping at once, and a
+    /// stop asked again while it does sends nothing.
     func cancel() async throws {
-        try await controller.cancel(RunRequest(key: try openStore().runKey(), threadId: open.id ?? "", runId: state.snapshot.thread?.activeRun?.runId ?? state.runId))
+        guard !stopping else { return }
+        let request = RunRequest(key: try openStore().runKey(), threadId: open.id ?? "", runId: state.snapshot.thread?.activeRun?.runId ?? state.runId)
+        guard running else { return try await controller.cancel(request) }
+        let shown = controller.track()
+        controller.updateView { $0.stopping = true }
+        // A reply already streaming is the one stopped, which keeps saying so
+        // even if the chat is left before its run ends.
+        if let last = state.messages.last, last.role.value1 == .assistant { controller.markCanceled([last.id]) }
+        do {
+            try await controller.cancel(request)
+        } catch {
+            // A stop the harness refused leaves the reply running; a run it
+            // no longer has ends with the reply's stream.
+            if shown(), (error as? HarnessError)?.action != .reload { controller.updateView { $0.stopping = false } }
+            throw error
+        }
     }
 
     /// The harness regenerates the reply it is named. A message is named by

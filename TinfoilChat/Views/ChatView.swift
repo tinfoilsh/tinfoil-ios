@@ -419,7 +419,8 @@ struct ChatContainer: View {
     private var chatArea: some View {
         ChatListView(
             isDarkMode: colorScheme == .dark,
-            isLoading: viewModel.isLoading,
+            // A reply the user stopped shows as stopped at once.
+            isLoading: viewModel.isLoading && !viewModel.isStopping,
             onRequestSignIn: showAuthenticationView,
             viewModel: viewModel,
             messageText: $messageText

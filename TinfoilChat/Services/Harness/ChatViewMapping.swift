@@ -21,6 +21,7 @@ enum ChatViewMapping {
         var message = Message(id: id ?? wire.id, role: role, content: wire.content ?? "", timestamp: ChatAccessCache.date(of: wire.createdAt) ?? .distantPast)
         message.modelDisplayName = wire.modelDisplayName
         message.isError = wire.isError
+        if role == .assistant, wire.isInterrupted == true { message.replyStop = .stopped }
         message.annotations = wire.annotations?.compactMap { annotation in
             guard let citation = annotation.urlCitation else { return nil }
             return Annotation(type: "url_citation", url_citation: URLCitation(title: citation.title, url: citation.url, start_index: citation.startIndex, end_index: citation.endIndex))

@@ -13,6 +13,13 @@ struct ChatViewMappingTests {
         try message(["id": "m", "role": "assistant", "createdAt": "2026-01-01T00:00:00Z", "timeline": timeline])
     }
 
+    @Test func aReplyStoppedEarlySaysSoUntilAContinuationFinishesIt() throws {
+        let stopped = try Self.message(["id": "m", "role": "assistant", "createdAt": "2026-01-01T00:00:00Z", "content": "Half", "isInterrupted": true])
+        #expect(ChatViewMapping.message(stopped).replyStop == .stopped)
+        let continued = try Self.message(["id": "m", "role": "assistant", "createdAt": "2026-01-01T00:00:00Z", "content": "Half and more", "isInterrupted": false])
+        #expect(ChatViewMapping.message(continued).replyStop == nil)
+    }
+
     @Test func aReplyStillThinkingHasNoSettledThinkingTime() throws {
         // The chat service updates a thought's duration as it streams.
         let wire = try Self.reply([["id": "t1", "type": "thinking", "content": "Hmm", "duration": 2.0, "startedAt": 1000, "endedAt": 3000]])

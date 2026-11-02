@@ -810,6 +810,17 @@ struct MessageView: View, Equatable {
                     .padding(.top, message.content.isEmpty && message.thoughts == nil ? 0 : 8)
                 }
                 
+                // A reply stopped early says so. Only one the user stopped in
+                // this session says who stopped it: the service stops replies
+                // when it restarts too.
+                if message.role == .assistant, let stop = message.replyStop, !isRenderingStream {
+                    Text(stop.note)
+                        .font(.caption)
+                        .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, message.hasVisibleAssistantContent ? 8 : 0)
+                }
+                
                 // Add action buttons for assistant messages (only when not streaming)
                 if showsAssistantActionSection {
                     VStack(alignment: .leading) {

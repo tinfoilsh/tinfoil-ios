@@ -110,11 +110,16 @@ final class RunController: ObservableObject {
     @Published private(set) var view = ChatState()
     /// The device chats whose runs this app reads, by chat.
     @Published private(set) var deviceRuns: [String: DeviceRun] = [:]
+    /// The messages whose reply the user stopped in this session, which keep
+    /// saying so as the chat is read again.
+    @Published private(set) var canceled: Set<String> = []
     /// When the open chat's error happened, so a wait the harness asks for
     /// counts from then.
     private(set) var errorAt: Date?
     var pending: PendingTurn?
     var submission: Submission?
+    /// A turn sent while the open chat's reply stops waits for it to stop.
+    var holding = false
     var retryPreparation: (() async -> Bool)?
     weak var delegate: RunControllerDelegate?
 
@@ -238,6 +243,7 @@ final class RunController: ObservableObject {
                                 if let widgetRetry { widgetRetry.failure = failed.error } else if shown { errorAt = Date() }
                             }
                         }
+                        if event.isTerminal { markCanceled(ChatReducer.canceled(by: event, in: base)) }
                         outcome.state = next
                         if shown { view = next }
                         if case .runStarted(let event) = event {
@@ -365,7 +371,10 @@ final class RunController: ObservableObject {
         errorAt = Date()
         updateView { state in
             state.error = detail
-            if started || !(state.status == .streaming || state.status == .queued) { state.status = .error }
+            if started || !(state.status == .streaming || state.status == .queued) {
+                state.status = .error
+                state.stopping = false
+            }
             if detail.code == HarnessErrorCode.chatFlagged { state.flagged = true }
         }
         account.reportRateLimit(detail.rateLimit)
@@ -393,6 +402,16 @@ final class RunController: ObservableObject {
             return
         }
         let _: RawJSON = try await account.post(.cancel, request, keyless: true, threadId: request.threadId)
+    }
+
+    func markCanceled(_ messageIds: [String]) {
+        if !messageIds.isEmpty { canceled.formUnion(messageIds) }
+    }
+
+    /// Returns once the run the open chat stops has ended, or the view moved
+    /// to another chat.
+    func stopped() async {
+        for await state in $view.values where !state.isStopping { return }
     }
 
     func sendQueued(_ request: RunRequest) async throws {
