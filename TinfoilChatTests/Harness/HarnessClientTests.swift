@@ -150,6 +150,17 @@ struct HarnessClientTests {
         #expect(await transport.requests.map(\.route) == [.list, .list])
     }
 
+    @Test func aReadWhoseConnectionIsLostAgainFails() async throws {
+        let transport = ScriptedTransport([
+            { _ in throw HarnessError(HarnessErrorBody.unreachable, urlErrorCode: .networkConnectionLost) },
+            { _ in throw HarnessError(HarnessErrorBody.unreachable, urlErrorCode: .networkConnectionLost) },
+        ])
+        let credentials = ScriptedCredentials(identities: ["jwt"], access: [.success("key")])
+        let error = await Self.failure { let _: Ok = try await Self.client(transport, credentials).post(.list, Input(threadId: "t")) }
+        #expect(error == HarnessError(HarnessErrorBody.unreachable, urlErrorCode: .networkConnectionLost))
+        #expect(await transport.requests.count == 2)
+    }
+
     @Test(arguments: [
         (HarnessRoute.update, URLError.Code.networkConnectionLost),
         (HarnessRoute.list, URLError.Code.notConnectedToInternet),
