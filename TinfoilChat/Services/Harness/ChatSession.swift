@@ -1044,9 +1044,12 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             dropSaved(threadId, toolCallId, saving.changes)
             return true
         } catch let error as HarnessError where error.action == .reload {
-            answerDrafts[threadId] = nil
+            // Only the widget the chat refused loses its picks; the chat's
+            // other widgets go on saving theirs.
+            answerDrafts[threadId]?.widgets[toolCallId] = nil
+            if answerDrafts[threadId]?.widgets.isEmpty == true { answerDrafts[threadId] = nil }
             if open.id == threadId { report(error) }
-            return false
+            return true
         } catch {
             Self.logger.error("Failed to save the answers to a chat's questions: \(error, privacy: .public)")
             answerFailures[threadId] = error
