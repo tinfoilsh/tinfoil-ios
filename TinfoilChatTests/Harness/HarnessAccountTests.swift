@@ -228,6 +228,21 @@ struct HarnessAccountTests {
         }
     }
 
+    @Test func aSignedOutCallersSettingsFromThePreviousAppUpgradeAsTheProfileTheHarnessAnswers() async throws {
+        let settings = MemoryProfileStorage()
+        settings.local = ["language": "Français", "customPromptPresets": [["id": "user:a", "name": "A"]]]
+        let upgraded: [String: Any] = ["language": "French", "customPromptPresets": [["id": "user:a", "name": "A", "systemPrompt": ""]]]
+        let (account, _) = makeAccount(userId: nil, answers: [Answers.json(sessionAnswer), Answers.json(["profile": upgraded])], settings: settings)
+
+        try await account.refresh()
+
+        #expect(settings.localProfileUpgraded)
+        #expect(settings.local["profile"] == nil)
+        #expect(settings.local["language"] as? String == "French")
+        #expect((settings.local["customPromptPresets"] as? [Any])?.count == 1)
+        #expect(account.profile["language"] as? String == "French")
+    }
+
     @Test func aChatServiceWithoutPromptEditsIsSentNoPromptListBeforeTheSettingsLoad() async throws {
         let (account, transport) = makeAccount(userId: "user-1", answers: [
             Answers.json(sessionAnswer), Answers.refusal(503, code: "UPSTREAM_UNAVAILABLE", action: "retry"),

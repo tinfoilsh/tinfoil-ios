@@ -378,7 +378,9 @@ final class HarnessAccount: ObservableObject {
                 guard !disposed else { return }
                 let current = try JSONSerialization.data(withJSONObject: try settings.loadLocalProfile(), options: [.sortedKeys])
                 guard current == sent else { return }
-                let fields = try Self.object(of: upgraded)
+                guard let fields = try Self.object(of: upgraded)["profile"] as? ProfileFields else {
+                    throw HarnessError.invalidResponse
+                }
                 let saved = try settings.saveLocalProfile(fields, replace: true)
                 if version == profileVersion { showProfile(saved) }
             } catch {
