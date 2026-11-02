@@ -93,6 +93,8 @@ struct MessageRowContext: Equatable {
     var thinkingSummary = ""
     var webSearchSummary = ""
     var genUIRetryStates: [String: GenUIRetryState] = [:]
+    /// The answers of the row's questions widgets, by widget call.
+    var answers: [String: GenUIAnswersState] = [:]
     /// The open chat's error, which only the row that failed shows.
     var failure: HarnessErrorBody?
     var failureAt: Date?
@@ -113,6 +115,9 @@ struct MessageRowContext: Equatable {
         }
         for toolCall in message.toolCalls {
             if let state = viewModel.genUIRetryState(toolCallId: toolCall.id) { genUIRetryStates[toolCall.id] = state }
+            if toolCall.name == QuestionSet.widgetName {
+                answers[toolCall.id] = viewModel.answersState(of: toolCall, isRenderingStream: isRenderingStream)
+            }
         }
         if shouldShowStreamError(message: message), let shown = viewModel.shownFailure {
             failure = shown.error
@@ -534,6 +539,16 @@ struct MessageView: View, Equatable {
             retryState: context.genUIRetryStates[toolCall.id],
             onRetry: (isRenderingStream || !context.canGenerateInCurrentChat) ? nil : {
                 viewModel.retryGenUIToolCall(toolCallId: toolCall.id)
+            },
+            answering: context.answers[toolCall.id].map { state in
+                GenUIAnswering(
+                    state: state,
+                    answer: { questionId, optionIds in
+                        viewModel.answerQuestion(toolCallId: toolCall.id, questionId: questionId, optionIds: optionIds)
+                    },
+                    retry: { viewModel.retryAnswers() },
+                    submit: { viewModel.submitAnswers() }
+                )
             }
         )
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -601,6 +616,18 @@ struct MessageView: View, Equatable {
                         deleteMessageButton
                     }
                 }
+            }
+
+            // The answers a message sent show above its text, or alone for a
+            // message that sent only answers.
+            if message.role == .user && !message.answers.isEmpty {
+                SentAnswersView(answers: message.answers, isDarkMode: isDarkMode)
+                    .modifier(MessageBubbleModifier(isUserMessage: true))
+                    .if(message.content.isEmpty && canDeleteMessage) { view in
+                        view.contextMenu {
+                            deleteMessageButton
+                        }
+                    }
             }
 
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {

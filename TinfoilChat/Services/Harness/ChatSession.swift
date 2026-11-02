@@ -49,6 +49,22 @@ enum SendBlock: Equatable {
     case loading
 }
 
+/// The answers picked in a chat's questions widgets that the chat has not
+/// saved yet. They are saved one widget at a time.
+struct AnswerDrafts: Equatable {
+    /// A widget's changes not saved yet, and the reply holding it.
+    struct Widget: Equatable {
+        var messageId: String
+        var changes: AnswerChanges = [:]
+    }
+
+    /// By widget call.
+    var widgets: [String: Widget] = [:]
+    /// A write failed: the changes wait until the user tries again or picks
+    /// another option.
+    var failed = false
+}
+
 /// The open chat of an account: which chat is shown, its runs, the stores
 /// its chats live in, and the actions on it.
 @MainActor
@@ -73,6 +89,17 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// The change whose answer each chat is shown from.
     private var latestShown: [String: Int] = [:]
     private var updates = 0
+    /// The answers picked in each chat's questions widgets that it has not
+    /// saved yet, by chat.
+    @Published private(set) var answerDrafts: [String: AnswerDrafts] = [:]
+    /// The write of each chat's answers under way, which saves the changes
+    /// made meanwhile once it returns.
+    private var answerWrites: [String: Task<Void, Never>] = [:]
+    /// Why each chat's answers last could not be saved.
+    private var answerFailures: [String: any Error] = [:]
+    /// Why a chat refused a widget's answers, which shows the chat as stored
+    /// once its other answers are saved.
+    private var answerRefusals: [String: HarnessError] = [:]
 
     private lazy var cloudStore = CloudThreads(account: account, list: list.cloud, attachments: attachments)
     private lazy var deviceStore = DeviceThreads(account: account, store: device, controller: controller, attachments: attachments, list: list.deviceEdits) { [weak self] in self?.markSaved($0) }
@@ -112,6 +139,13 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         if openStore().local, controller.startingThread != nil { return false }
         if let id = open.id, moving[id] != nil { return false }
         return true
+    }
+
+    /// Whether the open chat takes answers to its questions widgets now: it
+    /// is stored, no run of it is under way, and it neither loads nor moves.
+    var acceptsAnswers: Bool {
+        guard let id = open.id, open.unsaved != id, open.loadingId == nil, moving[id] == nil, !running else { return false }
+        return controller.deviceRuns[id] == nil && controller.startingThread != id
     }
 
     /// The open chat is a new chat whose first turn gave it its id, and is
@@ -437,12 +471,18 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         return left
     }
 
-    /// The message a turn adds, under the id the harness stores it with. A
-    /// message queued behind a running reply shows in the queue instead.
+    /// The message a turn adds, under the id the harness stores it with,
+    /// with the answers it sends. A message queued behind a running reply
+    /// shows in the queue instead, and a turn with nothing to send adds none.
     private func sentMessage(_ turn: Turn) -> Components.Schemas.MessageRecord? {
         guard turn.kind == .send, state.status != .streaming, state.status != .queued else { return nil }
         let sent = (turn.attachments ?? []).compactMap(\.uploaded)
-        return Components.Schemas.MessageRecord(id: turn.clientRequestId, role: .named(.user), createdAt: StoredThread.timestamp(Date()), content: turn.content ?? "", quote: turn.quote, attachments: sent.isEmpty ? nil : sent)
+        let answers = QuestionAnswering.unsent(in: state.messages, changes: answerDrafts[turn.threadId]?.widgets.mapValues(\.changes) ?? [:])
+        guard !(turn.content ?? "").isEmpty || !(turn.quote ?? "").isEmpty || !sent.isEmpty || !answers.isEmpty else { return nil }
+        return Components.Schemas.MessageRecord(
+            id: turn.clientRequestId, role: .named(.user), createdAt: StoredThread.timestamp(Date()), content: turn.content ?? "", quote: turn.quote,
+            attachments: sent.isEmpty ? nil : sent, answers: answers.isEmpty ? nil : answers
+        )
     }
 
     /// A message as the view shows it, without its uploads' contents.
@@ -453,7 +493,8 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             isInterrupted: record.isInterrupted, usage: record.usage, annotations: record.annotations,
             attachments: record.attachments?.map {
                 Components.Schemas.AttachmentView(id: $0.id, kind: $0.kind, fileName: $0.fileName, mimeType: $0.mimeType, size: $0.size, thumbnail: $0.thumbnail, textContent: $0.textContent, description: $0.description)
-            }
+            },
+            answers: record.answers
         )
     }
 
@@ -525,6 +566,13 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
                 }
             }
             do {
+                // The chat carries the answers picked so far once they are
+                // saved, so the turn sends them.
+                try await answersSaved(threadId)
+                guard shown() else {
+                    unapply()
+                    return false
+                }
                 // Each attempt reads the key it is sent with, so a retry after
                 // the key changed carries the current one.
                 let key = try threads.runKey()
@@ -554,6 +602,15 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             }
         }
         return await submit()
+    }
+
+    /// Sends the answers picked since the last message as a message of their
+    /// own, once those being saved are saved, while the chat they were
+    /// submitted in is open.
+    @discardableResult
+    func submitAnswers(in threadId: String, options: TurnOptions? = nil) async -> Bool {
+        guard open.id == threadId else { return false }
+        return await send(TurnFields(kind: .send, options: options))
     }
 
     func cancel() async throws {
@@ -718,7 +775,12 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// A chat takes no changes until its move has ended, the open chat's
     /// reopening included.
     private func whileMoving<T>(_ threadId: String, _ move: @escaping () async throws -> T) async throws -> T {
-        let task = Task { try await move() }
+        // A move copies the chat as stored, so the answers picked in it are
+        // saved first.
+        let task = Task { [self] in
+            try await answersSaved(threadId)
+            return try await move()
+        }
         let tracked = Task<Void, Error> { _ = try await task.value }
         moving[threadId] = tracked
         defer { if moving[threadId] == tracked { moving[threadId] = nil } }
@@ -893,6 +955,141 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         rewritten.content = text
         rewritten.timeline = blocks.isEmpty ? nil : blocks
         return rewritten
+    }
+
+    // MARK: - Answers
+
+    private static func isCall(_ block: TimelineBlock, _ toolCallId: String) -> Bool {
+        block._type.value1 == .toolCall && (block.toolCallId ?? block.id) == toolCallId
+    }
+
+    /// The answers a questions widget of the open chat shows: those its chat
+    /// saved, under the changes not saved yet.
+    func answers(toolCallId: String, saved: QuestionAnswers) -> QuestionAnswers {
+        guard let threadId = open.id, let changes = answerDrafts[threadId]?.widgets[toolCallId]?.changes else { return saved }
+        return QuestionAnswering.applying(changes, to: saved)
+    }
+
+    /// How saving a questions widget's answers goes, while it has changes
+    /// not saved.
+    func answerSaveStatus(toolCallId: String) -> AnswerSaveStatus? {
+        guard let threadId = open.id, let drafts = answerDrafts[threadId], drafts.widgets[toolCallId] != nil else { return nil }
+        return drafts.failed ? .failed : .saving
+    }
+
+    /// Whether a questions widget of the open chat shows answers that differ
+    /// from those a message last sent of it, which the next message sends.
+    func hasUnsentAnswers(toolCallId: String, answers: QuestionAnswers) -> Bool {
+        QuestionAnswering.isUnsent(toolCallId, answers: answers, in: state.messages)
+    }
+
+    /// Picks the options of a question in a questions widget of the open
+    /// chat, or leaves it unanswered with nil. The answer shows at once; the
+    /// chat saves it once the write under way, if any, has returned, with
+    /// the latest options picked of each question changed meanwhile.
+    func answer(toolCallId: String, questionId: String, optionIds: [String]?) {
+        guard acceptsAnswers, let threadId = open.id,
+              let message = state.messages.first(where: { candidate in candidate.timeline?.contains { Self.isCall($0, toolCallId) } == true }) else { return }
+        var drafts = answerDrafts[threadId] ?? AnswerDrafts()
+        var widget = drafts.widgets[toolCallId] ?? AnswerDrafts.Widget(messageId: message.id)
+        widget.changes[questionId] = Nullable(optionIds)
+        drafts.widgets[toolCallId] = widget
+        drafts.failed = false
+        answerDrafts[threadId] = drafts
+        saveAnswers(threadId)
+    }
+
+    /// Saves again the open chat's answers that could not be saved.
+    func retryAnswers() {
+        guard acceptsAnswers, let threadId = open.id, var drafts = answerDrafts[threadId], drafts.failed else { return }
+        drafts.failed = false
+        answerDrafts[threadId] = drafts
+        saveAnswers(threadId)
+    }
+
+    /// Waits until a chat's answers are saved: the write under way, those of
+    /// the changes made meanwhile, and those that could not be saved, which
+    /// are saved again. Throws why they still could not be, so a turn is not
+    /// sent without them.
+    func answersSaved(_ threadId: String) async throws {
+        if answerDrafts[threadId]?.failed == true {
+            answerDrafts[threadId]?.failed = false
+            saveAnswers(threadId)
+        }
+        await answerWrites[threadId]?.value
+        if answerDrafts[threadId]?.failed == true, let failure = answerFailures[threadId] { throw failure }
+    }
+
+    /// Saves a chat's answers, one widget at a time, unless a write of them
+    /// is under way, which saves the changes made meanwhile once it returns.
+    private func saveAnswers(_ threadId: String) {
+        guard answerWrites[threadId] == nil else { return }
+        answerWrites[threadId] = Task { [weak self] in
+            while await self?.saveNextAnswers(threadId) == true {}
+            self?.answerWrites[threadId] = nil
+            // A chat that refused a widget's answers is read again only once
+            // its other answers are saved, so the read holds them.
+            if let self, let refusal = self.answerRefusals.removeValue(forKey: threadId), self.open.id == threadId { self.report(refusal) }
+        }
+    }
+
+    /// Saves one widget's changes of a chat, through the chat's store.
+    /// Returns whether to go on with the changes left. A widget, question or
+    /// option the chat no longer holds drops the changes and shows the chat
+    /// as it is stored; any other failure keeps them to try again.
+    private func saveNextAnswers(_ threadId: String) async -> Bool {
+        guard let drafts = answerDrafts[threadId], !drafts.failed, let next = drafts.widgets.first else { return false }
+        let toolCallId = next.key
+        let saving = next.value
+        do {
+            let result = try await storeOf(threadId).answer(threadId, messageId: saving.messageId, toolCallId: toolCallId, answers: saving.changes)
+            guard let result else {
+                throw HarnessError(code: HarnessErrorCode.localSaveFailed, message: "The answers could not be saved with this chat.", action: .retry)
+            }
+            if open.id == threadId { showSavedAnswers(toolCallId, saving.changes, result) }
+            dropSaved(threadId, toolCallId, saving.changes)
+            return true
+        } catch let error as HarnessError where error.action == .reload {
+            // Only the widget the chat refused loses its picks; the chat's
+            // other widgets go on saving theirs.
+            answerDrafts[threadId]?.widgets[toolCallId] = nil
+            if answerDrafts[threadId]?.widgets.isEmpty == true { answerDrafts[threadId] = nil }
+            answerRefusals[threadId] = error
+            return true
+        } catch {
+            Self.logger.error("Failed to save the answers to a chat's questions: \(error, privacy: .public)")
+            answerFailures[threadId] = error
+            answerDrafts[threadId]?.failed = true
+            return false
+        }
+    }
+
+    /// Shows a widget's answers as its chat saved them: as the chat the store
+    /// answered with holds them, or else with the changes saved applied.
+    private func showSavedAnswers(_ toolCallId: String, _ changes: AnswerChanges, _ result: ThreadResult) {
+        let stored = result.window.messages.compactMap { message in message.timeline?.first { Self.isCall($0, toolCallId) } }.first
+        controller.updateView { state in
+            state.messages = state.messages.map { message -> HarnessMessage in
+                guard var timeline = message.timeline, let index = timeline.firstIndex(where: { Self.isCall($0, toolCallId) }) else { return message }
+                let saved = stored.map { $0.answers?.additionalProperties ?? [:] }
+                    ?? QuestionAnswering.applying(changes, to: timeline[index].answers?.additionalProperties ?? [:])
+                timeline[index].answers = saved.isEmpty ? nil : TimelineBlock.AnswersPayload(additionalProperties: saved)
+                var shown = message
+                shown.timeline = timeline
+                return shown
+            }
+        }
+    }
+
+    /// Drops the changes a write saved, but those of questions changed again
+    /// while it was under way.
+    private func dropSaved(_ threadId: String, _ toolCallId: String, _ saved: AnswerChanges) {
+        guard var drafts = answerDrafts[threadId] else { return }
+        if var widget = drafts.widgets[toolCallId] {
+            widget.changes = widget.changes.filter { saved[$0.key] != $0.value }
+            drafts.widgets[toolCallId] = widget.changes.isEmpty ? nil : widget
+        }
+        answerDrafts[threadId] = drafts.widgets.isEmpty ? nil : drafts
     }
 
     func share(_ threadId: String) async throws -> String {

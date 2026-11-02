@@ -61,6 +61,16 @@ private func record(id: String = threadId, messages: [[String: Any]]) -> [String
      "activeRun": NSNull(), "recordVersion": 1, "aLaterMember": "kept"]
 }
 
+/// A reply asking two questions, with the answers the chat saved of them.
+private func questionsReply(answers: [String: [String]]? = nil) -> [String: Any] {
+    var block: [String: Any] = [
+        "id": "q", "type": "tool_call", "toolCallId": "q", "name": QuestionSet.widgetName, "complete": true,
+        "arguments": #"{"questions":[{"id":"q1","prompt":"Capital of France?","selection":"single","options":[{"id":"a","label":"Lyon"},{"id":"b","label":"Paris"}]},{"id":"q2","prompt":"Pick the primes","selection":"multiple","options":[{"id":"x","label":"2"},{"id":"y","label":"3"}]}]}"#,
+    ]
+    if let answers { block["answers"] = answers }
+    return ["id": "a1", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "content": "", "timeline": [block]]
+}
+
 /// A run that answers "Second answer." and returns the device chat whole.
 private func deviceRun(id: String, question: String, questionId: String) -> [[String: Any]] {
     let reply = "msg_5"
@@ -344,6 +354,117 @@ struct ChatSessionTests {
         try await session.deleteMessage(at: 0)
         #expect(await fixture.transport.requests.map(\.route) == [.get, .messageDelete])
         #expect(session.state.messages.map(\.id) == ["u1"])
+    }
+
+    @Test func answersPickedWhileOneIsSavingAreSavedTogetherOnceItReturns() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        let question: [String: Any] = ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Quiz me"]
+        let stored = try #require(StoredThread(json: record(messages: [question, questionsReply()])))
+        _ = try await session.device.add(stored, originals: [:])
+        #expect(try await session.openChat(threadId, local: true) == .opened)
+        #expect(session.acceptsAnswers)
+
+        await fixture.transport.push(Answers.json(["thread": record(messages: [question, questionsReply(answers: ["q1": ["b"]])])]))
+        await fixture.transport.push(Answers.json(["thread": record(messages: [question, questionsReply(answers: ["q2": ["x", "y"]])])]))
+        await fixture.transport.hold()
+        session.answer(toolCallId: "q", questionId: "q1", optionIds: ["b"])
+        await fixture.transport.arrived()
+        // What is picked while the first write is under way shows at once,
+        // and is saved once it returns, with the latest pick of each question.
+        session.answer(toolCallId: "q", questionId: "q2", optionIds: ["x"])
+        session.answer(toolCallId: "q", questionId: "q2", optionIds: ["x", "y"])
+        session.answer(toolCallId: "q", questionId: "q1", optionIds: nil)
+        #expect(session.answers(toolCallId: "q", saved: [:]) == ["q2": ["x", "y"]])
+        #expect(session.answerSaveStatus(toolCallId: "q") == .saving)
+        await fixture.transport.release()
+        try await session.answersSaved(threadId)
+
+        let requests = await fixture.transport.requests
+        #expect(requests.map(\.route) == [.messageAnswer, .messageAnswer])
+        let first = try #require(requests.first)
+        #expect(first.json["local"] as? Bool == true)
+        #expect(first.json["thread"] != nil)
+        #expect(first.json["key"] == nil)
+        #expect(first.json["messageId"] as? String == "a1")
+        #expect(first.json["toolCallId"] as? String == "q")
+        #expect(first.json["answers"] as? [String: [String]] == ["q1": ["b"]])
+        let second = try #require(requests.last?.json["answers"] as? [String: Any])
+        #expect(second["q2"] as? [String] == ["x", "y"])
+        #expect(second["q1"] is NSNull)
+
+        // The chat shows, and this device stores, the answers as saved.
+        #expect(session.answerSaveStatus(toolCallId: "q") == nil)
+        #expect(session.answers(toolCallId: "q", saved: [:]).isEmpty)
+        #expect(session.state.messages.last?.timeline?.first?.answers?.additionalProperties == ["q2": ["x", "y"]])
+        let saved = try #require(try await session.device.get(threadId))
+        let block = saved.messages.last?.objectValue?["timeline"]?.arrayValue?.first?.objectValue
+        #expect(block?["answers"] == .object(["q2": .array([.string("x"), .string("y")])]))
+    }
+
+    @Test func answersToAWidgetTheChatNoLongerHoldsAreDroppedAndTheChatIsReadAgain() async throws {
+        let question: [String: Any] = ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Quiz me"]
+        let window: [String: Any] = summary(messageCount: 2).merging([
+            "revision": "rev-1", "presetId": NSNull(), "flagged": false,
+            "messages": [question, questionsReply()], "hasOlder": false,
+        ]) { $1 }
+        let (rereads, reread) = AsyncStream<HarnessRoute>.makeStream()
+        let fixture = Fixture(userId: "user-1", answers: [
+            Answers.json(window),
+            Answers.refusal(409, code: HarnessErrorCode.revisionConflict, action: "reload"),
+            { request in
+                reread.yield(request.route)
+                return try Answers.json(window)(request)
+            },
+        ])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        session.answer(toolCallId: "q", questionId: "q1", optionIds: ["a"])
+        #expect(session.answers(toolCallId: "q", saved: [:]) == ["q1": ["a"]])
+        try await session.answersSaved(threadId)
+
+        let answer = try #require(await fixture.transport.requests.dropFirst().first)
+        #expect(answer.route == .messageAnswer)
+        #expect(answer.json["key"] as? String != nil)
+        #expect(answer.json["local"] == nil)
+        #expect(answer.json["answers"] as? [String: [String]] == ["q1": ["a"]])
+        #expect(session.answers(toolCallId: "q", saved: [:]).isEmpty)
+        #expect(session.answerSaveStatus(toolCallId: "q") == nil)
+        #expect(session.open.failure == nil)
+        var routes = rereads.makeAsyncIterator()
+        #expect(await routes.next() == .get)
+    }
+
+    @Test func submittedAnswersAreAMessageOfTheirOwn() async throws {
+        let question: [String: Any] = ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Quiz me"]
+        let window: [String: Any] = summary(messageCount: 2).merging([
+            "revision": "rev-1", "presetId": NSNull(), "flagged": false,
+            "messages": [question, questionsReply(answers: ["q1": ["b"]])], "hasOlder": false,
+        ]) { $1 }
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(window)])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        #expect(session.hasUnsentAnswers(toolCallId: "q", answers: ["q1": ["b"]]))
+
+        await fixture.transport.push(Answers.events([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_3", "instance": "i"],
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_3", "metadata": [:]],
+        ]))
+        await fixture.transport.hold()
+        let submitted = Task { await session.submitAnswers(in: threadId) }
+        await fixture.transport.arrived()
+        // The message shows the answers it sends, without text of its own.
+        let sent = try #require(session.state.messages.last)
+        #expect(sent.role.value1 == .user)
+        #expect(sent.content == "")
+        #expect(sent.answers?.first?.questions.map(\.answered) == [true, false])
+        #expect(sent.answers?.first?.questions.first?.selected.map(\.label) == ["Paris"])
+        let turn = try #require(await fixture.transport.requests.last)
+        #expect(turn.route == .turn)
+        #expect(turn.json["kind"] as? String == "send")
+        #expect(turn.json["content"] == nil)
+        await fixture.transport.release()
+        #expect(await submitted.value)
     }
 
     @Test func aForkOpensOnceItsOpeningReturnsUnlessTheViewMoved() async throws {

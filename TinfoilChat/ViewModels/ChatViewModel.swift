@@ -1658,6 +1658,13 @@ class ChatViewModel: ObservableObject {
         )
     }
 
+    /// A free account that used up its requests is offered an upgrade
+    /// instead of sending.
+    private var needsUpgradeToSend: Bool {
+        guard let rateLimit, rateLimit.kind == .freeDaily, rateLimit.exhausted else { return false }
+        return authManager?.hasActiveSubscription != true
+    }
+
     @discardableResult
     func sendMessage(text: String) -> Bool {
         guard let session, canGenerateInCurrentChat else { return false }
@@ -1667,7 +1674,7 @@ class ChatViewModel: ObservableObject {
         // A message the chat cannot take now stays in the composer.
         guard session.acceptsTurn else { return false }
         if session.running, isMessageQueueFull { return false }
-        if let rateLimit, rateLimit.kind == .freeDaily, rateLimit.exhausted, authManager?.hasActiveSubscription != true {
+        if needsUpgradeToSend {
             showRateLimitPaywall = true
             return false
         }
@@ -1857,6 +1864,53 @@ class ChatViewModel: ObservableObject {
 
     func genUIRetryState(toolCallId: String) -> GenUIRetryState? {
         genUIRetryStates[toolCallId]
+    }
+
+    // MARK: - Questions widgets
+
+    /// What a questions widget of the open chat shows: the answers the chat
+    /// saved, under those not saved yet, and what the user can do now. A
+    /// widget takes no answers while its reply streams, the chat runs, or
+    /// the chat cannot take a turn.
+    func answersState(of toolCall: GenUIToolCall, isRenderingStream: Bool) -> GenUIAnswersState {
+        guard let session else { return GenUIAnswersState(answers: toolCall.answers) }
+        let answers = session.answers(toolCallId: toolCall.id, saved: toolCall.answers)
+        let canAnswer = !isRenderingStream && canGenerateInCurrentChat && session.acceptsAnswers
+        return GenUIAnswersState(
+            answers: answers,
+            canAnswer: canAnswer,
+            saveStatus: session.answerSaveStatus(toolCallId: toolCall.id),
+            canSubmit: canAnswer && canSendInCurrentContext && session.acceptsTurn
+                && session.hasUnsentAnswers(toolCallId: toolCall.id, answers: answers)
+        )
+    }
+
+    /// Picks a question's options in a questions widget of the open chat, or
+    /// leaves the question unanswered with nil.
+    func answerQuestion(toolCallId: String, questionId: String, optionIds: [String]?) {
+        guard let session, canGenerateInCurrentChat else { return }
+        session.answer(toolCallId: toolCallId, questionId: questionId, optionIds: optionIds)
+    }
+
+    /// Saves again the open chat's answers that could not be saved.
+    func retryAnswers() {
+        guard let session, canGenerateInCurrentChat else { return }
+        session.retryAnswers()
+    }
+
+    /// Sends the answers picked in the open chat's questions widgets that the
+    /// model has not read, as a message of their own.
+    func submitAnswers() {
+        guard let session, canSendInCurrentContext, session.acceptsTurn, !session.running else { return }
+        if needsUpgradeToSend {
+            showRateLimitPaywall = true
+            return
+        }
+        dismissKeyboard()
+        scrollsToTurnOnStart = false
+        guard let threadId = session.open.id else { return }
+        let options = turnOptions
+        Task { await session.submitAnswers(in: threadId, options: options) }
     }
 
     // MARK: - Verifier

@@ -96,6 +96,13 @@ struct ChatViewMappingTests {
         #expect(shown.segments == [.toolCall(toolCallId: "w")])
     }
 
+    @Test func aQuestionsWidgetCarriesTheAnswersTheChatSaved() throws {
+        let wire = try Self.reply([
+            ["id": "q", "type": "tool_call", "toolCallId": "q", "name": QuestionSet.widgetName, "arguments": "{}", "complete": true, "answers": ["q1": ["b"], "q2": ["x", "y"]]],
+        ])
+        #expect(ChatViewMapping.message(wire).toolCalls.first?.answers == ["q1": ["b"], "q2": ["x", "y"]])
+    }
+
     @Test func aUserMessageKeepsItsTextAndAttachments() throws {
         let wire = try Self.message([
             "id": "u", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Look",
@@ -108,6 +115,21 @@ struct ChatViewMappingTests {
         #expect(shown.attachments.first?.type == .image)
         #expect(shown.attachments.first?.thumbnailBase64 == "AAAA")
         #expect(shown.attachments.first?.processingState == .completed)
+    }
+
+    @Test func aUserMessageKeepsTheAnswersItSent() throws {
+        let wire = try Self.message([
+            "id": "u", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "",
+            "answers": [["toolCallId": "q", "title": "Quiz", "questions": [
+                ["id": "q1", "prompt": "Capital of France?", "answered": true, "selected": [["id": "b", "label": "Paris"]]],
+                ["id": "q2", "prompt": "Pick the primes", "answered": false, "selected": []],
+            ]]],
+        ])
+        let shown = ChatViewMapping.message(wire)
+        #expect(shown.content.isEmpty)
+        #expect(shown.answers.map(\.toolCallId) == ["q"])
+        #expect(shown.answers.first?.questions.map(\.answered) == [true, false])
+        #expect(shown.answers.first?.questions.first?.selected.map(\.label) == ["Paris"])
     }
 
     @Test func aBlockOfATypeThisClientDoesNotKnowIsLeftOut() throws {

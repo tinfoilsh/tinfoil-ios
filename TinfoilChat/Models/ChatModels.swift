@@ -316,6 +316,8 @@ struct GenUIToolCall: Equatable, Identifiable {
     let id: String
     let name: String
     let arguments: String
+    /// The answers the chat saved of a widget the user answers in place.
+    var answers: QuestionAnswers = [:]
 }
 
 /// A user message submitted while the assistant was busy, held until the
@@ -368,6 +370,8 @@ struct Message: Identifiable, Equatable {
     /// The reply's blocks as the chat service sent them, which the widgets
     /// read their state from.
     var timeline: [JSONValue]? = nil
+    /// The answers to questions widgets a question sent the model.
+    var answers: [WidgetAnswers] = []
 
     init(id: String = UUID().uuidString.lowercased(), role: MessageRole, content: String, timestamp: Date = Date()) {
         self.id = id
