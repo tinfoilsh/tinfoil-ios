@@ -91,6 +91,31 @@ private func deviceRun(id: String, question: String, questionId: String) -> [[St
     ]
 }
 
+/// A run's stream that sends `head`, then `tail` once `release` yields.
+private func heldRun(_ head: [[String: Any]], then tail: [[String: Any]], until release: AsyncStream<Void>) -> ScriptedTransport.Answer {
+    func text(_ frames: [[String: Any]], from first: Int) -> Data {
+        var text = ""
+        for (offset, frame) in frames.enumerated() {
+            let data = try! JSONSerialization.data(withJSONObject: frame)
+            text += "id: \(first + offset)\ndata: \(String(decoding: data, as: UTF8.self))\n\n"
+        }
+        return Data(text.utf8)
+    }
+    let start = text(head, from: 0)
+    let end = text(tail, from: head.count)
+    return { _ in
+        HarnessResponse(status: 200, headers: ["content-type": "text/event-stream"], sealed: true, body: AsyncThrowingStream { continuation in
+            let task = Task {
+                continuation.yield(start)
+                for await _ in release { break }
+                continuation.yield(end)
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        })
+    }
+}
+
 @Suite("Chat session")
 @MainActor
 struct ChatSessionTests {
@@ -236,6 +261,56 @@ struct ChatSessionTests {
         #expect(turn.json["thread"] == nil)
         #expect(session.state.messages.map(\.id).contains("msg_6"))
         #expect(session.state.messages.last?.timeline?.first?.content == "Hi.")
+    }
+
+    @Test func aStopShowsAtOnceAndATurnSentMeanwhileGoesOnceTheReplyStopped() async throws {
+        let window: [String: Any] = summary().merging([
+            "revision": "rev-1", "presetId": NSNull(), "flagged": false,
+            "messages": [["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"]],
+            "hasOlder": false,
+        ]) { $1 }
+        let (release, stopped) = AsyncStream<Void>.makeStream()
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(window)])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        await fixture.transport.push(heldRun([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_3", "instance": "i"],
+            ["type": "TEXT_MESSAGE_CHUNK", "messageId": "msg_6", "role": "assistant", "delta": "Half"],
+        ], then: [
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_3", "metadata": [
+                "cancelled": true, "messages": [["id": "msg_6", "isInterrupted": true]],
+            ]],
+        ], until: release))
+        await fixture.transport.push(Answers.json([:]))
+        await fixture.transport.push(Answers.events([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_4", "instance": "i"],
+            ["type": "TEXT_MESSAGE_CHUNK", "messageId": "msg_7", "role": "assistant", "delta": "More."],
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_4", "metadata": [:]],
+        ]))
+        let first = Task { await session.send(TurnFields(kind: .send, content: "again")) }
+        for await state in session.controller.$view.values where state.messages.last?.id == "msg_6" { break }
+
+        try await session.cancel()
+
+        #expect(session.stopping)
+        let stop = try #require(await fixture.transport.requests.last)
+        #expect(stop.route == .cancel)
+        #expect(stop.json["runId"] as? String == "run_3")
+        // The harness ends a turn queued behind a reply it stops, so the next
+        // waits for it, and the chat takes no other until then.
+        let next = Task { await session.send(TurnFields(kind: .send, content: "more")) }
+        for _ in 0..<100 where !session.controller.holding { await Task.yield() }
+        #expect(session.controller.holding)
+        #expect(!session.acceptsTurn)
+        #expect(await fixture.transport.requests.map(\.route) == [.get, .turn, .cancel])
+        stopped.yield(())
+        #expect(await first.value == false)
+        #expect(await next.value)
+        let turn = try #require(await fixture.transport.requests.last)
+        #expect(turn.route == .turn)
+        #expect(turn.json["content"] as? String == "more")
+        #expect(session.controller.canceled == ["msg_6"])
+        #expect(!session.stopping)
     }
 
     @Test func aStopThatArrivesAfterTheReplyEndedReadsTheChatAgainRatherThanFailing() async throws {

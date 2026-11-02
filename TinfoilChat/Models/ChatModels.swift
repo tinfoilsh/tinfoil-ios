@@ -372,6 +372,8 @@ struct Message: Identifiable, Equatable {
     var timeline: [JSONValue]? = nil
     /// The answers to questions widgets a question sent the model.
     var answers: [WidgetAnswers] = []
+    /// Why the reply ended before it finished, if it did.
+    var replyStop: ReplyStop? = nil
 
     init(id: String = UUID().uuidString.lowercased(), role: MessageRole, content: String, timestamp: Date = Date()) {
         self.id = id
@@ -412,6 +414,22 @@ struct Message: Identifiable, Equatable {
     /// resume: text or tool calls. Thoughts alone are not always sent back.
     var hasContinuableResponse: Bool {
         role == .assistant && (!content.isEmpty || !toolCalls.isEmpty)
+    }
+}
+
+/// Why a reply ended before it finished, as a note under it says.
+enum ReplyStop: Equatable {
+    /// The user stopped it in this session.
+    case canceledByUser
+    /// The chat service stopped it for a reason it does not record: the user,
+    /// elsewhere or before a relaunch, or a restart of the service.
+    case stopped
+
+    var note: String {
+        switch self {
+        case .canceledByUser: return "Response canceled by user"
+        case .stopped: return "Response stopped"
+        }
     }
 }
 

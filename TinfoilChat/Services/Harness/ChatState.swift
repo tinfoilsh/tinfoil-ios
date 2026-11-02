@@ -36,6 +36,11 @@ struct ChatState: Equatable, Sendable {
     /// The safeguards flagged the chat, as it was loaded or as the harness
     /// refused a turn, so it takes no more turns.
     var flagged = false
+    /// The user stopped the run the chat shows, which has not ended yet.
+    var stopping = false
+
+    var isRunning: Bool { [.submitting, .streaming, .queued].contains(status) }
+    var isStopping: Bool { isRunning && stopping }
 
     /// The state before any run, of a chat as it was loaded, or of a new one.
     init(thread: ThreadWindow? = nil) {

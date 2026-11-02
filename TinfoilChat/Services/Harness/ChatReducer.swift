@@ -148,16 +148,30 @@ enum ChatReducer {
         case .runFinished(let finished):
             next.snapshot.queue = withoutQueued(next.snapshot.queue, runId)
             next.status = .idle
+            next.stopping = false
             next.messages = committed(next.messages, finished.metadata.messages)
         case .runError(let failed):
             next.snapshot.queue = withoutQueued(next.snapshot.queue, runId)
             next.status = .error
+            next.stopping = false
             next.error = failed.error
             next.failedRun = runId
             if failed.error.code == HarnessErrorCode.chatFlagged { next.flagged = true }
             next.messages = committed(next.messages, failed.metadata?.messages)
         }
         return next
+    }
+
+    /// The messages whose reply the user stopped, as the run they stopped
+    /// ends: the reply it had begun, or the message it stopped before
+    /// answering.
+    static func canceled(by event: RunEvent, in state: ChatState) -> [String] {
+        guard state.stopping, case .runFinished(let finished) = event, finished.runId == state.runId,
+              finished.metadata.cancelled == true else { return [] }
+        let replies = finished.metadata.messages?.map(\.id) ?? []
+        if !replies.isEmpty { return replies }
+        guard let last = state.messages.last, last.role.value1 == .user else { return [] }
+        return [last.id]
     }
 
     /// A window of the chat's latest messages, after the earlier messages the

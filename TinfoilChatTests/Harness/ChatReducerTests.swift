@@ -120,6 +120,27 @@ struct ChatReducerTests {
         #expect(state.cursors == ["r": 2, "q": 2])
     }
 
+    @Test func aRunTheUserStoppedNamesWhatItStoppedAsItEnds() throws {
+        func ended(_ messages: [[String: Any]], stopping: Bool) throws -> (canceled: [String], state: ChatState) {
+            var state = try Self.reduce([
+                Self.started(),
+                ["type": "MESSAGES_SNAPSHOT", "messages": [["id": "u", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Why?"]], "hasOlder": false],
+            ] + (messages.isEmpty ? [] : [Self.text("Half")]))
+            state.stopping = stopping
+            let frame = try HarnessProtocolFixtures.frame(
+                ["type": "RUN_FINISHED", "threadId": "t", "runId": "r", "metadata": ["cancelled": true, "messages": messages]], id: 3
+            )
+            return (ChatReducer.canceled(by: frame.event, in: state), try ChatReducer.reduce(state, frame))
+        }
+        let reply = try ended([["id": "m", "isInterrupted": true]], stopping: true)
+        #expect(reply.canceled == ["m"])
+        #expect(!reply.state.stopping)
+        // A run stopped before it answered leaves the message it stopped on.
+        #expect(try ended([], stopping: true).canceled == ["u"])
+        // The service stops replies too, as it restarts.
+        #expect(try ended([["id": "m", "isInterrupted": true]], stopping: false).canceled.isEmpty)
+    }
+
     @Test func aStateDeltaNamingARunQueuesAnIdleChat() throws {
         let state = try Self.reduce([
             ["type": "STATE_DELTA", "runId": "q", "delta": [["op": "replace", "path": "/queue", "value": [Self.queued("q")]]]],
