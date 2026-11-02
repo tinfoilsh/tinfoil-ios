@@ -220,6 +220,6 @@ struct ChatViewMappingTests {
         let running = ChatViewMapping.compaction(opened)
         #expect(running.isRunning)
         #expect(running.coveredMessages == nil)
-        #expect(running.startedAt == ChatReducer.millis(of: "2026-01-01T00:00:05Z"))
+        #expect(running.startedAt == 1767225605000)
     }
 }

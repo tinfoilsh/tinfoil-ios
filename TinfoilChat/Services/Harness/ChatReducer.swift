@@ -190,15 +190,15 @@ enum ChatReducer {
         let markers = messages.markers()
         let shown = messages.shown
         guard let first = shown.first,
-              let start = view.messages.firstIndex(where: { $0.id == first.id }),
-              start > 0 else {
+              let start = view.messages.firstIndex(where: { $0.id == first.id }) else {
             return (shown, hasOlder, markers)
         }
         // A window that starts after the marker above its first message
         // leaves that marker as the view had it.
         let earlier = Set(view.messages[...start].map(\.id))
-        let kept = view.markers.filter { earlier.contains($0.key) }
-        return (Array(view.messages[..<start]) + shown, view.hasOlder, kept.merging(markers) { $1 })
+        let kept = view.markers.filter { earlier.contains($0.key) }.merging(markers) { $1 }
+        guard start > 0 else { return (shown, hasOlder, kept) }
+        return (Array(view.messages[..<start]) + shown, view.hasOlder, kept)
     }
 
     /// Opens a compaction marker while its summary is written, above the

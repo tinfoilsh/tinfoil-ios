@@ -566,6 +566,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         fields.options = fields.options.flatMap { leaveToPreset($0, choice) }
         let shown = controller.track()
         let before = state.messages
+        let markers = state.markers
         let sent = sentMessage(fields.applied(to: defaults))
         if let sent { controller.updateView { $0.messages.append(shownMessage(sent)) } }
         let applied = appliedTurn(fields.applied(to: defaults))
@@ -573,7 +574,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         // A turn that did not start leaves the chat as the harness stores it.
         let unapply = { [weak self] in
             guard let self, let applied, shown(), state.messages == applied else { return }
-            controller.updateView { $0.messages = before }
+            controller.updateView { $0.messages = before; $0.markers = markers }
         }
         let status = state.status
         let submission = status == .streaming || status == .queued ? nil : Submission(threadId: threadId)

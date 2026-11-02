@@ -260,6 +260,17 @@ struct ChatReducerTests {
         #expect(state.hasOlder)
     }
 
+    @Test func aMessagesSnapshotStartingBelowAMarkerKeepsIt() throws {
+        var view = ChatState()
+        view.messages = [HarnessMessage(id: "m1", role: .named(.user), createdAt: "", content: "first")]
+        view.markers = ["m1": HarnessMessage(id: "c", role: .named(.compaction), createdAt: "", content: Self.summary)]
+        let state = try Self.reduce([
+            Self.started(),
+            ["type": "MESSAGES_SNAPSHOT", "messages": [["id": "m1", "role": "user", "createdAt": "", "content": "first"]], "hasOlder": true],
+        ], into: view)
+        #expect(state.markers["m1"]?.id == "c")
+    }
+
     private static let summary = "## Goals and context\nThe user asked a first question."
 
     private static func marker(_ id: String = "c", covering messages: Int = 2) -> [String: Any] {
