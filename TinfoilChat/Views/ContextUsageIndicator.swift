@@ -19,6 +19,9 @@ struct ContextUsage: Equatable {
 /// `ContextUsageIndicator`.
 struct ContextUsageIndicator: View {
     let usage: ContextUsage
+    /// The chat service summarizes the earlier messages of a chat that
+    /// fills its context, rather than refusing its next turn.
+    let compacts: Bool
 
     private static let ringDiameter: CGFloat = 14
     private static let ringLineWidth: CGFloat = 2
@@ -40,6 +43,9 @@ struct ContextUsageIndicator: View {
     }
 
     private var accessibilityText: String {
+        if isFull, compacts {
+            return "Context window full (~\(Self.formatTokens(usage.limitTokens)) tokens). Earlier messages will be summarized to make room."
+        }
         if isFull {
             return "Context window full (~\(Self.formatTokens(usage.limitTokens)) tokens). Older messages are archived and no longer sent to the model."
         }

@@ -724,6 +724,12 @@ class ChatViewModel: ObservableObject {
         account?.session?.features.additionalProperties["webSearch"] == true
     }
 
+    /// The chat service summarizes a chat's earlier messages once its prompt
+    /// would outgrow the model's window, rather than refusing the turn.
+    var compactsChats: Bool {
+        account?.session?.features.additionalProperties["compaction"] == true
+    }
+
     // MARK: - Safeguards
 
     private func bindSafeguardsStore() {
