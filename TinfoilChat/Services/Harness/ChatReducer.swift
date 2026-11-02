@@ -74,6 +74,7 @@ enum ChatReducer {
             let shown = afterLoaded(next, snapshot.messages, hasOlder: snapshot.hasOlder)
             next.messages = shown.messages
             next.hasOlder = shown.hasOlder
+            next.markers = shown.markers
             // The window holds the continued reply as the harness stored it.
             if let continued = next.continued { next.sealed = sealOf(next.messages, continued) }
         case .textMessageChunk(let chunk):
@@ -145,6 +146,10 @@ enum ChatReducer {
             }
             if let failure { throw failure }
             next.messages = messages ?? next.messages
+        case .compactionStart(let start):
+            next.markers = startedCompaction(next, start)
+        case .compactionEnd(let end):
+            next.markers = endedCompaction(next, end)
         case .runFinished(let finished):
             next.snapshot.queue = withoutQueued(next.snapshot.queue, runId)
             next.status = .idle
@@ -175,19 +180,51 @@ enum ChatReducer {
     }
 
     /// A window of the chat's latest messages, after the earlier messages the
-    /// view loaded before the window's first.
+    /// view loaded before the window's first, with the compaction markers of
+    /// both.
     static func afterLoaded(
         _ view: ChatState,
         _ messages: [HarnessMessage],
         hasOlder: Bool
-    ) -> (messages: [HarnessMessage], hasOlder: Bool) {
-        let messages = messages.shown
-        guard let first = messages.first,
+    ) -> (messages: [HarnessMessage], hasOlder: Bool, markers: [String: HarnessMessage]) {
+        let markers = messages.markers()
+        let shown = messages.shown
+        guard let first = shown.first,
               let start = view.messages.firstIndex(where: { $0.id == first.id }),
               start > 0 else {
-            return (messages, hasOlder)
+            return (shown, hasOlder, markers)
         }
-        return (Array(view.messages[..<start]) + messages, view.hasOlder)
+        // A window that starts after the marker above its first message
+        // leaves that marker as the view had it.
+        let earlier = Set(view.messages[...start].map(\.id))
+        let kept = view.markers.filter { earlier.contains($0.key) }
+        return (Array(view.messages[..<start]) + shown, view.hasOlder, kept.merging(markers) { $1 })
+    }
+
+    /// Opens a compaction marker while its summary is written, above the
+    /// message the event names, or else above the run's question.
+    private static func startedCompaction(_ state: ChatState, _ start: Components.Schemas.CompactionStartEvent) -> [String: HarnessMessage] {
+        guard let before = state.messages.first(where: { $0.id == start.beforeMessageId })?.id
+                ?? state.messages.last(where: { $0.role.value1 == .user })?.id else {
+            return state.markers
+        }
+        var markers = state.markers.filter { $0.value.id != start.messageId }
+        markers[before] = HarnessMessage(id: start.messageId, role: .named(.compaction), createdAt: start.timestamp ?? "")
+        return markers
+    }
+
+    /// Closes a compaction marker. A completed one is kept as the event
+    /// carries it, where it was opened; a failed one, or one whose outcome
+    /// this client does not know, is removed.
+    private static func endedCompaction(_ state: ChatState, _ end: Components.Schemas.CompactionEndEvent) -> [String: HarnessMessage] {
+        let opened = state.markers.first { $0.value.id == end.messageId }?.key
+        var markers = state.markers.filter { $0.value.id != end.messageId }
+        guard end.outcome.value1 == .completed, let marker = end.marker,
+              let before = opened ?? state.messages.last(where: { $0.role.value1 == .user })?.id else {
+            return markers
+        }
+        markers[before] = marker
+        return markers
     }
 
     private static func invalidPatch() -> HarnessError {

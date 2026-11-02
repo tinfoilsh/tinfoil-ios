@@ -259,4 +259,109 @@ struct ChatReducerTests {
         #expect(state.messages.map(\.id) == ["old", "m1"])
         #expect(state.hasOlder)
     }
+
+    private static let summary = "## Goals and context\nThe user asked a first question."
+
+    private static func marker(_ id: String = "c", covering messages: Int = 2) -> [String: Any] {
+        ["id": id, "role": "compaction", "createdAt": "2026-01-01T00:00:03Z", "content": summary,
+         "compaction": ["messages": messages, "startedAt": 1767225600000, "endedAt": 1767225601000, "model": "gpt-oss-120b", "version": 1]]
+    }
+
+    private static let compactedTurn: [[String: Any]] = [
+        started(),
+        ["type": "MESSAGES_SNAPSHOT", "messages": [
+            ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first"],
+            ["id": "a1", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "timeline": [["id": "b1", "type": "content", "content": "long"]]],
+            ["id": "u2", "role": "user", "createdAt": "2026-01-01T00:00:02Z", "content": "second"],
+        ], "hasOlder": false],
+        snapshot(),
+        ["type": "COMPACTION_START", "timestamp": "2026-01-01T00:00:03Z", "messageId": "c", "beforeMessageId": "u2"],
+    ]
+
+    private static func compactionEnd(_ outcome: String, marker: [String: Any]? = nil) -> [String: Any] {
+        var event: [String: Any] = ["type": "COMPACTION_END", "messageId": "c", "outcome": outcome]
+        if let marker { event["marker"] = marker }
+        return event
+    }
+
+    @Test func aCompactionOpensAboveTheQuestionAndKeepsTheMarkerItCompletes() throws {
+        let running = try Self.reduce(Self.compactedTurn)
+        #expect(running.messages.map(\.id) == ["u1", "a1", "u2"])
+        let open = try #require(running.markers["u2"])
+        #expect(open.id == "c")
+        #expect(open.compaction == nil)
+        #expect(open.createdAt == "2026-01-01T00:00:03Z")
+        // The messages above a summary still being written are still read.
+        #expect(running.summarizedIds.isEmpty)
+
+        let completed = try Self.reduce([Self.compactionEnd("completed", marker: Self.marker())], from: Self.compactedTurn.count, into: running)
+        #expect(completed.messages.map(\.id) == ["u1", "a1", "u2"])
+        let marker = try #require(completed.markers["u2"])
+        #expect(marker.content == Self.summary)
+        #expect(marker.compaction?.messages == 2)
+        #expect(completed.summarizedIds == ["u1", "a1"])
+        #expect(completed.messagesWithMarkers.map(\.id) == ["u1", "a1", "c", "u2"])
+    }
+
+    @Test func aFailedCompactionRemovesItsMarkerBeforeTheRunFails() throws {
+        for outcome in ["failed", "abandoned"] {
+            let state = try Self.reduce(Self.compactedTurn + [
+                Self.compactionEnd(outcome),
+                ["type": "RUN_ERROR", "threadId": "t", "runId": "r", "code": HarnessErrorCode.compactionFailed, "message": "failed", "action": "retry"],
+            ])
+            #expect(state.markers.isEmpty, "\(outcome)")
+            #expect(state.messages.map(\.id) == ["u1", "a1", "u2"])
+            #expect(state.status == .error)
+            #expect(state.error?.code == HarnessErrorCode.compactionFailed)
+            #expect(state.error?.action == .retry)
+        }
+    }
+
+    @Test func aReplayedCompactionChangesNothing() throws {
+        let events = Self.compactedTurn + [Self.compactionEnd("completed", marker: Self.marker())]
+        let state = try Self.reduce(events)
+        // A run followed again from its first frame skips what it applied.
+        #expect(try Self.reduce(events, into: state) == state)
+        // Its end applied once more keeps the one marker where it was.
+        let again = try ChatReducer.reduce(state, try HarnessProtocolFixtures.frame(Self.compactionEnd("completed", marker: Self.marker())))
+        #expect(again.markers == state.markers)
+    }
+
+    @Test func aCompactionBeforeAMessageTheChatLacksOpensAboveTheRunsQuestion() throws {
+        var events = Self.compactedTurn
+        events[events.count - 1]["beforeMessageId"] = "gone"
+        let state = try Self.reduce(events)
+        #expect(state.markers.keys.sorted() == ["u2"])
+    }
+
+    @Test func aLoadedChatShowsItsMarkersAboveTheirQuestionsAndNotAsMessages() throws {
+        let messages: [[String: Any]] = [
+            ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first"],
+            ["id": "a1", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "timeline": []],
+            Self.marker(),
+            ["id": "u2", "role": "user", "createdAt": "2026-01-01T00:00:04Z", "content": "second"],
+            ["id": "a2", "role": "assistant", "createdAt": "2026-01-01T00:00:05Z", "timeline": []],
+        ]
+        var window = Self.thread
+        window.merge(["revision": "1", "presetId": NSNull(), "messages": messages, "hasOlder": false]) { $1 }
+        let loaded = ChatState(thread: try ThreadWindow(jsonObject: window))
+        #expect(loaded.messages.map(\.id) == ["u1", "a1", "u2", "a2"])
+        #expect(loaded.markers.mapValues(\.id) == ["u2": "c"])
+        #expect(loaded.summarizedIds == ["u1", "a1"])
+    }
+
+    @Test func aWindowThatStartsBelowAMarkerKeepsTheMarkerTheViewLoaded() throws {
+        var view = ChatState()
+        view.messages = [
+            HarnessMessage(id: "old", role: .named(.user), createdAt: "", content: "old"),
+            HarnessMessage(id: "m1", role: .named(.user), createdAt: "", content: "first"),
+        ]
+        view.markers = ["m1": try HarnessMessage(jsonObject: Self.marker())]
+        view.hasOlder = true
+        let state = try Self.reduce([
+            Self.started(),
+            ["type": "MESSAGES_SNAPSHOT", "messages": [["id": "m1", "role": "user", "createdAt": "", "content": "first"]], "hasOlder": true],
+        ], into: view)
+        #expect(state.messagesWithMarkers.map(\.id) == ["old", "c", "m1"])
+    }
 }

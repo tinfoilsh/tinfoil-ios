@@ -17,6 +17,8 @@ enum RunEvent: Equatable, Sendable {
     case toolCallResult(Components.Schemas.ToolCallResultEvent)
     case activitySnapshot(Components.Schemas.ActivitySnapshotEvent)
     case activityDelta(Components.Schemas.ActivityDeltaEvent)
+    case compactionStart(Components.Schemas.CompactionStartEvent)
+    case compactionEnd(Components.Schemas.CompactionEndEvent)
     case runFinished(RunFinished)
     case runError(RunError)
 
@@ -35,6 +37,8 @@ enum RunEvent: Equatable, Sendable {
         case .toolCallResult: return .toolCallResult
         case .activitySnapshot: return .activitySnapshot
         case .activityDelta: return .activityDelta
+        case .compactionStart: return .compactionStart
+        case .compactionEnd: return .compactionEnd
         case .runFinished: return .runFinished
         case .runError: return .runError
         }
@@ -240,6 +244,8 @@ enum HarnessEventStream {
         case .toolCallResult: return .toolCallResult(try decoder.decode(Components.Schemas.ToolCallResultEvent.self, from: bytes))
         case .activitySnapshot: return .activitySnapshot(try decoder.decode(Components.Schemas.ActivitySnapshotEvent.self, from: bytes))
         case .activityDelta: return .activityDelta(try decoder.decode(Components.Schemas.ActivityDeltaEvent.self, from: bytes))
+        case .compactionStart: return .compactionStart(try decoder.decode(Components.Schemas.CompactionStartEvent.self, from: bytes))
+        case .compactionEnd: return .compactionEnd(try decoder.decode(Components.Schemas.CompactionEndEvent.self, from: bytes))
         case .runFinished:
             return .runFinished(RunFinished(event: try decoder.decode(Components.Schemas.RunFinishedEvent.self, from: bytes), thread: returnedThread(bytes)))
         case .runError:

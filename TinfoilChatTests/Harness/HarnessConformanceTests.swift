@@ -25,9 +25,9 @@ struct HarnessConformanceTests {
         let encoder = JSONEncoder()
         var projection: [String: Any] = [
             "status": state.status == .error ? "error" : "idle",
-            "messages": try state.messages.map { message -> [String: Any] in
+            "messages": try state.messagesWithMarkers.map { message -> [String: Any] in
                 var shown: [String: Any] = ["id": message.id, "role": message.role.value1?.rawValue ?? ""]
-                if message.role.value1 == .user { shown["content"] = message.content ?? "" }
+                if message.role.value1 == .user || message.role.value1 == .compaction { shown["content"] = message.content ?? "" }
                 shown["timeline"] = try (message.timeline ?? []).map { step -> [String: Any] in
                     let all = try JSONSerialization.jsonObject(with: encoder.encode(step)) as! [String: Any]
                     return all.filter { stepMembers.contains($0.key) }
