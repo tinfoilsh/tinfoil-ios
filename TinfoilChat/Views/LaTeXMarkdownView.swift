@@ -1025,6 +1025,9 @@ enum TableAlignment: Sendable {
 }
 
 enum MarkdownTableLayout {
+    /// Less than this much of the table's width is left unassigned.
+    private static let roomTolerance: CGFloat = 0.5
+
     static func columnWidth(
         intrinsicWidth: CGFloat,
         availableWidth: CGFloat?
@@ -1034,13 +1037,35 @@ enum MarkdownTableLayout {
         }
         return min(intrinsicWidth, availableWidth * Constants.UI.tableMaximumColumnWidthRatio)
     }
+
+    /// The width of each column: its widest cell's single-line width, up to
+    /// the responsive cap. Room the cap leaves in the table goes to the
+    /// columns whose text it wraps, evenly and up to their own widths, so a
+    /// table that wraps spans the full width.
+    static func columnWidths(intrinsic: [CGFloat], availableWidth: CGFloat?) -> [CGFloat] {
+        var widths = intrinsic.map { columnWidth(intrinsicWidth: $0, availableWidth: availableWidth) }
+        guard let availableWidth, availableWidth.isFinite, availableWidth > 0 else { return widths }
+        var room = availableWidth - widths.reduce(0, +)
+        while room > roomTolerance {
+            let wrapped = widths.indices.filter { widths[$0] < intrinsic[$0] }
+            guard !wrapped.isEmpty else { break }
+            let share = room / CGFloat(wrapped.count)
+            for index in wrapped {
+                let grant = min(share, intrinsic[index] - widths[index])
+                widths[index] += grant
+                room -= grant
+            }
+        }
+        return widths
+    }
 }
 
 /// Places table cells, given in row-major order, on a grid. Each column is as
 /// wide as its widest cell's rendered single-line width, up to the
-/// responsive cap, and each row is as tall as its tallest cell at those
-/// widths. Measuring the rendered cells keeps the columns in step with the
-/// text's actual font, Dynamic Type size, and inline markdown.
+/// responsive cap, with the room the cap leaves going to the columns it
+/// wraps, and each row is as tall as its tallest cell at those widths.
+/// Measuring the rendered cells keeps the columns in step with the text's
+/// actual font, Dynamic Type size, and inline markdown.
 struct MarkdownTableGrid: Layout {
     typealias Tracks = (columnWidths: [CGFloat], rowHeights: [CGFloat])
 
@@ -1090,9 +1115,7 @@ struct MarkdownTableGrid: Layout {
             let column = index % columnCount
             columnWidths[column] = max(columnWidths[column], subview.sizeThatFits(.unspecified).width)
         }
-        columnWidths = columnWidths.map {
-            MarkdownTableLayout.columnWidth(intrinsicWidth: $0, availableWidth: availableWidth)
-        }
+        columnWidths = MarkdownTableLayout.columnWidths(intrinsic: columnWidths, availableWidth: availableWidth)
 
         let rowCount = (subviews.count + columnCount - 1) / columnCount
         var rowHeights = Array(repeating: CGFloat.zero, count: rowCount)
