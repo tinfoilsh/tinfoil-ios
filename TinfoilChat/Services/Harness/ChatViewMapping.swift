@@ -102,6 +102,19 @@ enum ChatViewMapping {
         return message
     }
 
+    /// A compaction marker as the view shows it above the message after it.
+    /// One whose summary is still being written has no compaction member,
+    /// and counts from when it opened.
+    static func compaction(_ marker: HarnessMessage) -> CompactionMarker {
+        CompactionMarker(
+            id: marker.id,
+            summary: marker.content ?? "",
+            coveredMessages: marker.compaction?.messages,
+            isRunning: marker.compaction == nil,
+            startedAt: marker.compaction?.startedAt ?? ChatReducer.millis(of: marker.createdAt)
+        )
+    }
+
     private enum ToolStatus { case running, completed, failed }
 
     /// A web search or page fetch shows what the harness reports of it. A

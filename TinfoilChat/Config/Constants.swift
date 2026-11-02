@@ -115,6 +115,18 @@ enum Constants {
             static let searchRowPadding: CGFloat = 6
             static let linkRowPadding: CGFloat = 4
         }
+
+        /// The marker above a message, before which the chat's earlier
+        /// messages were summarized.
+        enum Compaction {
+            /// The inset of a message's content in its row, which the marker
+            /// lines up with.
+            static let horizontalPadding: CGFloat = 4
+            /// The space between the summary and the note under it.
+            static let noteSpacing: CGFloat = 8
+            /// Messages the model reads a summary of instead show faded.
+            static let summarizedOpacity = 0.6
+        }
     }
 
     enum Accessibility {
@@ -132,8 +144,9 @@ enum Constants {
 
         static let scrollToLatestMessage = "Scroll to latest message"
 
-        /// Label of the divider above the first message still in context.
-        static let archivedMessagesSeparator = "Older messages above are archived"
+        /// What VoiceOver says of a compaction marker, which heads the row of
+        /// the message after it.
+        static let summarizedMessagesSeparator = "Earlier messages above were summarized"
     }
 
     enum Rendering {
@@ -227,6 +240,8 @@ enum Constants {
         static let verticalChrome: CGFloat = 56
         /// Extra height for a collapsed reasoning/thoughts pill.
         static let thoughtsHeight: CGFloat = 50
+        /// Extra height for a collapsed compaction marker above a message.
+        static let compactionHeight: CGFloat = 36
         /// Approximate height contributed by each image attachment.
         static let attachmentHeight: CGFloat = 220
         /// Smallest estimate we ever return for a populated row.

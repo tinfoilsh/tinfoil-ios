@@ -166,4 +166,13 @@ struct WorkRunTests {
         expansion.toggleLoneStep(step, rowId: "work:0:thinking")
         #expect(expansion.expandedRows.isEmpty)
     }
+
+    @Test func aCompactionMarkerSaysItIsWorkingAndThenHowManyMessagesItCovers() {
+        let running = CompactionMarker(id: "c", summary: "", coveredMessages: nil, isRunning: true, startedAt: 1_000)
+        #expect(running.label == WorkLabel(text: "Compacting conversation", tone: .live, shimmers: true))
+        let one = CompactionMarker(id: "c", summary: "## Goals", coveredMessages: 1, isRunning: false, startedAt: 1_000)
+        #expect(one.label == WorkLabel(text: "Compacted 1 earlier message", tone: .settled))
+        let many = CompactionMarker(id: "c", summary: "## Goals", coveredMessages: 12, isRunning: false, startedAt: 1_000)
+        #expect(many.label.text == "Compacted 12 earlier messages")
+    }
 }

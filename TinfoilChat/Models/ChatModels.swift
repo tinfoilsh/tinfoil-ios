@@ -374,6 +374,11 @@ struct Message: Identifiable, Equatable {
     var answers: [WidgetAnswers] = []
     /// Why the reply ended before it finished, if it did.
     var replyStop: ReplyStop? = nil
+    /// The compaction marker that sits before the message, shown above it.
+    var compaction: CompactionMarker? = nil
+    /// The message comes before the chat's latest compaction marker, whose
+    /// summary the model reads in its place.
+    var isOutOfContext: Bool = false
 
     init(id: String = UUID().uuidString.lowercased(), role: MessageRole, content: String, timestamp: Date = Date()) {
         self.id = id
@@ -415,6 +420,20 @@ struct Message: Identifiable, Equatable {
     var hasContinuableResponse: Bool {
         role == .assistant && (!content.isEmpty || !toolCalls.isEmpty)
     }
+}
+
+/// A compaction marker as the views show it: the summary the model reads in
+/// place of every message before it, which the chat service wrote once the
+/// chat outgrew the model's window.
+struct CompactionMarker: Equatable {
+    let id: String
+    /// The summary, in Markdown; empty while it is written.
+    let summary: String
+    /// How many earlier messages the summary covers, once it is written.
+    let coveredMessages: Int?
+    let isRunning: Bool
+    /// When the summary was started, in epoch milliseconds.
+    let startedAt: Double?
 }
 
 /// Why a reply ended before it finished, as a note under it says.

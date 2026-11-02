@@ -237,6 +237,20 @@ struct MessageTableView: UIViewRepresentable {
                 }
             }
         } else if usesStreamingLayout && !messages.isEmpty {
+            // A chat compacted while its reply streams marks the rows above
+            // the reply, which the update below leaves alone.
+            for (index, message) in messages.dropLast().enumerated() {
+                guard let wrapper = context.coordinator.messageWrappers[message.id],
+                      wrapper.message.compaction != message.compaction
+                        || wrapper.message.isOutOfContext != message.isOutOfContext else { continue }
+                wrapper.update(
+                    message: message,
+                    isDarkMode: isDarkMode,
+                    isLastMessage: false,
+                    isLoading: false,
+                    messageIndex: index
+                )
+            }
             // During streaming, update the last message wrapper directly
             if let lastMessage = messages.last,
                let wrapper = context.coordinator.messageWrappers[lastMessage.id] {
@@ -627,6 +641,9 @@ struct MessageTableView: UIViewRepresentable {
             if let thoughts = message.thoughts, !thoughts.isEmpty {
                 height += Constants.HeightEstimation.thoughtsHeight
             }
+            if message.compaction != nil {
+                height += Constants.HeightEstimation.compactionHeight
+            }
             height += CGFloat(message.attachments.count) * Constants.HeightEstimation.attachmentHeight
 
             let result = max(height, Constants.HeightEstimation.minimumHeight)
@@ -967,12 +984,12 @@ struct MessageTableView: UIViewRepresentable {
                 return nil
             }
             if object.isAccessibilityElement {
-                // The archive divider heads its row but is not the message.
+                // A compaction marker heads its row but is not the message.
                 // Landing on it would also make the next flick skip the
                 // message, since the rotor advances from the focused row.
-                let isArchiveDivider = object.accessibilityLabel
-                    == Constants.Accessibility.archivedMessagesSeparator
-                return isArchiveDivider ? nil : object
+                let isCompactionMarker = object.accessibilityLabel
+                    == Constants.Accessibility.summarizedMessagesSeparator
+                return isCompactionMarker ? nil : object
             }
             if let elements = object.accessibilityElements {
                 for case let element as NSObject in elements {
@@ -1085,10 +1102,12 @@ class ObservableMessageWrapper: ObservableObject {
                             self.message.toolCalls != message.toolCalls ||
                             self.message.timeline != message.timeline ||
                             self.message.annotations != message.annotations ||
+                            self.message.compaction != message.compaction ||
                             self.isDarkMode != isDarkMode
 
         let metadataChanged = self.isLastMessage != isLastMessage ||
                               self.isLoading != isLoading ||
+                              self.message.isOutOfContext != message.isOutOfContext ||
                               self.messageIndex != messageIndex
 
         if !contentChanged && !metadataChanged {
@@ -1164,24 +1183,32 @@ struct ObservableMessageCell: View {
                         .frame(height: bufferHeight)
                 }
 
-                MessageView(
-                    message: wrapper.message,
-                    isDarkMode: wrapper.isDarkMode,
-                    isLastMessage: wrapper.isLastMessage,
-                    isLoading: wrapper.isLoading,
-                    messageIndex: wrapper.messageIndex,
-                    stepExpansion: wrapper.stepExpansion,
-                    context: MessageRowContext(
-                        viewModel,
+                VStack(alignment: .leading, spacing: 0) {
+                    if let compaction = wrapper.message.compaction {
+                        CompactionBox(marker: compaction, isDarkMode: wrapper.isDarkMode, expansion: wrapper.stepExpansion)
+                            .padding(.horizontal, Constants.UI.Compaction.horizontalPadding)
+                    }
+
+                    MessageView(
                         message: wrapper.message,
+                        isDarkMode: wrapper.isDarkMode,
+                        isLastMessage: wrapper.isLastMessage,
+                        isLoading: wrapper.isLoading,
                         messageIndex: wrapper.messageIndex,
-                        isRenderingStream: wrapper.isLoading && wrapper.isLastMessage
-                    ),
-                    viewModel: viewModel
-                )
-                .equatable()
+                        stepExpansion: wrapper.stepExpansion,
+                        context: MessageRowContext(
+                            viewModel,
+                            message: wrapper.message,
+                            messageIndex: wrapper.messageIndex,
+                            isRenderingStream: wrapper.isLoading && wrapper.isLastMessage
+                        ),
+                        viewModel: viewModel
+                    )
+                    .equatable()
+                }
                 .environmentObject(viewModel)
                 .markdownStyleHost(isDarkMode: wrapper.isDarkMode)
+                .opacity(wrapper.message.isOutOfContext ? Constants.UI.Compaction.summarizedOpacity : 1.0)
                 .padding(.vertical, 8)
                 .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 8)
                 .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
