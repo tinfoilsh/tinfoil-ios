@@ -638,6 +638,9 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         guard running else { return try await controller.cancel(request) }
         let shown = controller.track()
         controller.updateView { $0.stopping = true }
+        // A reply already streaming is the one stopped, which keeps saying so
+        // even if the chat is left before its run ends.
+        if let last = state.messages.last, last.role.value1 == .assistant { controller.markCanceled([last.id]) }
         do {
             try await controller.cancel(request)
         } catch {

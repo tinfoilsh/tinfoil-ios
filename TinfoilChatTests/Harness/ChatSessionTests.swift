@@ -71,6 +71,13 @@ private func questionsReply(answers: [String: [String]]? = nil) -> [String: Any]
     return ["id": "a1", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "content": "", "timeline": [block]]
 }
 
+/// A stored chat as the harness opens it, holding its first question.
+private let firstQuestionWindow: [String: Any] = summary().merging([
+    "revision": "rev-1", "presetId": NSNull(), "flagged": false,
+    "messages": [["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"]],
+    "hasOlder": false,
+]) { $1 }
+
 /// A run that answers "Second answer." and returns the device chat whole.
 private func deviceRun(id: String, question: String, questionId: String) -> [[String: Any]] {
     let reply = "msg_5"
@@ -232,11 +239,7 @@ struct ChatSessionTests {
     }
 
     @Test func aStoredChatIsNamedByItsKey() async throws {
-        let window: [String: Any] = summary().merging([
-            "revision": "rev-1", "presetId": NSNull(), "flagged": false,
-            "messages": [["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"]],
-            "hasOlder": false,
-        ]) { $1 }
+        let window = firstQuestionWindow
         let fixture = Fixture(userId: "user-1", answers: [Answers.json(window)])
         let session = fixture.session
         #expect(!session.open.local)
@@ -264,11 +267,7 @@ struct ChatSessionTests {
     }
 
     @Test func aStopShowsAtOnceAndATurnSentMeanwhileGoesOnceTheReplyStopped() async throws {
-        let window: [String: Any] = summary().merging([
-            "revision": "rev-1", "presetId": NSNull(), "flagged": false,
-            "messages": [["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"]],
-            "hasOlder": false,
-        ]) { $1 }
+        let window = firstQuestionWindow
         let (release, stopped) = AsyncStream<Void>.makeStream()
         let fixture = Fixture(userId: "user-1", answers: [Answers.json(window)])
         let session = fixture.session
@@ -293,6 +292,9 @@ struct ChatSessionTests {
         try await session.cancel()
 
         #expect(session.stopping)
+        // The reply it stops is known at once, so leaving the chat before the
+        // run ends still says the user stopped it.
+        #expect(session.controller.canceled == ["msg_6"])
         let stop = try #require(await fixture.transport.requests.last)
         #expect(stop.route == .cancel)
         #expect(stop.json["runId"] as? String == "run_3")
@@ -314,11 +316,7 @@ struct ChatSessionTests {
     }
 
     @Test func aStopThatArrivesAfterTheReplyEndedReadsTheChatAgainRatherThanFailing() async throws {
-        let window: [String: Any] = summary().merging([
-            "revision": "rev-1", "presetId": NSNull(), "flagged": false,
-            "messages": [["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"]],
-            "hasOlder": false,
-        ]) { $1 }
+        let window = firstQuestionWindow
         let (rereads, reread) = AsyncStream<HarnessRoute>.makeStream()
         let fixture = Fixture(userId: "user-1", answers: [
             Answers.json(window),
