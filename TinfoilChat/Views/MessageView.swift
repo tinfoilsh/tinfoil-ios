@@ -618,6 +618,18 @@ struct MessageView: View, Equatable {
                 }
             }
 
+            // The answers a message sent show above its text, or alone for a
+            // message that sent only answers.
+            if message.role == .user && !message.answers.isEmpty {
+                SentAnswersView(answers: message.answers, isDarkMode: isDarkMode)
+                    .modifier(MessageBubbleModifier(isUserMessage: true))
+                    .if(message.content.isEmpty && canDeleteMessage) { view in
+                        view.contextMenu {
+                            deleteMessageButton
+                        }
+                    }
+            }
+
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
                 // Show the loading dots for a fresh streaming assistant response (but not if we have thoughts or are thinking)
                 if message.role == .assistant &&

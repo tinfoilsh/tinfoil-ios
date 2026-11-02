@@ -26,6 +26,7 @@ enum ChatViewMapping {
             return Annotation(type: "url_citation", url_citation: URLCitation(title: citation.title, url: citation.url, start_index: citation.startIndex, end_index: citation.endIndex))
         }
         message.attachments = wire.attachments?.map(attachment) ?? []
+        message.answers = wire.answers ?? []
         guard role == .assistant else { return message }
 
         let blocks = wire.timeline ?? []

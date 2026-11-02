@@ -117,6 +117,21 @@ struct ChatViewMappingTests {
         #expect(shown.attachments.first?.processingState == .completed)
     }
 
+    @Test func aUserMessageKeepsTheAnswersItSent() throws {
+        let wire = try Self.message([
+            "id": "u", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "",
+            "answers": [["toolCallId": "q", "title": "Quiz", "questions": [
+                ["id": "q1", "prompt": "Capital of France?", "answered": true, "selected": [["id": "b", "label": "Paris"]]],
+                ["id": "q2", "prompt": "Pick the primes", "answered": false, "selected": []],
+            ]]],
+        ])
+        let shown = ChatViewMapping.message(wire)
+        #expect(shown.content.isEmpty)
+        #expect(shown.answers.map(\.toolCallId) == ["q"])
+        #expect(shown.answers.first?.questions.map(\.answered) == [true, false])
+        #expect(shown.answers.first?.questions.first?.selected.map(\.label) == ["Paris"])
+    }
+
     @Test func aBlockOfATypeThisClientDoesNotKnowIsLeftOut() throws {
         let wire = try Self.reply([
             ["id": "x", "type": "diagram", "content": "<svg/>"],
