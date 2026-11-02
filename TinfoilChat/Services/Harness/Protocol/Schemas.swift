@@ -4921,7 +4921,7 @@ extension Components {
                 case thread
             }
         }
-        /// An opened share, whose attachments name the key that reads each blob.
+        /// An opened share, whose attachments name the key that reads each blob. A share holds the conversation without its compaction markers.
         ///
         /// - Remark: Generated from `#/components/schemas/SharedThread`.
         internal struct SharedThread: Codable, Hashable, Sendable {
