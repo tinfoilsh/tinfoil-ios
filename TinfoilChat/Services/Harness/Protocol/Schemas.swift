@@ -1078,6 +1078,8 @@ extension Components {
             internal var projectId: Swift.String?
             /// - Remark: Generated from `#/components/schemas/Turn/presetId`.
             internal var presetId: Swift.String?
+            /// A send without content, a quote or an attachment sends only the answers the user changed since their last question, and is refused when there are none.
+            ///
             /// - Remark: Generated from `#/components/schemas/Turn/content`.
             internal var content: Swift.String?
             /// - Remark: Generated from `#/components/schemas/Turn/quote`.
@@ -1111,7 +1113,7 @@ extension Components {
             ///   - profile:
             ///   - projectId:
             ///   - presetId:
-            ///   - content:
+            ///   - content: A send without content, a quote or an attachment sends only the answers the user changed since their last question, and is refused when there are none.
             ///   - quote:
             ///   - messageId: The message an edit, regenerate, continue or retry acts on.
             ///   - toolCallId: The widget call a retryToolCall regenerates.
@@ -3234,6 +3236,10 @@ extension Components {
             internal var annotations: [Components.Schemas.Annotation]?
             /// - Remark: Generated from `#/components/schemas/MessageView/attachments`.
             internal var attachments: [Components.Schemas.AttachmentView]?
+            /// A question's answers to questions widgets, as it sent them to the model.
+            ///
+            /// - Remark: Generated from `#/components/schemas/MessageView/answers`.
+            internal var answers: [Components.Schemas.WidgetAnswers]?
             /// Creates a new `MessageView`.
             ///
             /// - Parameters:
@@ -3250,6 +3256,7 @@ extension Components {
             ///   - usage:
             ///   - annotations:
             ///   - attachments:
+            ///   - answers: A question's answers to questions widgets, as it sent them to the model.
             internal init(
                 id: Swift.String,
                 role: Components.Schemas.Role,
@@ -3263,7 +3270,8 @@ extension Components {
                 isInterrupted: Swift.Bool? = nil,
                 usage: Components.Schemas.MessageUsage? = nil,
                 annotations: [Components.Schemas.Annotation]? = nil,
-                attachments: [Components.Schemas.AttachmentView]? = nil
+                attachments: [Components.Schemas.AttachmentView]? = nil,
+                answers: [Components.Schemas.WidgetAnswers]? = nil
             ) {
                 self.id = id
                 self.role = role
@@ -3278,6 +3286,7 @@ extension Components {
                 self.usage = usage
                 self.annotations = annotations
                 self.attachments = attachments
+                self.answers = answers
             }
             internal enum CodingKeys: String, CodingKey {
                 case id
@@ -3293,6 +3302,98 @@ extension Components {
                 case usage
                 case annotations
                 case attachments
+                case answers
+            }
+        }
+        /// What the user had answered of one questions widget when they sent a question, with the questions' text, so it reads the same however the widget changes later.
+        ///
+        /// - Remark: Generated from `#/components/schemas/WidgetAnswers`.
+        internal struct WidgetAnswers: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/WidgetAnswers/toolCallId`.
+            internal var toolCallId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/WidgetAnswers/title`.
+            internal var title: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/WidgetAnswers/questions`.
+            internal var questions: [Components.Schemas.AnsweredQuestion]
+            /// Creates a new `WidgetAnswers`.
+            ///
+            /// - Parameters:
+            ///   - toolCallId:
+            ///   - title:
+            ///   - questions:
+            internal init(
+                toolCallId: Swift.String,
+                title: Swift.String? = nil,
+                questions: [Components.Schemas.AnsweredQuestion]
+            ) {
+                self.toolCallId = toolCallId
+                self.title = title
+                self.questions = questions
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case toolCallId
+                case title
+                case questions
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/AnsweredQuestion`.
+        internal struct AnsweredQuestion: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/AnsweredQuestion/id`.
+            internal var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/AnsweredQuestion/prompt`.
+            internal var prompt: Swift.String
+            /// False for a question left unanswered. An answered question may have nothing selected, as a checklist with nothing ticked.
+            ///
+            /// - Remark: Generated from `#/components/schemas/AnsweredQuestion/answered`.
+            internal var answered: Swift.Bool
+            /// - Remark: Generated from `#/components/schemas/AnsweredQuestion/selected`.
+            internal var selected: [Components.Schemas.QuestionOption]
+            /// Creates a new `AnsweredQuestion`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - prompt:
+            ///   - answered: False for a question left unanswered. An answered question may have nothing selected, as a checklist with nothing ticked.
+            ///   - selected:
+            internal init(
+                id: Swift.String,
+                prompt: Swift.String,
+                answered: Swift.Bool,
+                selected: [Components.Schemas.QuestionOption]
+            ) {
+                self.id = id
+                self.prompt = prompt
+                self.answered = answered
+                self.selected = selected
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case id
+                case prompt
+                case answered
+                case selected
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/QuestionOption`.
+        internal struct QuestionOption: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/QuestionOption/id`.
+            internal var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/QuestionOption/label`.
+            internal var label: Swift.String
+            /// Creates a new `QuestionOption`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - label:
+            internal init(
+                id: Swift.String,
+                label: Swift.String
+            ) {
+                self.id = id
+                self.label = label
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case id
+                case label
             }
         }
         /// Who wrote a message. A client leaves out a message whose role it does not know.
@@ -3469,6 +3570,30 @@ extension Components {
             ///
             /// - Remark: Generated from `#/components/schemas/Block/duration`.
             internal var duration: Swift.Double?
+            /// Of a questions widget's call, the ids of the options the user picked, by question id. A question absent from it is unanswered.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Block/answers`.
+            internal struct AnswersPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                internal var additionalProperties: [String: [Swift.String]]
+                /// Creates a new `AnswersPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                internal init(additionalProperties: [String: [Swift.String]] = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                internal init(from decoder: any Swift.Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                internal func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// Of a questions widget's call, the ids of the options the user picked, by question id. A question absent from it is unanswered.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Block/answers`.
+            internal var answers: Components.Schemas.Block.AnswersPayload?
             /// The widget's current declaration refuses the call's arguments, so the client offers to regenerate them.
             ///
             /// - Remark: Generated from `#/components/schemas/Block/invalidArguments`.
@@ -3491,6 +3616,7 @@ extension Components {
             ///   - startedAt: Epoch milliseconds.
             ///   - endedAt: Epoch milliseconds.
             ///   - duration: How long a reasoning step thought, in seconds.
+            ///   - answers: Of a questions widget's call, the ids of the options the user picked, by question id. A question absent from it is unanswered.
             ///   - invalidArguments: The widget's current declaration refuses the call's arguments, so the client offers to regenerate them.
             internal init(
                 id: Swift.String,
@@ -3508,6 +3634,7 @@ extension Components {
                 startedAt: Swift.Double? = nil,
                 endedAt: Swift.Double? = nil,
                 duration: Swift.Double? = nil,
+                answers: Components.Schemas.Block.AnswersPayload? = nil,
                 invalidArguments: Swift.Bool? = nil
             ) {
                 self.id = id
@@ -3525,6 +3652,7 @@ extension Components {
                 self.startedAt = startedAt
                 self.endedAt = endedAt
                 self.duration = duration
+                self.answers = answers
                 self.invalidArguments = invalidArguments
             }
             internal enum CodingKeys: String, CodingKey {
@@ -3543,6 +3671,7 @@ extension Components {
                 case startedAt
                 case endedAt
                 case duration
+                case answers
                 case invalidArguments
             }
         }
@@ -4159,6 +4288,8 @@ extension Components {
             internal var isError: Swift.Bool?
             /// - Remark: Generated from `#/components/schemas/MessageRecord/isInterrupted`.
             internal var isInterrupted: Swift.Bool?
+            /// - Remark: Generated from `#/components/schemas/MessageRecord/answers`.
+            internal var answers: [Components.Schemas.WidgetAnswers]?
             /// Creates a new `MessageRecord`.
             ///
             /// - Parameters:
@@ -4175,6 +4306,7 @@ extension Components {
             ///   - usage:
             ///   - isError:
             ///   - isInterrupted:
+            ///   - answers:
             internal init(
                 id: Swift.String,
                 role: Components.Schemas.Role,
@@ -4188,7 +4320,8 @@ extension Components {
                 annotations: [Components.Schemas.Annotation]? = nil,
                 usage: Components.Schemas.MessageUsage? = nil,
                 isError: Swift.Bool? = nil,
-                isInterrupted: Swift.Bool? = nil
+                isInterrupted: Swift.Bool? = nil,
+                answers: [Components.Schemas.WidgetAnswers]? = nil
             ) {
                 self.id = id
                 self.role = role
@@ -4203,6 +4336,7 @@ extension Components {
                 self.usage = usage
                 self.isError = isError
                 self.isInterrupted = isInterrupted
+                self.answers = answers
             }
             internal enum CodingKeys: String, CodingKey {
                 case id
@@ -4218,6 +4352,7 @@ extension Components {
                 case usage
                 case isError
                 case isInterrupted
+                case answers
             }
         }
         /// A device chat as its client sends it: a ThreadRecord the harness returned, sent back whole, or a record without a recordVersion that an older client kept or a client made for a new chat. The harness refuses a ThreadRecord with a member its version does not have.
@@ -4594,6 +4729,8 @@ extension Components {
                 internal var usage: Components.Schemas.MessageUsage?
                 /// - Remark: Generated from `#/components/schemas/SharedThread/MessagesPayload/annotations`.
                 internal var annotations: [Components.Schemas.Annotation]?
+                /// - Remark: Generated from `#/components/schemas/SharedThread/MessagesPayload/answers`.
+                internal var answers: [Components.Schemas.WidgetAnswers]?
                 /// - Remark: Generated from `#/components/schemas/SharedThread/MessagesPayload/AttachmentsPayload`.
                 internal struct AttachmentsPayloadPayload: Codable, Hashable, Sendable {
                     /// - Remark: Generated from `#/components/schemas/SharedThread/MessagesPayload/AttachmentsPayload/id`.
@@ -4678,6 +4815,7 @@ extension Components {
                 ///   - isInterrupted:
                 ///   - usage:
                 ///   - annotations:
+                ///   - answers:
                 ///   - attachments:
                 internal init(
                     id: Swift.String,
@@ -4692,6 +4830,7 @@ extension Components {
                     isInterrupted: Swift.Bool? = nil,
                     usage: Components.Schemas.MessageUsage? = nil,
                     annotations: [Components.Schemas.Annotation]? = nil,
+                    answers: [Components.Schemas.WidgetAnswers]? = nil,
                     attachments: Components.Schemas.SharedThread.MessagesPayloadPayload.AttachmentsPayload? = nil
                 ) {
                     self.id = id
@@ -4706,6 +4845,7 @@ extension Components {
                     self.isInterrupted = isInterrupted
                     self.usage = usage
                     self.annotations = annotations
+                    self.answers = answers
                     self.attachments = attachments
                 }
                 internal enum CodingKeys: String, CodingKey {
@@ -4721,6 +4861,7 @@ extension Components {
                     case isInterrupted
                     case usage
                     case annotations
+                    case answers
                     case attachments
                 }
             }
