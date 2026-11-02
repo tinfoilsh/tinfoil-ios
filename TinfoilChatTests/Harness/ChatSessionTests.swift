@@ -378,7 +378,7 @@ struct ChatSessionTests {
         #expect(session.answers(toolCallId: "q", saved: [:]) == ["q2": ["x", "y"]])
         #expect(session.answerSaveStatus(toolCallId: "q") == .saving)
         await fixture.transport.release()
-        await session.answersSaved(threadId)
+        try await session.answersSaved(threadId)
 
         let requests = await fixture.transport.requests
         #expect(requests.map(\.route) == [.messageAnswer, .messageAnswer])
@@ -421,7 +421,7 @@ struct ChatSessionTests {
         #expect(try await session.openChat(threadId, local: false) == .opened)
         session.answer(toolCallId: "q", questionId: "q1", optionIds: ["a"])
         #expect(session.answers(toolCallId: "q", saved: [:]) == ["q1": ["a"]])
-        await session.answersSaved(threadId)
+        try await session.answersSaved(threadId)
 
         let answer = try #require(await fixture.transport.requests.dropFirst().first)
         #expect(answer.route == .messageAnswer)

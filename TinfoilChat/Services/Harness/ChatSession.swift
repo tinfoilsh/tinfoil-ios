@@ -95,6 +95,8 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// The write of each chat's answers under way, which saves the changes
     /// made meanwhile once it returns.
     private var answerWrites: [String: Task<Void, Never>] = [:]
+    /// Why each chat's answers last could not be saved.
+    private var answerFailures: [String: any Error] = [:]
 
     private lazy var cloudStore = CloudThreads(account: account, list: list.cloud, attachments: attachments)
     private lazy var deviceStore = DeviceThreads(account: account, store: device, controller: controller, attachments: attachments, list: list.deviceEdits) { [weak self] in self?.markSaved($0) }
@@ -563,7 +565,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             do {
                 // The chat carries the answers picked so far once they are
                 // saved, so the turn sends them.
-                await answersSaved(threadId)
+                try await answersSaved(threadId)
                 guard shown() else {
                     unapply()
                     return false
@@ -995,10 +997,17 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         saveAnswers(threadId)
     }
 
-    /// Waits for the write of a chat's answers under way, and those of the
-    /// changes made meanwhile.
-    func answersSaved(_ threadId: String) async {
+    /// Waits until a chat's answers are saved: the write under way, those of
+    /// the changes made meanwhile, and those that could not be saved, which
+    /// are saved again. Throws why they still could not be, so a turn is not
+    /// sent without them.
+    func answersSaved(_ threadId: String) async throws {
+        if answerDrafts[threadId]?.failed == true {
+            answerDrafts[threadId]?.failed = false
+            saveAnswers(threadId)
+        }
         await answerWrites[threadId]?.value
+        if answerDrafts[threadId]?.failed == true, let failure = answerFailures[threadId] { throw failure }
     }
 
     /// Saves a chat's answers, one widget at a time, unless a write of them
@@ -1033,6 +1042,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             return false
         } catch {
             Self.logger.error("Failed to save the answers to a chat's questions: \(error, privacy: .public)")
+            answerFailures[threadId] = error
             answerDrafts[threadId]?.failed = true
             return false
         }
