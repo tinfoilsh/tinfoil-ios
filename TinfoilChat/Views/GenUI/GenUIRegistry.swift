@@ -28,6 +28,7 @@ final class GenUIRegistry {
             MessageComposeWidget(),
             SportsDataWidget(),
             MapWidget(),
+            QuestionsWidget(),
         ]
     ) {
         self.widgets = widgets

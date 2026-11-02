@@ -435,6 +435,38 @@ struct ChatSessionTests {
         #expect(await routes.next() == .get)
     }
 
+    @Test func submittedAnswersAreAMessageOfTheirOwn() async throws {
+        let question: [String: Any] = ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Quiz me"]
+        let window: [String: Any] = summary(messageCount: 2).merging([
+            "revision": "rev-1", "presetId": NSNull(), "flagged": false,
+            "messages": [question, questionsReply(answers: ["q1": ["b"]])], "hasOlder": false,
+        ]) { $1 }
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(window)])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        #expect(session.hasUnsentAnswers(toolCallId: "q", answers: ["q1": ["b"]]))
+
+        await fixture.transport.push(Answers.events([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_3", "instance": "i"],
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_3", "metadata": [:]],
+        ]))
+        await fixture.transport.hold()
+        let submitted = Task { await session.submitAnswers() }
+        await fixture.transport.arrived()
+        // The message shows the answers it sends, without text of its own.
+        let sent = try #require(session.state.messages.last)
+        #expect(sent.role.value1 == .user)
+        #expect(sent.content == "")
+        #expect(sent.answers?.first?.questions.map(\.answered) == [true, false])
+        #expect(sent.answers?.first?.questions.first?.selected.map(\.label) == ["Paris"])
+        let turn = try #require(await fixture.transport.requests.last)
+        #expect(turn.route == .turn)
+        #expect(turn.json["kind"] as? String == "send")
+        #expect(turn.json["content"] == nil)
+        await fixture.transport.release()
+        #expect(await submitted.value)
+    }
+
     @Test func aForkOpensOnceItsOpeningReturnsUnlessTheViewMoved() async throws {
         let forkId = "0000000000002_00000000-0000-4000-8000-000000000002"
         func window(_ id: String) -> [String: Any] {

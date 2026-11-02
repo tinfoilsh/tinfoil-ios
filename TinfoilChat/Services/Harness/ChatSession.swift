@@ -466,12 +466,18 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         return left
     }
 
-    /// The message a turn adds, under the id the harness stores it with. A
-    /// message queued behind a running reply shows in the queue instead.
+    /// The message a turn adds, under the id the harness stores it with,
+    /// with the answers it sends. A message queued behind a running reply
+    /// shows in the queue instead, and a turn with nothing to send adds none.
     private func sentMessage(_ turn: Turn) -> Components.Schemas.MessageRecord? {
         guard turn.kind == .send, state.status != .streaming, state.status != .queued else { return nil }
         let sent = (turn.attachments ?? []).compactMap(\.uploaded)
-        return Components.Schemas.MessageRecord(id: turn.clientRequestId, role: .named(.user), createdAt: StoredThread.timestamp(Date()), content: turn.content ?? "", quote: turn.quote, attachments: sent.isEmpty ? nil : sent)
+        let answers = QuestionAnswering.unsent(in: state.messages, changes: answerDrafts[turn.threadId]?.widgets.mapValues(\.changes) ?? [:])
+        guard !(turn.content ?? "").isEmpty || !(turn.quote ?? "").isEmpty || !sent.isEmpty || !answers.isEmpty else { return nil }
+        return Components.Schemas.MessageRecord(
+            id: turn.clientRequestId, role: .named(.user), createdAt: StoredThread.timestamp(Date()), content: turn.content ?? "", quote: turn.quote,
+            attachments: sent.isEmpty ? nil : sent, answers: answers.isEmpty ? nil : answers
+        )
     }
 
     /// A message as the view shows it, without its uploads' contents.
@@ -482,7 +488,8 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             isInterrupted: record.isInterrupted, usage: record.usage, annotations: record.annotations,
             attachments: record.attachments?.map {
                 Components.Schemas.AttachmentView(id: $0.id, kind: $0.kind, fileName: $0.fileName, mimeType: $0.mimeType, size: $0.size, thumbnail: $0.thumbnail, textContent: $0.textContent, description: $0.description)
-            }
+            },
+            answers: record.answers
         )
     }
 
@@ -590,6 +597,13 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             }
         }
         return await submit()
+    }
+
+    /// Sends the answers picked since the last message as a message of their
+    /// own, once those being saved are saved.
+    @discardableResult
+    func submitAnswers(options: TurnOptions? = nil) async -> Bool {
+        await send(TurnFields(kind: .send, options: options))
     }
 
     func cancel() async throws {

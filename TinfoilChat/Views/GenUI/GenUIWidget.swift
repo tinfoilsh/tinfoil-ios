@@ -12,6 +12,32 @@ import SwiftUI
 /// Read-only context passed to widgets as they render in a reply.
 struct GenUIRenderContext {
     let isDarkMode: Bool
+    /// The answers of a widget the user answers in place, and the actions on
+    /// them, while the reply is in an open chat.
+    var answering: GenUIAnswering? = nil
+}
+
+/// What a widget the user answers in place shows of its answers, as the
+/// chat holds them, and what the user can do with them now.
+struct GenUIAnswersState: Equatable {
+    /// The options picked, saved or not yet saved.
+    var answers: QuestionAnswers = [:]
+    var canAnswer = false
+    var saveStatus: AnswerSaveStatus?
+    /// The widget has answers the model has not read, and the chat can send
+    /// them now.
+    var canSubmit = false
+}
+
+/// A widget's answers and the actions on them, which the chat carries out.
+struct GenUIAnswering {
+    let state: GenUIAnswersState
+    /// Picks a question's options, or leaves it unanswered with nil.
+    let answer: (_ questionId: String, _ optionIds: [String]?) -> Void
+    /// Saves again the answers that could not be saved.
+    let retry: () -> Void
+    /// Sends the answers the model has not read.
+    let submit: () -> Void
 }
 
 /// Erased widget protocol used by the registry. Concrete widgets conform via

@@ -25,11 +25,12 @@ struct GenUIToolCallView: View {
     let isDarkMode: Bool
     let retryState: GenUIRetryState?
     let onRetry: (() -> Void)?
+    var answering: GenUIAnswering? = nil
 
     var body: some View {
         let widget = GenUIRegistry.shared.widget(named: toolCall.name)
         let parsedResult = parsedArgs(widget: widget)
-        let context = GenUIRenderContext(isDarkMode: isDarkMode)
+        let context = GenUIRenderContext(isDarkMode: isDarkMode, answering: answering)
 
         if isStreaming || retryState == .generating {
             return AnyView(streamingPlaceholder)
