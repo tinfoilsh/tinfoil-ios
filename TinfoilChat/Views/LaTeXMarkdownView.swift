@@ -1062,9 +1062,10 @@ enum MarkdownTableLayout {
 
 /// Places table cells, given in row-major order, on a grid. Each column is as
 /// wide as its widest cell's rendered single-line width, up to the
-/// responsive cap, and each row is as tall as its tallest cell at those
-/// widths. Measuring the rendered cells keeps the columns in step with the
-/// text's actual font, Dynamic Type size, and inline markdown.
+/// responsive cap, with the room the cap leaves going to the columns it
+/// wraps, and each row is as tall as its tallest cell at those widths.
+/// Measuring the rendered cells keeps the columns in step with the text's
+/// actual font, Dynamic Type size, and inline markdown.
 struct MarkdownTableGrid: Layout {
     typealias Tracks = (columnWidths: [CGFloat], rowHeights: [CGFloat])
 
