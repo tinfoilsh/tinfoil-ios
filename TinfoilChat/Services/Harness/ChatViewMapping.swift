@@ -78,7 +78,7 @@ enum ChatViewMapping {
                         segments.append(.urlFetch(fetchId: id))
                     }
                 } else {
-                    toolCalls.append(GenUIToolCall(id: toolCallId, name: block.name ?? "", arguments: block.arguments ?? ""))
+                    toolCalls.append(GenUIToolCall(id: toolCallId, name: block.name ?? "", arguments: block.arguments ?? "", answers: block.answers?.additionalProperties ?? [:]))
                     segments.append(.toolCall(toolCallId: toolCallId))
                 }
                 timeline.append(timelineBlock(block))

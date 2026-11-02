@@ -78,6 +78,8 @@ protocol ThreadStore: AnyObject {
     func fork(_ threadId: String, messageId: String) async throws -> String?
     func deleteMessage(_ threadId: String, messageId: String) async throws -> ThreadResult?
     func editReply(_ threadId: String, messageId: String, content: String) async throws -> ThreadResult?
+    /// Saves the options picked in a questions widget of a reply.
+    func answer(_ threadId: String, messageId: String, toolCallId: String, answers: AnswerChanges) async throws -> ThreadResult?
     func share(_ threadId: String) async throws -> String
     /// The audio of a message read aloud, as one stream.
     func speech(_ threadId: String, messageId: String) async throws -> HarnessResponse
@@ -257,7 +259,7 @@ final class CloudThreads: ThreadStore {
 
     /// The harness changes a stored chat's message and answers with its
     /// latest window.
-    private func change(_ route: HarnessRoute, _ request: MessageRequest) async throws -> ThreadResult {
+    private func change(_ route: HarnessRoute, _ request: some Encodable) async throws -> ThreadResult {
         let window: ThreadWindow = try await account.post(route, request)
         list.replace(summaryOf(window))
         return ThreadResult(window: window)
@@ -269,6 +271,10 @@ final class CloudThreads: ThreadStore {
 
     func editReply(_ threadId: String, messageId: String, content: String) async throws -> ThreadResult? {
         try await change(.messageUpdate, MessageRequest(threadId: threadId, messageId: messageId, content: content))
+    }
+
+    func answer(_ threadId: String, messageId: String, toolCallId: String, answers: AnswerChanges) async throws -> ThreadResult? {
+        try await change(.messageAnswer, AnswerRequest(threadId: threadId, messageId: messageId, toolCallId: toolCallId, answers: answers))
     }
 
     func share(_ threadId: String) async throws -> String {
@@ -449,6 +455,18 @@ final class DeviceThreads: ThreadStore {
     func editReply(_ threadId: String, messageId: String, content: String) async throws -> ThreadResult? {
         let changed = try await change(threadId, .messageUpdate) { sent in
             MessageRequest(threadId: threadId, messageId: messageId, content: content, local: true, thread: sent)
+        }
+        return changed.map { ThreadResult(window: $0.window) }
+    }
+
+    /// The chat on this device is sent with the settings this device holds.
+    func answer(_ threadId: String, messageId: String, toolCallId: String, answers: AnswerChanges) async throws -> ThreadResult? {
+        let profile = account.profile
+        let changed = try await change(threadId, .messageAnswer) { sent in
+            AnswerRequest(
+                threadId: threadId, messageId: messageId, toolCallId: toolCallId, answers: answers,
+                local: true, thread: sent, profile: ProfileFieldsInput(profile)
+            )
         }
         return changed.map { ThreadResult(window: $0.window) }
     }

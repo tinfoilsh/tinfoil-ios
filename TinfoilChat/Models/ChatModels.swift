@@ -316,6 +316,8 @@ struct GenUIToolCall: Equatable, Identifiable {
     let id: String
     let name: String
     let arguments: String
+    /// The answers the chat saved of a widget the user answers in place.
+    var answers: QuestionAnswers = [:]
 }
 
 /// A user message submitted while the assistant was busy, held until the

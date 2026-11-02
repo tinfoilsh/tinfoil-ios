@@ -96,6 +96,13 @@ struct ChatViewMappingTests {
         #expect(shown.segments == [.toolCall(toolCallId: "w")])
     }
 
+    @Test func aQuestionsWidgetCarriesTheAnswersTheChatSaved() throws {
+        let wire = try Self.reply([
+            ["id": "q", "type": "tool_call", "toolCallId": "q", "name": QuestionSet.widgetName, "arguments": "{}", "complete": true, "answers": ["q1": ["b"], "q2": ["x", "y"]]],
+        ])
+        #expect(ChatViewMapping.message(wire).toolCalls.first?.answers == ["q1": ["b"], "q2": ["x", "y"]])
+    }
+
     @Test func aUserMessageKeepsItsTextAndAttachments() throws {
         let wire = try Self.message([
             "id": "u", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Look",

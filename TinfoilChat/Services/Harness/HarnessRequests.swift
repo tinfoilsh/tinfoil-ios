@@ -267,6 +267,36 @@ struct MessageRequest: Encodable, Equatable, Sendable {
     }
 }
 
+/// The options picked in a questions widget of a reply, by question id:
+/// each question named takes its options, or is left unanswered when null,
+/// and the others keep their answers.
+struct AnswerRequest: Encodable, Equatable, Sendable {
+    var key: String?
+    var threadId: String
+    var messageId: String
+    var toolCallId: String
+    var answers: [String: Nullable<[String]>]
+    var local: Bool?
+    var thread: StoredThread?
+    var profile: ProfileFieldsInput?
+
+    private enum CodingKeys: String, CodingKey {
+        case key, threadId, messageId, toolCallId, answers, local, thread, profile
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(key, forKey: .key)
+        try container.encode(threadId, forKey: .threadId)
+        try container.encode(messageId, forKey: .messageId)
+        try container.encode(toolCallId, forKey: .toolCallId)
+        try container.encode(answers, forKey: .answers)
+        try container.encodeIfPresent(local, forKey: .local)
+        try container.encodeIfPresent(thread.map { JSONObject($0.fields) }, forKey: .thread)
+        try container.encodeIfPresent(profile, forKey: .profile)
+    }
+}
+
 /// A page of stored chats.
 struct ListRequest: Encodable, Equatable, Sendable {
     var key: String?

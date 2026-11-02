@@ -19,6 +19,8 @@ typealias ToolActivity = Components.Schemas.ToolActivity
 typealias CommittedReply = Components.Schemas.CommittedReply
 typealias HarnessSession = Components.Schemas.Session
 typealias ThreadWindow = Components.Schemas.ThreadWindow
+/// What a message sent of one questions widget's answers.
+typealias WidgetAnswers = Components.Schemas.WidgetAnswers
 
 /// The harness's routes. Every one is a POST.
 enum HarnessRoute: String, CaseIterable, Sendable {
@@ -47,6 +49,7 @@ enum HarnessRoute: String, CaseIterable, Sendable {
     case fork = "/v1/threads/fork"
     case messageDelete = "/v1/threads/messages/delete"
     case messageUpdate = "/v1/threads/messages/update"
+    case messageAnswer = "/v1/threads/messages/answer"
     case share = "/v1/threads/share"
     case shareStatus = "/v1/threads/share/status"
     case shareRevoke = "/v1/threads/share/revoke"
