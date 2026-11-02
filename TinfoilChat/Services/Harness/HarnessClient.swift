@@ -205,7 +205,7 @@ actor HarnessClient {
             if let credential { headers[HarnessHeader.inferenceKey] = credential }
             if let instance { headers[HarnessHeader.instance] = instance }
             if let lastEventId { headers[HarnessHeader.lastEventId] = String(lastEventId) }
-            let response = try await transport.send(HarnessRequest(route: route, headers: headers, body: body))
+            let response = try await send(HarnessRequest(route: route, headers: headers, body: body))
             guard response.sealed else { throw HarnessError(HarnessErrorBody.unsealedAnswer, status: nil) }
             if response.isSuccess { return response }
             // A refusal without the harness's error envelope, or one that
@@ -230,6 +230,20 @@ actor HarnessClient {
             throw HarnessError(detail, status: response.status)
         }
         throw HarnessError.unauthenticated
+    }
+
+    /// Sends a request, and once more when one that only reads lost its
+    /// connection. The system can hand a request a kept-open connection the
+    /// chat service closed meanwhile, as while the app was in the background,
+    /// and it does not send a POST again on its own.
+    private func send(_ request: HarnessRequest) async throws -> HarnessResponse {
+        do {
+            return try await transport.send(request)
+        } catch let error as HarnessError where error.urlErrorCode == .networkConnectionLost && request.route.onlyReads {
+            try Task.checkCancellation()
+            guard !disposed else { throw CancellationError() }
+            return try await transport.send(request)
+        }
     }
 
     /// An answer that is not the JSON the protocol describes is not one the

@@ -83,6 +83,20 @@ enum HarnessRoute: String, CaseIterable, Sendable {
         default: return false
         }
     }
+
+    /// The routes that change nothing the harness keeps, so a request can go
+    /// again when it is unknown whether the first one arrived. Following a
+    /// run is left to the run's own reconnecting.
+    var onlyReads: Bool {
+        switch self {
+        case .session, .changes, .profileGet, .keysCurrent, .list, .search, .get, .shareStatus, .shareOpen,
+             .transcript, .attachmentGet, .attachmentGetPublic, .projectsList, .projectsGet, .favicon,
+             .linkMetadata, .importStatus:
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 /// The events of a run's stream. A frame of another type is one a later
