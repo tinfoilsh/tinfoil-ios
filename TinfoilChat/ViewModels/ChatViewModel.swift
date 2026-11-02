@@ -1908,7 +1908,9 @@ class ChatViewModel: ObservableObject {
         }
         dismissKeyboard()
         scrollsToTurnOnStart = false
-        Task { await session.submitAnswers(options: turnOptions) }
+        guard let threadId = session.open.id else { return }
+        let options = turnOptions
+        Task { await session.submitAnswers(in: threadId, options: options) }
     }
 
     // MARK: - Verifier

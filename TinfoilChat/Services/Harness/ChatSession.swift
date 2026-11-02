@@ -602,10 +602,12 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     }
 
     /// Sends the answers picked since the last message as a message of their
-    /// own, once those being saved are saved.
+    /// own, once those being saved are saved, while the chat they were
+    /// submitted in is open.
     @discardableResult
-    func submitAnswers(options: TurnOptions? = nil) async -> Bool {
-        await send(TurnFields(kind: .send, options: options))
+    func submitAnswers(in threadId: String, options: TurnOptions? = nil) async -> Bool {
+        guard open.id == threadId else { return false }
+        return await send(TurnFields(kind: .send, options: options))
     }
 
     func cancel() async throws {

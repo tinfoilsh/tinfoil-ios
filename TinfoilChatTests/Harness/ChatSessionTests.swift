@@ -451,7 +451,7 @@ struct ChatSessionTests {
             ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_3", "metadata": [:]],
         ]))
         await fixture.transport.hold()
-        let submitted = Task { await session.submitAnswers() }
+        let submitted = Task { await session.submitAnswers(in: threadId) }
         await fixture.transport.arrived()
         // The message shows the answers it sends, without text of its own.
         let sent = try #require(session.state.messages.last)
