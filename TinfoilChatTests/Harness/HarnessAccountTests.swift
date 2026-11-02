@@ -200,6 +200,34 @@ struct HarnessAccountTests {
         #expect((account.profile["customPromptPresets"] as? [Any])?.count == 3)
     }
 
+    @Test(arguments: [true, false])
+    func aChangedPromptIsSentAsTheChangeOrWholeAsThisDeviceHasIt(updates: Bool) async throws {
+        var session = sessionAnswer
+        session["features"] = ["promptPresetEdits": true, "promptPresetUpdates": updates]
+        let preset: [String: Any] = ["id": "user:a", "name": "A", "model": "kimi-k3", "webSearchEnabled": false]
+        let (account, transport) = makeAccount(userId: "user-1", answers: [
+            Answers.json(session), Answers.json(["customPromptPresets": [preset]]), Answers.json(["customPromptPresets": [preset]]),
+        ])
+        try await account.refresh()
+
+        try await account.editPrompts(PromptEdits(update: [["id": "user:a", "name": "A2"]]))
+
+        let update = try #require(await transport.requests.last)
+        #expect(update.route == .profileUpdate)
+        if updates {
+            // Only what changed, so what another device saved since stays.
+            let sent = try #require(update.json["updatePromptPresets"] as? [[String: Any]])
+            #expect(sent.count == 1)
+            #expect(NSDictionary(dictionary: sent[0]) == NSDictionary(dictionary: ["id": "user:a", "name": "A2"]))
+            #expect(update.json["savePromptPresets"] == nil)
+        } else {
+            let sent = try #require(update.json["savePromptPresets"] as? [[String: Any]])
+            #expect(sent.count == 1)
+            #expect(NSDictionary(dictionary: sent[0]) == NSDictionary(dictionary: ["id": "user:a", "name": "A2", "model": "kimi-k3", "webSearchEnabled": false]))
+            #expect(update.json["updatePromptPresets"] == nil)
+        }
+    }
+
     @Test func aChatServiceWithoutPromptEditsIsSentNoPromptListBeforeTheSettingsLoad() async throws {
         let (account, transport) = makeAccount(userId: "user-1", answers: [
             Answers.json(sessionAnswer), Answers.refusal(503, code: "UPSTREAM_UNAVAILABLE", action: "retry"),

@@ -141,6 +141,9 @@ struct ProfileFieldsInput: Encodable, Equatable, Sendable {
 struct PromptEdits {
     /// Prompts to add, each replacing the one with its id where it stands.
     var save: [ProfileFields] = []
+    /// Changes to prompts, each setting the members it names on the prompt
+    /// with its id, and clearing those it names as null.
+    var update: [ProfileFields] = []
     /// Prompts to remove, which are then no longer favorites or the default.
     var delete: [String] = []
     var addFavorites: [String] = []
@@ -150,6 +153,7 @@ struct PromptEdits {
     var body: JSONObject {
         var members: [String: Any] = [:]
         if !save.isEmpty { members["savePromptPresets"] = save }
+        if !update.isEmpty { members["updatePromptPresets"] = update }
         if !delete.isEmpty { members["deletePromptPresetIds"] = delete }
         if !addFavorites.isEmpty { members["addFavoritePromptPresetIds"] = addFavorites }
         if !removeFavorites.isEmpty { members["removeFavoritePromptPresetIds"] = removeFavorites }
@@ -160,7 +164,7 @@ struct PromptEdits {
     /// them, so a change shows before the harness answers.
     func applied(to profile: ProfileFields) -> ProfileFields {
         var patch: ProfileFields = [:]
-        if !save.isEmpty || !delete.isEmpty {
+        if !save.isEmpty || !update.isEmpty || !delete.isEmpty {
             var presets = profile["customPromptPresets"] as? [Any] ?? []
             for preset in save {
                 if let index = presets.firstIndex(where: { Self.id(of: $0) == preset["id"] as? String }) {
@@ -168,6 +172,15 @@ struct PromptEdits {
                 } else {
                     presets.append(preset)
                 }
+            }
+            // A prompt another device deleted stays deleted.
+            for change in update {
+                guard let index = presets.firstIndex(where: { Self.id(of: $0) == change["id"] as? String }),
+                      var preset = presets[index] as? ProfileFields else { continue }
+                for (name, value) in change {
+                    if value is NSNull { preset.removeValue(forKey: name) } else { preset[name] = value }
+                }
+                presets[index] = preset
             }
             patch["customPromptPresets"] = presets.filter { preset in
                 guard let id = Self.id(of: preset) else { return true }

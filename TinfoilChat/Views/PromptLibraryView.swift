@@ -472,6 +472,8 @@ struct PromptEditorView: View {
     @State private var model: String?
     /// Web search choice, or nil for no override.
     @State private var webSearchEnabled: Bool?
+    /// The preset as the editor opened it, so saving sends only what changed.
+    @State private var opened: PromptPreset?
 
     /// Models offered for the override: Auto followed by the real chat models,
     /// the same list the chat's model picker shows.
@@ -560,6 +562,7 @@ struct PromptEditorView: View {
     private func loadExisting() {
         guard case .edit(let presetId) = target,
               let preset = profileManager.promptPreset(for: presetId) else { return }
+        opened = preset
         name = preset.name
         description = preset.description
         systemPrompt = stripSystemTags(preset.systemPrompt)
@@ -583,14 +586,13 @@ struct PromptEditorView: View {
                 webSearchEnabled: webSearchEnabled
             )
         case .edit(let presetId):
-            profileManager.updatePromptPreset(
-                id: presetId,
-                name: trimmedName,
-                description: trimmedDescription,
-                systemPrompt: wrappedPrompt,
-                model: model,
-                webSearchEnabled: webSearchEnabled
-            )
+            var changes = PromptPresetChanges()
+            if name != opened?.name { changes.name = trimmedName }
+            if description != opened?.description { changes.description = trimmedDescription }
+            if systemPrompt != opened.map({ stripSystemTags($0.systemPrompt) }) { changes.systemPrompt = wrappedPrompt }
+            if opened.map({ $0.model != model }) ?? true { changes.model = .some(model) }
+            if opened.map({ $0.webSearchEnabled != webSearchEnabled }) ?? true { changes.webSearchEnabled = .some(webSearchEnabled) }
+            profileManager.updatePromptPreset(id: presetId, changes)
         }
         dismiss()
     }
