@@ -1898,8 +1898,10 @@ class ChatViewModel: ObservableObject {
     }
 
     /// Tries the chat service again when it could not be verified or the
-    /// account's settings could not load.
+    /// account's settings could not load, and lists the chats again when
+    /// they could not be listed.
     private func retryClientSetupIfFailed() {
+        if session?.list.error != nil { session?.list.retry() }
         guard verification.error != nil || account?.profileFailed == true else { return }
         retryClientSetup()
     }

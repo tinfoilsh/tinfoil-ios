@@ -139,6 +139,40 @@ struct HarnessClientTests {
         #expect(error == HarnessError(HarnessErrorBody.unsealedAnswer, status: nil))
     }
 
+    @Test func aReadWhoseConnectionWasLostGoesOnceMore() async throws {
+        let transport = ScriptedTransport([
+            { _ in throw HarnessError(HarnessErrorBody.unreachable, urlErrorCode: .networkConnectionLost) },
+            Self.json(200, #"{"ok":true}"#),
+        ])
+        let credentials = ScriptedCredentials(identities: ["jwt"], access: [.success("key")])
+        let answer: Ok = try await Self.client(transport, credentials).post(.list, Input(threadId: "t"))
+        #expect(answer == Ok(ok: true))
+        #expect(await transport.requests.map(\.route) == [.list, .list])
+    }
+
+    @Test func aReadWhoseConnectionIsLostAgainFails() async throws {
+        let transport = ScriptedTransport([
+            { _ in throw HarnessError(HarnessErrorBody.unreachable, urlErrorCode: .networkConnectionLost) },
+            { _ in throw HarnessError(HarnessErrorBody.unreachable, urlErrorCode: .networkConnectionLost) },
+        ])
+        let credentials = ScriptedCredentials(identities: ["jwt"], access: [.success("key")])
+        let error = await Self.failure { let _: Ok = try await Self.client(transport, credentials).post(.list, Input(threadId: "t")) }
+        #expect(error == HarnessError(HarnessErrorBody.unreachable, urlErrorCode: .networkConnectionLost))
+        #expect(await transport.requests.count == 2)
+    }
+
+    @Test(arguments: [
+        (HarnessRoute.update, URLError.Code.networkConnectionLost),
+        (HarnessRoute.list, URLError.Code.notConnectedToInternet),
+    ])
+    func aChangeOrAnotherNetworkFailureIsNotSentAgain(_ route: HarnessRoute, _ network: URLError.Code) async throws {
+        let transport = ScriptedTransport([{ _ in throw HarnessError(HarnessErrorBody.unreachable, urlErrorCode: network) }])
+        let credentials = ScriptedCredentials(identities: ["jwt"], access: [.success("key")])
+        let error = await Self.failure { let _: Ok = try await Self.client(transport, credentials).post(route, Input(threadId: "t")) }
+        #expect(error == HarnessError(HarnessErrorBody.unreachable, urlErrorCode: network))
+        #expect(await transport.requests.count == 1)
+    }
+
     @Test func anAnswerThatIsNotTheProtocolsIsOneTheClientCannotRead() async throws {
         let transport = ScriptedTransport([Self.json(200, #"{"something":"else"}"#)])
         let credentials = ScriptedCredentials(identities: ["jwt"], access: [.success("key")])
