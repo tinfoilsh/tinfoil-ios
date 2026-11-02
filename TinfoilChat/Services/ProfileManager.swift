@@ -84,6 +84,20 @@ struct SyncedPromptPreset: Codable, Equatable {
     }
 }
 
+/// A change to a saved prompt: the fields it names. A setting named as nil
+/// is cleared.
+struct PromptPresetChanges: Equatable {
+    var name: String?
+    var description: String?
+    var systemPrompt: String?
+    var model: String??
+    var webSearchEnabled: Bool??
+
+    var isEmpty: Bool {
+        name == nil && description == nil && systemPrompt == nil && model == nil && webSearchEnabled == nil
+    }
+}
+
 @MainActor
 class ProfileManager: ObservableObject {
     static let shared = ProfileManager()
@@ -260,23 +274,6 @@ class ProfileManager: ObservableObject {
         return "\(PromptPreset.userIdPrefix)\(timestamp)-\(random)"
     }
 
-    /// The saved prompts as the profile holds them, each as its client
-    /// wrote it.
-    private var storedPromptPresets: [Any] {
-        account?.profile["customPromptPresets"] as? [Any] ?? []
-    }
-
-    /// The saved prompts with one prompt's fields changed, and a field set
-    /// to nil removed. The other prompts, and the members of the changed one
-    /// this client does not set, stay as the profile holds them.
-    nonisolated static func updatingPreset(_ id: String, in presets: [Any], with fields: [String: Any?]) -> [Any] {
-        presets.map { element in
-            guard var preset = element as? ProfileFields, preset["id"] as? String == id else { return element }
-            for (name, value) in fields { preset[name] = value }
-            return preset
-        }
-    }
-
     /// Create a new user preset and return its library representation.
     @discardableResult
     func createPromptPreset(
@@ -302,33 +299,34 @@ class ProfileManager: ObservableObject {
         return PromptPreset(from: preset)
     }
 
-    /// Update an existing user preset in place.
-    func updatePromptPreset(
-        id: String,
-        name: String,
-        description: String,
-        systemPrompt: String,
-        model: String?,
-        webSearchEnabled: Bool?
-    ) {
-        guard let index = customPromptPresets.firstIndex(where: { $0.id == id }) else { return }
+    /// Change the fields of a user preset that the changes name, so what
+    /// another device saved since this one read the preset stays.
+    func updatePromptPreset(id: String, _ changes: PromptPresetChanges) {
+        guard let index = customPromptPresets.firstIndex(where: { $0.id == id }), !changes.isEmpty else { return }
         let updatedAt = Date().timeIntervalSince1970 * 1000
-        customPromptPresets[index].name = name
-        customPromptPresets[index].description = description
-        customPromptPresets[index].systemPrompt = systemPrompt
-        customPromptPresets[index].model = model
-        customPromptPresets[index].webSearchEnabled = webSearchEnabled
+        var update: ProfileFields = ["id": id, "updatedAt": updatedAt]
+        if let name = changes.name {
+            customPromptPresets[index].name = name
+            update["name"] = name
+        }
+        if let description = changes.description {
+            customPromptPresets[index].description = description
+            update["description"] = description
+        }
+        if let systemPrompt = changes.systemPrompt {
+            customPromptPresets[index].systemPrompt = systemPrompt
+            update["systemPrompt"] = systemPrompt
+        }
+        if let model = changes.model {
+            customPromptPresets[index].model = model
+            update["model"] = model.map { $0 as Any } ?? NSNull()
+        }
+        if let webSearchEnabled = changes.webSearchEnabled {
+            customPromptPresets[index].webSearchEnabled = webSearchEnabled
+            update["webSearchEnabled"] = webSearchEnabled.map { $0 as Any } ?? NSNull()
+        }
         customPromptPresets[index].updatedAt = updatedAt
-        let presets = Self.updatingPreset(id, in: storedPromptPresets, with: [
-            "name": name,
-            "description": description,
-            "systemPrompt": systemPrompt,
-            "model": model,
-            "webSearchEnabled": webSearchEnabled,
-            "updatedAt": updatedAt,
-        ])
-        guard let edited = presets.lazy.compactMap({ $0 as? ProfileFields }).first(where: { $0["id"] as? String == id }) else { return }
-        edit(PromptEdits(save: [edited]))
+        edit(PromptEdits(update: [update]))
     }
 
     /// Delete a user preset, which is then no longer a favorite or the

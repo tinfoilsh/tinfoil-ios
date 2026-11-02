@@ -200,6 +200,53 @@ struct HarnessAccountTests {
         #expect((account.profile["customPromptPresets"] as? [Any])?.count == 3)
     }
 
+    @Test(arguments: [true, false])
+    func aChangedPromptIsSentAsTheChangeOrWholeAsThisDeviceHasIt(updates: Bool) async throws {
+        var session = sessionAnswer
+        session["features"] = ["promptPresetEdits": true, "promptPresetUpdates": updates]
+        let preset: [String: Any] = ["id": "user:a", "name": "A", "model": "kimi-k3", "webSearchEnabled": false]
+        var renamed = preset
+        renamed["name"] = "A2"
+        let (account, transport) = makeAccount(userId: "user-1", answers: [
+            Answers.json(session), Answers.json(["customPromptPresets": [preset]]), Answers.json(["customPromptPresets": [renamed]]),
+        ])
+        try await account.refresh()
+
+        try await account.editPrompts(PromptEdits(update: [["id": "user:a", "name": "A2"]]))
+
+        let update = try #require(await transport.requests.last)
+        #expect(update.route == .profileUpdate)
+        if updates {
+            // Only what changed, so what another device saved since stays.
+            let sent = try #require(update.json["updatePromptPresets"] as? [[String: Any]])
+            #expect(sent.count == 1)
+            #expect(NSDictionary(dictionary: sent[0]) == NSDictionary(dictionary: ["id": "user:a", "name": "A2"]))
+            #expect(update.json["savePromptPresets"] == nil)
+        } else {
+            let sent = try #require(update.json["savePromptPresets"] as? [[String: Any]])
+            #expect(sent.count == 1)
+            #expect(NSDictionary(dictionary: sent[0]) == NSDictionary(dictionary: ["id": "user:a", "name": "A2", "model": "kimi-k3", "webSearchEnabled": false]))
+            #expect(update.json["updatePromptPresets"] == nil)
+        }
+        let shown = try #require((account.profile["customPromptPresets"] as? [[String: Any]])?.first)
+        #expect(NSDictionary(dictionary: shown) == NSDictionary(dictionary: renamed))
+    }
+
+    @Test func aSignedOutCallersSettingsFromThePreviousAppUpgradeAsTheProfileTheHarnessAnswers() async throws {
+        let settings = MemoryProfileStorage()
+        settings.local = ["language": "Français", "customPromptPresets": [["id": "user:a", "name": "A"]]]
+        let upgraded: [String: Any] = ["language": "French", "customPromptPresets": [["id": "user:a", "name": "A", "systemPrompt": ""]]]
+        let (account, _) = makeAccount(userId: nil, answers: [Answers.json(sessionAnswer), Answers.json(["profile": upgraded])], settings: settings)
+
+        try await account.refresh()
+
+        #expect(settings.localProfileUpgraded)
+        #expect(settings.local["profile"] == nil)
+        #expect(settings.local["language"] as? String == "French")
+        #expect((settings.local["customPromptPresets"] as? [Any])?.count == 1)
+        #expect(account.profile["language"] as? String == "French")
+    }
+
     @Test func aChatServiceWithoutPromptEditsIsSentNoPromptListBeforeTheSettingsLoad() async throws {
         let (account, transport) = makeAccount(userId: "user-1", answers: [
             Answers.json(sessionAnswer), Answers.refusal(503, code: "UPSTREAM_UNAVAILABLE", action: "retry"),

@@ -378,7 +378,9 @@ final class HarnessAccount: ObservableObject {
                 guard !disposed else { return }
                 let current = try JSONSerialization.data(withJSONObject: try settings.loadLocalProfile(), options: [.sortedKeys])
                 guard current == sent else { return }
-                let fields = try Self.object(of: upgraded)
+                guard let fields = try Self.object(of: upgraded)["profile"] as? ProfileFields else {
+                    throw HarnessError.invalidResponse
+                }
                 let saved = try settings.saveLocalProfile(fields, replace: true)
                 if version == profileVersion { showProfile(saved) }
             } catch {
@@ -432,8 +434,19 @@ final class HarnessAccount: ObservableObject {
     func editPrompts(_ edits: PromptEdits) async throws -> ProfileFields {
         let patch = edits.applied(to: profile)
         guard cloud else { return try await saveProfile(patch, edits: nil) }
-        if session?.features.additionalProperties["promptPresetEdits"] == true {
-            return try await saveProfile(patch, edits: edits)
+        let features = session?.features.additionalProperties
+        if features?["promptPresetEdits"] == true {
+            guard features?["promptPresetUpdates"] != true, !edits.update.isEmpty else {
+                return try await saveProfile(patch, edits: edits)
+            }
+            // A chat service without updates takes each changed prompt
+            // whole, as this device has it.
+            let changed = Set(edits.update.compactMap { $0["id"] as? String })
+            var whole = edits
+            whole.update = []
+            whole.save += (patch["customPromptPresets"] as? [Any] ?? []).compactMap { $0 as? ProfileFields }
+                .filter { changed.contains($0["id"] as? String ?? "") }
+            return try await saveProfile(patch, edits: whole)
         }
         // A chat service without edits takes whole lists, which only the
         // loaded profile holds.

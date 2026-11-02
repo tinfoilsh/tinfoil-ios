@@ -5666,6 +5666,61 @@ extension Components {
                 case updatedAt
             }
         }
+        /// A change to a saved prompt, which sets only the members it names. A null model or webSearchEnabled clears that setting.
+        ///
+        /// - Remark: Generated from `#/components/schemas/PresetUpdate`.
+        internal struct PresetUpdate: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/PresetUpdate/id`.
+            internal var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/PresetUpdate/name`.
+            internal var name: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PresetUpdate/description`.
+            internal var description: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PresetUpdate/systemPrompt`.
+            internal var systemPrompt: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PresetUpdate/model`.
+            internal var model: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/PresetUpdate/webSearchEnabled`.
+            internal var webSearchEnabled: Swift.Bool?
+            /// - Remark: Generated from `#/components/schemas/PresetUpdate/updatedAt`.
+            internal var updatedAt: Components.Schemas.Json?
+            /// Creates a new `PresetUpdate`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - name:
+            ///   - description:
+            ///   - systemPrompt:
+            ///   - model:
+            ///   - webSearchEnabled:
+            ///   - updatedAt:
+            internal init(
+                id: Swift.String,
+                name: Swift.String? = nil,
+                description: Swift.String? = nil,
+                systemPrompt: Swift.String? = nil,
+                model: Swift.String? = nil,
+                webSearchEnabled: Swift.Bool? = nil,
+                updatedAt: Components.Schemas.Json? = nil
+            ) {
+                self.id = id
+                self.name = name
+                self.description = description
+                self.systemPrompt = systemPrompt
+                self.model = model
+                self.webSearchEnabled = webSearchEnabled
+                self.updatedAt = updatedAt
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case id
+                case name
+                case description
+                case systemPrompt
+                case model
+                case webSearchEnabled
+                case updatedAt
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/Project`.
         internal struct Project: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/Project/id`.

@@ -17,15 +17,13 @@ struct SavedPromptTests {
         ],
     ]
 
-    @Test func anEditRewritesOnlyThePromptItChanges() throws {
-        let updated = ProfileManager.updatingPreset("user:a", in: stored, with: [
-            "name": "Short",
-            "description": "",
-            "systemPrompt": "Be short.",
-            "model": nil,
-            "webSearchEnabled": true,
-            "updatedAt": 1_767_312_000_000.0,
+    @Test func anUpdateChangesOnlyTheMembersItNames() throws {
+        let edits = PromptEdits(update: [
+            ["id": "user:a", "name": "Short", "model": NSNull(), "webSearchEnabled": true, "updatedAt": 1_767_312_000_000.0],
+            // A prompt another device deleted stays deleted.
+            ["id": "user:gone", "name": "Back"],
         ])
+        let updated = try #require(edits.applied(to: ["customPromptPresets": stored])["customPromptPresets"] as? [Any])
 
         #expect(updated.count == 2)
         let untouched = try #require(updated[1] as? [String: Any])
@@ -33,7 +31,7 @@ struct SavedPromptTests {
 
         let edited = try #require(updated[0] as? [String: Any])
         #expect(edited["name"] as? String == "Short")
-        #expect(edited["systemPrompt"] as? String == "Be short.")
+        #expect(edited["systemPrompt"] as? String == "Be brief.")
         #expect(edited["webSearchEnabled"] as? Bool == true)
         #expect(edited["updatedAt"] as? Double == 1_767_312_000_000)
         #expect(edited["model"] == nil)
