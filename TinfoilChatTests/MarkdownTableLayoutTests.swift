@@ -26,6 +26,16 @@ struct MarkdownTableLayoutTests {
         #expect(width == 120)
     }
 
+    @Test("Gives the room the cap leaves to the columns it wraps")
+    func givesLeftoverRoomToWrappedColumns() {
+        // The short column keeps its width, and the long one wraps across the rest.
+        #expect(MarkdownTableLayout.columnWidths(intrinsic: [100, 500], availableWidth: 320) == [100, 220])
+        // A column that fits its text takes no more than it needs.
+        #expect(MarkdownTableLayout.columnWidths(intrinsic: [100, 180], availableWidth: 320) == [100, 180])
+        // A table wider than the screen at its caps keeps them, and scrolls.
+        #expect(MarkdownTableLayout.columnWidths(intrinsic: [300, 300, 300], availableWidth: 320) == [160, 160, 160])
+    }
+
     @Test("Preserves intrinsic width before container measurement")
     func preservesIntrinsicWidthWithoutAvailableWidth() {
         let width = MarkdownTableLayout.columnWidth(
@@ -79,16 +89,12 @@ struct MarkdownTableGridTests {
         #expect(abs(grid.height - singleLineHeight) < Self.pixelRoundingTolerance)
     }
 
-    @Test("Wraps a cell wider than the column cap onto more lines")
-    func wrapsCellsWiderThanTheCap() {
-        let text = "A cell long enough that it cannot fit on one line in half of a narrow table"
+    @Test("Wraps a cell wider than the table onto more lines across its full width")
+    func wrapsCellsWiderThanTheTable() {
+        let text = "A cell long enough that it cannot fit on one line in a narrow table"
         let availableWidth: CGFloat = 240
-        let cap = MarkdownTableLayout.columnWidth(
-            intrinsicWidth: .greatestFiniteMagnitude,
-            availableWidth: availableWidth
-        )
         let singleLine = fittingSize(of: Text(text), textSize: .large)
-        let wrapped = fittingSize(of: Text(text), textSize: .large, width: cap)
+        let wrapped = fittingSize(of: Text(text), textSize: .large, width: availableWidth)
 
         let grid = fittingSize(
             of: MarkdownTableGrid(columnCount: 1, availableWidth: availableWidth) {
@@ -97,7 +103,7 @@ struct MarkdownTableGridTests {
             textSize: .large
         )
 
-        #expect(abs(grid.width - cap) < Self.pixelRoundingTolerance)
+        #expect(abs(grid.width - availableWidth) < Self.pixelRoundingTolerance)
         #expect(abs(grid.height - wrapped.height) < Self.pixelRoundingTolerance)
         #expect(grid.height > singleLine.height)
     }
