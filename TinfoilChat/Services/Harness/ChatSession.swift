@@ -772,7 +772,12 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// A chat takes no changes until its move has ended, the open chat's
     /// reopening included.
     private func whileMoving<T>(_ threadId: String, _ move: @escaping () async throws -> T) async throws -> T {
-        let task = Task { try await move() }
+        // A move copies the chat as stored, so the answers picked in it are
+        // saved first.
+        let task = Task { [self] in
+            try await answersSaved(threadId)
+            return try await move()
+        }
         let tracked = Task<Void, Error> { _ = try await task.value }
         moving[threadId] = tracked
         defer { if moving[threadId] == tracked { moving[threadId] = nil } }
