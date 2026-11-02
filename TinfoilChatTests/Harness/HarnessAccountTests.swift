@@ -205,8 +205,10 @@ struct HarnessAccountTests {
         var session = sessionAnswer
         session["features"] = ["promptPresetEdits": true, "promptPresetUpdates": updates]
         let preset: [String: Any] = ["id": "user:a", "name": "A", "model": "kimi-k3", "webSearchEnabled": false]
+        var renamed = preset
+        renamed["name"] = "A2"
         let (account, transport) = makeAccount(userId: "user-1", answers: [
-            Answers.json(session), Answers.json(["customPromptPresets": [preset]]), Answers.json(["customPromptPresets": [preset]]),
+            Answers.json(session), Answers.json(["customPromptPresets": [preset]]), Answers.json(["customPromptPresets": [renamed]]),
         ])
         try await account.refresh()
 
@@ -226,6 +228,8 @@ struct HarnessAccountTests {
             #expect(NSDictionary(dictionary: sent[0]) == NSDictionary(dictionary: ["id": "user:a", "name": "A2", "model": "kimi-k3", "webSearchEnabled": false]))
             #expect(update.json["updatePromptPresets"] == nil)
         }
+        let shown = try #require((account.profile["customPromptPresets"] as? [[String: Any]])?.first)
+        #expect(NSDictionary(dictionary: shown) == NSDictionary(dictionary: renamed))
     }
 
     @Test func aSignedOutCallersSettingsFromThePreviousAppUpgradeAsTheProfileTheHarnessAnswers() async throws {

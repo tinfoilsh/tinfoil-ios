@@ -587,8 +587,8 @@ struct PromptEditorView: View {
             )
         case .edit(let presetId):
             var changes = PromptPresetChanges()
-            if name != opened?.name { changes.name = trimmedName }
-            if description != opened?.description { changes.description = trimmedDescription }
+            if trimmedName != opened?.name.trimmingCharacters(in: .whitespacesAndNewlines) { changes.name = trimmedName }
+            if trimmedDescription != opened?.description.trimmingCharacters(in: .whitespacesAndNewlines) { changes.description = trimmedDescription }
             if systemPrompt != opened.map({ stripSystemTags($0.systemPrompt) }) { changes.systemPrompt = wrappedPrompt }
             if opened.map({ $0.model != model }) ?? true { changes.model = .some(model) }
             if opened.map({ $0.webSearchEnabled != webSearchEnabled }) ?? true { changes.webSearchEnabled = .some(webSearchEnabled) }
