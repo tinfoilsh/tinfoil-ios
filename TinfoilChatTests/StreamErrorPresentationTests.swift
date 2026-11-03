@@ -62,6 +62,12 @@ struct StreamErrorPresentationTests {
         #expect(!shown.offersRetry)
     }
 
+    @Test func aChatWhoseEarlierMessagesCouldNotBeSummarizedOffersToTryAgain() {
+        let shown = StreamErrorPresentation(Self.error(HarnessErrorCode.compactionFailed, .retry), occurredAt: nil)
+        #expect(shown.kind == .compaction)
+        #expect(shown.offersRetry && !shown.resends)
+    }
+
     @Test func aConversationTooLongForTheModelAsksToChangeItRatherThanRetry() {
         let shown = StreamErrorPresentation(Self.error(HarnessErrorCode.contextTooLarge, .revise), occurredAt: nil)
         #expect(shown.kind == .contextLength && !shown.offersRetry)

@@ -48,6 +48,25 @@ struct ChatRowsTests {
         #expect(done.map(\.id) == waiting.map(\.id))
     }
 
+    @Test func aCompactionMarkerIsNoRowOfItsOwn() throws {
+        let rows = ChatRows()
+        let marker = try HarnessMessage(jsonObject: [
+            "id": "marker", "role": "compaction", "createdAt": "2026-01-01T00:00:02Z", "content": "## Goals and context\nA greeting.",
+            "compaction": ["messages": 2, "startedAt": 1767225600000, "endedAt": 1767225601000, "model": "gpt-oss-120b", "version": 1],
+        ])
+        let earlier = [try Self.user("u0", "Hi"), try Self.reply("r0", "Hello"), marker]
+        let sent = earlier + [try Self.user("client-1", "How are you?")]
+        let waiting = rows.rows(chatId: "c", messages: sent.shown, running: true, summaries: [:], replyModelName: nil)
+        #expect(waiting.map(\.role) == [.user, .assistant, .user, .assistant])
+        #expect(sent.markers().mapValues(\.id) == ["client-1": "marker"])
+
+        // The reply fills the row under the message the marker sits above.
+        let stored = earlier + [try Self.user("u1", "How are you?"), try Self.reply("r1", "Fine")]
+        let streaming = rows.rows(chatId: "c", messages: stored.shown, running: true, summaries: [:], replyModelName: nil)
+        #expect(streaming.map(\.id) == waiting.map(\.id))
+        #expect(stored.markers().mapValues(\.id) == ["u1": "marker"])
+    }
+
     @Test func aRegeneratedReplyWaitsInARowUnderItsMessage() throws {
         let rows = ChatRows()
         let message = try Self.user("u1", "Again")

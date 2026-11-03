@@ -68,6 +68,28 @@ struct StoredThreadTests {
         #expect(shown[1]["fileName"] as? String == "notes.pdf")
     }
 
+    @Test func aCompactionMarkerSurvivesTheWindowAndARoundTrip() throws {
+        let summary = "## Goals and context\nThe user showed a cat."
+        let marker: [String: Any] = [
+            "id": "c", "role": "compaction", "createdAt": "2026-01-01T00:00:30Z", "content": summary,
+            "compaction": ["messages": 2, "startedAt": 1767225600000, "endedAt": 1767225601000, "model": "gpt-oss-120b", "version": 1],
+        ]
+        let question: [String: Any] = ["id": "u2", "role": "user", "createdAt": "2026-01-01T00:00:40Z", "content": "And this one?"]
+        var record = Self.record
+        record["messages"] = (Self.record["messages"] as! [[String: Any]]) + [marker, question]
+        let thread = try #require(StoredThread(json: record))
+        let written = try JSONSerialization.jsonObject(with: thread.data()) as! NSDictionary
+        #expect(written == NSDictionary(dictionary: record))
+        // A marker is not one of the chat's messages.
+        #expect(thread.summary.messageCount == 3)
+        let window = thread.window
+        #expect(window.messages.map(\.id) == ["u", "a", "c", "u2"])
+        #expect(window.messages[2].compaction?.messages == 2)
+        let shown = ChatState(thread: window)
+        #expect(shown.messages.map(\.id) == ["u", "a", "u2"])
+        #expect(shown.markers["u2"]?.content == summary)
+    }
+
     @Test func heldImagesAreRestoredWhereTheHarnessLeftThemOut() throws {
         let thread = try #require(StoredThread(json: Self.record))
         let held = thread.heldImages

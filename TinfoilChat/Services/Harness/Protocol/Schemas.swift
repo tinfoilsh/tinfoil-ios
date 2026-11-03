@@ -309,6 +309,7 @@ extension Components {
                 case attachmentsUnavailable = "ATTACHMENTS_UNAVAILABLE"
                 case badRequest = "BAD_REQUEST"
                 case chatFlagged = "CHAT_FLAGGED"
+                case compactionFailed = "COMPACTION_FAILED"
                 case contextTooLarge = "CONTEXT_TOO_LARGE"
                 case credentialRequired = "CREDENTIAL_REQUIRED"
                 case importInvalid = "IMPORT_INVALID"
@@ -522,7 +523,7 @@ extension Components {
             internal var composer: Components.Schemas.Composer
             /// - Remark: Generated from `#/components/schemas/Session/presets`.
             internal var presets: [Components.Schemas.Preset]
-            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here.
+            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused.
             ///
             /// - Remark: Generated from `#/components/schemas/Session/features`.
             internal struct FeaturesPayload: Codable, Hashable, Sendable {
@@ -542,7 +543,7 @@ extension Components {
                     try encoder.encodeAdditionalProperties(additionalProperties)
                 }
             }
-            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here.
+            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused.
             ///
             /// - Remark: Generated from `#/components/schemas/Session/features`.
             internal var features: Components.Schemas.Session.FeaturesPayload
@@ -559,7 +560,7 @@ extension Components {
             ///   - profileDefaults:
             ///   - composer:
             ///   - presets:
-            ///   - features: Optional behaviors this harness offers. A client acts on a feature only when it is true here.
+            ///   - features: Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused.
             internal init(
                 _protocol: Components.Schemas.Session._ProtocolPayload,
                 user: Components.Schemas.Session.UserPayload,
@@ -1401,6 +1402,10 @@ extension Components {
             case activityDelta(Components.Schemas.ActivityDeltaEvent)
             /// - Remark: Generated from `#/components/schemas/HarnessEvent/ActivitySnapshotEvent`.
             case activitySnapshot(Components.Schemas.ActivitySnapshotEvent)
+            /// - Remark: Generated from `#/components/schemas/HarnessEvent/CompactionEndEvent`.
+            case compactionEnd(Components.Schemas.CompactionEndEvent)
+            /// - Remark: Generated from `#/components/schemas/HarnessEvent/CompactionStartEvent`.
+            case compactionStart(Components.Schemas.CompactionStartEvent)
             /// - Remark: Generated from `#/components/schemas/HarnessEvent/MessagesSnapshotEvent`.
             case messagesSnapshot(Components.Schemas.MessagesSnapshotEvent)
             /// - Remark: Generated from `#/components/schemas/HarnessEvent/ReasoningMessageChunkEvent`.
@@ -1441,6 +1446,10 @@ extension Components {
                     self = .activityDelta(try .init(from: decoder))
                 case "ACTIVITY_SNAPSHOT":
                     self = .activitySnapshot(try .init(from: decoder))
+                case "COMPACTION_END":
+                    self = .compactionEnd(try .init(from: decoder))
+                case "COMPACTION_START":
+                    self = .compactionStart(try .init(from: decoder))
                 case "MESSAGES_SNAPSHOT":
                     self = .messagesSnapshot(try .init(from: decoder))
                 case "REASONING_MESSAGE_CHUNK":
@@ -1480,6 +1489,10 @@ extension Components {
                 case let .activityDelta(value):
                     try value.encode(to: encoder)
                 case let .activitySnapshot(value):
+                    try value.encode(to: encoder)
+                case let .compactionEnd(value):
+                    try value.encode(to: encoder)
+                case let .compactionStart(value):
                     try value.encode(to: encoder)
                 case let .messagesSnapshot(value):
                     try value.encode(to: encoder)
@@ -2483,6 +2496,149 @@ extension Components {
                 }
             }
         }
+        /// Opens a compaction marker while its summary is written. A turn whose
+        /// prompt would not fit the share of the model's window a prompt may
+        /// fill summarizes every message before its question, from the chat's
+        /// latest marker on, into a new marker before that question. A run
+        /// compacts at most once, before its first model turn or between two of
+        /// them. A client shows the marker before the message beforeMessageId
+        /// names, and the messages before it as ones the model no longer reads.
+        ///
+        ///
+        /// - Remark: Generated from `#/components/schemas/CompactionStartEvent`.
+        internal struct CompactionStartEvent: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/CompactionStartEvent/type`.
+            internal var _type: OpenAPIRuntime.OpenAPIValueContainer
+            /// - Remark: Generated from `#/components/schemas/CompactionStartEvent/timestamp`.
+            internal var timestamp: Components.Schemas.Timestamp?
+            /// - Remark: Generated from `#/components/schemas/CompactionStartEvent/messageId`.
+            internal var messageId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/CompactionStartEvent/beforeMessageId`.
+            internal var beforeMessageId: Swift.String
+            /// Creates a new `CompactionStartEvent`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - timestamp:
+            ///   - messageId:
+            ///   - beforeMessageId:
+            internal init(
+                _type: OpenAPIRuntime.OpenAPIValueContainer,
+                timestamp: Components.Schemas.Timestamp? = nil,
+                messageId: Swift.String,
+                beforeMessageId: Swift.String
+            ) {
+                self._type = _type
+                self.timestamp = timestamp
+                self.messageId = messageId
+                self.beforeMessageId = beforeMessageId
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case timestamp
+                case messageId
+                case beforeMessageId
+            }
+        }
+        /// Closes a compaction marker. A completed one carries the marker, which the chat keeps even if the reply then fails, and is followed by a STATE_SNAPSHOT with the context the turn's prompt now fills. A client removes a failed one, after which the run ends with COMPACTION_FAILED.
+        ///
+        /// - Remark: Generated from `#/components/schemas/CompactionEndEvent`.
+        internal struct CompactionEndEvent: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/CompactionEndEvent/type`.
+            internal var _type: OpenAPIRuntime.OpenAPIValueContainer
+            /// - Remark: Generated from `#/components/schemas/CompactionEndEvent/timestamp`.
+            internal var timestamp: Components.Schemas.Timestamp?
+            /// - Remark: Generated from `#/components/schemas/CompactionEndEvent/messageId`.
+            internal var messageId: Swift.String
+            /// A client treats an outcome it does not know as failed.
+            ///
+            /// - Remark: Generated from `#/components/schemas/CompactionEndEvent/outcome`.
+            internal struct OutcomePayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/CompactionEndEvent/outcome/value1`.
+                internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case completed = "completed"
+                    case failed = "failed"
+                }
+                /// - Remark: Generated from `#/components/schemas/CompactionEndEvent/outcome/value1`.
+                internal var value1: Components.Schemas.CompactionEndEvent.OutcomePayload.Value1Payload?
+                /// - Remark: Generated from `#/components/schemas/CompactionEndEvent/outcome/value2`.
+                internal var value2: Swift.String?
+                /// Creates a new `OutcomePayload`.
+                ///
+                /// - Parameters:
+                ///   - value1:
+                ///   - value2:
+                internal init(
+                    value1: Components.Schemas.CompactionEndEvent.OutcomePayload.Value1Payload? = nil,
+                    value2: Swift.String? = nil
+                ) {
+                    self.value1 = value1
+                    self.value2 = value2
+                }
+                internal init(from decoder: any Swift.Decoder) throws {
+                    var errors: [any Swift.Error] = []
+                    do {
+                        self.value1 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    do {
+                        self.value2 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                        [
+                            self.value1,
+                            self.value2
+                        ],
+                        type: Self.self,
+                        codingPath: decoder.codingPath,
+                        errors: errors
+                    )
+                }
+                internal func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                        self.value1,
+                        self.value2
+                    ])
+                }
+            }
+            /// A client treats an outcome it does not know as failed.
+            ///
+            /// - Remark: Generated from `#/components/schemas/CompactionEndEvent/outcome`.
+            internal var outcome: Components.Schemas.CompactionEndEvent.OutcomePayload
+            /// - Remark: Generated from `#/components/schemas/CompactionEndEvent/marker`.
+            internal var marker: Components.Schemas.MessageView?
+            /// Creates a new `CompactionEndEvent`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - timestamp:
+            ///   - messageId:
+            ///   - outcome: A client treats an outcome it does not know as failed.
+            ///   - marker:
+            internal init(
+                _type: OpenAPIRuntime.OpenAPIValueContainer,
+                timestamp: Components.Schemas.Timestamp? = nil,
+                messageId: Swift.String,
+                outcome: Components.Schemas.CompactionEndEvent.OutcomePayload,
+                marker: Components.Schemas.MessageView? = nil
+            ) {
+                self._type = _type
+                self.timestamp = timestamp
+                self.messageId = messageId
+                self.outcome = outcome
+                self.marker = marker
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case timestamp
+                case messageId
+                case outcome
+                case marker
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/RunFinishedEvent`.
         internal struct RunFinishedEvent: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/RunFinishedEvent/type`.
@@ -2809,7 +2965,7 @@ extension Components {
                 ])
             }
         }
-        /// How much of the model's window the chat's last prompt filled.
+        /// What the chat's last prompt filled of the share of the model's window a prompt may fill. A prompt over that share compacts the chat, after which a run reports what its prompt fills then.
         ///
         /// - Remark: Generated from `#/components/schemas/ContextUsage`.
         internal struct ContextUsage: Codable, Hashable, Sendable {
@@ -3212,7 +3368,7 @@ extension Components {
             internal var role: Components.Schemas.Role
             /// - Remark: Generated from `#/components/schemas/MessageView/createdAt`.
             internal var createdAt: Swift.String
-            /// A question's text.
+            /// A question's text, or a compaction marker's summary.
             ///
             /// - Remark: Generated from `#/components/schemas/MessageView/content`.
             internal var content: Swift.String?
@@ -3240,13 +3396,15 @@ extension Components {
             ///
             /// - Remark: Generated from `#/components/schemas/MessageView/answers`.
             internal var answers: [Components.Schemas.WidgetAnswers]?
+            /// - Remark: Generated from `#/components/schemas/MessageView/compaction`.
+            internal var compaction: Components.Schemas.Compaction?
             /// Creates a new `MessageView`.
             ///
             /// - Parameters:
             ///   - id:
             ///   - role:
             ///   - createdAt:
-            ///   - content: A question's text.
+            ///   - content: A question's text, or a compaction marker's summary.
             ///   - timeline: A reply's steps.
             ///   - quote:
             ///   - model:
@@ -3257,6 +3415,7 @@ extension Components {
             ///   - annotations:
             ///   - attachments:
             ///   - answers: A question's answers to questions widgets, as it sent them to the model.
+            ///   - compaction:
             internal init(
                 id: Swift.String,
                 role: Components.Schemas.Role,
@@ -3271,7 +3430,8 @@ extension Components {
                 usage: Components.Schemas.MessageUsage? = nil,
                 annotations: [Components.Schemas.Annotation]? = nil,
                 attachments: [Components.Schemas.AttachmentView]? = nil,
-                answers: [Components.Schemas.WidgetAnswers]? = nil
+                answers: [Components.Schemas.WidgetAnswers]? = nil,
+                compaction: Components.Schemas.Compaction? = nil
             ) {
                 self.id = id
                 self.role = role
@@ -3287,6 +3447,7 @@ extension Components {
                 self.annotations = annotations
                 self.attachments = attachments
                 self.answers = answers
+                self.compaction = compaction
             }
             internal enum CodingKeys: String, CodingKey {
                 case id
@@ -3303,6 +3464,68 @@ extension Components {
                 case annotations
                 case attachments
                 case answers
+                case compaction
+            }
+        }
+        /// What a compaction marker records of its summary. A compaction marker
+        /// is a message of role compaction whose content summarizes every message
+        /// before it, which the model reads in their place. It always sits
+        /// directly before a question. A client shows the messages before a
+        /// chat's latest marker as ones the model no longer reads, and the marker
+        /// as a step the user can open to read the summary. The marker is not one
+        /// of the chat's messages: messageCount leaves it out, and a client offers
+        /// no action on it.
+        ///
+        ///
+        /// - Remark: Generated from `#/components/schemas/Compaction`.
+        internal struct Compaction: Codable, Hashable, Sendable {
+            /// How many messages the summary covers, those an earlier marker covered included.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Compaction/messages`.
+            internal var messages: Swift.Int
+            /// When the summary was started, in epoch milliseconds.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Compaction/startedAt`.
+            internal var startedAt: Swift.Double
+            /// When the summary was written, in epoch milliseconds.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Compaction/endedAt`.
+            internal var endedAt: Swift.Double
+            /// The model that wrote the summary.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Compaction/model`.
+            internal var model: Swift.String
+            /// The version of the instructions it was written under.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Compaction/version`.
+            internal var version: Swift.Int
+            /// Creates a new `Compaction`.
+            ///
+            /// - Parameters:
+            ///   - messages: How many messages the summary covers, those an earlier marker covered included.
+            ///   - startedAt: When the summary was started, in epoch milliseconds.
+            ///   - endedAt: When the summary was written, in epoch milliseconds.
+            ///   - model: The model that wrote the summary.
+            ///   - version: The version of the instructions it was written under.
+            internal init(
+                messages: Swift.Int,
+                startedAt: Swift.Double,
+                endedAt: Swift.Double,
+                model: Swift.String,
+                version: Swift.Int
+            ) {
+                self.messages = messages
+                self.startedAt = startedAt
+                self.endedAt = endedAt
+                self.model = model
+                self.version = version
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case messages
+                case startedAt
+                case endedAt
+                case model
+                case version
             }
         }
         /// What the user had answered of one questions widget when they sent a question, with the questions' text, so it reads the same however the widget changes later.
@@ -3396,7 +3619,7 @@ extension Components {
                 case label
             }
         }
-        /// Who wrote a message. A client leaves out a message whose role it does not know.
+        /// Who wrote a message, or compaction for a compaction marker. A client leaves out a message whose role it does not know.
         ///
         /// - Remark: Generated from `#/components/schemas/Role`.
         internal struct Role: Codable, Hashable, Sendable {
@@ -3404,6 +3627,7 @@ extension Components {
             internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
                 case user = "user"
                 case assistant = "assistant"
+                case compaction = "compaction"
             }
             /// - Remark: Generated from `#/components/schemas/Role/value1`.
             internal var value1: Components.Schemas.Role.Value1Payload?
@@ -4290,6 +4514,8 @@ extension Components {
             internal var isInterrupted: Swift.Bool?
             /// - Remark: Generated from `#/components/schemas/MessageRecord/answers`.
             internal var answers: [Components.Schemas.WidgetAnswers]?
+            /// - Remark: Generated from `#/components/schemas/MessageRecord/compaction`.
+            internal var compaction: Components.Schemas.Compaction?
             /// Creates a new `MessageRecord`.
             ///
             /// - Parameters:
@@ -4307,6 +4533,7 @@ extension Components {
             ///   - isError:
             ///   - isInterrupted:
             ///   - answers:
+            ///   - compaction:
             internal init(
                 id: Swift.String,
                 role: Components.Schemas.Role,
@@ -4321,7 +4548,8 @@ extension Components {
                 usage: Components.Schemas.MessageUsage? = nil,
                 isError: Swift.Bool? = nil,
                 isInterrupted: Swift.Bool? = nil,
-                answers: [Components.Schemas.WidgetAnswers]? = nil
+                answers: [Components.Schemas.WidgetAnswers]? = nil,
+                compaction: Components.Schemas.Compaction? = nil
             ) {
                 self.id = id
                 self.role = role
@@ -4337,6 +4565,7 @@ extension Components {
                 self.isError = isError
                 self.isInterrupted = isInterrupted
                 self.answers = answers
+                self.compaction = compaction
             }
             internal enum CodingKeys: String, CodingKey {
                 case id
@@ -4353,6 +4582,7 @@ extension Components {
                 case isError
                 case isInterrupted
                 case answers
+                case compaction
             }
         }
         /// A device chat as its client sends it: a ThreadRecord the harness returned, sent back whole, or a record without a recordVersion that an older client kept or a client made for a new chat. The harness refuses a ThreadRecord with a member its version does not have.
@@ -4691,7 +4921,7 @@ extension Components {
                 case thread
             }
         }
-        /// An opened share, whose attachments name the key that reads each blob.
+        /// An opened share, whose attachments name the key that reads each blob. A share holds the conversation without its compaction markers.
         ///
         /// - Remark: Generated from `#/components/schemas/SharedThread`.
         internal struct SharedThread: Codable, Hashable, Sendable {

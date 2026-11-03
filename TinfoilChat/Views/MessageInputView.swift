@@ -1639,7 +1639,7 @@ struct AddToSheetView: View {
                     HStack {
                         Label("Context Used", systemImage: "text.alignleft")
                         Spacer()
-                        ContextUsageIndicator(usage: contextUsage)
+                        ContextUsageIndicator(usage: contextUsage, compacts: viewModel.compactsChats)
                     }
                     .padding(.horizontal, 20)
                 }

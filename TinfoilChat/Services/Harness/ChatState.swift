@@ -16,6 +16,10 @@ struct ChatState: Equatable, Sendable {
 
     var snapshot: RunSnapshot
     var messages: [HarnessMessage]
+    /// The chat's compaction markers, which its messages leave out, by the
+    /// id of the message each one shows above. One whose summary is still
+    /// being written has no compaction member yet.
+    var markers: [String: HarnessMessage] = [:]
     var hasOlder: Bool
     var runId: String?
     var status: Status
@@ -42,10 +46,26 @@ struct ChatState: Equatable, Sendable {
     var isRunning: Bool { [.submitting, .streaming, .queued].contains(status) }
     var isStopping: Bool { isRunning && stopping }
 
+    /// The messages with each compaction marker before the message it shows
+    /// above, as the harness keeps them.
+    var messagesWithMarkers: [HarnessMessage] {
+        messages.flatMap { message -> [HarnessMessage] in
+            markers[message.id].map { [$0, message] } ?? [message]
+        }
+    }
+
+    /// The messages before the chat's latest compaction marker whose summary
+    /// was written, which the model reads that summary in place of.
+    var summarizedIds: Set<String> {
+        guard let latest = messages.lastIndex(where: { markers[$0.id]?.compaction != nil }) else { return [] }
+        return Set(messages[..<latest].map(\.id))
+    }
+
     /// The state before any run, of a chat as it was loaded, or of a new one.
     init(thread: ThreadWindow? = nil) {
         snapshot = RunSnapshot(thread: thread.map(ThreadSummary.init(of:)))
         messages = thread?.messages.shown ?? []
+        markers = thread?.messages.markers() ?? [:]
         hasOlder = thread?.hasOlder ?? false
         status = .idle
         flagged = thread?.flagged ?? false

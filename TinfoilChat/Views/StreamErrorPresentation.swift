@@ -7,7 +7,7 @@ import Foundation
 /// for logs; the card shows it only as details.
 struct StreamErrorPresentation: Equatable {
     enum Kind: Equatable {
-        case connection, verification, auth, key, rateLimit, busy, queueFull, contextLength, tooLarge, model, document, server, storage, revise, refused, unfinished
+        case connection, verification, auth, key, rateLimit, busy, queueFull, contextLength, compaction, tooLarge, model, document, server, storage, revise, refused, unfinished
     }
 
     let kind: Kind
@@ -98,6 +98,10 @@ struct StreamErrorPresentation: Equatable {
         .contextLength, "This conversation is too long for the model",
         "Remove an attachment, shorten your message, or switch to a model with a larger context window."
     )
+    private static let compaction = StreamErrorPresentation(
+        .compaction, "Couldn't summarize earlier messages",
+        "Earlier messages are summarized to make room for new ones. Try again. \(notLost)"
+    )
     private static let storage = StreamErrorPresentation(
         .storage, "This chat could not be saved on this device",
         "The reply arrived, but this device could not store it, so it may be missing when the chat is opened again."
@@ -126,6 +130,7 @@ struct StreamErrorPresentation: Equatable {
         case HarnessErrorCode.rateLimited: return busy
         case HarnessErrorCode.queueFull: return queueFull
         case HarnessErrorCode.contextTooLarge: return contextLength
+        case HarnessErrorCode.compactionFailed: return compaction
         case HarnessErrorCode.threadTooLarge: return tooLarge
         case HarnessErrorCode.modelUnavailable: return model
         case HarnessErrorCode.localSaveFailed: return storage

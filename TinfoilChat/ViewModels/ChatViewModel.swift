@@ -724,6 +724,12 @@ class ChatViewModel: ObservableObject {
         account?.session?.features.additionalProperties["webSearch"] == true
     }
 
+    /// The chat service summarizes a chat's earlier messages once its prompt
+    /// would outgrow the model's window, rather than refusing the turn.
+    var compactsChats: Bool {
+        account?.session?.features.additionalProperties["compaction"] == true
+    }
+
     // MARK: - Safeguards
 
     private func bindSafeguardsStore() {
@@ -819,6 +825,7 @@ class ChatViewModel: ObservableObject {
         @MainActor init(_ session: ChatSession, rows: [Message]) {
             var state = session.state
             state.messages = []
+            state.markers = [:]
             state.summaries = [:]
             state.cursors = [:]
             self.state = state
@@ -1107,12 +1114,17 @@ class ChatViewModel: ObservableObject {
         // answering.
         let stopping = session.stopping
         let stoppedId = stopping ? state.messages.last?.id : nil
+        let summarized = state.summarizedIds
         var messages = rows.rows(chatId: open.id, messages: state.messages, running: running && !stopping, summaries: state.summaries, replyModelName: replyModelName).map { message -> Message in
             var view = message
             // A reply the user stopped here says so, until a continuation
             // finishes it.
             let id = rows.messageId(ofRow: view.id)
             if view.role == .assistant, id == stoppedId || (view.replyStop != nil && canceled.contains(id)) { view.replyStop = .canceledByUser }
+            // A compaction marker shows above the message after it; one whose
+            // summary is still being written shows while its run goes on.
+            if let marker = state.markers[id], marker.compaction != nil || running { view.compaction = ChatViewMapping.compaction(marker) }
+            view.isOutOfContext = summarized.contains(id)
             if open.onDevice, !view.attachments.isEmpty {
                 // An image the previous client stored without a thumbnail
                 // shows its bytes; others load them when opened.

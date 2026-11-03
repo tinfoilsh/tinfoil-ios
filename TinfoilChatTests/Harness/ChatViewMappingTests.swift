@@ -206,4 +206,20 @@ struct ChatViewMappingTests {
         // A run this app streams is live without a deadline.
         #expect(ActiveRun(runId: "r", expiresAt: "", instance: "").isLive(at: deadline))
     }
+
+    @Test func aCompactionMarkerShowsItsSummaryOnceWrittenAndRunsUntilThen() throws {
+        let written = try Self.message([
+            "id": "c", "role": "compaction", "createdAt": "2026-01-01T00:00:05Z", "content": "## Goals and context\nA cat.",
+            "compaction": ["messages": 4, "startedAt": 1767225600000, "endedAt": 1767225603000, "model": "gpt-oss-120b", "version": 1],
+        ])
+        #expect(ChatViewMapping.compaction(written) == CompactionMarker(
+            id: "c", summary: "## Goals and context\nA cat.", coveredMessages: 4, isRunning: false, startedAt: 1767225600000
+        ))
+        // A summary still being written counts from when its marker opened.
+        let opened = try Self.message(["id": "c", "role": "compaction", "createdAt": "2026-01-01T00:00:05Z"])
+        let running = ChatViewMapping.compaction(opened)
+        #expect(running.isRunning)
+        #expect(running.coveredMessages == nil)
+        #expect(running.startedAt == 1767225605000)
+    }
 }

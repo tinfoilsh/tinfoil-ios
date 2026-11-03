@@ -525,6 +525,16 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         }
     }
 
+    /// The compaction markers of messages a turn changed: a message it
+    /// replaces, as an edit replaces its question, keeps the marker above it.
+    private static func keptMarkers(_ markers: [String: HarnessMessage], of messages: [HarnessMessage], replacedBy applied: [HarnessMessage]) -> [String: HarnessMessage] {
+        var kept = markers
+        for (index, message) in applied.enumerated() where messages.indices.contains(index) && messages[index].id != message.id {
+            if let marker = markers[messages[index].id] { kept[message.id] = marker }
+        }
+        return kept
+    }
+
     /// Sends a turn of the open chat. Returns whether its run finished
     /// while the view still showed the chat.
     @discardableResult
@@ -556,14 +566,15 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         fields.options = fields.options.flatMap { leaveToPreset($0, choice) }
         let shown = controller.track()
         let before = state.messages
+        let markers = state.markers
         let sent = sentMessage(fields.applied(to: defaults))
         if let sent { controller.updateView { $0.messages.append(shownMessage(sent)) } }
         let applied = appliedTurn(fields.applied(to: defaults))
-        if let applied { controller.updateView { $0.messages = applied } }
+        if let applied { controller.updateView { $0.markers = Self.keptMarkers($0.markers, of: $0.messages, replacedBy: applied); $0.messages = applied } }
         // A turn that did not start leaves the chat as the harness stores it.
         let unapply = { [weak self] in
             guard let self, let applied, shown(), state.messages == applied else { return }
-            controller.updateView { $0.messages = before }
+            controller.updateView { $0.messages = before; $0.markers = markers }
         }
         let status = state.status
         let submission = status == .streaming || status == .queued ? nil : Submission(threadId: threadId)
@@ -920,14 +931,17 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         _ changeLoaded: @escaping ([HarnessMessage], String) -> [HarnessMessage]
     ) async throws {
         let before = state.messages
+        let markers = state.markers
         guard let threadId = open.id, before.indices.contains(index), moving[threadId] == nil else { return }
         let messageId = before[index].id
         let shown = controller.track()
-        let changed = changeLoaded(before, messageId)
-        controller.updateView { $0.messages = changed }
+        // A change applies to the messages with their compaction markers, as
+        // the harness keeps them.
+        let changed = changeLoaded(state.messagesWithMarkers, messageId)
+        controller.updateView { $0.messages = changed.shown; $0.markers = changed.markers() }
         let undo = { [weak self] in
-            guard let self, shown(), state.messages == changed else { return }
-            controller.updateView { $0.messages = before }
+            guard let self, shown(), state.messages == changed.shown else { return }
+            controller.updateView { $0.messages = before; $0.markers = markers }
         }
         let result: ThreadResult?
         do {
@@ -943,12 +957,22 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         guard shown() else { return }
         controller.updateView { state in
             var loaded = state
-            loaded.messages = changeLoaded(state.messages, messageId)
+            let reapplied = changeLoaded(state.messagesWithMarkers, messageId)
+            loaded.messages = reapplied.shown
+            loaded.markers = reapplied.markers()
             let shown = ChatReducer.afterLoaded(loaded, result.window.messages, hasOlder: result.window.hasOlder)
             state.messages = shown.messages
             state.hasOlder = shown.hasOlder
+            state.markers = shown.markers
             state.snapshot.thread = ThreadSummary(of: result.window)
         }
+    }
+
+    /// The messages without the compaction markers from `start` on, as the
+    /// harness removes the markers whose summaries covered a message it
+    /// deletes or rewrites.
+    private static func withoutMarkers(_ messages: [HarnessMessage], from start: Int) -> [HarnessMessage] {
+        Array(messages[..<start]) + messages[start...].filter { $0.role.value1 != .compaction }
     }
 
     /// Removes one message; its reply, or the message it answers, stays. A
@@ -958,7 +982,10 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         try await changeMessage(at: index) { store, threadId, messageId in
             try await store.deleteMessage(threadId, messageId: messageId)
         } _: { messages, messageId in
-            messages.filter { $0.id != messageId }
+            guard let position = messages.firstIndex(where: { $0.id == messageId }) else { return messages }
+            var kept = messages
+            kept.remove(at: position)
+            return Self.withoutMarkers(kept, from: position)
         }
     }
 
@@ -968,7 +995,9 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         try await changeMessage(at: index) { store, threadId, messageId in
             try await store.editReply(threadId, messageId: messageId, content: content)
         } _: { messages, messageId in
-            messages.map { $0.id == messageId ? Self.rewrittenReply($0, content) : $0 }
+            let rewritten = messages.map { $0.id == messageId ? Self.rewrittenReply($0, content) : $0 }
+            guard let position = messages.firstIndex(where: { $0.id == messageId }) else { return rewritten }
+            return Self.withoutMarkers(rewritten, from: position + 1)
         }
     }
 
@@ -1142,7 +1171,11 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             let page = try await storeOf(threadId).older(threadId, before: before)
             guard shown() else { return }
             let earlier = page.messages.shown.filter { message in !state.messages.contains { $0.id == message.id } }
-            controller.updateView { $0.messages = earlier + $0.messages; $0.hasOlder = page.hasOlder }
+            controller.updateView { state in
+                state.markers.merge(page.messages.markers(before: state.messages.first?.id)) { kept, _ in kept }
+                state.messages = earlier + state.messages
+                state.hasOlder = page.hasOlder
+            }
             guard let first = page.messages.first?.id, first != before else { return }
             before = first
         }

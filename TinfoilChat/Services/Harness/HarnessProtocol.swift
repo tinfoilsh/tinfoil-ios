@@ -118,6 +118,8 @@ enum HarnessEventType: String, CaseIterable, Sendable {
     case toolCallResult = "TOOL_CALL_RESULT"
     case activitySnapshot = "ACTIVITY_SNAPSHOT"
     case activityDelta = "ACTIVITY_DELTA"
+    case compactionStart = "COMPACTION_START"
+    case compactionEnd = "COMPACTION_END"
     case runFinished = "RUN_FINISHED"
     case runError = "RUN_ERROR"
 }
@@ -162,6 +164,9 @@ enum HarnessErrorCode {
     static let queueFull = "QUEUE_FULL"
     /// The turn does not fit the model's context window.
     static let contextTooLarge = "CONTEXT_TOO_LARGE"
+    /// The chat's earlier messages could not be summarized to make room for
+    /// the turn.
+    static let compactionFailed = "COMPACTION_FAILED"
     /// The chat is too large to store.
     static let threadTooLarge = "THREAD_TOO_LARGE"
     static let modelUnavailable = "MODEL_UNAVAILABLE"
@@ -216,8 +221,30 @@ extension Components.Schemas.RateLimit.KindPayload: OpenValue {}
 
 extension Array where Element == HarnessMessage {
     /// The messages a chat shows: a message whose role this client does not
-    /// know is left out, as the protocol says.
-    var shown: [HarnessMessage] { filter { $0.role.value1 != nil } }
+    /// know is left out, as the protocol says, and a compaction marker shows
+    /// above the message after it rather than as a message of its own.
+    var shown: [HarnessMessage] { filter { $0.role.value1 != nil && $0.role.value1 != .compaction } }
+
+    /// The compaction markers among the messages, by the id of the message
+    /// each one sits before. One after the last of them sits before
+    /// `following`, the message they come before, when it is named.
+    func markers(before following: String? = nil) -> [String: HarnessMessage] {
+        var markers: [String: HarnessMessage] = [:]
+        var open: HarnessMessage?
+        for message in self {
+            switch message.role.value1 {
+            case .compaction:
+                open = message
+            case nil:
+                continue
+            default:
+                if let marker = open { markers[message.id] = marker }
+                open = nil
+            }
+        }
+        if let marker = open, let following { markers[following] = marker }
+        return markers
+    }
 }
 
 extension ErrorAction {

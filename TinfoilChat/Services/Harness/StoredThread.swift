@@ -163,7 +163,8 @@ struct StoredThread: Equatable, Sendable {
             pinned: false,
             contextUsage: contextUsage,
             activeRun: nil,
-            messageCount: messages.count,
+            // A compaction marker is not one of the chat's messages.
+            messageCount: messages.filter { $0.objectValue?["role"]?.stringValue != Components.Schemas.Role.Value1Payload.compaction.rawValue }.count,
             flagged: flagged ? true : nil
         )
     }

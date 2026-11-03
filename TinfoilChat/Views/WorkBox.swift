@@ -326,6 +326,8 @@ struct WorkHeader: View {
     let isExpanded: Bool
     let detailsName: String
     let isDarkMode: Bool
+    /// What VoiceOver says of the header in place of its text, if anything.
+    var spokenText: String? = nil
     let onToggle: () -> Void
 
     @State private var shownAt = Date()
@@ -374,7 +376,7 @@ struct WorkHeader: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(NoHighlightButtonStyle())
-        .accessibilityLabel(elapsed.map { "\(label.text), \(ElapsedTime.spokenLabel($0))" } ?? label.text)
+        .accessibilityLabel(spokenText ?? elapsed.map { "\(label.text), \(ElapsedTime.spokenLabel($0))" } ?? label.text)
         .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
         .accessibilityHint(isExpanded ? "Hides the \(detailsName)" : "Shows the \(detailsName)")
     }
@@ -506,6 +508,53 @@ struct WorkBox: View {
             }
         }
         .padding(.horizontal, Constants.UI.WorkSteps.boxPadding)
+    }
+}
+
+extension CompactionMarker {
+    /// What the marker's header says: that the chat is being compacted while
+    /// its summary is written, and how many messages the summary covers once
+    /// it is.
+    var label: WorkLabel {
+        guard !isRunning else { return WorkLabel(text: "Compacting conversation", tone: .live, shimmers: true) }
+        guard let coveredMessages else { return WorkLabel(text: "Compacted earlier messages", tone: .settled) }
+        return WorkLabel(text: "Compacted \(coveredMessages) earlier message\(coveredMessages == 1 ? "" : "s")", tone: .settled)
+    }
+}
+
+/// A compaction marker above the message after it: a header saying the
+/// chat's earlier messages were summarized, which opens the summary the
+/// model reads in their place.
+struct CompactionBox: View {
+    let marker: CompactionMarker
+    let isDarkMode: Bool
+    @ObservedObject var expansion: WorkStepExpansion
+
+    var body: some View {
+        let isExpanded = expansion.isExpanded(marker.id)
+        VStack(alignment: .leading, spacing: 0) {
+            WorkHeader(
+                label: marker.label,
+                isActive: marker.isRunning,
+                startedAt: marker.startedAt,
+                isExpanded: isExpanded,
+                detailsName: "summary",
+                isDarkMode: isDarkMode,
+                spokenText: marker.isRunning ? nil : Constants.Accessibility.summarizedMessagesSeparator,
+                onToggle: { expansion.toggle(marker.id) }
+            )
+            if isExpanded && !marker.isRunning {
+                VStack(alignment: .leading, spacing: Constants.UI.Compaction.noteSpacing) {
+                    LaTeXMarkdownView(content: marker.summary, isDarkMode: isDarkMode)
+                        .equatable()
+                    Text("The assistant now reads this summary instead of the messages above.")
+                        .font(.caption)
+                        .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                }
+                .padding(Constants.UI.WorkSteps.boxPadding)
+                .workStepsBox(isDarkMode: isDarkMode)
+            }
+        }
     }
 }
 
