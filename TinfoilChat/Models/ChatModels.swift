@@ -525,3 +525,8 @@ struct RateLimitInfo: Equatable {
         return remaining <= 0
     }
 }
+
+extension HarnessRateLimit {
+    /// The quota is of a kind this client shows.
+    var isShown: Bool { RateLimitInfo(self) != nil }
+}

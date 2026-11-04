@@ -40,16 +40,15 @@ struct RunControllerTests {
         ["type": "RUN_FINISHED", "timestamp": "2026-01-01T00:00:02Z", "threadId": "t", "runId": "run_1", "metadata": [:]],
     ]
 
-    /// A controller for a signed-out account whose requests go to transport,
-    /// and whose waits before rejoining a run go to waits.
-    private static func controller(_ transport: ScriptedTransport, waits: Waits = Waits()) -> RunController {
+    /// A signed-out account whose requests go to transport.
+    private static func account(_ transport: ScriptedTransport) -> HarnessAccount {
         let controlPlane = FreeKeyControlPlane()
         let credentials = HarnessCredentialProvider(
             identity: { _ in nil },
             chatAccess: ChatAccessCache(controlPlane: controlPlane) { _ in },
             anonymousAccess: AnonymousAccessCache(controlPlane: controlPlane)
         )
-        let account = HarnessAccount(
+        return HarnessAccount(
             userId: nil,
             client: HarnessClient(credentials: credentials, transport: transport, languages: { ["en"] }),
             credentials: credentials,
@@ -57,7 +56,12 @@ struct RunControllerTests {
             settings: MemoryProfileStorage(),
             cloudSync: false
         )
-        return RunController(account: account, receipts: nil) { waits.wait($0) }
+    }
+
+    /// A controller for a signed-out account whose requests go to transport,
+    /// and whose waits before rejoining a run go to waits.
+    private static func controller(_ transport: ScriptedTransport, waits: Waits = Waits()) -> RunController {
+        RunController(account: account(transport), receipts: nil) { waits.wait($0) }
     }
 
     private static func turn() -> Turn {
@@ -198,5 +202,22 @@ struct RunControllerTests {
         #expect(!finished)
         #expect(await transport.requests.count == 1)
         #expect(controller.view.status == .error)
+    }
+
+    @Test func aRunThatReportsAQuotaOfAKindThisClientDoesNotKnowSpendsTheHourlyBudget() async throws {
+        let transport = ScriptedTransport([Answers.events(Self.frames + [
+            ["type": "RUN_FINISHED", "timestamp": "2026-01-01T00:00:02Z", "threadId": "t", "runId": "run_1", "metadata": [
+                "rateLimit": ["kind": "monthly", "maxRequests": 100, "remaining": 50],
+                "usage": ["prompt_tokens": 100_000, "completion_tokens": 0, "total_tokens": 100_000],
+            ]],
+        ])])
+        let account = Self.account(transport)
+        // The hourly budget the account's chat access reported.
+        account.reportMintedRateLimit(HarnessRateLimit(kind: .named(.hourly), inputTokens: .init(max: 2_000_000, used: 500_000, remaining: 1_500_000)))
+        let controller = RunController(account: account, receipts: nil)
+
+        #expect(await controller.run(.turn, .turn(Self.turn())))
+
+        #expect(account.rateLimit == HarnessRateLimit(kind: .named(.hourly), inputTokens: .init(max: 2_000_000, used: 600_000, remaining: 1_400_000)))
     }
 }

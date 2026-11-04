@@ -426,17 +426,19 @@ final class RunController: ObservableObject {
         account.reportRateLimit(detail.rateLimit)
     }
 
-    /// The quota a run reports as it starts and as it ends.
+    /// The quota a run reports as it starts and as it ends. A run that ends
+    /// reporting no quota this client shows spends the hourly budget the
+    /// chat access reported.
     private func reportQuota(_ event: RunEvent) {
         switch event {
         case .stateSnapshot(let snapshot):
             account.reportRateLimit(snapshot.snapshot.rateLimit)
         case .runFinished(let finished):
             account.reportRateLimit(finished.metadata.rateLimit)
-            if finished.metadata.rateLimit?.kind == nil { account.reportUsage(finished.metadata.usage) }
+            if finished.metadata.rateLimit?.isShown != true { account.reportUsage(finished.metadata.usage) }
         case .runError(let failed):
             account.reportRateLimit(failed.metadata?.rateLimit)
-            if failed.metadata?.rateLimit?.kind == nil { account.reportUsage(failed.metadata?.usage) }
+            if failed.metadata?.rateLimit?.isShown != true { account.reportUsage(failed.metadata?.usage) }
         default:
             break
         }
