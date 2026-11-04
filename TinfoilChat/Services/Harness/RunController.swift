@@ -306,10 +306,13 @@ final class RunController: ObservableObject {
         let outcome = await task.value
         followers[follower] = nil
         // A device run this app no longer reads is not shown as running, and
-        // another turn may follow one that never started.
-        if let device {
-            settle(device)
-            if deviceRuns[device.threadId] === device { deviceRuns[device.threadId] = nil }
+        // another turn may follow one that never started. One waiting to be
+        // rejoined still runs, so it stays shown until the wait ends.
+        defer {
+            if let device {
+                settle(device)
+                if deviceRuns[device.threadId] === device { deviceRuns[device.threadId] = nil }
+            }
         }
         guard let cause = outcome.failure else { return outcome.succeeded && attached() }
         if task.isCancelled || cause is CancellationError { return false }

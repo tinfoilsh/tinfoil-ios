@@ -127,6 +127,21 @@ struct RunControllerTests {
         #expect(controller.view.error?.code == HarnessErrorBody.unreachable.code)
     }
 
+    @Test func aDeviceRunWaitingToBeRejoinedStillShowsAsRunning() async throws {
+        let waits = Waits()
+        let transport = ScriptedTransport([Answers.events(Self.frames), unreachable, Answers.events(Self.finished)])
+        let controller = Self.controller(transport, waits: waits)
+        let run = DeviceRun(threadId: "t", store: DeviceThreadStore(directory: nil), since: 0)
+        var shownRunning: Bool?
+        waits.onWait = { shownRunning = controller.deviceRuns["t"] === run }
+
+        _ = await controller.run(.turn, .turn(Self.turn()), options: RunOptions(device: run))
+
+        #expect(waits.seconds == [1])
+        #expect(shownRunning == true)
+        #expect(controller.deviceRuns["t"] == nil)
+    }
+
     @Test func aRunStopsBeingRejoinedOnceTheViewMovesToAnotherChat() async throws {
         let waits = Waits()
         let transport = ScriptedTransport([Answers.events(Self.frames), unreachable])
