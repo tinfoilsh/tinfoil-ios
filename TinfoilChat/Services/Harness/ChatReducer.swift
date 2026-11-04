@@ -43,6 +43,17 @@ enum ChatReducer {
         if !widgetRetry, let runId, let current = state.runId, runId != current,
            event.type != .runStarted, event.type != .stateDelta {
             if event.isTerminal { next.snapshot.queue = withoutQueued(next.snapshot.queue, runId) }
+            // A queued turn that fails leaves the queue without a reply, so
+            // the chat shows why, as it does for one refused when sent. A
+            // reply still streaming goes on.
+            if case .runError(let failed) = event {
+                next.error = failed.error
+                if next.status != .streaming, next.status != .queued {
+                    next.status = .error
+                    next.stopping = false
+                }
+                if failed.error.code == HarnessErrorCode.chatFlagged { next.flagged = true }
+            }
             return next
         }
         switch event {
@@ -152,7 +163,9 @@ enum ChatReducer {
             next.markers = endedCompaction(next, end)
         case .runFinished(let finished):
             next.snapshot.queue = withoutQueued(next.snapshot.queue, runId)
-            next.status = .idle
+            // A turn queued behind the reply that failed as the reply
+            // streamed shows why once the reply ends.
+            next.status = next.status == .streaming && next.error != nil ? .error : .idle
             next.stopping = false
             next.messages = committed(next.messages, finished.metadata.messages)
         case .runError(let failed):

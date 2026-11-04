@@ -120,6 +120,54 @@ struct ChatReducerTests {
         #expect(state.cursors == ["r": 2, "q": 2])
     }
 
+    @Test func aQueuedTurnThatFailsShowsWhyAndLeavesTheReplyStreaming() throws {
+        var queued = try Self.reduce([Self.started("r"), Self.snapshot(), Self.text("one")])
+        queued = try ChatReducer.reduce(queued, try HarnessProtocolFixtures.frame(
+            ["type": "STATE_DELTA", "runId": "q", "delta": [["op": "add", "path": "/queue/-", "value": Self.queued("q")]]], id: 0
+        ), runHint: "q")
+        // The service shuts down before the queued turn starts. The failure
+        // is not a reply's, so retrying sends the turn again rather than
+        // running a reply again.
+        let failure = try HarnessProtocolFixtures.frame(
+            ["type": "RUN_ERROR", "threadId": "t", "runId": "q", "code": HarnessErrorCode.upstreamRefused, "message": "The service is shutting down", "action": "retry"], id: 1
+        )
+        let finished = try HarnessProtocolFixtures.frame(Self.finished("r"), id: 3)
+
+        let streaming = try ChatReducer.reduce(queued, failure, runHint: "q")
+        #expect(streaming.snapshot.queue.isEmpty)
+        #expect(streaming.error?.code == HarnessErrorCode.upstreamRefused)
+        #expect(streaming.status == .streaming)
+        #expect(streaming.runId == "r")
+        #expect(streaming.failedRun == nil)
+        #expect(Self.blocks(streaming).first?.content == "one")
+        // The chat shows why once the reply ends.
+        let ended = try ChatReducer.reduce(streaming, finished)
+        #expect(ended.status == .error)
+        #expect(ended.error?.code == HarnessErrorCode.upstreamRefused)
+        #expect(ended.failedRun == nil)
+
+        // A queued turn that fails after the reply ended shows why at once.
+        let idle = try ChatReducer.reduce(queued, finished)
+        #expect(idle.status == .idle)
+        let failed = try ChatReducer.reduce(idle, failure, runHint: "q")
+        #expect(failed.status == .error)
+        #expect(failed.error?.code == HarnessErrorCode.upstreamRefused)
+        #expect(failed.failedRun == nil)
+        #expect(failed.snapshot.queue.isEmpty)
+    }
+
+    @Test func aReplyRejoinedAfterItsStreamFailedEndsIdle() throws {
+        // The stream broke and the chat showed the connection error; a
+        // rejoin resumes after the frames applied, so RUN_STARTED is not
+        // read again.
+        var state = try Self.reduce([Self.started("r"), Self.snapshot(), Self.text("one")])
+        state.status = .error
+        state.error = HarnessErrorBody(code: HarnessErrorCode.streamInterrupted, message: "The connection closed.", action: .retry)
+        state = try Self.reduce([Self.text(" two"), Self.finished("r")], from: 3, into: state)
+        #expect(state.status == .idle)
+        #expect(Self.blocks(state).first?.content == "one two")
+    }
+
     @Test func aQueuedTurnTheRunningReplyListedFirstIsListedOnce() throws {
         var state = try Self.reduce([
             Self.started("r"), Self.snapshot(), Self.text("one"),
