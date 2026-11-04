@@ -303,7 +303,7 @@ struct ChatReducerTests {
     ]
 
     private static func compactionEnd(_ outcome: String, marker: [String: Any]? = nil) -> [String: Any] {
-        var event: [String: Any] = ["type": "COMPACTION_END", "messageId": "c", "outcome": outcome]
+        var event: [String: Any] = ["type": "COMPACTION_END", "messageId": "c", "beforeMessageId": "u2", "outcome": outcome]
         if let marker { event["marker"] = marker }
         return event
     }
