@@ -242,7 +242,10 @@ enum ChatReducer {
             // apart by its path, not by the form it happened to read as.
             switch patch {
             case .case1(let add) where add.op.value as? String == "add" && add.path.value as? String == "/queue/-":
-                next.queue.append(add.value)
+                // The running reply's stream lists a queued turn as the
+                // turn's own stream adds it, in either order, so the chat
+                // lists it once.
+                if !next.queue.contains(where: { $0.queueId == add.value.queueId }) { next.queue.append(add.value) }
             case .case2(let replace) where replace.op.value as? String == "replace" && replace.path.value as? String == "/queue":
                 next.queue = replace.value
             case .case3(let replace) where replace.op.value as? String == "replace":
