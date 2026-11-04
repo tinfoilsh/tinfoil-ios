@@ -309,6 +309,9 @@ enum Constants {
         static let runReceiptKeyPrefix = "tinfoil-harness-run-"
         /// Where an account's prompt cache secret is kept in the keychain.
         static let promptCacheSecretKeyPrefix = "tinfoil-harness-prompt-cache-secret-"
+        /// Where the models the last session offered are kept, which the
+        /// model picker offers until the next session loads.
+        static let keptModelsKey = "tinfoil-harness-session-models"
 
         enum Search {
             static let debounceSeconds: TimeInterval = 0.3

@@ -133,6 +133,7 @@ final class MemoryProfileStorage: ProfileStorage, @unchecked Sendable {
     var localProfileUpgraded = false
     var pendingProfileMerge: String?
     var cloudCache: [String: ProfileFields] = [:]
+    var keptModels: [Components.Schemas.SessionModel] = []
 
     func loadLocalProfile() -> ProfileFields { local }
 

@@ -171,6 +171,9 @@ class ChatViewModel: ObservableObject {
     // MARK: - Settings
 
     @Published var currentModel: ModelType
+    /// The model shown was picked from the models the last session offered,
+    /// as the account's session has not loaded yet.
+    private var showsKeptModels = true
     @Published var reasoningEffort: ReasoningEffort = .medium {
         didSet { if !isApplyingProfile { saveSetting("reasoningEffort", reasoningEffort.rawValue) } }
     }
@@ -462,6 +465,7 @@ class ChatViewModel: ObservableObject {
         isSavingTemporaryChat = false
         rows = ChatRows()
         session = nil
+        showsKeptModels = true
         verification = VerificationInfo(isVerifying: true)
         // The account's settings load with its key as the session opens,
         // before its sign-in runs.
@@ -628,6 +632,13 @@ class ChatViewModel: ObservableObject {
     private func applySessionModels() {
         if let minimum = account?.session?._protocol.minimum { AppConfig.shared.harnessServes(minimumProtocol: minimum) }
         guard let models = account?.session?.models else { return }
+        // A model shown from the models the last session offered stays only
+        // if this session still offers it; otherwise the model is picked as
+        // if none had shown, from Auto.
+        if showsKeptModels, !models.contains(where: { $0.id == currentModel.id && !$0.deprecated }) {
+            currentModel = .auto
+        }
+        showsKeptModels = false
         let available = models.map(ModelType.init)
         if session?.open.id == nil, session?.open.modelChosen != true, let shown = openChatModel {
             currentModel = shown
@@ -641,7 +652,7 @@ class ChatViewModel: ObservableObject {
     }
 
     var availableModels: [ModelType] {
-        (account?.session?.models ?? []).filter { !$0.deprecated || $0.id == currentModel.id }.map(ModelType.init)
+        (account?.models ?? []).filter { !$0.deprecated || $0.id == currentModel.id }.map(ModelType.init)
     }
 
     /// Models shown in the picker: Auto first, then the real models.
