@@ -353,7 +353,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
                 await account.client.locate(threadId: threadId, instance: live.instance)
                 let (body, run) = try await store.follow(threadId, runId: live.runId)
                 guard shown() else { return }
-                await controller.run(.follow, body, options: RunOptions(device: run, quiet: run != nil))
+                Task { await controller.run(.follow, body, options: RunOptions(device: run, quiet: run != nil)) }
             } else {
                 controller.updateView { $0.status = .idle; $0.error = nil; $0.stopping = false }
             }

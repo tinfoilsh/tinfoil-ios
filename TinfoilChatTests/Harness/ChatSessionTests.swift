@@ -412,6 +412,7 @@ struct ChatSessionTests {
         ]))
 
         await session.send(TurnFields(kind: .send, content: "again"))
+        for await state in session.controller.$view.values where state.messages.last?.id == "msg_6" && state.status == .idle { break }
 
         let requests = await fixture.transport.requests
         #expect(requests.map(\.route) == [.get, .turn, .turn, .get, .follow])
