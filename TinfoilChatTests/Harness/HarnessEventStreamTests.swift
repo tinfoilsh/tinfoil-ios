@@ -108,11 +108,14 @@ struct HarnessEventStreamTests {
         #expect(failed.runId == "r")
     }
 
-    /// The harness decides how large an event grows.
-    @Test func readsAnEventOfAnySize() async throws {
+    /// The harness decides how large an event grows. Reading one searches
+    /// each byte once, so an event in thousands of small chunks reads in a
+    /// moment rather than in minutes.
+    @Test(.timeLimit(.minutes(1)))
+    func readsAnEventOfAnySize() async throws {
         let delta = String(repeating: "x", count: 9 << 20)
         let text = "data: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"messageId\":\"m\",\"role\":\"assistant\",\"delta\":\"\(delta)\"}\n\ndata: \(Self.finished)\n\n"
-        let frames = try await Self.collect(Self.bytes(text, every: 1 << 20))
+        let frames = try await Self.collect(Self.bytes(text, every: 1 << 10))
         #expect(frames.count == 2)
         guard case .textMessageChunk(let chunk) = frames.first?.event else {
             Issue.record("expected a text chunk, got \(String(describing: frames.first?.event))")

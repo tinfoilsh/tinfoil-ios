@@ -126,8 +126,10 @@ enum HarnessEventStream {
 
     /// The frames of a stream. Lines are split before the bytes are read as
     /// UTF-8, so a character, a CRLF, a comment or a multi-line event split
-    /// across chunks survives. A stream that ends without the run's last
-    /// event fails as interrupted: the run may go on.
+    /// across chunks survives. Each byte is searched for a line break once,
+    /// so an event of any size is read in time proportional to it. A stream
+    /// that ends without the run's last event fails as interrupted: the run
+    /// may go on.
     static func frames(
         from chunks: AsyncThrowingStream<Data, Error>
     ) -> AsyncThrowingStream<Frame, Error> {
@@ -149,6 +151,9 @@ enum HarnessEventStream {
         emit: (Frame) -> Void
     ) async throws {
         var buffer: [UInt8] = []
+        // How much of the buffer holds no line break, so a long line is
+        // searched once as it arrives rather than again with each chunk.
+        var scanned = 0
         var data: [UInt8] = []
         var hasData = false
         var id: Int?
@@ -163,9 +168,15 @@ enum HarnessEventStream {
             }
             var start = 0
             while start < buffer.count {
-                guard let end = buffer[start...].firstIndex(where: { $0 == lineFeed || $0 == carriageReturn }) else { break }
+                guard let end = buffer[max(start, scanned)...].firstIndex(where: { $0 == lineFeed || $0 == carriageReturn }) else {
+                    scanned = buffer.count
+                    break
+                }
                 // A CR that ends the buffer may be the first half of a CRLF.
-                if buffer[end] == carriageReturn, end == buffer.count - 1, !done { break }
+                if buffer[end] == carriageReturn, end == buffer.count - 1, !done {
+                    scanned = end
+                    break
+                }
                 let line = buffer[start..<end]
                 start = end + (buffer[end] == carriageReturn && end + 1 < buffer.count && buffer[end + 1] == lineFeed ? 2 : 1)
                 if line.isEmpty {
@@ -191,6 +202,7 @@ enum HarnessEventStream {
                 }
             }
             buffer.removeFirst(start)
+            scanned = max(0, scanned - start)
         }
         if !terminal { throw HarnessError.streamInterrupted }
     }
