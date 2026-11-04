@@ -219,9 +219,12 @@ final class HarnessAccount: ObservableObject {
 
     /// Shows the quota a session, a run, a refusal or the account's chat
     /// access reported. The harness reports none for a subscriber, whose
-    /// quota came with its chat access.
+    /// quota came with its chat access. A quota of a kind this client does
+    /// not know shows none, but leaves the hourly budget the chat access
+    /// reported, which the account's runs still spend.
     func reportRateLimit(_ limit: HarnessRateLimit?) {
         guard !disposed, let limit, limit.kind != nil, limit != rateLimit else { return }
+        if !limit.isShown, rateLimit?.kind?.value1 == .hourly { return }
         rateLimit = limit
     }
 

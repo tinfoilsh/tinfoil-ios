@@ -175,6 +175,20 @@ struct HarnessAccountTests {
         #expect(settings.keptModels == account.session?.models)
     }
 
+    @Test func aQuotaOfAKindThisClientDoesNotKnowClearsADailyQuotaButLeavesAnHourlyBudget() async throws {
+        let (account, _) = makeAccount(userId: nil, answers: [])
+        let monthly = try JSONDecoder().decode(HarnessRateLimit.self, from: Data(#"{"kind":"monthly","maxRequests":100,"remaining":50}"#.utf8))
+
+        account.reportRateLimit(HarnessRateLimit(kind: .named(.freeDaily), maxRequests: 20, remaining: 3))
+        account.reportRateLimit(monthly)
+        #expect(account.rateLimit.flatMap(RateLimitInfo.init) == nil)
+
+        let hourly = HarnessRateLimit(kind: .named(.hourly), inputTokens: .init(max: 2_000_000, used: 500_000, remaining: 1_500_000))
+        account.reportMintedRateLimit(hourly)
+        account.reportRateLimit(monthly)
+        #expect(account.rateLimit == hourly)
+    }
+
     @Test func aThemeOrFontThisClientDoesNotKnowLeavesTheOtherSettingsShown() async throws {
         let settings = MemoryProfileStorage()
         settings.local = ["themeMode": "sepia", "chatFont": "handwritten", "reasoningEffort": "high"]
