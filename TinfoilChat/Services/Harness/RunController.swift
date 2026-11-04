@@ -55,7 +55,9 @@ struct RunOptions {
     var device: DeviceRun?
     /// Rejoining a run left behind: losing it shows no error.
     var quiet = false
-    var rejoined = false
+    /// The attempts made in a row to rejoin the run since its stream last
+    /// delivered a frame.
+    var rejoins = 0
     /// The view the run was started for, which a rejoin keeps.
     var version: Int?
     /// What a rejoined run continues from while the view shows another
@@ -94,7 +96,8 @@ protocol RunControllerDelegate: AnyObject {
 
 /// Streams the runs of the chat a view shows: a turn's run, or a live run
 /// it follows again, which replays from its first frame while the view
-/// skips the frames it applied. A run whose stream drops is rejoined once.
+/// skips the frames it applied. A run whose stream drops is rejoined,
+/// backing off while the harness cannot be reached.
 @MainActor
 final class RunController: ObservableObject {
     private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Harness")
@@ -136,10 +139,17 @@ final class RunController: ObservableObject {
     /// on a clock that also dates the turns read from the chat.
     private var clock = 0
     private var settingChanges: [String: [String: Int]] = [:]
+    /// Waits the seconds named before an attempt to rejoin a run.
+    private let wait: @MainActor (TimeInterval) async throws -> Void
 
-    init(account: HarnessAccount, receipts: RunReceiptStore?) {
+    init(
+        account: HarnessAccount,
+        receipts: RunReceiptStore?,
+        wait: @escaping @MainActor (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }
+    ) {
         self.account = account
         self.receipts = receipts
+        self.wait = wait
     }
 
     /// The view moves to another chat: runs it followed stop, other than
@@ -208,6 +218,8 @@ final class RunController: ObservableObject {
         var succeeded = false
         var state: ChatState
         var failure: Error?
+        /// The stream applied a frame the view did not hold yet.
+        var progressed = false
     }
 
     /// Streams a run, applying its frames to the view. Returns whether the
@@ -244,6 +256,7 @@ final class RunController: ObservableObject {
                             }
                         }
                         if event.isTerminal { markCanceled(ChatReducer.canceled(by: event, in: base)) }
+                        outcome.progressed = true
                         outcome.state = next
                         if shown { view = next }
                         if case .runStarted(let event) = event {
@@ -300,9 +313,17 @@ final class RunController: ObservableObject {
         }
         guard let cause = outcome.failure else { return outcome.succeeded && attached() }
         if task.isCancelled || cause is CancellationError { return false }
-        // A stream cut off after its run started rejoins the run once, which
-        // replays it; a device run does so after the view moved on.
-        if let runId = outcome.runId, !options.rejoined, Self.interrupted(cause), device != nil || attached() {
+        // A stream cut off after its run started rejoins the run, which
+        // replays it; a device run does so after the view moved on. Attempts
+        // that deliver nothing wait longer each time, so a harness that
+        // restarts is reached once its new instance answers.
+        let delays = Constants.Harness.rejoinDelaysSeconds
+        let rejoins = outcome.progressed ? 0 : options.rejoins
+        if let runId = outcome.runId, rejoins < delays.count, Self.interrupted(cause), device != nil || attached() {
+            if delays[rejoins] > 0 {
+                do { try await wait(delays[rejoins]) } catch { return false }
+            }
+            guard device != nil || attached() else { return false }
             let follow: RunBody
             do {
                 follow = RunBody(key: try body.keyed ? account.key() : nil, threadId: outcome.threadId, runId: runId)
@@ -311,7 +332,7 @@ final class RunController: ObservableObject {
                 return false
             }
             var again = options
-            again.rejoined = true
+            again.rejoins = rejoins + 1
             again.started = outcome.started
             again.version = version
             again.state = attached() ? nil : outcome.state
