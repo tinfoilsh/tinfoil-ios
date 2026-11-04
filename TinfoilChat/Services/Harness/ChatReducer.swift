@@ -202,28 +202,28 @@ enum ChatReducer {
     }
 
     /// Opens a compaction marker while its summary is written, above the
-    /// message the event names, or else above the run's question.
+    /// message the event names. A marker whose message is not loaded sits
+    /// among earlier messages the view has not loaded, so the view leaves it
+    /// out.
     private static func startedCompaction(_ state: ChatState, _ start: Components.Schemas.CompactionStartEvent) -> [String: HarnessMessage] {
-        guard let before = state.messages.first(where: { $0.id == start.beforeMessageId })?.id
-                ?? state.messages.last(where: { $0.role.value1 == .user })?.id else {
+        guard state.messages.contains(where: { $0.id == start.beforeMessageId }) else {
             return state.markers
         }
         var markers = state.markers.filter { $0.value.id != start.messageId }
-        markers[before] = HarnessMessage(id: start.messageId, role: .named(.compaction), createdAt: start.timestamp ?? "")
+        markers[start.beforeMessageId] = HarnessMessage(id: start.messageId, role: .named(.compaction), createdAt: start.timestamp ?? "")
         return markers
     }
 
     /// Closes a compaction marker. A completed one is kept as the event
-    /// carries it, where it was opened; a failed one, or one whose outcome
-    /// this client does not know, is removed.
+    /// carries it, above the message the event names; a failed one, or one
+    /// whose outcome this client does not know, is removed.
     private static func endedCompaction(_ state: ChatState, _ end: Components.Schemas.CompactionEndEvent) -> [String: HarnessMessage] {
-        let opened = state.markers.first { $0.value.id == end.messageId }?.key
         var markers = state.markers.filter { $0.value.id != end.messageId }
         guard end.outcome.value1 == .completed, let marker = end.marker,
-              let before = opened ?? state.messages.last(where: { $0.role.value1 == .user })?.id else {
+              state.messages.contains(where: { $0.id == end.beforeMessageId }) else {
             return markers
         }
-        markers[before] = marker
+        markers[end.beforeMessageId] = marker
         return markers
     }
 
