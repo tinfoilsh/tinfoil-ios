@@ -158,6 +158,23 @@ struct HarnessAccountTests {
         #expect(withoutSync.profile["language"] as? String == "French")
     }
 
+    @Test func theModelsTheLastSessionOfferedShowUntilTheSessionLoadsWhichKeepsItsOwn() async throws {
+        let settings = MemoryProfileStorage()
+        settings.keptModels = [Components.Schemas.SessionModel(id: "kimi-k3", label: "Kimi K3", shortLabel: "Kimi", icon: "moonshot.png", description: "", badges: [], deprecated: false)]
+        var opened = sessionAnswer
+        opened["models"] = [
+            ["id": "auto", "label": "Auto", "shortLabel": "Auto", "icon": "", "description": "", "badges": [], "reasoning": NSNull(), "deprecated": false, "auto": true],
+            ["id": "gpt-oss-120b", "label": "GPT-OSS 120B", "shortLabel": "GPT-OSS", "icon": "openai.png", "description": "", "badges": [], "reasoning": NSNull(), "deprecated": false],
+        ]
+        let (account, _) = makeAccount(userId: nil, answers: [Answers.json(opened)], settings: settings)
+        #expect(account.models.map(\.id) == ["kimi-k3"])
+
+        try await account.refresh()
+
+        #expect(account.models.map(\.id) == ["auto", "gpt-oss-120b"])
+        #expect(settings.keptModels == account.session?.models)
+    }
+
     @Test func aThemeOrFontThisClientDoesNotKnowLeavesTheOtherSettingsShown() async throws {
         let settings = MemoryProfileStorage()
         settings.local = ["themeMode": "sepia", "chatFont": "handwritten", "reasoningEffort": "high"]

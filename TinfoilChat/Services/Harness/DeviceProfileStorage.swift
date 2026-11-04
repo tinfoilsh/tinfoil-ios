@@ -2,7 +2,8 @@ import Foundation
 import OSLog
 
 /// The settings this device keeps for the harness: a local profile in the
-/// keychain, with its bookkeeping in the defaults.
+/// keychain, with its bookkeeping in the defaults, and the models the last
+/// session offered, which are no secret, in the defaults too.
 final class DeviceProfileStorage: ProfileStorage {
     private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Harness")
 
@@ -125,6 +126,18 @@ final class DeviceProfileStorage: ProfileStorage {
     func clearCloudProfileCache(userId: String?) {
         guard let userId else { return }
         keychain.delete(for: Self.cloudCacheKey(userId), service: service)
+    }
+
+    /// The models the last session offered; none when they cannot be read,
+    /// as once a later protocol changed what a model holds.
+    var keptModels: [Components.Schemas.SessionModel] {
+        get {
+            defaults.data(forKey: Constants.Harness.keptModelsKey)
+                .flatMap { try? JSONDecoder().decode([Components.Schemas.SessionModel].self, from: $0) } ?? []
+        }
+        set {
+            defaults.set(try? JSONEncoder().encode(newValue), forKey: Constants.Harness.keptModelsKey)
+        }
     }
 
     private static func cloudCacheKey(_ userId: String) -> String {

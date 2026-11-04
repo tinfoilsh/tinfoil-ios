@@ -96,6 +96,29 @@ struct KeychainStorageTests {
         #expect(try DeviceProfileStorage(keychain: keychain, defaults: defaults).loadLocalProfile()["nickname"] as? String == "Al")
     }
 
+    @Test func theModelsTheLastSessionOfferedAreKeptUnlessTheyCannotBeRead() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let deprecated = Components.Schemas.SessionModel.BadgesPayloadPayload(
+            kind: .init(value1: .deprecated, value2: "deprecated"), label: "Deprecated", tooltip: "Retiring soon"
+        )
+        let models = [
+            Components.Schemas.SessionModel(id: "auto", label: "Auto", shortLabel: "Auto", icon: "", description: "", badges: [], deprecated: false, auto: true),
+            Components.Schemas.SessionModel(
+                id: "kimi-k3", label: "Kimi K3", shortLabel: "Kimi", icon: "moonshot.png", description: "Reasons at length",
+                badges: [deprecated], reasoning: .init(toggle: true, effort: false, defaultEnabled: true), deprecated: true
+            ),
+        ]
+        let storage = DeviceProfileStorage(keychain: MemoryKeychain(), defaults: defaults)
+        #expect(storage.keptModels.isEmpty)
+
+        storage.keptModels = models
+
+        #expect(DeviceProfileStorage(keychain: MemoryKeychain(), defaults: defaults).keptModels == models)
+        defaults.set(Data("not json".utf8), forKey: Constants.Harness.keptModelsKey)
+        #expect(storage.keptModels.isEmpty)
+    }
+
     private func previousClientDefaults() throws -> (UserDefaults, String) {
         let (defaults, suiteName) = try makeDefaults()
         defaults.set("gpt-oss-120b", forKey: Constants.StorageKeys.Settings.selectedModel)

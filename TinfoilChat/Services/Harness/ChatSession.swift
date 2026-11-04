@@ -264,7 +264,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
               let presets = account.profile["customPromptPresets"] as? [[String: Any]],
               let preset = presets.first(where: { $0["id"] as? String == presetId }) else { return PresetChoice() }
         var choice = PresetChoice()
-        if !open.modelChosen, let model = preset["model"] as? String, account.session?.models.contains(where: { $0.id == model && !$0.deprecated }) == true {
+        if !open.modelChosen, let model = preset["model"] as? String, account.models.contains(where: { $0.id == model && !$0.deprecated }) {
             choice.model = model
         }
         if open.webSearch == nil, let webSearch = preset["webSearchEnabled"] as? Bool { choice.webSearchEnabled = webSearch }

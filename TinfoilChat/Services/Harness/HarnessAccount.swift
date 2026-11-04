@@ -61,6 +61,8 @@ final class HarnessAccount: ObservableObject {
     private var changeWatcher: Task<Void, Never>?
     private var checkingChanges = false
     private var observers: [NSObjectProtocol] = []
+    /// The models the last session on this device offered.
+    private let keptModels: [Components.Schemas.SessionModel]
 
     private enum ProfileSource { case cloud, local }
 
@@ -84,6 +86,7 @@ final class HarnessAccount: ObservableObject {
         self.keyBytes = keyBytes
         self.settings = settings
         self.cloudSync = cloudSync
+        keptModels = settings.keptModels
         cloud = userId != nil && cloudSync
         if cloud {
             profile = settings.cloudProfileCache(userId: userId)
@@ -252,6 +255,7 @@ final class HarnessAccount: ObservableObject {
         let session: HarnessSession = try await post(.session, keyless: true)
         guard !disposed else { throw CancellationError() }
         self.session = session
+        settings.keptModels = session.models
         error = nil
         reportRateLimit(session.rateLimit)
         await refreshProfile()
@@ -266,9 +270,17 @@ final class HarnessAccount: ObservableObject {
         guard !disposed else { throw CancellationError() }
         if session == nil {
             session = loaded
+            settings.keptModels = loaded.models
             reportRateLimit(loaded.rateLimit)
         }
         return session ?? loaded
+    }
+
+    /// The models the session offers, or until it loads those the last
+    /// session on this device offered, so the model the user picked shows
+    /// as the app opens.
+    var models: [Components.Schemas.SessionModel] {
+        session?.models ?? keptModels
     }
 
     // MARK: - Settings
@@ -574,7 +586,7 @@ final class HarnessAccount: ObservableObject {
 /// Where this device keeps the settings the harness does not hold for an
 /// account: the local profile and what changed in it, whether it was
 /// upgraded, a merge into the cloud still pending, and the cloud profile
-/// last seen.
+/// last seen; and the models the last session offered.
 protocol ProfileStorage: AnyObject {
     func loadLocalProfile() throws -> ProfileFields
     func saveLocalProfile(_ patch: ProfileFields, replace: Bool) throws -> ProfileFields
@@ -585,4 +597,5 @@ protocol ProfileStorage: AnyObject {
     func cloudProfileCache(userId: String?) -> ProfileFields
     func saveCloudProfileCache(_ profile: ProfileFields, userId: String?)
     func clearCloudProfileCache(userId: String?)
+    var keptModels: [Components.Schemas.SessionModel] { get set }
 }
