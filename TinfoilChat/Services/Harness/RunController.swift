@@ -92,8 +92,10 @@ protocol RunControllerDelegate: AnyObject {
     func runSaved(_ run: DeviceRun, event: RunEvent, attached: Bool) async -> Bool
     /// A run ended, which may have changed the chat list.
     func runEnded()
-    /// The open chat's run is over though its stream did not say so.
-    func runGone(threadId: String) async
+    /// The open chat's run is over though its stream did not say so, or the
+    /// harness had applied the turn sent again, whose run another instance
+    /// of it may still be running.
+    func runGone(threadId: String, applied: Bool) async
 }
 
 /// Streams the runs of the chat a view shows: a turn's run, or a live run
@@ -296,7 +298,7 @@ final class RunController: ObservableObject {
                     delegate?.runEnded()
                     if case .runError(let failed) = event, failed.error.action == .reload, attached() {
                         pending = nil
-                        await delegate?.runGone(threadId: outcome.threadId)
+                        await delegate?.runGone(threadId: outcome.threadId, applied: false)
                     }
                 }
             } catch {
@@ -357,7 +359,7 @@ final class RunController: ObservableObject {
             if Self.gone(cause) {
                 pending = nil
                 forgetReceipt(outcome.runId)
-                await delegate?.runGone(threadId: body.threadId)
+                await delegate?.runGone(threadId: body.threadId, applied: (cause as? HarnessError)?.code == HarnessErrorCode.alreadyApplied)
             } else if let widgetRetry {
                 widgetRetry.failure = (cause as? HarnessError)?.detail ?? Self.connectionLost
                 account.reportRateLimit(widgetRetry.failure?.rateLimit)

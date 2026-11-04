@@ -336,16 +336,24 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
 
     /// Shows the open chat as it is stored once its run is over, as when the
     /// harness no longer has the run or had applied a turn sent again. A
-    /// chat never saved keeps what it shows.
-    private func showStored(_ threadId: String) async {
+    /// chat never saved keeps what it shows. The run of a turn the harness
+    /// had applied may still go on, on another instance of the harness the
+    /// chat names, so the chat follows it.
+    private func showStored(_ threadId: String, followingLiveRun: Bool = false) async {
         guard open.id == threadId else { return }
         let shown = controller.track()
+        let store = openStore()
         do {
-            let result = try await openStore().get(threadId)
+            let result = try await store.get(threadId)
             guard shown() else { return }
             if result != nil { markSaved(threadId) }
             if let result {
                 controller.setView(ChatState(thread: result.window))
+                guard followingLiveRun, let live = store.liveRun(result.window) else { return }
+                await account.client.locate(threadId: threadId, instance: live.instance)
+                let (body, run) = try await store.follow(threadId, runId: live.runId)
+                guard shown() else { return }
+                await controller.run(.follow, body, options: RunOptions(device: run, quiet: run != nil))
             } else {
                 controller.updateView { $0.status = .idle; $0.error = nil; $0.stopping = false }
             }
@@ -433,8 +441,8 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         list.reload()
     }
 
-    func runGone(threadId: String) async {
-        await showStored(threadId)
+    func runGone(threadId: String, applied: Bool) async {
+        await showStored(threadId, followingLiveRun: applied)
     }
 
     // MARK: - Turns
