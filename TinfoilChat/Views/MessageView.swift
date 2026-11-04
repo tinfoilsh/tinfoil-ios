@@ -187,6 +187,16 @@ struct MessageView: View, Equatable {
         Task { await viewModel.forkChat(throughMessageIndex: messageIndex) }
     }
 
+    /// Continuing a reply drops the messages after it, so only the last
+    /// reply the service stopped offers it.
+    private var canContinueStoppedReply: Bool {
+        message.replyStop == .stopped
+            && isLastMessage
+            && message.hasContinuableResponse
+            && context.canGenerateInCurrentChat
+            && !context.isChatLoading
+    }
+
     private var canShareAssistantMessage: Bool {
         message.hasVisibleAssistantContent && isLastMessage && !context.isChatLoading
     }
@@ -814,11 +824,26 @@ struct MessageView: View, Equatable {
                 // this session says who stopped it: the service stops replies
                 // when it restarts too.
                 if message.role == .assistant, let stop = message.replyStop, !isRenderingStream {
-                    Text(stop.note)
-                        .font(.caption)
-                        .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, message.hasVisibleAssistantContent ? 8 : 0)
+                    HStack(spacing: 12) {
+                        Text(stop.note)
+                            .font(.caption)
+                            .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
+                        // The last reply the service stopped goes on where
+                        // it stopped.
+                        if canContinueStoppedReply {
+                            Button {
+                                viewModel.continueLastResponse()
+                            } label: {
+                                Label(Constants.MessageActions.continueLabel, systemImage: Constants.MessageActions.continueSystemImage)
+                                    .font(.caption.weight(.medium))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundColor(isDarkMode ? .white.opacity(0.8) : .black.opacity(0.7))
+                            .accessibilityLabel(Constants.MessageActions.continueAccessibilityLabel)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, message.hasVisibleAssistantContent ? 8 : 0)
                 }
                 
                 // Add action buttons for assistant messages (only when not streaming)

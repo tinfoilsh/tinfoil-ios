@@ -127,6 +127,15 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         hasRetryableMessage && state.messages.last?.isError == true
     }
 
+    /// The open chat, at rest, ends on a reply the chat service stopped and
+    /// the user did not stop here, as one cut off while the service
+    /// restarted, which can go on where it stopped.
+    var endsOnStoppedReply: Bool {
+        guard state.status == .idle, open.loadingId == nil, open.failure == nil, let last = state.messages.last,
+              last.role.value1 == .assistant, last.isInterrupted == true else { return false }
+        return !controller.canceled.contains(last.id)
+    }
+
     /// The open chat, at rest, ends on a reply that did not finish or on a
     /// message no reply answers, as one left by a turn that failed.
     private var hasRetryableMessage: Bool {

@@ -218,6 +218,59 @@ struct ChatSessionTests {
         #expect(!session.hasUnfinishedReply)
     }
 
+    /// A device chat stored with its last reply cut off, as the chat service
+    /// leaves one it stops while it restarts.
+    private static let stoppedReplyChat = StoredThread(json: record(messages: [
+        ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"],
+        ["id": "a1", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "content": "Half", "isInterrupted": true,
+         "timeline": [["id": "b1", "type": "content", "content": "Half"]]],
+    ]))!
+
+    @Test func aReplyTheServiceStoppedGoesOnWhereItStopped() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        _ = try await session.device.add(Self.stoppedReplyChat, originals: [:])
+        session.list.reloadDevice()
+        #expect(try await session.openChat(threadId, local: true) == .opened)
+        #expect(session.endsOnStoppedReply)
+
+        let messages: [[String: Any]] = [
+            ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"],
+            ["id": "a1", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "content": "Half, then the rest.", "isInterrupted": false,
+             "timeline": [["id": "b1", "type": "content", "content": "Half, then the rest."]]],
+        ]
+        await fixture.transport.push(Answers.events([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_5", "instance": "i", "messageId": "a1"],
+            ["type": "TEXT_MESSAGE_CHUNK", "messageId": "a1", "role": "assistant", "delta": ", then the rest."],
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_5", "metadata": [
+                "messages": [["id": "a1", "isInterrupted": false]],
+                "thread": record(messages: messages),
+            ]],
+        ]))
+        #expect(await session.continueReply(at: 1))
+
+        let request = try #require(await fixture.transport.requests.last)
+        #expect(request.route == .turn)
+        #expect(request.json["kind"] as? String == "continue")
+        #expect(request.json["messageId"] as? String == "a1")
+        #expect(session.state.messages.map(\.id) == ["u1", "a1"])
+        #expect(session.state.messages.last?.timeline?.first?.content == "Half, then the rest.")
+        #expect(!session.endsOnStoppedReply)
+    }
+
+    @Test func aReplyTheUserStoppedHereIsNotOfferedToGoOn() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        _ = try await session.device.add(Self.stoppedReplyChat, originals: [:])
+        session.list.reloadDevice()
+        #expect(try await session.openChat(threadId, local: true) == .opened)
+        #expect(session.endsOnStoppedReply)
+
+        session.controller.markCanceled(["a1"])
+
+        #expect(!session.endsOnStoppedReply)
+    }
+
     @Test func aTemporaryChatIsKeptOnceItsReplyIsStored() async throws {
         let fixture = Fixture(answers: [])
         let session = fixture.session
