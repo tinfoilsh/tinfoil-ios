@@ -120,6 +120,19 @@ struct ChatReducerTests {
         #expect(state.cursors == ["r": 2, "q": 2])
     }
 
+    @Test func aQueuedTurnTheRunningReplyListedFirstIsListedOnce() throws {
+        var state = try Self.reduce([
+            Self.started("r"), Self.snapshot(), Self.text("one"),
+            ["type": "STATE_DELTA", "delta": [["op": "replace", "path": "/queue", "value": [Self.queued("q")]]]],
+        ])
+        state = try ChatReducer.reduce(state, try HarnessProtocolFixtures.frame(
+            ["type": "STATE_DELTA", "threadId": "t", "runId": "q", "delta": [["op": "add", "path": "/queue/-", "value": Self.queued("q")]]], id: 0
+        ), runHint: "q")
+        #expect(state.snapshot.queue.map(\.queueId) == ["q"])
+        #expect(state.status == .streaming)
+        #expect(state.runId == "r")
+    }
+
     @Test func aRunTheUserStoppedNamesWhatItStoppedAsItEnds() throws {
         func ended(_ messages: [[String: Any]], stopping: Bool) throws -> (canceled: [String], state: ChatState) {
             var state = try Self.reduce([
