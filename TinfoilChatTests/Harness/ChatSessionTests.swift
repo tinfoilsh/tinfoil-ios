@@ -387,6 +387,46 @@ struct ChatSessionTests {
         #expect(await routes.next() == .get)
     }
 
+    @Test func aTurnSentAgainThatTheHarnessHadAppliedShowsTheChatAndFollowsItsRun() async throws {
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(firstQuestionWindow)])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        // The chat as stored once the first turn arrived, whose run another
+        // instance of the harness runs.
+        let applied: [String: Any] = summary(messageCount: 2).merging([
+            "revision": "rev-2", "presetId": NSNull(), "flagged": false,
+            "activeRun": ["runId": "run_3", "expiresAt": "2999-01-01T00:00:00Z", "instance": "other"],
+            "messages": [
+                ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"],
+                ["id": "u2", "role": "user", "createdAt": "2026-01-01T00:00:02Z", "content": "again"],
+            ],
+            "hasOlder": false,
+        ]) { $1 }
+        await fixture.transport.push { _ in throw HarnessError(HarnessErrorBody.unreachable, urlErrorCode: .networkConnectionLost) }
+        await fixture.transport.push(Answers.refusal(409, code: HarnessErrorCode.alreadyApplied, action: "reload"))
+        await fixture.transport.push(Answers.json(applied))
+        await fixture.transport.push(Answers.events([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_3", "instance": "other"],
+            ["type": "TEXT_MESSAGE_CHUNK", "messageId": "msg_6", "role": "assistant", "delta": "Hi."],
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_3", "metadata": [:]],
+        ]))
+
+        await session.send(TurnFields(kind: .send, content: "again"))
+        for await state in session.controller.$view.values where state.messages.last?.id == "msg_6" && state.status == .idle { break }
+
+        let requests = await fixture.transport.requests
+        #expect(requests.map(\.route) == [.get, .turn, .turn, .get, .follow])
+        let nonces = requests.filter { $0.route == .turn }.map { $0.json["clientRequestId"] as? String }
+        #expect(nonces.count == 2 && nonces[0] != nil && nonces[0] == nonces[1])
+        let follow = try #require(requests.last)
+        #expect(follow.json["runId"] as? String == "run_3")
+        #expect(follow.headers[HarnessHeader.instance] == "other")
+        #expect(session.state.messages.map(\.id) == ["u1", "u2", "msg_6"])
+        #expect(session.state.status == .idle)
+        #expect(session.state.error == nil)
+        #expect(session.open.failure == nil)
+    }
+
     @Test func olderMessagesAreReadPastAPageThisClientShowsNothingOf() async throws {
         func page(_ messages: [[String: Any]], hasOlder: Bool) -> [String: Any] {
             summary().merging(["revision": "rev-1", "presetId": NSNull(), "flagged": false, "messages": messages, "hasOlder": hasOlder]) { $1 }

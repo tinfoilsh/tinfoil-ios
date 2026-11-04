@@ -155,4 +155,48 @@ struct RunControllerTests {
         #expect(await transport.requests.map(\.route) == [.turn, .follow])
         #expect(waits.seconds == [1])
     }
+
+    @Test func aTurnWhoseConnectionWasLostGoesOnceMoreWithItsNonce() async throws {
+        let transport = ScriptedTransport([unreachable, Answers.events(Self.finished)])
+        let controller = Self.controller(transport)
+        let turn = Self.turn()
+
+        let finished = await controller.run(.turn, .turn(turn))
+
+        #expect(finished)
+        let requests = await transport.requests
+        #expect(requests.map(\.route) == [.turn, .turn])
+        #expect(requests.map { $0.json["clientRequestId"] as? String } == [turn.clientRequestId, turn.clientRequestId])
+        #expect(controller.view.status == .idle)
+        #expect(controller.view.error == nil)
+    }
+
+    @Test func aTurnWhoseConnectionIsLostAgainFails() async throws {
+        let transport = ScriptedTransport([unreachable, unreachable])
+        let controller = Self.controller(transport)
+
+        let finished = await controller.run(.turn, .turn(Self.turn()))
+
+        #expect(!finished)
+        #expect(await transport.requests.count == 2)
+        #expect(controller.view.status == .error)
+        #expect(controller.view.error?.code == HarnessErrorBody.unreachable.code)
+    }
+
+    @Test(arguments: [false, true])
+    func aTurnThatFailedOtherwiseIsNotSentAgain(answered: Bool) async throws {
+        // The harness answered, then the stream broke before the run started,
+        // or the request could not leave the device.
+        let offline: ScriptedTransport.Answer = { _ in
+            throw HarnessError(HarnessErrorBody.unreachable, urlErrorCode: .notConnectedToInternet)
+        }
+        let transport = ScriptedTransport([answered ? Answers.events([]) : offline])
+        let controller = Self.controller(transport)
+
+        let finished = await controller.run(.turn, .turn(Self.turn()))
+
+        #expect(!finished)
+        #expect(await transport.requests.count == 1)
+        #expect(controller.view.status == .error)
+    }
 }
