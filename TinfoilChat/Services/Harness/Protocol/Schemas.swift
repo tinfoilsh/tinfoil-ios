@@ -2498,11 +2498,14 @@ extension Components {
         }
         /// Opens a compaction marker while its summary is written. A turn whose
         /// prompt would not fit the share of the model's window a prompt may
-        /// fill summarizes every message before its question, from the chat's
-        /// latest marker on, into a new marker before that question. A run
+        /// fill summarizes the messages from the chat's latest marker on into a
+        /// new marker, except the latest exchanges before its question, which
+        /// the model goes on reading as they were. The marker sits before the
+        /// first question it keeps, or else before the turn's question. A run
         /// compacts at most once, before its first model turn or between two of
-        /// them. A client shows the marker before the message beforeMessageId
-        /// names, and the messages before it as ones the model no longer reads.
+        /// them. beforeMessageId names a message of the run's MESSAGES_SNAPSHOT.
+        /// A client shows the marker before that message, and the messages
+        /// before it as ones the model no longer reads.
         ///
         ///
         /// - Remark: Generated from `#/components/schemas/CompactionStartEvent`.
@@ -2540,7 +2543,7 @@ extension Components {
                 case beforeMessageId
             }
         }
-        /// Closes a compaction marker. A completed one carries the marker, which the chat keeps even if the reply then fails, and is followed by a STATE_SNAPSHOT with the context the turn's prompt now fills. A client removes a failed one, after which the run ends with COMPACTION_FAILED.
+        /// Closes a compaction marker, which sits before the message beforeMessageId names, as COMPACTION_START named it. A completed one carries the marker, which the chat keeps even if the reply then fails, and is followed by a STATE_SNAPSHOT with the context the turn's prompt now fills. A client removes a failed one, after which the run ends with COMPACTION_FAILED.
         ///
         /// - Remark: Generated from `#/components/schemas/CompactionEndEvent`.
         internal struct CompactionEndEvent: Codable, Hashable, Sendable {
@@ -2550,6 +2553,8 @@ extension Components {
             internal var timestamp: Components.Schemas.Timestamp?
             /// - Remark: Generated from `#/components/schemas/CompactionEndEvent/messageId`.
             internal var messageId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/CompactionEndEvent/beforeMessageId`.
+            internal var beforeMessageId: Swift.String
             /// A client treats an outcome it does not know as failed.
             ///
             /// - Remark: Generated from `#/components/schemas/CompactionEndEvent/outcome`.
@@ -2616,18 +2621,21 @@ extension Components {
             ///   - _type:
             ///   - timestamp:
             ///   - messageId:
+            ///   - beforeMessageId:
             ///   - outcome: A client treats an outcome it does not know as failed.
             ///   - marker:
             internal init(
                 _type: OpenAPIRuntime.OpenAPIValueContainer,
                 timestamp: Components.Schemas.Timestamp? = nil,
                 messageId: Swift.String,
+                beforeMessageId: Swift.String,
                 outcome: Components.Schemas.CompactionEndEvent.OutcomePayload,
                 marker: Components.Schemas.MessageView? = nil
             ) {
                 self._type = _type
                 self.timestamp = timestamp
                 self.messageId = messageId
+                self.beforeMessageId = beforeMessageId
                 self.outcome = outcome
                 self.marker = marker
             }
@@ -2635,6 +2643,7 @@ extension Components {
                 case _type = "type"
                 case timestamp
                 case messageId
+                case beforeMessageId
                 case outcome
                 case marker
             }

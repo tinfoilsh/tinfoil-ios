@@ -291,26 +291,36 @@ struct ChatReducerTests {
          "compaction": ["messages": messages, "startedAt": 1767225600000, "endedAt": 1767225601000, "model": "gpt-oss-120b", "version": 1]]
     }
 
-    private static let compactedTurn: [[String: Any]] = [
-        started(),
-        ["type": "MESSAGES_SNAPSHOT", "messages": [
-            ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first"],
-            ["id": "a1", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "timeline": [["id": "b1", "type": "content", "content": "long"]]],
-            ["id": "u2", "role": "user", "createdAt": "2026-01-01T00:00:02Z", "content": "second"],
-        ], "hasOlder": false],
-        snapshot(),
-        ["type": "COMPACTION_START", "timestamp": "2026-01-01T00:00:03Z", "messageId": "c", "beforeMessageId": "u2"],
+    /// The messages of a chat whose compaction keeps its latest exchange, u2
+    /// and a2, before the run's question.
+    private static let compactedMessages: [[String: Any]] = [
+        ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first"],
+        ["id": "a1", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "timeline": [["id": "b1", "type": "content", "content": "long"]]],
+        ["id": "u2", "role": "user", "createdAt": "2026-01-01T00:00:02Z", "content": "second"],
+        ["id": "a2", "role": "assistant", "createdAt": "2026-01-01T00:00:02Z", "timeline": [["id": "b2", "type": "content", "content": "short"]]],
+        ["id": "u3", "role": "user", "createdAt": "2026-01-01T00:00:02Z", "content": "third"],
     ]
 
-    private static func compactionEnd(_ outcome: String, marker: [String: Any]? = nil) -> [String: Any] {
-        var event: [String: Any] = ["type": "COMPACTION_END", "messageId": "c", "outcome": outcome]
+    private static let compactedTurn: [[String: Any]] = [
+        started(),
+        ["type": "MESSAGES_SNAPSHOT", "messages": compactedMessages, "hasOlder": false],
+        snapshot(),
+        compactionStart(),
+    ]
+
+    private static func compactionStart(before: String = "u2") -> [String: Any] {
+        ["type": "COMPACTION_START", "timestamp": "2026-01-01T00:00:03Z", "messageId": "c", "beforeMessageId": before]
+    }
+
+    private static func compactionEnd(_ outcome: String, marker: [String: Any]? = nil, before: String = "u2") -> [String: Any] {
+        var event: [String: Any] = ["type": "COMPACTION_END", "messageId": "c", "beforeMessageId": before, "outcome": outcome]
         if let marker { event["marker"] = marker }
         return event
     }
 
-    @Test func aCompactionOpensAboveTheQuestionAndKeepsTheMarkerItCompletes() throws {
+    @Test func aCompactionOpensAboveTheMessageItNamesAndKeepsTheMarkerItCompletes() throws {
         let running = try Self.reduce(Self.compactedTurn)
-        #expect(running.messages.map(\.id) == ["u1", "a1", "u2"])
+        #expect(running.messages.map(\.id) == ["u1", "a1", "u2", "a2", "u3"])
         let open = try #require(running.markers["u2"])
         #expect(open.id == "c")
         #expect(open.compaction == nil)
@@ -319,12 +329,21 @@ struct ChatReducerTests {
         #expect(running.summarizedIds.isEmpty)
 
         let completed = try Self.reduce([Self.compactionEnd("completed", marker: Self.marker())], from: Self.compactedTurn.count, into: running)
-        #expect(completed.messages.map(\.id) == ["u1", "a1", "u2"])
+        #expect(completed.messages.map(\.id) == ["u1", "a1", "u2", "a2", "u3"])
         let marker = try #require(completed.markers["u2"])
         #expect(marker.content == Self.summary)
         #expect(marker.compaction?.messages == 2)
+        // The exchange the compaction kept is still read.
         #expect(completed.summarizedIds == ["u1", "a1"])
-        #expect(completed.messagesWithMarkers.map(\.id) == ["u1", "a1", "c", "u2"])
+        #expect(completed.messagesWithMarkers.map(\.id) == ["u1", "a1", "c", "u2", "a2", "u3"])
+    }
+
+    @Test func aCompletedCompactionWhoseOpeningANewWindowReplacedKeepsItsPlace() throws {
+        let state = try Self.reduce(Self.compactedTurn + [
+            ["type": "MESSAGES_SNAPSHOT", "messages": Self.compactedMessages, "hasOlder": false],
+            Self.compactionEnd("completed", marker: Self.marker()),
+        ])
+        #expect(state.markers.mapValues(\.id) == ["u2": "c"])
     }
 
     @Test func aFailedCompactionRemovesItsMarkerBeforeTheRunFails() throws {
@@ -334,7 +353,7 @@ struct ChatReducerTests {
                 ["type": "RUN_ERROR", "threadId": "t", "runId": "r", "code": HarnessErrorCode.compactionFailed, "message": "failed", "action": "retry"],
             ])
             #expect(state.markers.isEmpty, "\(outcome)")
-            #expect(state.messages.map(\.id) == ["u1", "a1", "u2"])
+            #expect(state.messages.map(\.id) == ["u1", "a1", "u2", "a2", "u3"])
             #expect(state.status == .error)
             #expect(state.error?.code == HarnessErrorCode.compactionFailed)
             #expect(state.error?.action == .retry)
@@ -351,11 +370,11 @@ struct ChatReducerTests {
         #expect(again.markers == state.markers)
     }
 
-    @Test func aCompactionBeforeAMessageTheChatLacksOpensAboveTheRunsQuestion() throws {
+    @Test func aCompactionBeforeAMessageTheChatLacksShowsNoMarker() throws {
         var events = Self.compactedTurn
-        events[events.count - 1]["beforeMessageId"] = "gone"
-        let state = try Self.reduce(events)
-        #expect(state.markers.keys.sorted() == ["u2"])
+        events[events.count - 1] = Self.compactionStart(before: "gone")
+        let state = try Self.reduce(events + [Self.compactionEnd("completed", marker: Self.marker(), before: "gone")])
+        #expect(state.markers.isEmpty)
     }
 
     @Test func aLoadedChatShowsItsMarkersAboveTheirQuestionsAndNotAsMessages() throws {
