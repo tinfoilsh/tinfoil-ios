@@ -291,6 +291,10 @@ enum Constants {
         /// How long a run's stream may go without a byte before the
         /// connection is given up.
         static let streamIdleTimeoutSeconds: TimeInterval = 120
+        /// The waits before each attempt to rejoin a run whose stream
+        /// dropped, the first at once. Together they outlast a restart of the
+        /// chat service, whose new instance takes about a minute to answer.
+        static let rejoinDelaysSeconds: [TimeInterval] = [0, 1, 2, 4, 8, 15, 30, 30]
         /// The version of the protocol this client was built from, the
         /// info.version of harness-protocol/openapi.yaml. A harness that no
         /// longer serves it asks the user to update the app.
@@ -497,6 +501,7 @@ enum Constants {
         static let deleteConfirmationTitle = "Delete message?"
         static let deleteConfirmationMessage = "This message will be removed from the conversation. This cannot be undone."
         static let continueLabel = "Continue"
+        static let continueAccessibilityLabel = "Continue response"
         static let continueSystemImage = "forward"
         static let tryAgainLabel = "Try again"
         static let resendLabel = "Resend message"

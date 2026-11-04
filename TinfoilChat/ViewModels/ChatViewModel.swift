@@ -1748,13 +1748,14 @@ class ChatViewModel: ObservableObject {
         Task { await session.regenerate(at: index, options: turnOptions) }
     }
 
-    /// Continues a reply whose run failed, or that a chat was opened on
-    /// unfinished, from what it streamed. Anything else is retried: a reply
-    /// whose stream dropped may still be running.
+    /// Continues a reply whose run failed, that a chat was opened on
+    /// unfinished, or that the chat service stopped, from what it streamed.
+    /// Anything else is retried: a reply whose stream dropped may still be
+    /// running.
     func continueLastResponse() {
         guard let session, canGenerateInCurrentChat else { return }
         let state = session.state
-        let failed = (state.status == .error && state.failedRun != nil) || session.hasUnfinishedReply
+        let failed = (state.status == .error && state.failedRun != nil) || session.hasUnfinishedReply || session.endsOnStoppedReply
         guard failed, let index = state.messages.indices.last, state.messages[index].role.value1 == .assistant else {
             retryLastResponse()
             return
