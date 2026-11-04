@@ -58,6 +58,8 @@ struct RunOptions {
     /// The attempts made in a row to rejoin the run since its stream last
     /// delivered a frame.
     var rejoins = 0
+    /// The turn was sent again after its connection was lost.
+    var resent = false
     /// The view the run was started for, which a rejoin keeps.
     var version: Int?
     /// What a rejoined run continues from while the view shows another
@@ -316,6 +318,16 @@ final class RunController: ObservableObject {
         }
         guard let cause = outcome.failure else { return outcome.succeeded && attached() }
         if task.isCancelled || cause is CancellationError { return false }
+        // A turn whose connection was lost before the harness answered goes
+        // once more with its nonce, which the harness answers with the run
+        // the first one started, or by saying it applied it.
+        if case .turn = body, !options.resent, Self.lostBeforeAnswer(cause), device != nil || attached() {
+            var again = options
+            again.resent = true
+            again.version = version
+            again.state = attached() ? nil : outcome.state
+            return await run(route, body, options: again)
+        }
         // A stream cut off after its run started rejoins the run, which
         // replays it; a device run does so after the view moved on. Attempts
         // that deliver nothing wait longer each time, so a harness that
@@ -366,6 +378,14 @@ final class RunController: ObservableObject {
     private static func interrupted(_ cause: Error) -> Bool {
         guard let error = cause as? HarnessError else { return true }
         return error.code == HarnessErrorCode.streamInterrupted || error.code == HarnessErrorCode.connection
+    }
+
+    /// A request whose connection was lost before any answer, as when the
+    /// system sends it on a kept-open connection the harness closed while
+    /// the app was in the background. Only sending a request fails this
+    /// way, so nothing of its stream arrived.
+    private static func lostBeforeAnswer(_ cause: Error) -> Bool {
+        (cause as? HarnessError)?.urlErrorCode == .networkConnectionLost
     }
 
     /// The chat changed from the copy this client shows, as when the harness
