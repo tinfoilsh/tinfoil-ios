@@ -115,10 +115,6 @@ struct Frame: Equatable, Sendable {
 
 /// Reads a run's server-sent events from the bytes of its response body.
 enum HarnessEventStream {
-    /// A frame's data, in bytes, beyond which the stream is not one this
-    /// client reads.
-    static let maximumFrameBytes = 8 * 1024 * 1024
-
     private static let lineFeed = UInt8(ascii: "\n")
     private static let carriageReturn = UInt8(ascii: "\r")
     private static let colon = UInt8(ascii: ":")
@@ -193,15 +189,11 @@ enum HarnessEventStream {
                         id = try cursor(value)
                     }
                 }
-                if data.count > maximumFrameBytes { throw oversized }
             }
             buffer.removeFirst(start)
-            if data.count + buffer.count > maximumFrameBytes { throw oversized }
         }
         if !terminal { throw HarnessError.streamInterrupted }
     }
-
-    private static let oversized = HarnessError.invalidStream("The chat event exceeded its size limit.")
 
     /// A frame's cursor: a non-negative integer.
     private static func cursor(_ value: ArraySlice<UInt8>) throws -> Int {

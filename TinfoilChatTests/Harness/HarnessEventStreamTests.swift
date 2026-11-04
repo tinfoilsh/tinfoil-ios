@@ -108,10 +108,17 @@ struct HarnessEventStreamTests {
         #expect(failed.runId == "r")
     }
 
-    @Test func refusesAFrameBeyondTheSizeLimit() async {
-        let oversized = String(repeating: "x", count: HarnessEventStream.maximumFrameBytes + 1)
-        let error = await Self.failure(Self.chunks(["data: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"delta\":\"\(oversized)"]))
-        #expect(error?.code == HarnessErrorCode.invalidStream)
+    /// The harness decides how large an event grows.
+    @Test func readsAnEventOfAnySize() async throws {
+        let delta = String(repeating: "x", count: 9 << 20)
+        let text = "data: {\"type\":\"TEXT_MESSAGE_CHUNK\",\"messageId\":\"m\",\"role\":\"assistant\",\"delta\":\"\(delta)\"}\n\ndata: \(Self.finished)\n\n"
+        let frames = try await Self.collect(Self.bytes(text, every: 1 << 20))
+        #expect(frames.count == 2)
+        guard case .textMessageChunk(let chunk) = frames.first?.event else {
+            Issue.record("expected a text chunk, got \(String(describing: frames.first?.event))")
+            return
+        }
+        #expect(chunk.delta == delta)
     }
 
     @Test func aTransportFailureEndsTheStreamWithIt() async {
