@@ -525,6 +525,7 @@ final class DeviceThreads: ThreadStore {
         run.originals = attachments.originalsOf(sent)
         let store = store
         let saved = saved
+        let list = list
         return PreparedTurn(input: input, resend: input, run: run) { message in
             // The chat keeps the message until the run returns the thread, so
             // a new chat is listed from its first message.
@@ -536,7 +537,10 @@ final class DeviceThreads: ThreadStore {
                     next.updatedAt = message.createdAt
                     return next
                 }
-                if kept != nil { saved(threadId) }
+                if let kept {
+                    list.add(kept.summary)
+                    saved(threadId)
+                }
             } catch {
                 Self.logger.error("Failed to keep a sent message on this device: \(error, privacy: .public)")
             }

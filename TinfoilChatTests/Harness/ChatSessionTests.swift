@@ -181,6 +181,28 @@ struct ChatSessionTests {
         #expect(stored.recordVersion == 1)
     }
 
+    @Test func aNewDeviceChatIsListedFromItsFirstMessageAndAsItsReplyIsStored() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        session.newChat()
+        await fixture.transport.push { request in
+            let turn = request.json
+            return try Answers.events(deviceRun(id: turn["threadId"] as! String, question: "hello", questionId: turn["clientRequestId"] as! String))(request)
+        }
+        await fixture.transport.hold()
+        let sending = Task { await session.send(TurnFields(kind: .send, content: "hello")) }
+        await fixture.transport.arrived()
+
+        let threadId = try #require(session.open.id)
+        #expect(session.list.deviceListed.map(\.id) == [threadId])
+        #expect(session.list.deviceListed.first?.messageCount == 1)
+        await fixture.transport.release()
+        #expect(await sending.value)
+        #expect(session.list.deviceListed.map(\.id) == [threadId])
+        #expect(session.list.deviceListed.first?.title == "Kept title")
+        #expect(session.list.deviceListed.first?.messageCount == 2)
+    }
+
     @Test func openingADeviceChatShowsItsMessagesAndUpdatesGoThroughTheHarness() async throws {
         let fixture = Fixture(answers: [])
         let session = fixture.session
@@ -417,6 +439,7 @@ struct ChatSessionTests {
         #expect(await session.send(TurnFields(kind: .send, content: "hello")))
         let threadId = try #require(session.open.id)
         #expect(try await session.device.get(threadId) == nil)
+        #expect(session.list.deviceListed.isEmpty)
 
         try await session.saveTemporary()
         #expect(!session.open.temporary)

@@ -432,6 +432,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             guard let saved = try await DeviceRunStorage.store(run, event: event, changedSince: controller.settingsChangedSince(run), storedRuns: controller.storedRuns) else { return true }
             run.threadStored = true
             markSaved(saved.id)
+            relist(saved, storedBy: run)
             guard open.id == saved.id else { return true }
             attachments.rememberThread(saved)
             controller.updateView { state in
@@ -460,10 +461,17 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
 
     func runCutOff(_ run: DeviceRun, state: ChatState) async {
         do {
-            try await DeviceRunStorage.storeCutOff(run, state: state)
+            guard let saved = try await DeviceRunStorage.storeCutOff(run, state: state) else { return }
+            relist(saved, storedBy: run)
         } catch {
             Self.logger.error("Failed to save a cut-off reply on this device: \(error, privacy: .public)")
         }
+    }
+
+    /// The list shows a chat on this device as a run stored it. A temporary
+    /// chat is not listed.
+    private func relist(_ thread: StoredThread, storedBy run: DeviceRun) {
+        if run.store === device { list.deviceEdits.replace(thread.summary) }
     }
 
     // MARK: - Turns
