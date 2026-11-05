@@ -432,6 +432,16 @@ final class DeviceThreads: ThreadStore {
     func remove(_ threadId: String) async throws {
         try await store.delete(threadId)
         list.remove(threadId)
+        // The harness keeps a chat's last reply for a while for this device
+        // to collect. The chat is deleted here whether or not it hears.
+        let account = account
+        Task {
+            do {
+                let _: RawJSON = try await account.post(.delete, DeleteRequest(id: threadId, local: true), keyless: true)
+            } catch {
+                Self.logger.error("Failed to tell the chat service a chat was deleted: \(error, privacy: .public)")
+            }
+        }
     }
 
     /// The harness makes the fork, a new chat under an id it chooses, which

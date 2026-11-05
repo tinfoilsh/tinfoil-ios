@@ -401,9 +401,16 @@ struct TransferRequest: Encodable, Equatable, Sendable {
     }
 }
 
-/// A stored chat to delete, at the revision this client showed.
+/// A stored chat to delete, at the revision this client showed, or a chat
+/// this device deleted, which the harness drops what it keeps of.
 struct DeleteRequest: Encodable, Equatable, Sendable {
     var key: String?
     var id: String
     var revision: String?
+    var local: Bool?
+}
+
+/// Every chat this device deleted, which the harness drops what it keeps of.
+struct DeleteAllRequest: Encodable, Equatable, Sendable {
+    var local: Bool
 }
