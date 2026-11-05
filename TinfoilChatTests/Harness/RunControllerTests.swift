@@ -204,6 +204,41 @@ struct RunControllerTests {
         #expect(controller.view.status == .error)
     }
 
+    @Test func eachChatKeepsTheReceiptOfItsLatestRunUntilThatRunEnds() throws {
+        let name = "RunControllerTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let receipts = RunReceiptStore(userId: "user", defaults: defaults)
+
+        receipts.write(RunReceipt(threadId: "a", runId: "run_1", instance: "i"))
+        receipts.write(RunReceipt(threadId: "b", runId: "run_2", instance: "i"))
+        receipts.write(RunReceipt(threadId: "a", runId: "run_3", instance: "j"))
+
+        #expect(receipts.read(threadId: "a") == RunReceipt(threadId: "a", runId: "run_3", instance: "j"))
+        #expect(receipts.read(threadId: "b")?.runId == "run_2")
+        // A chat's earlier run ending leaves the receipt of its latest one.
+        receipts.forget(runId: "run_1")
+        #expect(receipts.read(threadId: "a")?.runId == "run_3")
+        receipts.forget(runId: "run_3")
+        #expect(receipts.read(threadId: "a") == nil)
+        #expect(receipts.read(threadId: "b")?.runId == "run_2")
+        receipts.forget(threadId: "b")
+        #expect(receipts.read(threadId: "b") == nil)
+    }
+
+    @Test func theReceiptAnEarlierVersionKeptIsStillRead() throws {
+        let name = "RunControllerTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(try JSONEncoder().encode(RunReceipt(threadId: "a", runId: "run_1", instance: "i")), forKey: Constants.Harness.runReceiptKeyPrefix + "user")
+        let receipts = RunReceiptStore(userId: "user", defaults: defaults)
+
+        #expect(receipts.read(threadId: "a")?.runId == "run_1")
+        receipts.write(RunReceipt(threadId: "b", runId: "run_2", instance: "i"))
+        #expect(receipts.read(threadId: "a")?.runId == "run_1")
+        #expect(receipts.read(threadId: "b")?.runId == "run_2")
+    }
+
     @Test func aRunThatReportsAQuotaOfAKindThisClientDoesNotKnowSpendsTheHourlyBudget() async throws {
         let transport = ScriptedTransport([Answers.events(Self.frames + [
             ["type": "RUN_FINISHED", "timestamp": "2026-01-01T00:00:02Z", "threadId": "t", "runId": "run_1", "metadata": [

@@ -546,8 +546,7 @@ final class DeviceThreads: ThreadStore {
     /// A run this app started, or one a relaunched app left behind.
     func liveRun(_ thread: ThreadWindow) -> RunReceipt? {
         if let run = controller.deviceRuns[thread.id]?.run { return run }
-        if let receipt = controller.receipt(), receipt.threadId == thread.id { return receipt }
-        return nil
+        return controller.receipt(of: thread.id)
     }
 
     func follow(_ threadId: String, runId: String) async throws -> (body: RunBody, device: DeviceRun?) {

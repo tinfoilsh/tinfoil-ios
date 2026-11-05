@@ -1581,6 +1581,7 @@ class ChatViewModel: ObservableObject {
     func clearAllChatsFromDevice() async {
         guard let session else { return }
         _ = try? await session.device.deleteAll()
+        session.controller.clearReceipts()
         session.list.reloadDevice()
         if session.open.onDevice { createNewChat(focusInput: false) }
     }

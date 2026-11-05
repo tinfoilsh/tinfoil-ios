@@ -286,7 +286,6 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             $0.temporary = false
         }
         temporaryStore = DeviceThreadStore(directory: nil)
-        controller.clearReceipt()
     }
 
     @discardableResult
@@ -906,6 +905,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             undo()
             throw error
         }
+        controller.forgetReceipt(of: threadId)
     }
 
     /// Deletes every chat the user can see here: the harness's stored chats
@@ -918,6 +918,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             cloudDeleted = true
         }
         try await device.deleteAll()
+        controller.clearReceipts()
         // The harness keeps chats' last replies for a while for this device
         // to collect. They are deleted here whether or not it hears.
         let account = account

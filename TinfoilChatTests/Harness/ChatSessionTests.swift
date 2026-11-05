@@ -18,7 +18,7 @@ private struct Fixture {
 
     /// A signed-out caller, whose chats live in memory, or an account with
     /// cloud sync whose key is held.
-    init(userId: String? = nil, answers: [ScriptedTransport.Answer]) {
+    init(userId: String? = nil, answers: [ScriptedTransport.Answer], receipts: RunReceiptStore? = nil) {
         transport = ScriptedTransport(answers)
         let controlPlane = FreeKeyControlPlane()
         let credentials = HarnessCredentialProvider(
@@ -35,7 +35,7 @@ private struct Fixture {
             settings: MemoryProfileStorage(),
             cloudSync: userId != nil
         )
-        session = ChatSession(account: account, device: DeviceThreadStore(directory: nil), cache: ChatListCache(directory: nil), receipts: nil)
+        session = ChatSession(account: account, device: DeviceThreadStore(directory: nil), cache: ChatListCache(directory: nil), receipts: receipts)
     }
 }
 
@@ -251,6 +251,40 @@ struct ChatSessionTests {
         #expect(request.json["kind"] as? String == "retry")
         #expect(session.state.messages.count == 2)
         #expect(!session.hasUnfinishedReply)
+    }
+
+    @Test func aDeviceChatsRunLeftBehindByARelaunchIsFollowedOnceTheChatOpens() async throws {
+        let name = "ChatSessionTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let receipts = RunReceiptStore(userId: nil, defaults: defaults)
+        // The app was closed while the chat's reply ran: the chat holds its
+        // question, and the run's receipt is kept.
+        receipts.write(RunReceipt(threadId: threadId, runId: "run_2", instance: "i"))
+        let fixture = Fixture(answers: [], receipts: receipts)
+        let session = fixture.session
+        let stored = try #require(StoredThread(json: record(messages: [
+            ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "second question"],
+        ])))
+        _ = try await session.device.add(stored, originals: [:])
+        session.list.reloadDevice()
+        // The relaunched app opens on a new chat before the user opens the
+        // one whose reply ran.
+        session.newChat()
+        #expect(receipts.read(threadId: threadId)?.runId == "run_2")
+        await fixture.transport.push(Answers.events(deviceRun(id: threadId, question: "second question", questionId: "u1")))
+
+        #expect(try await session.openChat(threadId, local: true) == .opened)
+        for await state in session.controller.$view.values where state.status == .idle && state.messages.count == 2 { break }
+        for await runs in session.controller.$deviceRuns.values where runs[threadId] == nil { break }
+
+        let follow = try #require(await fixture.transport.requests.last)
+        #expect(follow.route == .follow)
+        #expect(follow.json["runId"] as? String == "run_2")
+        #expect(follow.headers[HarnessHeader.instance] == "i")
+        #expect(try await session.device.get(threadId)?.messages.count == 2)
+        // The reply is stored, so the run is not followed again.
+        #expect(receipts.read(threadId: threadId) == nil)
     }
 
     /// A device chat stored with its last reply cut off, as the chat service

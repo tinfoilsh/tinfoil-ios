@@ -401,12 +401,14 @@ final class RunController: ObservableObject {
             settle(device)
             device.run = receipt
             deviceRuns[device.threadId] = device
+            // A chat on this device is rejoined after a relaunch through this
+            // receipt, whichever chat the view shows.
+            receipts?.write(receipt)
         }
         guard shown else { return }
         pending = nil
-        // A stored chat names its run itself; a chat on this device is
-        // rejoined after a relaunch through this receipt.
-        if device != nil { receipts?.write(receipt) } else { delegate?.runAccepted(threadId: receipt.threadId) }
+        // A stored chat names its run itself.
+        if device == nil { delegate?.runAccepted(threadId: receipt.threadId) }
     }
 
     /// The open chat's run ended with its stream, refused or cut off. A turn
@@ -470,16 +472,21 @@ final class RunController: ObservableObject {
         let _: RawJSON = try await account.post(.queueRemove, request, keyless: true, threadId: request.threadId)
     }
 
-    func receipt() -> RunReceipt? {
-        receipts?.read()
+    func receipt(of threadId: String) -> RunReceipt? {
+        receipts?.read(threadId: threadId)
     }
 
     /// A run that ended is not followed again after a relaunch.
     private func forgetReceipt(_ runId: String?) {
-        if let runId, receipts?.read()?.runId == runId { receipts?.clear() }
+        if let runId { receipts?.forget(runId: runId) }
     }
 
-    func clearReceipt() {
+    /// A deleted chat's run is not followed again.
+    func forgetReceipt(of threadId: String) {
+        receipts?.forget(threadId: threadId)
+    }
+
+    func clearReceipts() {
         receipts?.clear()
     }
 }
@@ -542,7 +549,8 @@ enum RunBody {
     }
 }
 
-/// Keeps the receipt of a device run across relaunches, for one account.
+/// Keeps the receipts of device runs across relaunches, one for the latest
+/// run of each chat, for one account.
 final class RunReceiptStore: Sendable {
     private let key: String
     private let defaults: UserDefaults
@@ -552,16 +560,44 @@ final class RunReceiptStore: Sendable {
         self.defaults = defaults
     }
 
-    func read() -> RunReceipt? {
-        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(RunReceipt.self, from: $0) }
+    func read(threadId: String) -> RunReceipt? {
+        all().last { $0.threadId == threadId }
     }
 
+    /// Keeps a run's receipt in place of its chat's earlier one.
     func write(_ receipt: RunReceipt) {
-        defaults.set(try? JSONEncoder().encode(receipt), forKey: key)
+        save(all().filter { $0.threadId != receipt.threadId } + [receipt])
+    }
+
+    func forget(runId: String) {
+        let kept = all()
+        if kept.contains(where: { $0.runId == runId }) { save(kept.filter { $0.runId != runId }) }
+    }
+
+    func forget(threadId: String) {
+        let kept = all()
+        if kept.contains(where: { $0.threadId == threadId }) { save(kept.filter { $0.threadId != threadId }) }
     }
 
     func clear() {
         defaults.removeObject(forKey: key)
+    }
+
+    /// The receipts kept, the latest last. A receipt kept on its own, as an
+    /// earlier version of the app kept one, is the only one.
+    private func all() -> [RunReceipt] {
+        guard let data = defaults.data(forKey: key) else { return [] }
+        if let receipts = try? JSONDecoder().decode([RunReceipt].self, from: data) { return receipts }
+        return (try? JSONDecoder().decode(RunReceipt.self, from: data)).map { [$0] } ?? []
+    }
+
+    /// Keeps the latest receipts, as many as the limit allows.
+    private func save(_ receipts: [RunReceipt]) {
+        guard !receipts.isEmpty else {
+            clear()
+            return
+        }
+        defaults.set(try? JSONEncoder().encode(Array(receipts.suffix(Constants.Harness.runReceiptLimit))), forKey: key)
     }
 }
 

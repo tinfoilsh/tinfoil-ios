@@ -144,7 +144,6 @@ extension ChatViewModel {
         session.account.invalidateKey()
         session.list.clearCloud()
         if !session.open.onDevice { session.newChat(local: false) }
-        session.controller.clearReceipt()
         await session.account.refreshProfile()
         if session.account.keyReady {
             session.list.reload()
