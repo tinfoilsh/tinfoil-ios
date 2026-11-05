@@ -54,6 +54,12 @@ final class StoredRuns: @unchecked Sendable {
             return true
         }
     }
+
+    /// Whether a later run stored the run's chat, whose thread then holds
+    /// what the run streamed as the harness finished it.
+    func superseded(_ run: DeviceRun) -> Bool {
+        lock.withLock { latest[run.threadId].map { $0 > run.since } ?? false }
+    }
 }
 
 /// A turn sent whose run has not started. Its chat is sent again, with its

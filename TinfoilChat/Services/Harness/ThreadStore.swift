@@ -628,12 +628,12 @@ enum DeviceRunStorage {
     /// A device run the harness no longer has, whose final event never
     /// returned the thread, leaves the chat with the replies it streamed as
     /// interrupted. A reply is stored with its text, as the harness stores
-    /// one.
+    /// one. A chat a later run stored is left as it is.
     @discardableResult
-    static func storeCutOff(_ run: DeviceRun, state: ChatState) async throws -> StoredThread? {
+    static func storeCutOff(_ run: DeviceRun, state: ChatState, storedRuns: StoredRuns) async throws -> StoredThread? {
         let unstored = !run.threadStored
         return try await run.store.update(run.threadId, originals: [:]) { stored in
-            guard var stored else { return nil }
+            guard var stored, !storedRuns.superseded(run) else { return nil }
             let messageId = { (message: JSONValue) in message.objectValue?["id"]?.stringValue }
             let replies = ChatReducer.cutOffReplies(state, storedIds: Set(stored.messages.compactMap(messageId)), unstored: unstored)
             guard !replies.isEmpty else { return nil }

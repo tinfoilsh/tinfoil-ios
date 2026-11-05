@@ -461,7 +461,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
 
     func runCutOff(_ run: DeviceRun, state: ChatState) async {
         do {
-            guard let saved = try await DeviceRunStorage.storeCutOff(run, state: state) else { return }
+            guard let saved = try await DeviceRunStorage.storeCutOff(run, state: state, storedRuns: controller.storedRuns) else { return }
             relist(saved, storedBy: run)
         } catch {
             Self.logger.error("Failed to save a cut-off reply on this device: \(error, privacy: .public)")
