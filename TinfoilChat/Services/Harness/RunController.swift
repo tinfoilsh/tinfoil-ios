@@ -20,6 +20,10 @@ final class DeviceRun: @unchecked Sendable {
     /// The run, once it started.
     var run: RunReceipt?
     var saved = false
+    /// The chat stored the thread the run's final event returned. A final
+    /// event without the thread leaves the chat without anything the run
+    /// streamed.
+    var threadStored = false
     /// When the run's turn read the chat, on the controller's clock.
     let since: Int
 
@@ -29,6 +33,32 @@ final class DeviceRun: @unchecked Sendable {
         self.images = images
         self.originals = originals
         self.since = since
+    }
+}
+
+/// Orders the runs of each device chat by when their turns read the chat,
+/// so a run's final event does not store the chat over the thread a later
+/// run stored, which holds the earlier run's turn, as when the earlier
+/// run's event arrives last on a stream rejoined after the later run ended.
+final class StoredRuns: @unchecked Sendable {
+    private let lock = NSLock()
+    /// When the turn of the latest run that stored each chat read it.
+    private var latest: [String: Int] = [:]
+
+    /// Whether the run's final event may store its chat, which makes it the
+    /// latest run that stored the chat.
+    func claim(_ run: DeviceRun) -> Bool {
+        lock.withLock { () -> Bool in
+            if let stored = latest[run.threadId], stored > run.since { return false }
+            latest[run.threadId] = run.since
+            return true
+        }
+    }
+
+    /// Whether a later run stored the run's chat, whose thread then holds
+    /// what the run streamed as the harness finished it.
+    func superseded(_ run: DeviceRun) -> Bool {
+        lock.withLock { latest[run.threadId].map { $0 > run.since } ?? false }
     }
 }
 
@@ -94,8 +124,12 @@ protocol RunControllerDelegate: AnyObject {
     func runEnded()
     /// The open chat's run is over though its stream did not say so, or the
     /// harness had applied the turn sent again, whose run another instance
-    /// of it may still be running.
-    func runGone(threadId: String, applied: Bool) async
+    /// of it may still be running. A device run's chat holds nothing it
+    /// streamed unless its final event was stored.
+    func runGone(threadId: String, applied: Bool, device: DeviceRun?) async
+    /// A device run the view moved away from is gone before its final event
+    /// returned the thread: its chat stores what the run streamed.
+    func runCutOff(_ run: DeviceRun, state: ChatState) async
 }
 
 /// Streams the runs of the chat a view shows: a turn's run, or a live run
@@ -129,9 +163,13 @@ final class RunController: ObservableObject {
     var holding = false
     var retryPreparation: (() async -> Bool)?
     weak var delegate: RunControllerDelegate?
+    let storedRuns = StoredRuns()
 
     private let account: HarnessAccount
     private let receipts: RunReceiptStore?
+    /// When the turn of each device run this app started read its chat, by
+    /// run.
+    private var runsSince: [String: Int] = [:]
     /// Changes each time the view moves to another chat. A run started for
     /// the previous one no longer updates the view.
     private var generation = 0
@@ -208,6 +246,13 @@ final class RunController: ObservableObject {
     /// The settings of a device chat changed after a run's turn read it.
     func settingsChangedSince(_ run: DeviceRun) -> [String] {
         (settingChanges[run.threadId] ?? [:]).filter { $0.value > run.since }.map(\.key)
+    }
+
+    /// When a device run's turn read its chat: a run this app started says,
+    /// and one an earlier launch left behind read it before anything this
+    /// app changed.
+    func since(ofRun runId: String) -> Int {
+        runsSince[runId] ?? 0
     }
 
     func settle(_ run: DeviceRun) {
@@ -298,7 +343,7 @@ final class RunController: ObservableObject {
                     delegate?.runEnded()
                     if case .runError(let failed) = event, failed.error.action == .reload, attached() {
                         pending = nil
-                        await delegate?.runGone(threadId: outcome.threadId, applied: false)
+                        await delegate?.runGone(threadId: outcome.threadId, applied: false, device: device)
                     }
                 }
             } catch {
@@ -359,7 +404,7 @@ final class RunController: ObservableObject {
             if Self.gone(cause) {
                 pending = nil
                 forgetReceipt(outcome.runId)
-                await delegate?.runGone(threadId: body.threadId, applied: (cause as? HarnessError)?.code == HarnessErrorCode.alreadyApplied)
+                await delegate?.runGone(threadId: body.threadId, applied: (cause as? HarnessError)?.code == HarnessErrorCode.alreadyApplied, device: device)
             } else if let widgetRetry {
                 widgetRetry.failure = (cause as? HarnessError)?.detail ?? Self.connectionLost
                 account.reportRateLimit(widgetRetry.failure?.rateLimit)
@@ -371,6 +416,9 @@ final class RunController: ObservableObject {
             } else if let refusal = cause as? HarnessError, refusal.status != nil {
                 forgetReceipt(outcome.runId)
             }
+        } else if let device, Self.gone(cause) {
+            forgetReceipt(outcome.runId)
+            await delegate?.runCutOff(device, state: outcome.state)
         }
         return false
     }
@@ -401,12 +449,15 @@ final class RunController: ObservableObject {
             settle(device)
             device.run = receipt
             deviceRuns[device.threadId] = device
+            runsSince[receipt.runId] = device.since
+            // A chat on this device is rejoined after a relaunch through this
+            // receipt, whichever chat the view shows.
+            receipts?.write(receipt)
         }
         guard shown else { return }
         pending = nil
-        // A stored chat names its run itself; a chat on this device is
-        // rejoined after a relaunch through this receipt.
-        if device != nil { receipts?.write(receipt) } else { delegate?.runAccepted(threadId: receipt.threadId) }
+        // A stored chat names its run itself.
+        if device == nil { delegate?.runAccepted(threadId: receipt.threadId) }
     }
 
     /// The open chat's run ended with its stream, refused or cut off. A turn
@@ -470,16 +521,21 @@ final class RunController: ObservableObject {
         let _: RawJSON = try await account.post(.queueRemove, request, keyless: true, threadId: request.threadId)
     }
 
-    func receipt() -> RunReceipt? {
-        receipts?.read()
+    func receipt(of threadId: String) -> RunReceipt? {
+        receipts?.read(threadId: threadId)
     }
 
     /// A run that ended is not followed again after a relaunch.
     private func forgetReceipt(_ runId: String?) {
-        if let runId, receipts?.read()?.runId == runId { receipts?.clear() }
+        if let runId { receipts?.forget(runId: runId) }
     }
 
-    func clearReceipt() {
+    /// A deleted chat's run is not followed again.
+    func forgetReceipt(of threadId: String) {
+        receipts?.forget(threadId: threadId)
+    }
+
+    func clearReceipts() {
         receipts?.clear()
     }
 }
@@ -542,7 +598,8 @@ enum RunBody {
     }
 }
 
-/// Keeps the receipt of a device run across relaunches, for one account.
+/// Keeps the receipts of device runs across relaunches, one for the latest
+/// run of each chat, for one account.
 final class RunReceiptStore: Sendable {
     private let key: String
     private let defaults: UserDefaults
@@ -552,16 +609,44 @@ final class RunReceiptStore: Sendable {
         self.defaults = defaults
     }
 
-    func read() -> RunReceipt? {
-        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(RunReceipt.self, from: $0) }
+    func read(threadId: String) -> RunReceipt? {
+        all().last { $0.threadId == threadId }
     }
 
+    /// Keeps a run's receipt in place of its chat's earlier one.
     func write(_ receipt: RunReceipt) {
-        defaults.set(try? JSONEncoder().encode(receipt), forKey: key)
+        save(all().filter { $0.threadId != receipt.threadId } + [receipt])
+    }
+
+    func forget(runId: String) {
+        let kept = all()
+        if kept.contains(where: { $0.runId == runId }) { save(kept.filter { $0.runId != runId }) }
+    }
+
+    func forget(threadId: String) {
+        let kept = all()
+        if kept.contains(where: { $0.threadId == threadId }) { save(kept.filter { $0.threadId != threadId }) }
     }
 
     func clear() {
         defaults.removeObject(forKey: key)
+    }
+
+    /// The receipts kept, the latest last. A receipt kept on its own, as an
+    /// earlier version of the app kept one, is the only one.
+    private func all() -> [RunReceipt] {
+        guard let data = defaults.data(forKey: key) else { return [] }
+        if let receipts = try? JSONDecoder().decode([RunReceipt].self, from: data) { return receipts }
+        return (try? JSONDecoder().decode(RunReceipt.self, from: data)).map { [$0] } ?? []
+    }
+
+    /// Keeps the latest receipts, as many as the limit allows.
+    private func save(_ receipts: [RunReceipt]) {
+        guard !receipts.isEmpty else {
+            clear()
+            return
+        }
+        defaults.set(try? JSONEncoder().encode(Array(receipts.suffix(Constants.Harness.runReceiptLimit))), forKey: key)
     }
 }
 

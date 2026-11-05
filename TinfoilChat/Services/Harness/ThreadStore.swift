@@ -525,6 +525,7 @@ final class DeviceThreads: ThreadStore {
         run.originals = attachments.originalsOf(sent)
         let store = store
         let saved = saved
+        let list = list
         return PreparedTurn(input: input, resend: input, run: run) { message in
             // The chat keeps the message until the run returns the thread, so
             // a new chat is listed from its first message.
@@ -536,7 +537,10 @@ final class DeviceThreads: ThreadStore {
                     next.updatedAt = message.createdAt
                     return next
                 }
-                if kept != nil { saved(threadId) }
+                if let kept {
+                    list.add(kept.summary)
+                    saved(threadId)
+                }
             } catch {
                 Self.logger.error("Failed to keep a sent message on this device: \(error, privacy: .public)")
             }
@@ -546,18 +550,19 @@ final class DeviceThreads: ThreadStore {
     /// A run this app started, or one a relaunched app left behind.
     func liveRun(_ thread: ThreadWindow) -> RunReceipt? {
         if let run = controller.deviceRuns[thread.id]?.run { return run }
-        if let receipt = controller.receipt(), receipt.threadId == thread.id { return receipt }
-        return nil
+        return controller.receipt(of: thread.id)
     }
 
+    /// A run this app reads already is followed with its record; another is
+    /// recorded anew, as of when its turn read the chat.
     func follow(_ threadId: String, runId: String) async throws -> (body: RunBody, device: DeviceRun?) {
         let device: DeviceRun
-        if let running = controller.deviceRuns[threadId] {
+        if let running = controller.deviceRuns[threadId], running.run?.runId == runId {
             device = running
         } else {
             var held = try await transcript(threadId).heldImages
             StoredThread.holdImages(attachments.uploads.values.compactMap { try? JSONValue(any: $0.jsonObject()) }, into: &held)
-            device = DeviceRun(threadId: threadId, store: store, images: held, since: controller.tick())
+            device = DeviceRun(threadId: threadId, store: store, images: held, since: controller.since(ofRun: runId))
         }
         return (RunBody(key: nil, threadId: threadId, runId: runId), device)
     }
@@ -594,10 +599,12 @@ final class DeviceThreads: ThreadStore {
 /// A device run's final event carries the whole thread, which this device
 /// stores with the images it holds where the harness left them out, and the
 /// originals of the images the turn sent. The settings the user changed
-/// after the run's turn read the chat keep the user's values.
+/// after the run's turn read the chat keep the user's values. A run whose
+/// turn read the chat before a later run stored it leaves the later run's
+/// thread as it is.
 enum DeviceRunStorage {
     @discardableResult
-    static func store(_ run: DeviceRun, event: RunEvent, changedSince: [String]) async throws -> StoredThread? {
+    static func store(_ run: DeviceRun, event: RunEvent, changedSince: [String], storedRuns: StoredRuns) async throws -> StoredThread? {
         let returned: StoredThread?
         switch event {
         case .runFinished(let finished): returned = finished.thread
@@ -608,12 +615,36 @@ enum DeviceRunStorage {
         thread.id = run.threadId
         let base = thread
         return try await run.store.update(run.threadId, originals: run.originals) { stored in
+            guard storedRuns.claim(run) else { return nil }
             var next = base
             var held = stored?.heldImages ?? [:]
             held.merge(run.images) { $1 }
             next.restore(held)
             if let stored { next.take(changedSince, from: stored) }
             return next
+        }
+    }
+
+    /// A device run the harness no longer has, whose final event never
+    /// returned the thread, leaves the chat with the replies it streamed as
+    /// interrupted. A reply is stored with its text, as the harness stores
+    /// one. A chat a later run stored is left as it is.
+    @discardableResult
+    static func storeCutOff(_ run: DeviceRun, state: ChatState, storedRuns: StoredRuns) async throws -> StoredThread? {
+        let unstored = !run.threadStored
+        return try await run.store.update(run.threadId, originals: [:]) { stored in
+            guard var stored, !storedRuns.superseded(run) else { return nil }
+            let messageId = { (message: JSONValue) in message.objectValue?["id"]?.stringValue }
+            let replies = ChatReducer.cutOffReplies(state, storedIds: Set(stored.messages.compactMap(messageId)), unstored: unstored)
+            guard !replies.isEmpty else { return nil }
+            let records = replies.map { reply -> JSONValue in
+                var record = stored.messages.first { messageId($0) == reply.id }?.objectValue ?? [:]
+                record.merge((try? reply.jsonObject()).flatMap { JSONValue(any: $0).objectValue } ?? [:]) { $1 }
+                record["content"] = .string((reply.timeline ?? []).filter { $0._type.value1 == .content }.map { $0.content ?? "" }.joined())
+                return .object(record)
+            }
+            stored.messages = ChatReducer.withReplies(stored.messages, records, shown: state.messages, id: messageId)
+            return stored
         }
     }
 }

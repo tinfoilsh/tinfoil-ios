@@ -305,8 +305,11 @@ enum Constants {
         /// The title of a chat waiting for its generated one.
         static let placeholderTitle = "New Chat"
         static let temporaryTitle = "Temporary Chat"
-        /// Where a device run's receipt is kept, by account.
+        /// Where the receipts of device runs are kept, by account.
         static let runReceiptKeyPrefix = "tinfoil-harness-run-"
+        /// The most chats whose device runs keep a receipt; the receipts of
+        /// the runs that started longest ago are dropped first.
+        static let runReceiptLimit = 20
         /// Where an account's prompt cache secret is kept in the keychain.
         static let promptCacheSecretKeyPrefix = "tinfoil-harness-prompt-cache-secret-"
         /// Where the models the last session offered are kept, which the

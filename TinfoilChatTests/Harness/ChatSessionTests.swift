@@ -18,7 +18,7 @@ private struct Fixture {
 
     /// A signed-out caller, whose chats live in memory, or an account with
     /// cloud sync whose key is held.
-    init(userId: String? = nil, answers: [ScriptedTransport.Answer]) {
+    init(userId: String? = nil, answers: [ScriptedTransport.Answer], receipts: RunReceiptStore? = nil) {
         transport = ScriptedTransport(answers)
         let controlPlane = FreeKeyControlPlane()
         let credentials = HarnessCredentialProvider(
@@ -35,7 +35,7 @@ private struct Fixture {
             settings: MemoryProfileStorage(),
             cloudSync: userId != nil
         )
-        session = ChatSession(account: account, device: DeviceThreadStore(directory: nil), cache: ChatListCache(directory: nil), receipts: nil)
+        session = ChatSession(account: account, device: DeviceThreadStore(directory: nil), cache: ChatListCache(directory: nil), receipts: receipts)
     }
 }
 
@@ -95,6 +95,19 @@ private func deviceRun(id: String, question: String, questionId: String) -> [[St
             "messages": [["id": reply, "model": "kimi-k3", "modelDisplayName": "Kimi K3", "usage": ["promptTokens": 1, "completionTokens": 2], "isError": false, "isInterrupted": false]],
             "thread": record(id: id, messages: messages),
         ]],
+    ]
+}
+
+/// The start of a device chat's run, through part of its reply, whose
+/// question is the turn's message.
+private func cutOffRun(_ request: HarnessRequest) -> [[String: Any]] {
+    let turn = request.json
+    return [
+        ["type": "RUN_STARTED", "timestamp": "2026-01-01T00:00:00Z", "threadId": turn["threadId"] as! String, "runId": "run_2", "instance": "i"],
+        ["type": "MESSAGES_SNAPSHOT", "timestamp": "2026-01-01T00:00:01Z", "hasOlder": false, "messages": [
+            ["id": turn["clientRequestId"] as! String, "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "hello"],
+        ]],
+        ["type": "TEXT_MESSAGE_CHUNK", "timestamp": "2026-01-01T00:00:02Z", "messageId": "msg_5", "role": "assistant", "delta": "Half"],
     ]
 }
 
@@ -166,6 +179,28 @@ struct ChatSessionTests {
         #expect(stored.messages.count == 2)
         #expect(stored["aLaterMember"]?.stringValue == "kept")
         #expect(stored.recordVersion == 1)
+    }
+
+    @Test func aNewDeviceChatIsListedFromItsFirstMessageAndAsItsReplyIsStored() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        session.newChat()
+        await fixture.transport.push { request in
+            let turn = request.json
+            return try Answers.events(deviceRun(id: turn["threadId"] as! String, question: "hello", questionId: turn["clientRequestId"] as! String))(request)
+        }
+        await fixture.transport.hold()
+        let sending = Task { await session.send(TurnFields(kind: .send, content: "hello")) }
+        await fixture.transport.arrived()
+
+        let threadId = try #require(session.open.id)
+        #expect(session.list.deviceListed.map(\.id) == [threadId])
+        #expect(session.list.deviceListed.first?.messageCount == 1)
+        await fixture.transport.release()
+        #expect(await sending.value)
+        #expect(session.list.deviceListed.map(\.id) == [threadId])
+        #expect(session.list.deviceListed.first?.title == "Kept title")
+        #expect(session.list.deviceListed.first?.messageCount == 2)
     }
 
     @Test func openingADeviceChatShowsItsMessagesAndUpdatesGoThroughTheHarness() async throws {
@@ -253,6 +288,92 @@ struct ChatSessionTests {
         #expect(!session.hasUnfinishedReply)
     }
 
+    @Test func aDeviceChatsRunLeftBehindByARelaunchIsFollowedOnceTheChatOpens() async throws {
+        let name = "ChatSessionTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let receipts = RunReceiptStore(userId: nil, defaults: defaults)
+        // The app was closed while the chat's reply ran: the chat holds its
+        // question, and the run's receipt is kept.
+        receipts.write(RunReceipt(threadId: threadId, runId: "run_2", instance: "i"))
+        let fixture = Fixture(answers: [], receipts: receipts)
+        let session = fixture.session
+        let stored = try #require(StoredThread(json: record(messages: [
+            ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "second question"],
+        ])))
+        _ = try await session.device.add(stored, originals: [:])
+        session.list.reloadDevice()
+        // The relaunched app opens on a new chat before the user opens the
+        // one whose reply ran.
+        session.newChat()
+        #expect(receipts.read(threadId: threadId)?.runId == "run_2")
+        await fixture.transport.push(Answers.events(deviceRun(id: threadId, question: "second question", questionId: "u1")))
+
+        #expect(try await session.openChat(threadId, local: true) == .opened)
+        for await state in session.controller.$view.values where state.status == .idle && state.messages.count == 2 { break }
+        for await runs in session.controller.$deviceRuns.values where runs[threadId] == nil { break }
+
+        let follow = try #require(await fixture.transport.requests.last)
+        #expect(follow.route == .follow)
+        #expect(follow.json["runId"] as? String == "run_2")
+        #expect(follow.headers[HarnessHeader.instance] == "i")
+        #expect(try await session.device.get(threadId)?.messages.count == 2)
+        // The reply is stored, so the run is not followed again.
+        #expect(receipts.read(threadId: threadId) == nil)
+    }
+
+    /// The reply a device chat stores, as a cut-off run left it.
+    private static func storedReply(_ session: ChatSession, _ threadId: String) async throws -> [String: JSONValue]? {
+        try await session.device.get(threadId)?.messages.last?.objectValue
+    }
+
+    @Test func aDeviceRunTheHarnessNoLongerHasKeepsWhatItStreamedAsInterrupted() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        session.newChat()
+        // The stream breaks, and the harness, restarted, no longer has the run.
+        await fixture.transport.push { request in try Answers.events(cutOffRun(request))(request) }
+        await fixture.transport.push(Answers.refusal(404, code: HarnessErrorCode.runNotFound, action: "reload"))
+
+        #expect(!(await session.send(TurnFields(kind: .send, content: "hello"))))
+
+        #expect(await fixture.transport.requests.map(\.route) == [.turn, .follow])
+        let threadId = try #require(session.open.id)
+        #expect(session.state.status == .idle)
+        #expect(session.state.messages.count == 2)
+        #expect(session.state.messages.last?.id == "msg_5")
+        #expect(session.state.messages.last?.isInterrupted == true)
+        #expect(session.endsOnStoppedReply)
+        let reply = try #require(try await Self.storedReply(session, threadId))
+        #expect(reply["id"]?.stringValue == "msg_5")
+        #expect(reply["content"]?.stringValue == "Half")
+        #expect(reply["isInterrupted"]?.boolValue == true)
+    }
+
+    @Test func aDeviceRunCutOffAfterItsChatWasLeftKeepsWhatItStreamed() async throws {
+        let (release, cut) = AsyncStream<Void>.makeStream()
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        session.newChat()
+        await fixture.transport.push { request in try heldRun(cutOffRun(request), then: [], until: release)(request) }
+        await fixture.transport.push(Answers.refusal(404, code: HarnessErrorCode.runNotFound, action: "reload"))
+        let sending = Task { await session.send(TurnFields(kind: .send, content: "hello")) }
+        for await state in session.controller.$view.values where state.messages.last?.id == "msg_5" { break }
+        let threadId = try #require(session.open.id)
+
+        // The user opens a new chat, then the stream breaks and the harness no
+        // longer has the run.
+        session.newChat()
+        cut.yield(())
+        #expect(await sending.value == false)
+
+        #expect(await fixture.transport.requests.map(\.route) == [.turn, .follow])
+        let reply = try #require(try await Self.storedReply(session, threadId))
+        #expect(reply["id"]?.stringValue == "msg_5")
+        #expect(reply["content"]?.stringValue == "Half")
+        #expect(reply["isInterrupted"]?.boolValue == true)
+    }
+
     /// A device chat stored with its last reply cut off, as the chat service
     /// leaves one it stops while it restarts.
     private static let stoppedReplyChat = StoredThread(json: record(messages: [
@@ -318,6 +439,7 @@ struct ChatSessionTests {
         #expect(await session.send(TurnFields(kind: .send, content: "hello")))
         let threadId = try #require(session.open.id)
         #expect(try await session.device.get(threadId) == nil)
+        #expect(session.list.deviceListed.isEmpty)
 
         try await session.saveTemporary()
         #expect(!session.open.temporary)
