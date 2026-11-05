@@ -115,10 +115,6 @@ struct Frame: Equatable, Sendable {
 
 /// Reads a run's server-sent events from the bytes of its response body.
 enum HarnessEventStream {
-    /// A frame's data, in bytes, beyond which the stream is not one this
-    /// client reads.
-    static let maximumFrameBytes = 8 * 1024 * 1024
-
     private static let lineFeed = UInt8(ascii: "\n")
     private static let carriageReturn = UInt8(ascii: "\r")
     private static let colon = UInt8(ascii: ":")
@@ -130,8 +126,10 @@ enum HarnessEventStream {
 
     /// The frames of a stream. Lines are split before the bytes are read as
     /// UTF-8, so a character, a CRLF, a comment or a multi-line event split
-    /// across chunks survives. A stream that ends without the run's last
-    /// event fails as interrupted: the run may go on.
+    /// across chunks survives. Each byte is searched for a line break once,
+    /// so an event of any size is read in time proportional to it. A stream
+    /// that ends without the run's last event fails as interrupted: the run
+    /// may go on.
     static func frames(
         from chunks: AsyncThrowingStream<Data, Error>
     ) -> AsyncThrowingStream<Frame, Error> {
@@ -153,6 +151,9 @@ enum HarnessEventStream {
         emit: (Frame) -> Void
     ) async throws {
         var buffer: [UInt8] = []
+        // How much of the buffer holds no line break, so a long line is
+        // searched once as it arrives rather than again with each chunk.
+        var scanned = 0
         var data: [UInt8] = []
         var hasData = false
         var id: Int?
@@ -167,9 +168,15 @@ enum HarnessEventStream {
             }
             var start = 0
             while start < buffer.count {
-                guard let end = buffer[start...].firstIndex(where: { $0 == lineFeed || $0 == carriageReturn }) else { break }
+                guard let end = buffer[max(start, scanned)...].firstIndex(where: { $0 == lineFeed || $0 == carriageReturn }) else {
+                    scanned = buffer.count
+                    break
+                }
                 // A CR that ends the buffer may be the first half of a CRLF.
-                if buffer[end] == carriageReturn, end == buffer.count - 1, !done { break }
+                if buffer[end] == carriageReturn, end == buffer.count - 1, !done {
+                    scanned = end
+                    break
+                }
                 let line = buffer[start..<end]
                 start = end + (buffer[end] == carriageReturn && end + 1 < buffer.count && buffer[end + 1] == lineFeed ? 2 : 1)
                 if line.isEmpty {
@@ -193,15 +200,12 @@ enum HarnessEventStream {
                         id = try cursor(value)
                     }
                 }
-                if data.count > maximumFrameBytes { throw oversized }
             }
             buffer.removeFirst(start)
-            if data.count + buffer.count > maximumFrameBytes { throw oversized }
+            scanned = max(0, scanned - start)
         }
         if !terminal { throw HarnessError.streamInterrupted }
     }
-
-    private static let oversized = HarnessError.invalidStream("The chat event exceeded its size limit.")
 
     /// A frame's cursor: a non-negative integer.
     private static func cursor(_ value: ArraySlice<UInt8>) throws -> Int {
