@@ -116,11 +116,11 @@ struct MessageAttachmentIndicator: View {
         .padding(.bottom, 4)
     }
 
+    /// Opens the chat's images at the one tapped. An image without a preview
+    /// is opened too, and loads in full.
     private func openImageViewer(for attachment: Attachment) {
         let messages: [Message] = viewModel.currentChat?.messages ?? []
-        let allImages = messages.flatMap(\.attachments).filter { (image: Attachment) -> Bool in
-            image.type == .image && (image.base64 != nil || image.thumbnailBase64 != nil)
-        }
+        let allImages = messages.flatMap(\.attachments).filter { $0.type == .image }
         if let index = allImages.firstIndex(where: { $0.id == attachment.id }) {
             viewModel.imageViewerImages = allImages
             viewModel.imageViewerIndex = index
@@ -358,6 +358,8 @@ struct ZoomableImagePage: View {
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
     @State private var decodedImage: UIImage?
+    /// The image has no preview to show, and its full copy did not load.
+    @State private var failed = false
 
     private var fullSizeBase64: String? {
         attachment.base64 ?? attachment.thumbnailBase64
@@ -402,7 +404,7 @@ struct ZoomableImagePage: View {
                             isZoomed = false
                         }
                     }
-            } else {
+            } else if failed {
                 VStack(spacing: 12) {
                     Image(systemName: "photo")
                         .font(.system(size: 40))
@@ -411,6 +413,10 @@ struct ZoomableImagePage: View {
                         .foregroundStyle(.white.opacity(0.5))
                         .font(.caption)
                 }
+            } else {
+                ProgressView()
+                    .tint(.white)
+                    .accessibilityLabel("Loading image")
             }
         }
         .onChange(of: isActive) { _, active in
@@ -421,29 +427,36 @@ struct ZoomableImagePage: View {
             }
         }
         .task(id: cacheKey) {
-            guard let fullSizeBase64 else {
+            failed = false
+            if let fullSizeBase64 {
+                if let cached = Base64ImageDecoder.cachedImage(for: cacheKey) {
+                    decodedImage = cached
+                } else {
+                    guard !Task.isCancelled else { return }
+                    decodedImage = await Base64ImageDecoder.decode(base64: fullSizeBase64, cacheKey: cacheKey)
+                }
+            } else {
                 decodedImage = nil
+            }
+
+            // An image shown from its thumbnail, or without one, is replaced
+            // by the full image once it loads.
+            guard attachment.base64 == nil, let loadFullImage else {
+                failed = decodedImage == nil
                 return
             }
-
-            if let cached = Base64ImageDecoder.cachedImage(for: cacheKey) {
-                decodedImage = cached
-            } else {
-                guard !Task.isCancelled else { return }
-                decodedImage = await Base64ImageDecoder.decode(base64: fullSizeBase64, cacheKey: cacheKey)
-            }
-
-            // An image shown from its thumbnail is replaced by the full image
-            // once it loads.
-            guard attachment.base64 == nil, let loadFullImage else { return }
             let loadedKey = "attachment-loaded-\(attachment.id)"
             if let cached = Base64ImageDecoder.cachedImage(for: loadedKey) {
                 decodedImage = cached
                 return
             }
-            guard let data = await loadFullImage(attachment), !Task.isCancelled,
-                  let image = await Base64ImageDecoder.decode(data: data, cacheKey: loadedKey) else { return }
-            decodedImage = image
+            let data = await loadFullImage(attachment)
+            guard !Task.isCancelled else { return }
+            if let data, let image = await Base64ImageDecoder.decode(data: data, cacheKey: loadedKey) {
+                decodedImage = image
+            } else {
+                failed = decodedImage == nil
+            }
         }
     }
 
