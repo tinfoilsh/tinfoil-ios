@@ -36,6 +36,26 @@ final class DeviceRun: @unchecked Sendable {
     }
 }
 
+/// Orders the runs of each device chat by when their turns read the chat,
+/// so a run's final event does not store the chat over the thread a later
+/// run stored, which holds the earlier run's turn, as when the earlier
+/// run's event arrives last on a stream rejoined after the later run ended.
+final class StoredRuns: @unchecked Sendable {
+    private let lock = NSLock()
+    /// When the turn of the latest run that stored each chat read it.
+    private var latest: [String: Int] = [:]
+
+    /// Whether the run's final event may store its chat, which makes it the
+    /// latest run that stored the chat.
+    func claim(_ run: DeviceRun) -> Bool {
+        lock.withLock { () -> Bool in
+            if let stored = latest[run.threadId], stored > run.since { return false }
+            latest[run.threadId] = run.since
+            return true
+        }
+    }
+}
+
 /// A turn sent whose run has not started. Its chat is sent again, with its
 /// nonce, to reconnect.
 struct PendingTurn {
@@ -137,9 +157,13 @@ final class RunController: ObservableObject {
     var holding = false
     var retryPreparation: (() async -> Bool)?
     weak var delegate: RunControllerDelegate?
+    let storedRuns = StoredRuns()
 
     private let account: HarnessAccount
     private let receipts: RunReceiptStore?
+    /// When the turn of each device run this app started read its chat, by
+    /// run.
+    private var runsSince: [String: Int] = [:]
     /// Changes each time the view moves to another chat. A run started for
     /// the previous one no longer updates the view.
     private var generation = 0
@@ -216,6 +240,13 @@ final class RunController: ObservableObject {
     /// The settings of a device chat changed after a run's turn read it.
     func settingsChangedSince(_ run: DeviceRun) -> [String] {
         (settingChanges[run.threadId] ?? [:]).filter { $0.value > run.since }.map(\.key)
+    }
+
+    /// When a device run's turn read its chat: a run this app started says,
+    /// and one an earlier launch left behind read it before anything this
+    /// app changed.
+    func since(ofRun runId: String) -> Int {
+        runsSince[runId] ?? 0
     }
 
     func settle(_ run: DeviceRun) {
@@ -412,6 +443,7 @@ final class RunController: ObservableObject {
             settle(device)
             device.run = receipt
             deviceRuns[device.threadId] = device
+            runsSince[receipt.runId] = device.since
             // A chat on this device is rejoined after a relaunch through this
             // receipt, whichever chat the view shows.
             receipts?.write(receipt)

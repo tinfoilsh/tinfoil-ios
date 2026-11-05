@@ -204,6 +204,43 @@ struct RunControllerTests {
         #expect(controller.view.status == .error)
     }
 
+    @Test func anEarlierRunsLateFinalEventLeavesTheChatALaterRunStored() async throws {
+        let store = DeviceThreadStore(directory: nil)
+        let storedRuns = StoredRuns()
+        func finished(_ runId: String, _ messages: [[String: Any]]) throws -> RunEvent {
+            try HarnessProtocolFixtures.frame([
+                "type": "RUN_FINISHED", "threadId": "t", "runId": runId, "metadata": ["thread": [
+                    "id": "t", "title": "Cats", "titleState": "generated", "model": "gpt-oss-120b", "pinned": false, "webSearchEnabled": false,
+                    "messages": messages,
+                ]],
+            ]).event
+        }
+        let first: [[String: Any]] = [
+            ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first"],
+            ["id": "a1", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "content": "First answer."],
+        ]
+        let both = first + [
+            ["id": "u2", "role": "user", "createdAt": "2026-01-01T00:00:02Z", "content": "second",
+             "attachments": [["id": "img", "kind": "image", "fileName": "cat.png", "mimeType": "image/png"]]],
+            ["id": "a2", "role": "assistant", "createdAt": "2026-01-01T00:00:03Z", "content": "Second answer."],
+        ]
+        let earlier = DeviceRun(threadId: "t", store: store, since: 1)
+        let later = DeviceRun(threadId: "t", store: store, originals: ["img": AttachmentOriginal(base64: "QUJD", mimeType: "image/png")], since: 2)
+
+        // The later run, queued behind the earlier one, ends first on its own
+        // stream; the earlier run's final event arrives after it.
+        #expect(try await DeviceRunStorage.store(later, event: finished("run_2", both), changedSince: [], storedRuns: storedRuns) != nil)
+        #expect(try await DeviceRunStorage.store(earlier, event: finished("run_1", first), changedSince: [], storedRuns: storedRuns) == nil)
+
+        #expect(try await store.get("t")?.messages.count == 4)
+        #expect(try await store.originals("t", attachmentIds: ["img"])["img"] != nil)
+        // A run that started later stores the chat even when it holds fewer
+        // messages, as a regenerated reply leaves it.
+        let regenerated = DeviceRun(threadId: "t", store: store, since: 3)
+        #expect(try await DeviceRunStorage.store(regenerated, event: finished("run_3", first), changedSince: [], storedRuns: storedRuns) != nil)
+        #expect(try await store.get("t")?.messages.count == 2)
+    }
+
     @Test func eachChatKeepsTheReceiptOfItsLatestRunUntilThatRunEnds() throws {
         let name = "RunControllerTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: name))

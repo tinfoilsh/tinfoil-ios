@@ -429,7 +429,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
 
     func runSaved(_ run: DeviceRun, event: RunEvent, attached: Bool) async -> Bool {
         do {
-            guard let saved = try await DeviceRunStorage.store(run, event: event, changedSince: controller.settingsChangedSince(run)) else { return true }
+            guard let saved = try await DeviceRunStorage.store(run, event: event, changedSince: controller.settingsChangedSince(run), storedRuns: controller.storedRuns) else { return true }
             run.threadStored = true
             markSaved(saved.id)
             guard open.id == saved.id else { return true }

@@ -549,14 +549,16 @@ final class DeviceThreads: ThreadStore {
         return controller.receipt(of: thread.id)
     }
 
+    /// A run this app reads already is followed with its record; another is
+    /// recorded anew, as of when its turn read the chat.
     func follow(_ threadId: String, runId: String) async throws -> (body: RunBody, device: DeviceRun?) {
         let device: DeviceRun
-        if let running = controller.deviceRuns[threadId] {
+        if let running = controller.deviceRuns[threadId], running.run?.runId == runId {
             device = running
         } else {
             var held = try await transcript(threadId).heldImages
             StoredThread.holdImages(attachments.uploads.values.compactMap { try? JSONValue(any: $0.jsonObject()) }, into: &held)
-            device = DeviceRun(threadId: threadId, store: store, images: held, since: controller.tick())
+            device = DeviceRun(threadId: threadId, store: store, images: held, since: controller.since(ofRun: runId))
         }
         return (RunBody(key: nil, threadId: threadId, runId: runId), device)
     }
@@ -593,10 +595,12 @@ final class DeviceThreads: ThreadStore {
 /// A device run's final event carries the whole thread, which this device
 /// stores with the images it holds where the harness left them out, and the
 /// originals of the images the turn sent. The settings the user changed
-/// after the run's turn read the chat keep the user's values.
+/// after the run's turn read the chat keep the user's values. A run whose
+/// turn read the chat before a later run stored it leaves the later run's
+/// thread as it is.
 enum DeviceRunStorage {
     @discardableResult
-    static func store(_ run: DeviceRun, event: RunEvent, changedSince: [String]) async throws -> StoredThread? {
+    static func store(_ run: DeviceRun, event: RunEvent, changedSince: [String], storedRuns: StoredRuns) async throws -> StoredThread? {
         let returned: StoredThread?
         switch event {
         case .runFinished(let finished): returned = finished.thread
@@ -607,6 +611,7 @@ enum DeviceRunStorage {
         thread.id = run.threadId
         let base = thread
         return try await run.store.update(run.threadId, originals: run.originals) { stored in
+            guard storedRuns.claim(run) else { return nil }
             var next = base
             var held = stored?.heldImages ?? [:]
             held.merge(run.images) { $1 }
