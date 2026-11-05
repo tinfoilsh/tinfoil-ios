@@ -335,10 +335,14 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
 
     /// Shows the open chat as it is stored once its run is over, as when the
     /// harness no longer has the run or had applied a turn sent again. A
-    /// chat never saved keeps what it shows. The run of a turn the harness
-    /// had applied may still go on, on another instance of the harness the
-    /// chat names, so the chat follows it.
-    private func showStored(_ threadId: String, followingLiveRun: Bool = false) async {
+    /// chat never saved keeps what it shows. A chat on this device keeps the
+    /// replies its run streamed that its stored copy lacks, as interrupted,
+    /// and stores them, since only the run's final event returns them; the
+    /// harness stores a stored chat's replies itself, and its copy is shown
+    /// as it is. The run of a turn the harness had applied may still go on,
+    /// on another instance of the harness the chat names, so the chat
+    /// follows it.
+    private func showStored(_ threadId: String, run: DeviceRun? = nil, followingLiveRun: Bool = false) async {
         guard open.id == threadId else { return }
         let shown = controller.track()
         let store = openStore()
@@ -346,16 +350,25 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             let result = try await store.get(threadId)
             guard shown() else { return }
             if result != nil { markSaved(threadId) }
-            if let result {
-                controller.setView(ChatState(thread: result.window))
-                guard followingLiveRun, let live = store.liveRun(result.window) else { return }
-                await account.client.locate(threadId: threadId, instance: live.instance)
-                let (body, run) = try await store.follow(threadId, runId: live.runId)
-                guard shown() else { return }
-                Task { await controller.run(.follow, body, options: RunOptions(device: run, quiet: run != nil)) }
+            let streamed = state
+            let replies = run.map { ChatReducer.cutOffReplies(streamed, storedIds: Set(result?.window.messages.map(\.id) ?? []), unstored: !$0.threadStored) } ?? []
+            if var window = result?.window {
+                window.messages = ChatReducer.withReplies(window.messages, replies, shown: streamed.messages) { $0.id }
+                controller.setView(ChatState(thread: window))
             } else {
-                controller.updateView { $0.status = .idle; $0.error = nil; $0.stopping = false }
+                controller.updateView { state in
+                    state.messages = ChatReducer.withReplies(state.messages, replies, shown: streamed.messages) { $0.id }
+                    state.status = .idle
+                    state.error = nil
+                    state.stopping = false
+                }
             }
+            if let run, !replies.isEmpty { await runCutOff(run, state: streamed) }
+            guard followingLiveRun, shown(), let window = result?.window, let live = store.liveRun(window) else { return }
+            await account.client.locate(threadId: threadId, instance: live.instance)
+            let (body, followed) = try await store.follow(threadId, runId: live.runId)
+            guard shown() else { return }
+            Task { await controller.run(.follow, body, options: RunOptions(device: followed, quiet: followed != nil)) }
         } catch {
             report(error)
         }
@@ -417,6 +430,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     func runSaved(_ run: DeviceRun, event: RunEvent, attached: Bool) async -> Bool {
         do {
             guard let saved = try await DeviceRunStorage.store(run, event: event, changedSince: controller.settingsChangedSince(run)) else { return true }
+            run.threadStored = true
             markSaved(saved.id)
             guard open.id == saved.id else { return true }
             attachments.rememberThread(saved)
@@ -440,8 +454,16 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         list.reload()
     }
 
-    func runGone(threadId: String, applied: Bool) async {
-        await showStored(threadId, followingLiveRun: applied)
+    func runGone(threadId: String, applied: Bool, device: DeviceRun?) async {
+        await showStored(threadId, run: device, followingLiveRun: applied)
+    }
+
+    func runCutOff(_ run: DeviceRun, state: ChatState) async {
+        do {
+            try await DeviceRunStorage.storeCutOff(run, state: state)
+        } catch {
+            Self.logger.error("Failed to save a cut-off reply on this device: \(error, privacy: .public)")
+        }
     }
 
     // MARK: - Turns

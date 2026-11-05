@@ -20,6 +20,10 @@ final class DeviceRun: @unchecked Sendable {
     /// The run, once it started.
     var run: RunReceipt?
     var saved = false
+    /// The chat stored the thread the run's final event returned. A final
+    /// event without the thread leaves the chat without anything the run
+    /// streamed.
+    var threadStored = false
     /// When the run's turn read the chat, on the controller's clock.
     let since: Int
 
@@ -94,8 +98,12 @@ protocol RunControllerDelegate: AnyObject {
     func runEnded()
     /// The open chat's run is over though its stream did not say so, or the
     /// harness had applied the turn sent again, whose run another instance
-    /// of it may still be running.
-    func runGone(threadId: String, applied: Bool) async
+    /// of it may still be running. A device run's chat holds nothing it
+    /// streamed unless its final event was stored.
+    func runGone(threadId: String, applied: Bool, device: DeviceRun?) async
+    /// A device run the view moved away from is gone before its final event
+    /// returned the thread: its chat stores what the run streamed.
+    func runCutOff(_ run: DeviceRun, state: ChatState) async
 }
 
 /// Streams the runs of the chat a view shows: a turn's run, or a live run
@@ -298,7 +306,7 @@ final class RunController: ObservableObject {
                     delegate?.runEnded()
                     if case .runError(let failed) = event, failed.error.action == .reload, attached() {
                         pending = nil
-                        await delegate?.runGone(threadId: outcome.threadId, applied: false)
+                        await delegate?.runGone(threadId: outcome.threadId, applied: false, device: device)
                     }
                 }
             } catch {
@@ -359,7 +367,7 @@ final class RunController: ObservableObject {
             if Self.gone(cause) {
                 pending = nil
                 forgetReceipt(outcome.runId)
-                await delegate?.runGone(threadId: body.threadId, applied: (cause as? HarnessError)?.code == HarnessErrorCode.alreadyApplied)
+                await delegate?.runGone(threadId: body.threadId, applied: (cause as? HarnessError)?.code == HarnessErrorCode.alreadyApplied, device: device)
             } else if let widgetRetry {
                 widgetRetry.failure = (cause as? HarnessError)?.detail ?? Self.connectionLost
                 account.reportRateLimit(widgetRetry.failure?.rateLimit)
@@ -371,6 +379,9 @@ final class RunController: ObservableObject {
             } else if let refusal = cause as? HarnessError, refusal.status != nil {
                 forgetReceipt(outcome.runId)
             }
+        } else if let device, Self.gone(cause) {
+            forgetReceipt(outcome.runId)
+            await delegate?.runCutOff(device, state: outcome.state)
         }
         return false
     }

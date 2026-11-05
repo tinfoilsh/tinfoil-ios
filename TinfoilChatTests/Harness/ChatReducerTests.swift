@@ -94,6 +94,34 @@ struct ChatReducerTests {
         #expect(loaded.messages.map(\.id) == ["u", "a"])
     }
 
+    @Test func aCutOffRunKeepsWhatItStreamedIntoAContinuedReplyUntilItsThreadIsStored() throws {
+        let question: [String: Any] = ["id": "q", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Go on"]
+        let half: [String: Any] = ["id": "m", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "timeline": [["id": "m_content_0", "type": "content", "content": "Half"]]]
+        let state = try Self.reduce([
+            Self.started(messageId: "m"),
+            ["type": "MESSAGES_SNAPSHOT", "messages": [question, half], "hasOlder": false],
+            Self.text(", then more"),
+        ])
+
+        // The stored copy holds the reply as it was before the run went on.
+        let kept = ChatReducer.cutOffReplies(state, storedIds: ["q", "m"], unstored: true)
+        #expect(kept.map(\.id) == ["m"])
+        #expect(kept.first?.timeline?.first?.content == "Half, then more")
+        #expect(kept.first?.isInterrupted == true)
+        // A copy the run's final event replaced holds all the run streamed.
+        #expect(ChatReducer.cutOffReplies(state, storedIds: ["q", "m"], unstored: false).isEmpty)
+    }
+
+    @Test func aCutOffReplyTakesItsPlaceBeforeTheMessagesSentAfterIt() {
+        let question = HarnessMessage(id: "q", role: .named(.user), createdAt: "")
+        let reply = HarnessMessage(id: "m", role: .named(.assistant), createdAt: "", isInterrupted: true)
+        let later = HarnessMessage(id: "q2", role: .named(.user), createdAt: "")
+
+        let merged = ChatReducer.withReplies([question, later], [reply], shown: [question, reply]) { $0.id }
+
+        #expect(merged.map(\.id) == ["q", "m", "q2"])
+    }
+
     @Test func aPatchTheProtocolDoesNotNameFailsTheStream() throws {
         let state = try Self.reduce([Self.started(), Self.snapshot()])
         let patch = try HarnessProtocolFixtures.frame(

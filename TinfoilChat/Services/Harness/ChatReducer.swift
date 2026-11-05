@@ -214,6 +214,44 @@ enum ChatReducer {
         return (Array(view.messages[..<start]) + shown, view.hasOlder, kept)
     }
 
+    /// The replies the chat shows after its last question that a stored copy
+    /// of it lacks, marked as interrupted: what a run streamed before its
+    /// stream was cut off and the harness no longer had it. Replies are told
+    /// apart by the ids the harness gives them, which a stored copy keeps. A
+    /// copy that holds nothing of the run, as a device chat's before the
+    /// run's final event returns the thread, also lacks what the run
+    /// streamed into the reply it continued.
+    static func cutOffReplies(_ state: ChatState, storedIds: Set<String>, unstored: Bool) -> [HarnessMessage] {
+        let question = state.messages.lastIndex { $0.role.value1 == .user }
+        let afterQuestion = question.map { state.messages[($0 + 1)...] } ?? state.messages[...]
+        return afterQuestion
+            .filter { reply in
+                reply.role.value1 == .assistant && (!storedIds.contains(reply.id) || (unstored && reply.id == state.continued))
+            }
+            .map { reply in
+                var interrupted = reply
+                interrupted.isInterrupted = true
+                return interrupted
+            }
+    }
+
+    /// Messages with each reply in place of its copy, or else after the
+    /// message it followed in the chat shown.
+    static func withReplies<Record>(_ messages: [Record], _ replies: [Record], shown: [HarnessMessage], id: (Record) -> String?) -> [Record] {
+        var merged = messages
+        for reply in replies {
+            let replyId = id(reply)
+            if let at = merged.firstIndex(where: { id($0) == replyId }) {
+                merged[at] = reply
+                continue
+            }
+            let before = shown.firstIndex { $0.id == replyId }.flatMap { $0 > 0 ? shown[$0 - 1].id : nil }
+            let after = before.flatMap { before in merged.firstIndex { id($0) == before } }
+            merged.insert(reply, at: after.map { $0 + 1 } ?? merged.endIndex)
+        }
+        return merged
+    }
+
     /// Opens a compaction marker while its summary is written, above the
     /// message the event names. A marker whose message is not loaded sits
     /// among earlier messages the view has not loaded, so the view leaves it

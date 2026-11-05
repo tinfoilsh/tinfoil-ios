@@ -98,6 +98,19 @@ private func deviceRun(id: String, question: String, questionId: String) -> [[St
     ]
 }
 
+/// The start of a device chat's run, through part of its reply, whose
+/// question is the turn's message.
+private func cutOffRun(_ request: HarnessRequest) -> [[String: Any]] {
+    let turn = request.json
+    return [
+        ["type": "RUN_STARTED", "timestamp": "2026-01-01T00:00:00Z", "threadId": turn["threadId"] as! String, "runId": "run_2", "instance": "i"],
+        ["type": "MESSAGES_SNAPSHOT", "timestamp": "2026-01-01T00:00:01Z", "hasOlder": false, "messages": [
+            ["id": turn["clientRequestId"] as! String, "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "hello"],
+        ]],
+        ["type": "TEXT_MESSAGE_CHUNK", "timestamp": "2026-01-01T00:00:02Z", "messageId": "msg_5", "role": "assistant", "delta": "Half"],
+    ]
+}
+
 /// A run's stream that sends `head`, then `tail` once `release` yields.
 private func heldRun(_ head: [[String: Any]], then tail: [[String: Any]], until release: AsyncStream<Void>) -> ScriptedTransport.Answer {
     func text(_ frames: [[String: Any]], from first: Int) -> Data {
@@ -285,6 +298,58 @@ struct ChatSessionTests {
         #expect(try await session.device.get(threadId)?.messages.count == 2)
         // The reply is stored, so the run is not followed again.
         #expect(receipts.read(threadId: threadId) == nil)
+    }
+
+    /// The reply a device chat stores, as a cut-off run left it.
+    private static func storedReply(_ session: ChatSession, _ threadId: String) async throws -> [String: JSONValue]? {
+        try await session.device.get(threadId)?.messages.last?.objectValue
+    }
+
+    @Test func aDeviceRunTheHarnessNoLongerHasKeepsWhatItStreamedAsInterrupted() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        session.newChat()
+        // The stream breaks, and the harness, restarted, no longer has the run.
+        await fixture.transport.push { request in try Answers.events(cutOffRun(request))(request) }
+        await fixture.transport.push(Answers.refusal(404, code: HarnessErrorCode.runNotFound, action: "reload"))
+
+        #expect(!(await session.send(TurnFields(kind: .send, content: "hello"))))
+
+        #expect(await fixture.transport.requests.map(\.route) == [.turn, .follow])
+        let threadId = try #require(session.open.id)
+        #expect(session.state.status == .idle)
+        #expect(session.state.messages.count == 2)
+        #expect(session.state.messages.last?.id == "msg_5")
+        #expect(session.state.messages.last?.isInterrupted == true)
+        #expect(session.endsOnStoppedReply)
+        let reply = try #require(try await Self.storedReply(session, threadId))
+        #expect(reply["id"]?.stringValue == "msg_5")
+        #expect(reply["content"]?.stringValue == "Half")
+        #expect(reply["isInterrupted"]?.boolValue == true)
+    }
+
+    @Test func aDeviceRunCutOffAfterItsChatWasLeftKeepsWhatItStreamed() async throws {
+        let (release, cut) = AsyncStream<Void>.makeStream()
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        session.newChat()
+        await fixture.transport.push { request in try heldRun(cutOffRun(request), then: [], until: release)(request) }
+        await fixture.transport.push(Answers.refusal(404, code: HarnessErrorCode.runNotFound, action: "reload"))
+        let sending = Task { await session.send(TurnFields(kind: .send, content: "hello")) }
+        for await state in session.controller.$view.values where state.messages.last?.id == "msg_5" { break }
+        let threadId = try #require(session.open.id)
+
+        // The user opens a new chat, then the stream breaks and the harness no
+        // longer has the run.
+        session.newChat()
+        cut.yield(())
+        #expect(await sending.value == false)
+
+        #expect(await fixture.transport.requests.map(\.route) == [.turn, .follow])
+        let reply = try #require(try await Self.storedReply(session, threadId))
+        #expect(reply["id"]?.stringValue == "msg_5")
+        #expect(reply["content"]?.stringValue == "Half")
+        #expect(reply["isInterrupted"]?.boolValue == true)
     }
 
     /// A device chat stored with its last reply cut off, as the chat service
