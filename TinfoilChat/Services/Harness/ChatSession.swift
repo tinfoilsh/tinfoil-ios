@@ -918,6 +918,16 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             cloudDeleted = true
         }
         try await device.deleteAll()
+        // The harness keeps chats' last replies for a while for this device
+        // to collect. They are deleted here whether or not it hears.
+        let account = account
+        Task {
+            do {
+                let _: RawJSON = try await account.post(.deleteAll, DeleteAllRequest(local: true), keyless: true)
+            } catch {
+                Self.logger.error("Failed to tell the chat service chats were deleted: \(error, privacy: .public)")
+            }
+        }
         reset()
         list.clearCloud(confirmedEmpty: cloudDeleted)
         list.reloadDevice()

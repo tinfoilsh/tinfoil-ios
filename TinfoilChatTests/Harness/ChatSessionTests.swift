@@ -198,6 +198,41 @@ struct ChatSessionTests {
         #expect(session.state.snapshot.thread?.title == "Dogs")
     }
 
+    @Test func deletingDeviceChatsTellsTheHarnessWithoutAKey() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        let stored = StoredThread(json: record(messages: [
+            ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"],
+        ]))!
+        _ = try await session.device.add(stored, originals: [:])
+        session.list.reloadDevice()
+        func sent(_ count: Int) async -> [HarnessRequest] {
+            var attempts = 0
+            while await fixture.transport.requests.count < count, attempts < 100 {
+                attempts += 1
+                await Task.yield()
+            }
+            return await fixture.transport.requests
+        }
+
+        // A harness out of reach leaves the chat deleted.
+        await fixture.transport.push { _ in throw HarnessError(HarnessErrorBody.unreachable, urlErrorCode: .notConnectedToInternet) }
+        try await session.remove(threadId)
+        #expect(try await session.device.get(threadId) == nil)
+        let deletion = try #require(await sent(1).first)
+        #expect(deletion.route == .delete)
+        #expect(deletion.json["id"] as? String == threadId)
+        #expect(deletion.json["local"] as? Bool == true)
+        #expect(deletion.json["key"] == nil)
+
+        await fixture.transport.push(Answers.json(["deleted": 0]))
+        try await session.removeAll()
+        let everything = try #require(await sent(2).last)
+        #expect(everything.route == .deleteAll)
+        #expect(everything.json["local"] as? Bool == true)
+        #expect(everything.json["key"] == nil)
+    }
+
     @Test func aChatOpenedOnAnUnansweredMessageAsksTheHarnessToAnswerIt() async throws {
         let fixture = Fixture(answers: [])
         let session = fixture.session
