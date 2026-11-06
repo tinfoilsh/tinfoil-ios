@@ -42,9 +42,21 @@ struct ChatState: Equatable, Sendable {
     var flagged = false
     /// The user stopped the run the chat shows, which has not ended yet.
     var stopping = false
+    /// The chat's latest turn compacts it on request instead of asking for a
+    /// reply, so its last reply is not the one the run streams.
+    var compactTurn = false
 
     var isRunning: Bool { [.submitting, .streaming, .queued].contains(status) }
     var isStopping: Bool { isRunning && stopping }
+
+    /// Whether compacting the chat on request has anything to summarize, as
+    /// the harness decides it: a message after the latest compaction marker
+    /// that comes before the last question, which the harness keeps with its
+    /// reply.
+    var compactable: Bool {
+        guard let question = messages.lastIndex(where: { $0.role.value1 == .user }) else { return false }
+        return question > (messages.lastIndex(where: { markers[$0.id] != nil }) ?? 0)
+    }
 
     /// The messages with each compaction marker before the message it shows
     /// above, as the harness keeps them.

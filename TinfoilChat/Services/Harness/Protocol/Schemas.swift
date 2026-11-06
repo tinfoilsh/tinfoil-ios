@@ -319,6 +319,7 @@ extension Components {
                 case maxTurns = "MAX_TURNS"
                 case missingAttachment = "MISSING_ATTACHMENT"
                 case modelUnavailable = "MODEL_UNAVAILABLE"
+                case nothingToCompact = "NOTHING_TO_COMPACT"
                 case payloadTooLarge = "PAYLOAD_TOO_LARGE"
                 case projectsRequireCloud = "PROJECTS_REQUIRE_CLOUD"
                 case queueFull = "QUEUE_FULL"
@@ -331,6 +332,7 @@ extension Components {
                 case runLogFull = "RUN_LOG_FULL"
                 case runNotFound = "RUN_NOT_FOUND"
                 case searchIndexFailed = "SEARCH_INDEX_FAILED"
+                case serviceBusy = "SERVICE_BUSY"
                 case syncOutcomeUnknown = "SYNC_OUTCOME_UNKNOWN"
                 case tempSpaceBusy = "TEMP_SPACE_BUSY"
                 case threadExists = "THREAD_EXISTS"
@@ -523,7 +525,7 @@ extension Components {
             internal var composer: Components.Schemas.Composer
             /// - Remark: Generated from `#/components/schemas/Session/presets`.
             internal var presets: [Components.Schemas.Preset]
-            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused.
+            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request.
             ///
             /// - Remark: Generated from `#/components/schemas/Session/features`.
             internal struct FeaturesPayload: Codable, Hashable, Sendable {
@@ -543,7 +545,7 @@ extension Components {
                     try encoder.encodeAdditionalProperties(additionalProperties)
                 }
             }
-            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused.
+            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request.
             ///
             /// - Remark: Generated from `#/components/schemas/Session/features`.
             internal var features: Components.Schemas.Session.FeaturesPayload
@@ -560,7 +562,7 @@ extension Components {
             ///   - profileDefaults:
             ///   - composer:
             ///   - presets:
-            ///   - features: Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused.
+            ///   - features: Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request.
             internal init(
                 _protocol: Components.Schemas.Session._ProtocolPayload,
                 user: Components.Schemas.Session.UserPayload,
@@ -1049,6 +1051,15 @@ extension Components {
             internal var threadId: Components.Schemas.Identifier
             /// send when absent.
             ///
+            /// compact compacts the chat on request, as COMPACTION_START describes,
+            /// and asks the model nothing: its run sends the compaction and ends.
+            /// It is refused with NOTHING_TO_COMPACT when no message after the
+            /// chat's latest compaction marker comes before its last question, and
+            /// with RUN_IN_FLIGHT while the chat has a running reply. A retry after
+            /// a compact turn failed compacts again. A client sends it only while
+            /// the session's features.manualCompaction is true.
+            ///
+            ///
             /// - Remark: Generated from `#/components/schemas/Turn/kind`.
             internal enum KindPayload: String, Codable, Hashable, Sendable, CaseIterable {
                 case send = "send"
@@ -1058,8 +1069,18 @@ extension Components {
                 case retry = "retry"
                 case retryToolCall = "retryToolCall"
                 case ask = "ask"
+                case compact = "compact"
             }
             /// send when absent.
+            ///
+            /// compact compacts the chat on request, as COMPACTION_START describes,
+            /// and asks the model nothing: its run sends the compaction and ends.
+            /// It is refused with NOTHING_TO_COMPACT when no message after the
+            /// chat's latest compaction marker comes before its last question, and
+            /// with RUN_IN_FLIGHT while the chat has a running reply. A retry after
+            /// a compact turn failed compacts again. A client sends it only while
+            /// the session's features.manualCompaction is true.
+            ///
             ///
             /// - Remark: Generated from `#/components/schemas/Turn/kind`.
             internal var kind: Components.Schemas.Turn.KindPayload?
@@ -2503,7 +2524,9 @@ extension Components {
         /// the model goes on reading as they were. The marker sits before the
         /// first question it keeps, or else before the turn's question. A run
         /// compacts at most once, before its first model turn or between two of
-        /// them. beforeMessageId names a message of the run's MESSAGES_SNAPSHOT.
+        /// them. A compact turn compacts its chat the same way, taking the chat's
+        /// last question and what follows it for the turn's question.
+        /// beforeMessageId names a message of the run's MESSAGES_SNAPSHOT.
         /// A client shows the marker before that message, and the messages
         /// before it as ones the model no longer reads.
         ///
@@ -4359,7 +4382,7 @@ extension Components {
             internal var messages: [Components.Schemas.MessageRecord]
             /// - Remark: Generated from `#/components/schemas/ThreadRecord/lastRequestId`.
             internal var lastRequestId: Swift.String?
-            /// What the last request's turn did, which a retry repeats.
+            /// What the last request's turn did, which a retry repeats. A compaction is recorded only when it failed.
             ///
             /// - Remark: Generated from `#/components/schemas/ThreadRecord/lastRequestKind`.
             internal var lastRequestKind: Swift.String?
@@ -4427,7 +4450,7 @@ extension Components {
             ///   - webSearchEnabled:
             ///   - messages:
             ///   - lastRequestId:
-            ///   - lastRequestKind: What the last request's turn did, which a retry repeats.
+            ///   - lastRequestKind: What the last request's turn did, which a retry repeats. A compaction is recorded only when it failed.
             ///   - activeRun: A hint that a reply may be streaming, until the run's deadline. It never locks the chat.
             ///   - contextUsage:
             ///   - flagged:

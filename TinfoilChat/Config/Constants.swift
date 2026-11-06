@@ -137,6 +137,9 @@ enum Constants {
         static let responseComplete = "Response complete"
         static let generationStopped = "Generation stopped"
         static let responseFailed = "Response failed"
+        static let compactingChat = "Compacting chat"
+        static let chatCompacted = "Chat compacted"
+        static let compactionFailed = "Chat could not be compacted"
 
         /// Name of the VoiceOver custom rotor used to jump between messages
         /// in the conversation pane.
@@ -466,6 +469,20 @@ enum Constants {
         /// Usage percentage at which the context indicator switches to the
         /// warning color.
         static let warningThresholdPercent = 80
+
+        /// The popover the context row opens, which compacts the chat on
+        /// request.
+        static let popoverWidth: CGFloat = 300
+        static let popoverPadding: CGFloat = 16
+        static let popoverSpacing: CGFloat = 12
+        static let compactLabel = "Compact Chat"
+        static let compactingLabel = "Compacting…"
+        static let compactSystemImage = "rectangle.compress.vertical"
+        static let compactExplanation = "Compacting summarizes earlier messages so the chat uses less of the context window. The latest exchange is kept as it is."
+        static let nothingToCompactNote = "Nothing to compact right now."
+        /// The status above the composer while a compaction runs.
+        static let compactingStatusTitle = "Compacting conversation"
+        static let compactingStatusDetail = "This can take a minute or two. Messages you send now are sent once it is done."
     }
 
     /// The cover shown while the app is not active, and the placeholder

@@ -98,6 +98,8 @@ struct MessageRowContext: Equatable {
     /// The open chat's error, which only the row that failed shows.
     var failure: HarnessErrorBody?
     var failureAt: Date?
+    /// The error ended a compaction the user asked for, not a reply.
+    var compactionFailed = false
 
     @MainActor init(_ viewModel: ChatViewModel, message: Message, messageIndex: Int, isRenderingStream: Bool) {
         canGenerateInCurrentChat = viewModel.canGenerateInCurrentChat
@@ -122,6 +124,7 @@ struct MessageRowContext: Equatable {
         if shouldShowStreamError(message: message), let shown = viewModel.shownFailure {
             failure = shown.error
             failureAt = shown.at
+            compactionFailed = viewModel.compactionFailed
         }
     }
 }
@@ -226,9 +229,10 @@ struct MessageView: View, Equatable {
 
     private var streamErrorRetry: AssistantMessageActionPolicy.StreamErrorRetry? {
         guard hasVisibleStreamError else { return nil }
+        // A failed compaction compacts again; the reply above it is whole.
         return AssistantMessageActionPolicy.streamErrorRetry(
             canRegenerate: canRegenerateAssistantResponse,
-            hasPartialResponse: message.hasContinuableResponse
+            hasPartialResponse: message.hasContinuableResponse && !context.compactionFailed
         )
     }
 
@@ -807,7 +811,7 @@ struct MessageView: View, Equatable {
                 // Show an error box if the stream failed, with a button that
                 // continues the partial response or generates it again.
                 if shouldShowStreamError(message: message), let failure = context.failure {
-                    let presentation = StreamErrorPresentation(failure, occurredAt: context.failureAt)
+                    let presentation = StreamErrorPresentation(failure, occurredAt: context.failureAt, compactTurn: context.compactionFailed)
                     ErrorMessageView(
                         presentation: presentation,
                         details: failure.message,

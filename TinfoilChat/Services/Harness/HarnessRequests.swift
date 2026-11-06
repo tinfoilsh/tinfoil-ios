@@ -66,7 +66,7 @@ enum SentAttachment: Encodable, Equatable, Sendable {
 /// One user action on a chat, which its run carries out.
 struct Turn: Encodable, Equatable, Sendable {
     enum Kind: String, Encodable, Sendable {
-        case send, edit, regenerate, `continue`, retry, retryToolCall, ask
+        case send, edit, regenerate, `continue`, retry, retryToolCall, ask, compact
     }
 
     var key: String?

@@ -158,6 +158,10 @@ struct ChatListView: View {
                     .id(chatId)
                 }
                 if !isCurrentChatReadOnly {
+                    if viewModel.isCompactionRunning {
+                        CompactionStatusView(isDarkMode: isDarkMode)
+                            .transition(.opacity)
+                    }
                     MessageQueueView(
                         queue: viewModel.queuedMessages,
                         isDarkMode: isDarkMode,

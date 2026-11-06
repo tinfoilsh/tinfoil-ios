@@ -58,6 +58,9 @@ enum ChatReducer {
         }
         switch event {
         case .runStarted(let started):
+            // A compaction is the run of the turn the chat submitted, not one
+            // queued after it.
+            if next.status != .submitting { next.compactTurn = false }
             next.error = nil
             next.failedRun = nil
             next.sealed = [:]
@@ -167,6 +170,8 @@ enum ChatReducer {
             // streamed shows why once the reply ends.
             next.status = next.status == .streaming && next.error != nil ? .error : .idle
             next.stopping = false
+            // Only a compaction that failed is retried as one.
+            next.compactTurn = false
             next.messages = committed(next.messages, finished.metadata.messages)
         case .runError(let failed):
             next.snapshot.queue = withoutQueued(next.snapshot.queue, runId)
@@ -182,9 +187,9 @@ enum ChatReducer {
 
     /// The messages whose reply the user stopped, as the run they stopped
     /// ends: the reply it had begun, or the message it stopped before
-    /// answering.
+    /// answering. A compaction answers no message.
     static func canceled(by event: RunEvent, in state: ChatState) -> [String] {
-        guard state.stopping, case .runFinished(let finished) = event, finished.runId == state.runId,
+        guard state.stopping, !state.compactTurn, case .runFinished(let finished) = event, finished.runId == state.runId,
               finished.metadata.cancelled == true else { return [] }
         let replies = finished.metadata.messages?.map(\.id) ?? []
         if !replies.isEmpty { return replies }

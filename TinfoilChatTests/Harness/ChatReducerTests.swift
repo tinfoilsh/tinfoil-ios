@@ -446,6 +446,51 @@ struct ChatReducerTests {
         #expect(again.markers == state.markers)
     }
 
+    @Test func aChatHasSomethingToCompactBeforeItsLastQuestionAfterItsLatestMarker() throws {
+        let snapshot: [String: Any] = ["type": "MESSAGES_SNAPSHOT", "messages": Self.compactedMessages, "hasOlder": false]
+        #expect(try Self.reduce([Self.started(), snapshot]).compactable)
+        // The marker above u2 leaves u2 and its reply before the last
+        // question, which a marker above that question does not.
+        #expect(try Self.reduce(Self.compactedTurn + [Self.compactionEnd("completed", marker: Self.marker())]).compactable)
+        let aboveQuestion = Self.compactedTurn.dropLast() + [Self.compactionStart(before: "u3"), Self.compactionEnd("completed", marker: Self.marker(), before: "u3")]
+        #expect(try !Self.reduce(Array(aboveQuestion)).compactable)
+        let onlyQuestion: [String: Any] = ["type": "MESSAGES_SNAPSHOT", "messages": Array(Self.compactedMessages.prefix(1)), "hasOlder": false]
+        #expect(try !Self.reduce([Self.started(), onlyQuestion]).compactable)
+    }
+
+    @Test func aCompactionTheChatAskedForIsItsRunUntilItEndsAndOneThatFailedIsKeptToRetry() throws {
+        var submitted = ChatState()
+        submitted.status = .submitting
+        submitted.compactTurn = true
+        let compacting = try Self.reduce([Self.started("compact")], into: submitted)
+        #expect(compacting.status == .streaming)
+        #expect(compacting.compactTurn)
+
+        let compacted = try Self.reduce([Self.finished("compact")], from: 1, into: compacting)
+        let failed = try Self.reduce([
+            ["type": "RUN_ERROR", "threadId": "t", "runId": "compact", "code": HarnessErrorCode.compactionFailed, "message": "failed", "action": "retry"],
+        ], from: 1, into: compacting)
+
+        #expect(!compacted.compactTurn)
+        #expect(failed.status == .error)
+        #expect(failed.compactTurn)
+        // A turn queued behind the failed compaction streams its own reply.
+        let replying = try Self.reduce([Self.started("queued")], into: failed)
+        #expect(replying.runId == "queued")
+        #expect(!replying.compactTurn)
+    }
+
+    @Test func aStoppedCompactionCancelsNoQuestionItLeftUnanswered() throws {
+        var stopping = try Self.reduce([Self.started(), ["type": "MESSAGES_SNAPSHOT", "messages": Self.compactedMessages, "hasOlder": false]])
+        stopping.stopping = true
+        let stopped = try HarnessProtocolFixtures.frame(["type": "RUN_FINISHED", "threadId": "t", "runId": "r", "metadata": ["cancelled": true, "messages": []]]).event
+        #expect(ChatReducer.canceled(by: stopped, in: stopping) == ["u3"])
+
+        stopping.compactTurn = true
+
+        #expect(ChatReducer.canceled(by: stopped, in: stopping).isEmpty)
+    }
+
     @Test func aCompactionBeforeAMessageTheChatLacksShowsNoMarker() throws {
         var events = Self.compactedTurn
         events[events.count - 1] = Self.compactionStart(before: "gone")
