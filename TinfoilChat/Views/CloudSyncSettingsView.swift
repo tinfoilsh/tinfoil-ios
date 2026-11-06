@@ -577,8 +577,7 @@ struct CloudSyncSettingsView: View {
 private struct CloudSyncStatusSection: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var status: CloudSyncStatus
-    /// The account could not load from the cloud, so no check can run until
-    /// it does.
+    /// The account could not load from the cloud.
     let loadFailed: Bool
 
     private var paused: Bool { status.failing || loadFailed }
