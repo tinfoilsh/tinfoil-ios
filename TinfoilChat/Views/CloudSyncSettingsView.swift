@@ -63,6 +63,7 @@ struct CloudSyncSettingsView: View {
                 }
 
                 keyLockedRow
+                syncStatusRow
             } footer: {
                 Text("Encrypt and back up your chats so they sync across devices.")
                     .font(.caption)
@@ -70,8 +71,6 @@ struct CloudSyncSettingsView: View {
             .listRowBackground(Color.cardSurface(for: colorScheme))
 
             if settings.isCloudSyncEnabled {
-            syncStatusSection
-
             // Encryption Key Section
             Section {
                     if let key = viewModel.getCurrentEncryptionKey() {
@@ -266,9 +265,9 @@ struct CloudSyncSettingsView: View {
     /// A refused key shows in the row above instead, as nothing syncs until
     /// it is recovered.
     @ViewBuilder
-    private var syncStatusSection: some View {
-        if let account = viewModel.account, account.cloud, !account.keyLocked {
-            CloudSyncStatusSection(status: account.syncStatus, loadFailed: account.profileFailed)
+    private var syncStatusRow: some View {
+        if settings.isCloudSyncEnabled, let account = viewModel.account, account.cloud, !account.keyLocked {
+            CloudSyncStatusRow(status: account.syncStatus, loadFailed: account.profileFailed)
         }
     }
 
@@ -574,8 +573,7 @@ struct CloudSyncSettingsView: View {
 
 /// Whether this device reached the chats the cloud stores on its latest
 /// try, and when it last did.
-private struct CloudSyncStatusSection: View {
-    @Environment(\.colorScheme) private var colorScheme
+private struct CloudSyncStatusRow: View {
     @ObservedObject var status: CloudSyncStatus
     /// The account could not load from the cloud.
     let loadFailed: Bool
@@ -583,47 +581,50 @@ private struct CloudSyncStatusSection: View {
     private var paused: Bool { status.failing || loadFailed }
 
     var body: some View {
-        Section {
-            HStack {
-                Text("Sync Status")
-                Spacer()
-                if paused {
-                    Text("Paused")
-                        .foregroundColor(.orange)
-                } else if status.lastSyncedAt != nil {
-                    Text("Synced")
-                        .foregroundColor(.green)
-                } else {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                        .accessibilityLabel("Checking")
-                }
-            }
-
-            if let lastSyncedAt = status.lastSyncedAt {
-                HStack {
-                    Text("Last Sync")
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    TimelineView(.periodic(from: .now, by: Constants.CloudSync.statusTickSeconds)) { context in
-                        Text(Self.timeSince(lastSyncedAt, now: context.date))
+        TimelineView(.periodic(from: .now, by: Constants.CloudSync.statusTickSeconds)) { context in
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: symbolName)
+                    .font(.subheadline)
+                    .foregroundColor(symbolColor)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(headline(now: context.date))
+                        .font(.subheadline)
+                    if paused {
+                        Text(detail(now: context.date))
+                            .font(.caption)
                             .foregroundColor(.secondary)
                     }
                 }
             }
-        } header: {
-            Text("Synchronization")
-        } footer: {
-            if paused {
-                Text("Having trouble reaching the cloud. Retrying automatically.")
-                    .font(.caption)
-            }
+            .accessibilityElement(children: .combine)
         }
-        .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
+
+    private var symbolName: String {
+        if paused { return "exclamationmark.triangle" }
+        return status.lastSyncedAt == nil ? "icloud" : "checkmark.circle"
+    }
+
+    private var symbolColor: Color {
+        if paused { return .orange }
+        return status.lastSyncedAt == nil ? .secondary : .adaptiveAccent
+    }
+
+    private func headline(now: Date) -> String {
+        if paused { return "Sync paused" }
+        guard let lastSyncedAt = status.lastSyncedAt else { return "Checking sync…" }
+        return "Synced \(Self.timeSince(lastSyncedAt, now: now))"
+    }
+
+    private func detail(now: Date) -> String {
+        let detail = "Having trouble reaching the cloud. Retrying automatically."
+        guard let lastSyncedAt = status.lastSyncedAt else { return detail }
+        return "\(detail) Last synced \(Self.timeSince(lastSyncedAt, now: now))."
     }
 
     private static func timeSince(_ date: Date, now: Date) -> String {
-        guard now.timeIntervalSince(date) >= Constants.CloudSync.recentSyncSeconds else { return "Just now" }
+        guard now.timeIntervalSince(date) >= Constants.CloudSync.recentSyncSeconds else { return "just now" }
         let style = RelativeDateTimeFormatter()
         style.unitsStyle = .full
         return style.localizedString(for: date, relativeTo: now)
