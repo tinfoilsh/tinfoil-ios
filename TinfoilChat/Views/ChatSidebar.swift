@@ -1024,7 +1024,12 @@ struct ChatSidebar: View, Equatable {
         if isProjectsExpanded {
             Button {
                 Task {
-                    await viewModel.createProject()
+                    // A project created but not opened stays listed here.
+                    guard let created = await viewModel.createProject(),
+                          viewModel.activeProject?.id == created.id else { return }
+                    withAnimation {
+                        isOpen = false
+                    }
                 }
             } label: {
                 Label("New project", systemImage: "folder.badge.plus")
