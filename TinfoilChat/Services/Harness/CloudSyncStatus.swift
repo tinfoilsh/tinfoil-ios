@@ -2,8 +2,8 @@ import Foundation
 
 /// When this device last read what the harness stores of the account's
 /// chats, and whether its latest attempt failed. Kept apart from the
-/// account, which the chat views follow, so that a check every few seconds
-/// redraws only the settings that show it.
+/// account, which the chat views follow, so that the regular checks redraw
+/// only the settings that show it.
 @MainActor
 final class CloudSyncStatus: ObservableObject {
     @Published private(set) var lastSyncedAt: Date?
