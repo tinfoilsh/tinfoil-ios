@@ -1024,7 +1024,9 @@ struct ChatSidebar: View, Equatable {
         if isProjectsExpanded {
             Button {
                 Task {
-                    guard await viewModel.createProject() != nil else { return }
+                    // A project created but not opened stays listed here.
+                    guard let created = await viewModel.createProject(),
+                          viewModel.activeProject?.id == created.id else { return }
                     withAnimation {
                         isOpen = false
                     }
