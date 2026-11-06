@@ -149,6 +149,18 @@ struct ChatListTests {
         #expect(cursors == [nil, "c2", "c2"])
     }
 
+    @Test func listingTheStoredChatsReportsWhetherTheCloudWasReached() async throws {
+        let (list, transport, account) = await makeListAndAccount()
+        await transport.push(Answers.refusal(503, code: "UPSTREAM_REFUSED", action: "retry"))
+        await #expect(throws: HarnessError.self) { try await list.refresh() }
+        #expect(account.syncStatus.failing)
+        #expect(account.syncStatus.lastSyncedAt == nil)
+        await transport.push(ListPage.json([summary("a")], pinned: []))
+        try await list.refresh()
+        #expect(!account.syncStatus.failing)
+        #expect(account.syncStatus.lastSyncedAt != nil)
+    }
+
     @Test func aPageLoadsWithTheListMarkedLoading() async throws {
         let (list, transport) = await makeList()
         await transport.push(ListPage.json(fullPage, pinned: [], next: "c2"))

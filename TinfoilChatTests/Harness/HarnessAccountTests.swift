@@ -130,6 +130,33 @@ struct HarnessAccountTests {
         #expect(account.profile["language"] as? String == "French")
     }
 
+    @Test func aFailedCheckForChangesKeepsTheLastSyncUntilACheckSucceeds() async throws {
+        let tokens: [String: Any] = ["chats": "c1", "profile": "p1", "projects": "j1"]
+        let (account, _) = makeAccount(userId: "user-1", answers: [
+            Answers.json(sessionAnswer), Answers.json([:]),
+            Answers.json(tokens), Answers.json([:]),
+            Answers.refusal(503, code: "UPSTREAM_UNAVAILABLE", action: "retry"),
+            Answers.json(tokens),
+        ])
+        try await account.refresh()
+        #expect(account.syncStatus.lastSyncedAt == nil)
+
+        await account.checkChanges()
+        let synced = try #require(account.syncStatus.lastSyncedAt)
+        #expect(!account.syncStatus.failing)
+
+        await account.checkChanges()
+        #expect(account.syncStatus.failing)
+        #expect(account.syncStatus.lastSyncedAt == synced)
+
+        await account.checkChanges()
+        #expect(!account.syncStatus.failing)
+        #expect(try #require(account.syncStatus.lastSyncedAt) > synced)
+
+        account.invalidateKey()
+        #expect(account.syncStatus.lastSyncedAt == nil)
+    }
+
     @Test func settingsTheHarnessRefusesForTheIdentityAskForASignIn() async throws {
         let prompts = SignInPrompts()
         let observer = NotificationCenter.default.addObserver(forName: .chatAuthenticationRequired, object: nil, queue: nil) { _ in prompts.count += 1 }

@@ -481,6 +481,10 @@ enum Constants {
         static let clipboardExpirationSeconds: TimeInterval = 300
         static let attentionBadgeSize: CGFloat = 8
         static let attentionAccessibilityLabel = "Cloud sync needs attention"
+        /// A sync this recent shows as "Just now".
+        static let recentSyncSeconds: TimeInterval = 60
+        /// How often the time since the last sync moves on in Settings.
+        static let statusTickSeconds: TimeInterval = 15
     }
 
     enum ChatFork {

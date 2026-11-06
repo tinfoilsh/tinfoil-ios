@@ -43,6 +43,7 @@ final class HarnessAccount: ObservableObject {
     /// revision that changes when another device changes them.
     @Published private(set) var chatRevision: String?
     @Published private(set) var projectRevision: String?
+    let syncStatus = CloudSyncStatus()
 
     private(set) var disposed = false
     private var cloudSync: Bool
@@ -129,6 +130,7 @@ final class HarnessAccount: ObservableObject {
     /// load again.
     func invalidateKey() {
         changeTokens = nil
+        syncStatus.reset()
         keyGeneration += 1
         profileVersion += 1
         profileKey = nil
@@ -564,8 +566,10 @@ final class HarnessAccount: ObservableObject {
             changeTokens = tokens
             if tokens.chats != chatRevision { chatRevision = tokens.chats }
             if tokens.projects != projectRevision { projectRevision = tokens.projects }
+            syncStatus.reportSynced()
         } catch {
             if !disposed { Self.logger.error("Failed to refresh remote changes: \(error, privacy: .public)") }
+            if !disposed, !(error is CancellationError) { syncStatus.reportFailed() }
         }
     }
 
