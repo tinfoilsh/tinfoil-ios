@@ -458,17 +458,24 @@ struct ChatReducerTests {
         #expect(try !Self.reduce([Self.started(), onlyQuestion]).compactable)
     }
 
-    @Test func aCompactionTheChatAskedForIsTheRunItSubmittedNotOneQueuedAfterIt() throws {
+    @Test func aCompactionTheChatAskedForIsItsRunUntilItEndsAndOneThatFailedIsKeptToRetry() throws {
         var submitted = ChatState()
         submitted.status = .submitting
         submitted.compactTurn = true
         let compacting = try Self.reduce([Self.started("compact")], into: submitted)
         #expect(compacting.status == .streaming)
         #expect(compacting.compactTurn)
+
         let compacted = try Self.reduce([Self.finished("compact")], from: 1, into: compacting)
+        let failed = try Self.reduce([
+            ["type": "RUN_ERROR", "threadId": "t", "runId": "compact", "code": HarnessErrorCode.compactionFailed, "message": "failed", "action": "retry"],
+        ], from: 1, into: compacting)
 
-        let replying = try Self.reduce([Self.started("queued")], into: compacted)
-
+        #expect(!compacted.compactTurn)
+        #expect(failed.status == .error)
+        #expect(failed.compactTurn)
+        // A turn queued behind the failed compaction streams its own reply.
+        let replying = try Self.reduce([Self.started("queued")], into: failed)
         #expect(replying.runId == "queued")
         #expect(!replying.compactTurn)
     }

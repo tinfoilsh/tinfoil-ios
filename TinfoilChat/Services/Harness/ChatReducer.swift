@@ -170,6 +170,8 @@ enum ChatReducer {
             // streamed shows why once the reply ends.
             next.status = next.status == .streaming && next.error != nil ? .error : .idle
             next.stopping = false
+            // Only a compaction that failed is retried as one.
+            next.compactTurn = false
             next.messages = committed(next.messages, finished.metadata.messages)
         case .runError(let failed):
             next.snapshot.queue = withoutQueued(next.snapshot.queue, runId)

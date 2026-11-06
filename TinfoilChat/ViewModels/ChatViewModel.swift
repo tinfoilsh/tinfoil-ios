@@ -926,11 +926,11 @@ class ChatViewModel: ObservableObject {
             stopAnnounced = false
             AccessibilityAnnouncer.announce(next.compactTurn ? Constants.Accessibility.compactingChat : Constants.Accessibility.generatingResponse)
         } else if wasRunning, next.status == .error || next.failed {
-            AccessibilityAnnouncer.announce(next.compactTurn ? Constants.Accessibility.compactionFailed : Constants.Accessibility.responseFailed)
+            AccessibilityAnnouncer.announce(previous.compactTurn ? Constants.Accessibility.compactionFailed : Constants.Accessibility.responseFailed)
             HapticFeedback.trigger(.error)
         } else if wasRunning, next.status == .idle {
             if !stopAnnounced {
-                AccessibilityAnnouncer.announce(next.compactTurn ? Constants.Accessibility.chatCompacted : Constants.Accessibility.responseComplete)
+                AccessibilityAnnouncer.announce(previous.compactTurn ? Constants.Accessibility.chatCompacted : Constants.Accessibility.responseComplete)
                 HapticFeedback.trigger(.success)
             }
             stopAnnounced = false
