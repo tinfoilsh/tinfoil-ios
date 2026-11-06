@@ -37,5 +37,8 @@ struct CompactionStatusView: View {
         .padding(.horizontal, 12)
         .padding(.bottom, 6)
         .accessibilityElement(children: .combine)
+        // VoiceOver hears every compaction start, also one a turn makes
+        // inside a reply it already announced.
+        .onAppear { AccessibilityAnnouncer.announce(Constants.Accessibility.compactingChat) }
     }
 }

@@ -924,7 +924,8 @@ class ChatViewModel: ObservableObject {
         let wasRunning = running.contains(previous.status), isRunning = running.contains(next.status)
         if !wasRunning, isRunning {
             stopAnnounced = false
-            AccessibilityAnnouncer.announce(next.compactTurn ? Constants.Accessibility.compactingChat : Constants.Accessibility.generatingResponse)
+            // A compaction's status announces it as it shows.
+            if !next.compactTurn { AccessibilityAnnouncer.announce(Constants.Accessibility.generatingResponse) }
         } else if wasRunning, next.status == .error || next.failed {
             AccessibilityAnnouncer.announce(previous.compactTurn ? Constants.Accessibility.compactionFailed : Constants.Accessibility.responseFailed)
             HapticFeedback.trigger(.error)
