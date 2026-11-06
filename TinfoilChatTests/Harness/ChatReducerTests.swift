@@ -473,6 +473,17 @@ struct ChatReducerTests {
         #expect(!replying.compactTurn)
     }
 
+    @Test func aStoppedCompactionCancelsNoQuestionItLeftUnanswered() throws {
+        var stopping = try Self.reduce([Self.started(), ["type": "MESSAGES_SNAPSHOT", "messages": Self.compactedMessages, "hasOlder": false]])
+        stopping.stopping = true
+        let stopped = try HarnessProtocolFixtures.frame(["type": "RUN_FINISHED", "threadId": "t", "runId": "r", "metadata": ["cancelled": true, "messages": []]]).event
+        #expect(ChatReducer.canceled(by: stopped, in: stopping) == ["u3"])
+
+        stopping.compactTurn = true
+
+        #expect(ChatReducer.canceled(by: stopped, in: stopping).isEmpty)
+    }
+
     @Test func aCompactionBeforeAMessageTheChatLacksShowsNoMarker() throws {
         var events = Self.compactedTurn
         events[events.count - 1] = Self.compactionStart(before: "gone")

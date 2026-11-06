@@ -185,9 +185,9 @@ enum ChatReducer {
 
     /// The messages whose reply the user stopped, as the run they stopped
     /// ends: the reply it had begun, or the message it stopped before
-    /// answering.
+    /// answering. A compaction answers no message.
     static func canceled(by event: RunEvent, in state: ChatState) -> [String] {
-        guard state.stopping, case .runFinished(let finished) = event, finished.runId == state.runId,
+        guard state.stopping, !state.compactTurn, case .runFinished(let finished) = event, finished.runId == state.runId,
               finished.metadata.cancelled == true else { return [] }
         let replies = finished.metadata.messages?.map(\.id) ?? []
         if !replies.isEmpty { return replies }
