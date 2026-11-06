@@ -42,3 +42,47 @@ struct CompactionStatusView: View {
         .onAppear { AccessibilityAnnouncer.announce(Constants.Accessibility.compactingChat) }
     }
 }
+
+/// Says the open chat was just compacted, where the status of its
+/// compaction showed: the chat's marker sits above earlier messages, often
+/// out of view. Mirrors the webapp's CompactedNotice.
+struct CompactedNoticeView: View {
+    let messageCount: Int
+    let isDarkMode: Bool
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "checkmark.circle")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.secondary)
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(Constants.Context.compactedNoticeTitle)
+                    .font(.system(size: 14, weight: .medium))
+                Text("Summarized \(messageCount) earlier message\(messageCount == 1 ? "" : "s"). The assistant now reads the summary in their place.")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle().inset(by: -12))
+            }
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.chatSurface(isDarkMode: isDarkMode))
+        )
+        .padding(.horizontal, 12)
+        .padding(.bottom, 6)
+        .accessibilityElement(children: .contain)
+    }
+}

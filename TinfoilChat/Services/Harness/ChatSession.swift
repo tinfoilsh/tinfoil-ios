@@ -395,7 +395,11 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
                 result.window.hasOlder = older.hasOlder
             }
             guard shown(), state.status == .idle else { return false }
-            controller.setView(ChatState(thread: result.window))
+            // The compaction the chat points out outlives the chat read
+            // again, as the compaction itself changes the chat's revision.
+            var reread = ChatState(thread: result.window)
+            reread.compacted = state.compacted
+            controller.setView(reread)
             refreshedRevision = (id, revision)
             patch {
                 $0.model = result.window.model
@@ -630,7 +634,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             controller.retryPreparation = nil
             if let submission {
                 controller.submission = submission
-                controller.updateView { $0.status = .submitting; $0.runId = nil; $0.error = nil; $0.stopping = false; $0.compactTurn = fields.kind == .compact }
+                controller.updateView { $0.status = .submitting; $0.runId = nil; $0.error = nil; $0.stopping = false; $0.compactTurn = fields.kind == .compact; $0.compacted = nil }
             }
             defer {
                 if let submission, controller.submission === submission {

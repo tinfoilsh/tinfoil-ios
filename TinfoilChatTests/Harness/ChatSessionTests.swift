@@ -585,6 +585,8 @@ struct ChatSessionTests {
         _ = await sending.value
         #expect(session.state.messages.last?.timeline?.first?.content == "Third answer.")
         #expect(session.state.markers["u2"]?.compaction?.messages == 2)
+        // The message it queued does not hide that the chat was compacted.
+        #expect(session.state.compacted == "c")
     }
 
     @Test func aCompactionTheUserAsksForThatFailsCompactsAgainWhenRetried() async throws {
@@ -622,6 +624,15 @@ struct ChatSessionTests {
         #expect(retried.json["kind"] as? String == "compact")
         #expect(session.state.markers["u2"]?.compaction?.messages == 2)
         #expect(!session.canCompact)
+        #expect(session.state.compacted == "c")
+
+        // The next message the user sends puts the compaction behind them.
+        await fixture.transport.push(Answers.events([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_5", "instance": "i"],
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_5", "metadata": [:]],
+        ]))
+        await session.send(TurnFields(kind: .send, content: "next question"))
+        #expect(session.state.compacted == nil)
     }
 
     @Test func stoppingACompactionSaysNothingOfTheReplyBeforeIt() async throws {

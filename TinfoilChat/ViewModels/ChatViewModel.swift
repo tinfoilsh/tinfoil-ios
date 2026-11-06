@@ -982,6 +982,18 @@ class ChatViewModel: ObservableObject {
         return session.compacting || (session.running && session.state.markers.values.contains { $0.compaction == nil })
     }
 
+    /// How many messages the compaction the open chat just completed
+    /// summarized, which the chat points out until the user sends again or
+    /// dismisses it.
+    var compactedMessageCount: Int? {
+        guard let state = session?.state, let id = state.compacted else { return nil }
+        return state.markers.values.first(where: { $0.id == id })?.compaction?.messages
+    }
+
+    func dismissCompactedNotice() {
+        session?.controller.updateView { $0.compacted = nil }
+    }
+
     /// The open chat can be compacted on request now.
     var canCompactChat: Bool {
         guard let session, compactsChatsOnRequest, canGenerateInCurrentChat else { return false }

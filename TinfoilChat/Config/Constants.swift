@@ -483,6 +483,8 @@ enum Constants {
         /// The status above the composer while a compaction runs.
         static let compactingStatusTitle = "Compacting conversation"
         static let compactingStatusDetail = "This can take a minute or two. Messages you send now are sent once it is done."
+        /// The notice above the composer once a compaction completes.
+        static let compactedNoticeTitle = "Conversation compacted"
     }
 
     /// The cover shown while the app is not active, and the placeholder
