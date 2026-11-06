@@ -974,6 +974,13 @@ class ChatViewModel: ObservableObject {
         session?.compacting == true
     }
 
+    /// A compaction runs in the open chat: one the user asked for, or one a
+    /// turn makes before the model answers.
+    var isCompactionRunning: Bool {
+        guard let session else { return false }
+        return session.compacting || (session.running && session.state.markers.values.contains { $0.compaction == nil })
+    }
+
     /// The open chat can be compacted on request now.
     var canCompactChat: Bool {
         guard let session, compactsChatsOnRequest, canGenerateInCurrentChat else { return false }

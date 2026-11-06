@@ -544,6 +544,49 @@ struct ChatSessionTests {
 
     private static let compactionFailed: [String: Any] = ["type": "COMPACTION_END", "messageId": "c", "beforeMessageId": "u2", "outcome": "failed"]
 
+    private static let compactionCompleted: [String: Any] = ["type": "COMPACTION_END", "messageId": "c", "beforeMessageId": "u2", "outcome": "completed", "marker": [
+        "id": "c", "role": "compaction", "createdAt": "2026-01-01T00:00:04Z", "content": "## Goals and context\nTwo questions.",
+        "compaction": ["messages": 2, "startedAt": 1767225600000, "endedAt": 1767225601000, "model": "gpt-oss-120b", "version": 2],
+    ]]
+
+    @Test func aMessageSentWhileTheChatCompactsWaitsInTheQueueAndIsAnsweredOnceItEnds() async throws {
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(Self.twoExchangeWindow)])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        let (compaction, compacted) = AsyncStream<Void>.makeStream()
+        await fixture.transport.push(heldRun(Self.compactionStarted, then: [
+            Self.compactionCompleted,
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_3", "metadata": [:]],
+        ], until: compaction))
+        let queued: [String: Any] = ["queueId": "run_4", "kind": "send", "content": "third question", "quote": NSNull(), "attachments": [], "createdAt": "2026-01-01T00:00:05Z"]
+        let (queue, started) = AsyncStream<Void>.makeStream()
+        await fixture.transport.push(heldRun([
+            ["type": "STATE_DELTA", "threadId": threadId, "runId": "run_4", "delta": [["op": "add", "path": "/queue/-", "value": queued]]],
+        ], then: [
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_4", "instance": "i"],
+            ["type": "TEXT_MESSAGE_CHUNK", "messageId": "msg_7", "role": "assistant", "delta": "Third answer."],
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_4", "metadata": [:]],
+        ], until: queue))
+        let compacting = Task { await session.compact() }
+        for await state in session.controller.$view.values where state.markers["u2"] != nil { break }
+
+        #expect(session.acceptsTurn)
+        let sending = Task { await session.send(TurnFields(kind: .send, content: "third question")) }
+        for await state in session.controller.$view.values where !state.snapshot.queue.isEmpty { break }
+
+        let turn = try #require(await fixture.transport.requests.last)
+        #expect(turn.json["kind"] as? String == "send")
+        #expect(turn.json["content"] as? String == "third question")
+        #expect(session.compacting)
+        compacted.yield(())
+        _ = await compacting.value
+        #expect(!session.compacting)
+        started.yield(())
+        _ = await sending.value
+        #expect(session.state.messages.last?.timeline?.first?.content == "Third answer.")
+        #expect(session.state.markers["u2"]?.compaction?.messages == 2)
+    }
+
     @Test func aCompactionTheUserAsksForThatFailsCompactsAgainWhenRetried() async throws {
         let fixture = Fixture(userId: "user-1", answers: [Answers.json(Self.twoExchangeWindow)])
         let session = fixture.session
@@ -570,10 +613,7 @@ struct ChatSessionTests {
         await fixture.transport.push(Answers.events([
             ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_4", "instance": "i"],
             ["type": "COMPACTION_START", "messageId": "c", "beforeMessageId": "u2"],
-            ["type": "COMPACTION_END", "messageId": "c", "beforeMessageId": "u2", "outcome": "completed", "marker": [
-                "id": "c", "role": "compaction", "createdAt": "2026-01-01T00:00:04Z", "content": "## Goals and context\nTwo questions.",
-                "compaction": ["messages": 2, "startedAt": 1767225600000, "endedAt": 1767225601000, "model": "gpt-oss-120b", "version": 2],
-            ]],
+            Self.compactionCompleted,
             ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_4", "metadata": [:]],
         ]))
         await session.retry()

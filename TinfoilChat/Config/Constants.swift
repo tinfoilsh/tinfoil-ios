@@ -480,6 +480,9 @@ enum Constants {
         static let compactSystemImage = "rectangle.compress.vertical"
         static let compactExplanation = "Compacting summarizes earlier messages so the chat uses less of the context window. The latest exchange is kept as it is."
         static let nothingToCompactNote = "Nothing to compact right now."
+        /// The status above the composer while a compaction runs.
+        static let compactingStatusTitle = "Compacting conversation"
+        static let compactingStatusDetail = "This can take a minute or two. Messages you send now are sent once it is done."
     }
 
     /// The cover shown while the app is not active, and the placeholder
