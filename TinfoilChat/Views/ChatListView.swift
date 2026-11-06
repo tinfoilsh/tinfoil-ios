@@ -161,6 +161,11 @@ struct ChatListView: View {
                     if viewModel.isCompactionRunning {
                         CompactionStatusView(isDarkMode: isDarkMode)
                             .transition(.opacity)
+                    } else if let messageCount = viewModel.compactedMessageCount {
+                        CompactedNoticeView(messageCount: messageCount, isDarkMode: isDarkMode) {
+                            viewModel.dismissCompactedNotice()
+                        }
+                        .transition(.opacity)
                     }
                     MessageQueueView(
                         queue: viewModel.queuedMessages,

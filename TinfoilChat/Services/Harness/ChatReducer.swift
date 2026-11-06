@@ -164,6 +164,7 @@ enum ChatReducer {
             next.markers = startedCompaction(next, start)
         case .compactionEnd(let end):
             next.markers = endedCompaction(next, end)
+            if next.markers.values.contains(where: { $0.id == end.messageId && $0.compaction != nil }) { next.compacted = end.messageId }
         case .runFinished(let finished):
             next.snapshot.queue = withoutQueued(next.snapshot.queue, runId)
             // A turn queued behind the reply that failed as the reply

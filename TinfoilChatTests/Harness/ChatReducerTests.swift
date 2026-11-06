@@ -412,6 +412,9 @@ struct ChatReducerTests {
         // The exchange the compaction kept is still read.
         #expect(completed.summarizedIds == ["u1", "a1"])
         #expect(completed.messagesWithMarkers.map(\.id) == ["u1", "a1", "c", "u2", "a2", "u3"])
+        // The chat points out the compaction it just showed complete.
+        #expect(running.compacted == nil)
+        #expect(completed.compacted == "c")
     }
 
     @Test func aCompletedCompactionWhoseOpeningANewWindowReplacedKeepsItsPlace() throws {
@@ -429,6 +432,7 @@ struct ChatReducerTests {
                 ["type": "RUN_ERROR", "threadId": "t", "runId": "r", "code": HarnessErrorCode.compactionFailed, "message": "failed", "action": "retry"],
             ])
             #expect(state.markers.isEmpty, "\(outcome)")
+            #expect(state.compacted == nil, "\(outcome)")
             #expect(state.messages.map(\.id) == ["u1", "a1", "u2", "a2", "u3"])
             #expect(state.status == .error)
             #expect(state.error?.code == HarnessErrorCode.compactionFailed)
