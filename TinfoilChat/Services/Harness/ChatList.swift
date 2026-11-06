@@ -216,12 +216,14 @@ final class ChatList: ObservableObject {
             loaded = true
             error = nil
             retryCursor = nil
+            account.syncStatus.reportSynced()
             await persist()
         } catch {
             guard version == listing, !account.disposed, !(error is CancellationError) else { return }
             loaded = true
             retryCursor = cursor
             self.error = error.localizedDescription
+            account.syncStatus.reportFailed()
             throw error
         }
     }

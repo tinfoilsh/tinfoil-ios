@@ -70,6 +70,8 @@ struct CloudSyncSettingsView: View {
             .listRowBackground(Color.cardSurface(for: colorScheme))
 
             if settings.isCloudSyncEnabled {
+            syncStatusSection
+
             // Encryption Key Section
             Section {
                     if let key = viewModel.getCurrentEncryptionKey() {
@@ -258,6 +260,15 @@ struct CloudSyncSettingsView: View {
                 }
                 .buttonStyle(StatusActionButtonStyle(color: .orange))
             }
+        }
+    }
+
+    /// A refused key shows in the row above instead, as nothing syncs until
+    /// it is recovered.
+    @ViewBuilder
+    private var syncStatusSection: some View {
+        if let account = viewModel.account, account.cloud, !account.keyLocked {
+            CloudSyncStatusSection(status: account.syncStatus)
         }
     }
 
@@ -558,6 +569,60 @@ struct CloudSyncSettingsView: View {
         let prefix = String(key.prefix(visibleChars))
         let masked = String(repeating: "•", count: key.count - visibleChars)
         return "\(prefix)\(masked)"
+    }
+}
+
+/// Whether this device reached the chats the cloud stores on its latest
+/// try, and when it last did.
+private struct CloudSyncStatusSection: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject var status: CloudSyncStatus
+
+    var body: some View {
+        Section {
+            HStack {
+                Text("Sync Status")
+                Spacer()
+                if status.failing {
+                    Text("Paused")
+                        .foregroundColor(.orange)
+                } else if status.lastSyncedAt != nil {
+                    Text("Synced")
+                        .foregroundColor(.green)
+                } else {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .accessibilityLabel("Checking")
+                }
+            }
+
+            if let lastSyncedAt = status.lastSyncedAt {
+                HStack {
+                    Text("Last Sync")
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    TimelineView(.periodic(from: .now, by: Constants.CloudSync.statusTickSeconds)) { context in
+                        Text(Self.timeSince(lastSyncedAt, now: context.date))
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        } header: {
+            Text("Synchronization")
+        } footer: {
+            if status.failing {
+                Text("Having trouble reaching the cloud. Retrying automatically.")
+                    .font(.caption)
+            }
+        }
+        .listRowBackground(Color.cardSurface(for: colorScheme))
+    }
+
+    private static func timeSince(_ date: Date, now: Date) -> String {
+        guard now.timeIntervalSince(date) >= Constants.CloudSync.recentSyncSeconds else { return "Just now" }
+        let style = RelativeDateTimeFormatter()
+        style.unitsStyle = .full
+        return style.localizedString(for: date, relativeTo: now)
     }
 }
 
