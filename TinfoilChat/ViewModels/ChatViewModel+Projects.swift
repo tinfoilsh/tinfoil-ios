@@ -100,7 +100,9 @@ extension ChatViewModel {
             await enterProject(projectId: created.id)
             return created
         } catch {
-            projectError = error.localizedDescription
+            // The menu creates projects, where the project page's error
+            // would not show.
+            reportActionFailure("Couldn't Create Project", error)
             return nil
         }
     }
