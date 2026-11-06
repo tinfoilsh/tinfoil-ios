@@ -1024,7 +1024,10 @@ struct ChatSidebar: View, Equatable {
         if isProjectsExpanded {
             Button {
                 Task {
-                    await viewModel.createProject()
+                    guard await viewModel.createProject() != nil else { return }
+                    withAnimation {
+                        isOpen = false
+                    }
                 }
             } label: {
                 Label("New project", systemImage: "folder.badge.plus")
