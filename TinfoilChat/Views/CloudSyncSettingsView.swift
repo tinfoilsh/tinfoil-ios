@@ -268,7 +268,7 @@ struct CloudSyncSettingsView: View {
     @ViewBuilder
     private var syncStatusSection: some View {
         if let account = viewModel.account, account.cloud, !account.keyLocked {
-            CloudSyncStatusSection(status: account.syncStatus)
+            CloudSyncStatusSection(status: account.syncStatus, loadFailed: account.profileFailed)
         }
     }
 
@@ -577,13 +577,18 @@ struct CloudSyncSettingsView: View {
 private struct CloudSyncStatusSection: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var status: CloudSyncStatus
+    /// The account could not load from the cloud, so no check can run until
+    /// it does.
+    let loadFailed: Bool
+
+    private var paused: Bool { status.failing || loadFailed }
 
     var body: some View {
         Section {
             HStack {
                 Text("Sync Status")
                 Spacer()
-                if status.failing {
+                if paused {
                     Text("Paused")
                         .foregroundColor(.orange)
                 } else if status.lastSyncedAt != nil {
@@ -610,7 +615,7 @@ private struct CloudSyncStatusSection: View {
         } header: {
             Text("Synchronization")
         } footer: {
-            if status.failing {
+            if paused {
                 Text("Having trouble reaching the cloud. Retrying automatically.")
                     .font(.caption)
             }
