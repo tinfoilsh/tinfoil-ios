@@ -55,6 +55,18 @@ struct ContextUsageIndicator: View {
         return "Context window \(percentage)% used (~\(formatTokens(usage.usedTokens)) of \(formatTokens(usage.limitTokens)) tokens)"
     }
 
+    /// The context popover's title: how full the window is.
+    static func headline(of usage: ContextUsage) -> String {
+        let percentage = min(Int(usage.percentage.rounded()), 100)
+        return percentage >= 100 ? "Context window full" : "Context window \(percentage)% used"
+    }
+
+    /// The tokens the chat uses, on a line of their own under the popover's
+    /// title.
+    static func tokensUsed(of usage: ContextUsage) -> String {
+        "~\(formatTokens(usage.usedTokens)) out of \(formatTokens(usage.limitTokens)) tokens"
+    }
+
     var body: some View {
         HStack(spacing: 4) {
             ZStack {
@@ -96,9 +108,15 @@ struct ContextCompactionPopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Constants.Context.popoverSpacing) {
-            Text(ContextUsageIndicator.description(of: usage, compacts: compacts))
-                .font(.subheadline.weight(.semibold))
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(ContextUsageIndicator.headline(of: usage))
+                    .font(.subheadline.weight(.semibold))
+                Text(ContextUsageIndicator.tokensUsed(of: usage))
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(ContextUsageIndicator.description(of: usage, compacts: compacts))
             Text(Constants.Context.compactExplanation)
                 .font(.footnote)
                 .foregroundColor(.secondary)
