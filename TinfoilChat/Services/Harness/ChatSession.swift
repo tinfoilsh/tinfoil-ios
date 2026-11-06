@@ -121,6 +121,8 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     var running: Bool { [.submitting, .streaming, .queued].contains(state.status) }
     /// The user stopped the open chat's reply, which has not ended yet.
     var stopping: Bool { state.isStopping }
+    /// A compaction the user asked for runs, without a reply of its own.
+    var compacting: Bool { running && state.compactTurn }
 
     /// The open chat ends on a reply explicitly marked as failed.
     var hasUnfinishedReply: Bool {
@@ -628,7 +630,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             controller.retryPreparation = nil
             if let submission {
                 controller.submission = submission
-                controller.updateView { $0.status = .submitting; $0.runId = nil; $0.error = nil; $0.stopping = false }
+                controller.updateView { $0.status = .submitting; $0.runId = nil; $0.error = nil; $0.stopping = false; $0.compactTurn = fields.kind == .compact }
             }
             defer {
                 if let submission, controller.submission === submission {
@@ -696,8 +698,9 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         let shown = controller.track()
         controller.updateView { $0.stopping = true }
         // A reply already streaming is the one stopped, which keeps saying so
-        // even if the chat is left before its run ends.
-        if let last = state.messages.last, last.role.value1 == .assistant { controller.markCanceled([last.id]) }
+        // even if the chat is left before its run ends. A compaction streams
+        // no reply.
+        if let last = state.messages.last, last.role.value1 == .assistant, !state.compactTurn { controller.markCanceled([last.id]) }
         do {
             try await controller.cancel(request)
         } catch {
@@ -769,12 +772,29 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     }
 
     /// Retries what failed: a run that ended with an error runs again, as
-    /// the harness decides from the chat; a refused request or a dropped
-    /// stream reconnects.
+    /// the harness decides from the chat, and a compaction compacts again,
+    /// as the chat shows it does; a refused request or a dropped stream
+    /// reconnects.
     @discardableResult
     func retry(options: TurnOptions? = nil) async -> Bool {
-        guard (state.failedRun != nil && state.status == .error) || hasRetryableMessage else { return await reconnect() }
-        return await send(TurnFields(kind: .retry, options: options))
+        let failedRun = state.failedRun != nil && state.status == .error
+        guard failedRun || hasRetryableMessage else { return await reconnect() }
+        return await send(TurnFields(kind: failedRun && state.compactTurn ? .compact : .retry, options: options))
+    }
+
+    /// Whether the open chat can be compacted now: it is stored, no reply
+    /// runs, and it holds earlier messages to summarize.
+    var canCompact: Bool {
+        guard let id = open.id, open.unsaved != id, open.failedId == nil, !running, acceptsTurn else { return false }
+        return state.compactable
+    }
+
+    /// Compacts the open chat on request: the harness summarizes its earlier
+    /// messages without asking the model.
+    @discardableResult
+    func compact(options: TurnOptions? = nil) async -> Bool {
+        guard canCompact else { return false }
+        return await send(TurnFields(kind: .compact, options: options))
     }
 
     /// Asks the harness for new arguments for a widget call, while the chat

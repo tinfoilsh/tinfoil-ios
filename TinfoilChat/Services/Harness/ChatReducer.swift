@@ -58,6 +58,9 @@ enum ChatReducer {
         }
         switch event {
         case .runStarted(let started):
+            // A compaction is the run of the turn the chat submitted, not one
+            // queued after it.
+            if next.status != .submitting { next.compactTurn = false }
             next.error = nil
             next.failedRun = nil
             next.sealed = [:]

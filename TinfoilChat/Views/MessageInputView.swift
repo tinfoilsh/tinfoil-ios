@@ -1552,6 +1552,7 @@ struct AddToSheetView: View {
     let onPhotos: () -> Void
     let onFiles: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var showContextPopover = false
 
     private var selectedPrompt: PromptPreset? {
         profileManager.promptPreset(for: viewModel.currentChat?.promptPresetId)
@@ -1636,12 +1637,33 @@ struct AddToSheetView: View {
                 .accessibilityValue(promptDisplay.name)
 
                 if let contextUsage {
-                    HStack {
-                        Label("Context Used", systemImage: "text.alignleft")
-                        Spacer()
-                        ContextUsageIndicator(usage: contextUsage, compacts: viewModel.compactsChats)
+                    if viewModel.compactsChatsOnRequest {
+                        Button {
+                            showContextPopover = true
+                        } label: {
+                            contextRow(contextUsage)
+                        }
+                        .foregroundColor(.primary)
+                        .padding(.horizontal, 20)
+                        .accessibilityHint("Shows how much of the context window the chat uses, and compacts it")
+                        .popover(isPresented: $showContextPopover, arrowEdge: .bottom) {
+                            ContextCompactionPopover(
+                                usage: contextUsage,
+                                compacts: viewModel.compactsChats,
+                                canCompact: viewModel.canCompactChat,
+                                compacting: viewModel.isCompacting,
+                                onCompact: {
+                                    showContextPopover = false
+                                    viewModel.compactChat()
+                                    dismiss()
+                                }
+                            )
+                            .presentationCompactAdaptation(.popover)
+                        }
+                    } else {
+                        contextRow(contextUsage)
+                            .padding(.horizontal, 20)
                     }
-                    .padding(.horizontal, 20)
                 }
             }
             .padding(.top, 8)
@@ -1660,6 +1682,14 @@ struct AddToSheetView: View {
                     .accessibilityLabel("Close")
                 }
             }
+        }
+    }
+
+    private func contextRow(_ usage: ContextUsage) -> some View {
+        HStack {
+            Label("Context Used", systemImage: "text.alignleft")
+            Spacer()
+            ContextUsageIndicator(usage: usage, compacts: viewModel.compactsChats)
         }
     }
 

@@ -419,8 +419,9 @@ struct ChatContainer: View {
     private var chatArea: some View {
         ChatListView(
             isDarkMode: colorScheme == .dark,
-            // A reply the user stopped shows as stopped at once.
-            isLoading: viewModel.isLoading && !viewModel.isStopping,
+            // A reply the user stopped shows as stopped at once, and a
+            // compaction streams no reply.
+            isLoading: viewModel.isLoading && !viewModel.isStopping && !viewModel.isCompacting,
             onRequestSignIn: showAuthenticationView,
             viewModel: viewModel,
             messageText: $messageText

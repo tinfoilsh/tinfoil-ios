@@ -34,8 +34,12 @@ struct StreamErrorPresentation: Equatable {
 
     var offersUnlock: Bool { kind == .key }
 
-    init(_ error: HarnessErrorBody, occurredAt: Date?) {
-        let classified = Self.classify(error, occurredAt: occurredAt)
+    /// compactTurn says the failed turn compacted the chat on request rather
+    /// than sending a message.
+    init(_ error: HarnessErrorBody, occurredAt: Date?, compactTurn: Bool = false) {
+        let classified = compactTurn && error.code == HarnessErrorCode.compactionFailed
+            ? Self.requestedCompaction
+            : Self.classify(error, occurredAt: occurredAt)
         kind = classified.kind
         title = classified.title
         suggestion = classified.suggestion
@@ -102,6 +106,13 @@ struct StreamErrorPresentation: Equatable {
         .compaction, "Couldn't summarize earlier messages",
         "Earlier messages are summarized to make room for new ones. Try again. \(notLost)"
     )
+    private static let requestedCompaction = StreamErrorPresentation(
+        .compaction, "Couldn't compact this chat", "Try again. The chat is unchanged."
+    )
+    private static let nothingToCompact = StreamErrorPresentation(
+        .refused, "There's nothing to compact yet",
+        "Compacting summarizes the messages before your latest exchange, and this chat has none to summarize."
+    )
     private static let storage = StreamErrorPresentation(
         .storage, "This chat could not be saved on this device",
         "The reply arrived, but this device could not store it, so it may be missing when the chat is opened again."
@@ -131,6 +142,7 @@ struct StreamErrorPresentation: Equatable {
         case HarnessErrorCode.queueFull: return queueFull
         case HarnessErrorCode.contextTooLarge: return contextLength
         case HarnessErrorCode.compactionFailed: return compaction
+        case HarnessErrorCode.nothingToCompact: return nothingToCompact
         case HarnessErrorCode.threadTooLarge: return tooLarge
         case HarnessErrorCode.modelUnavailable: return model
         case HarnessErrorCode.localSaveFailed: return storage

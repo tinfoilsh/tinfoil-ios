@@ -741,6 +741,11 @@ class ChatViewModel: ObservableObject {
         account?.session?.features.additionalProperties["compaction"] == true
     }
 
+    /// The chat service compacts a chat when the user asks it to.
+    var compactsChatsOnRequest: Bool {
+        account?.session?.features.additionalProperties["manualCompaction"] == true
+    }
+
     // MARK: - Safeguards
 
     private func bindSafeguardsStore() {
@@ -811,6 +816,8 @@ class ChatViewModel: ObservableObject {
         /// The chat service titled the chat.
         let titled: Bool
         let status: ChatState.Status
+        /// The chat's latest turn compacts it on request.
+        let compactTurn: Bool
         let messageCount: Int
         let lastMessageId: String?
 
@@ -822,6 +829,7 @@ class ChatViewModel: ObservableObject {
             firstTurn = session.isNewChatsFirstTurn
             titled = session.state.snapshot.thread?.titleState.value1 == .generated
             status = session.state.status
+            compactTurn = session.state.compactTurn
             messageCount = session.state.messages.count
             lastMessageId = session.state.messages.last?.id
         }
@@ -916,13 +924,13 @@ class ChatViewModel: ObservableObject {
         let wasRunning = running.contains(previous.status), isRunning = running.contains(next.status)
         if !wasRunning, isRunning {
             stopAnnounced = false
-            AccessibilityAnnouncer.announce(Constants.Accessibility.generatingResponse)
+            AccessibilityAnnouncer.announce(next.compactTurn ? Constants.Accessibility.compactingChat : Constants.Accessibility.generatingResponse)
         } else if wasRunning, next.status == .error || next.failed {
-            AccessibilityAnnouncer.announce(Constants.Accessibility.responseFailed)
+            AccessibilityAnnouncer.announce(next.compactTurn ? Constants.Accessibility.compactionFailed : Constants.Accessibility.responseFailed)
             HapticFeedback.trigger(.error)
         } else if wasRunning, next.status == .idle {
             if !stopAnnounced {
-                AccessibilityAnnouncer.announce(Constants.Accessibility.responseComplete)
+                AccessibilityAnnouncer.announce(next.compactTurn ? Constants.Accessibility.chatCompacted : Constants.Accessibility.responseComplete)
                 HapticFeedback.trigger(.success)
             }
             stopAnnounced = false
@@ -959,6 +967,23 @@ class ChatViewModel: ObservableObject {
     /// The user stopped the open chat's reply, which has not ended yet.
     var isStopping: Bool {
         session?.stopping == true
+    }
+
+    /// A compaction the user asked for runs in the open chat.
+    var isCompacting: Bool {
+        session?.compacting == true
+    }
+
+    /// The open chat can be compacted on request now.
+    var canCompactChat: Bool {
+        guard let session, compactsChatsOnRequest, canGenerateInCurrentChat else { return false }
+        return session.canCompact
+    }
+
+    /// The open chat's last turn compacted it on request, and failed.
+    var compactionFailed: Bool {
+        guard let state = session?.state else { return false }
+        return state.compactTurn && state.status == .error
     }
 
     /// The open chat starts with older messages than those shown.
@@ -1120,13 +1145,16 @@ class ChatViewModel: ObservableObject {
         let model = choice.model ?? (open.model.isEmpty ? session.pickedModel : open.model)
         let replyModelName = findSelectableModel(id: model)?.responseDisplayName
         let canceled = session.controller.canceled
+        // A compaction the user asked for streams no reply, so the last one
+        // shows as it was.
+        let compacting = session.compacting
         // A reply the user stopped shows as stopped at once, before the
         // harness ends it: the reply, or the message it had not begun
         // answering.
-        let stopping = session.stopping
+        let stopping = session.stopping && !compacting
         let stoppedId = stopping ? state.messages.last?.id : nil
         let summarized = state.summarizedIds
-        var messages = rows.rows(chatId: open.id, messages: state.messages, running: running && !stopping, summaries: state.summaries, replyModelName: replyModelName).map { message -> Message in
+        var messages = rows.rows(chatId: open.id, messages: state.messages, running: running && !stopping && !compacting, summaries: state.summaries, replyModelName: replyModelName).map { message -> Message in
             var view = message
             // A reply the user stopped here says so, until a continuation
             // finishes it.
@@ -1782,6 +1810,13 @@ class ChatViewModel: ObservableObject {
         guard let session, canGenerateInCurrentChat else { return }
         startTurn(scrollingToMessage: true)
         Task { await session.retry(options: turnOptions) }
+    }
+
+    /// Compacts the open chat on request, summarizing its earlier messages.
+    func compactChat() {
+        guard let session, canCompactChat else { return }
+        startTurn(scrollingToMessage: false)
+        Task { await session.compact(options: turnOptions) }
     }
 
     /// A turn the user starts puts the keyboard away; one that asks for a

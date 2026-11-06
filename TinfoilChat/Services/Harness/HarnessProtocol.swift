@@ -167,6 +167,9 @@ enum HarnessErrorCode {
     /// The chat's earlier messages could not be summarized to make room for
     /// the turn.
     static let compactionFailed = "COMPACTION_FAILED"
+    /// A chat compacted on request holds nothing before its latest exchange
+    /// to summarize.
+    static let nothingToCompact = "NOTHING_TO_COMPACT"
     /// The chat is too large to store.
     static let threadTooLarge = "THREAD_TOO_LARGE"
     static let modelUnavailable = "MODEL_UNAVAILABLE"

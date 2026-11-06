@@ -525,6 +525,88 @@ struct ChatSessionTests {
         #expect(!session.stopping)
     }
 
+    /// A stored chat of two exchanges, as the harness opens it.
+    private static let twoExchangeWindow: [String: Any] = summary(messageCount: 4).merging([
+        "revision": "rev-1", "presetId": NSNull(), "flagged": false,
+        "messages": [
+            ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"],
+            ["id": "a1", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "timeline": [["id": "b1", "type": "content", "content": "first answer"]]],
+            ["id": "u2", "role": "user", "createdAt": "2026-01-01T00:00:02Z", "content": "second question"],
+            ["id": "a2", "role": "assistant", "createdAt": "2026-01-01T00:00:03Z", "timeline": [["id": "b2", "type": "content", "content": "second answer"]]],
+        ],
+        "hasOlder": false,
+    ]) { $1 }
+
+    private static let compactionStarted: [[String: Any]] = [
+        ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_3", "instance": "i"],
+        ["type": "COMPACTION_START", "messageId": "c", "beforeMessageId": "u2"],
+    ]
+
+    private static let compactionFailed: [String: Any] = ["type": "COMPACTION_END", "messageId": "c", "beforeMessageId": "u2", "outcome": "failed"]
+
+    @Test func aCompactionTheUserAsksForThatFailsCompactsAgainWhenRetried() async throws {
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(Self.twoExchangeWindow)])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        #expect(session.canCompact)
+        let (release, failed) = AsyncStream<Void>.makeStream()
+        await fixture.transport.push(heldRun(Self.compactionStarted, then: [
+            Self.compactionFailed,
+            ["type": "RUN_ERROR", "threadId": threadId, "runId": "run_3", "code": HarnessErrorCode.compactionFailed, "message": "failed", "action": "retry"],
+        ], until: release))
+        let compacting = Task { await session.compact() }
+        for await state in session.controller.$view.values where state.markers["u2"] != nil { break }
+
+        #expect(session.compacting)
+        #expect(!session.canCompact)
+        let turn = try #require(await fixture.transport.requests.last)
+        #expect(turn.route == .turn)
+        #expect(turn.json["kind"] as? String == "compact")
+        #expect(turn.json["content"] == nil)
+        failed.yield(())
+        _ = await compacting.value
+        #expect(session.state.error?.code == HarnessErrorCode.compactionFailed)
+
+        await fixture.transport.push(Answers.events([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_4", "instance": "i"],
+            ["type": "COMPACTION_START", "messageId": "c", "beforeMessageId": "u2"],
+            ["type": "COMPACTION_END", "messageId": "c", "beforeMessageId": "u2", "outcome": "completed", "marker": [
+                "id": "c", "role": "compaction", "createdAt": "2026-01-01T00:00:04Z", "content": "## Goals and context\nTwo questions.",
+                "compaction": ["messages": 2, "startedAt": 1767225600000, "endedAt": 1767225601000, "model": "gpt-oss-120b", "version": 2],
+            ]],
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_4", "metadata": [:]],
+        ]))
+        await session.retry()
+
+        let retried = try #require(await fixture.transport.requests.last)
+        #expect(retried.json["kind"] as? String == "compact")
+        #expect(session.state.markers["u2"]?.compaction?.messages == 2)
+        #expect(!session.canCompact)
+    }
+
+    @Test func stoppingACompactionSaysNothingOfTheReplyBeforeIt() async throws {
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(Self.twoExchangeWindow)])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        let (release, stopped) = AsyncStream<Void>.makeStream()
+        await fixture.transport.push(heldRun(Self.compactionStarted, then: [
+            Self.compactionFailed,
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_3", "metadata": ["cancelled": true, "messages": []]],
+        ], until: release))
+        await fixture.transport.push(Answers.json([:]))
+        let compacting = Task { await session.compact() }
+        for await state in session.controller.$view.values where state.markers["u2"] != nil { break }
+
+        try await session.cancel()
+
+        #expect(session.stopping)
+        #expect(session.controller.canceled.isEmpty)
+        stopped.yield(())
+        _ = await compacting.value
+        #expect(session.controller.canceled.isEmpty)
+        #expect(session.state.markers.isEmpty)
+    }
+
     @Test func aStopThatArrivesAfterTheReplyEndedReadsTheChatAgainRatherThanFailing() async throws {
         let window = firstQuestionWindow
         let (rereads, reread) = AsyncStream<HarnessRoute>.makeStream()

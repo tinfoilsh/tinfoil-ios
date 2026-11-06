@@ -34,22 +34,25 @@ struct ContextUsageIndicator: View {
         clampedPercentage >= Constants.Context.warningThresholdPercent
     }
 
-    private var isFull: Bool {
-        clampedPercentage >= 100
-    }
-
     private var ringColor: Color {
         isNearLimit ? .orange : .secondary
     }
 
     private var accessibilityText: String {
-        if isFull, compacts {
-            return "Context window full (~\(Self.formatTokens(usage.limitTokens)) tokens). Earlier messages will be summarized to make room."
+        Self.description(of: usage, compacts: compacts)
+    }
+
+    /// How much of the context window the chat uses, as VoiceOver reads the
+    /// indicator.
+    static func description(of usage: ContextUsage, compacts: Bool) -> String {
+        let percentage = min(Int(usage.percentage.rounded()), 100)
+        if percentage >= 100, compacts {
+            return "Context window full (~\(formatTokens(usage.limitTokens)) tokens). Earlier messages will be summarized to make room."
         }
-        if isFull {
-            return "Context window full (~\(Self.formatTokens(usage.limitTokens)) tokens). Older messages are archived and no longer sent to the model."
+        if percentage >= 100 {
+            return "Context window full (~\(formatTokens(usage.limitTokens)) tokens). Older messages are archived and no longer sent to the model."
         }
-        return "Context window \(clampedPercentage)% used (~\(Self.formatTokens(usage.usedTokens)) of \(Self.formatTokens(usage.limitTokens)) tokens)"
+        return "Context window \(percentage)% used (~\(formatTokens(usage.usedTokens)) of \(formatTokens(usage.limitTokens)) tokens)"
     }
 
     var body: some View {
@@ -78,5 +81,48 @@ struct ContextUsageIndicator: View {
             return "\(Int((Double(tokens) / 1000).rounded()))k"
         }
         return "\(tokens)"
+    }
+}
+
+/// What the context row opens while the chat service compacts chats on
+/// request: how much of the window the chat uses, and a button that
+/// compacts it. Mirrors the webapp's context popover.
+struct ContextCompactionPopover: View {
+    let usage: ContextUsage
+    let compacts: Bool
+    let canCompact: Bool
+    let compacting: Bool
+    let onCompact: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Constants.Context.popoverSpacing) {
+            Text(ContextUsageIndicator.description(of: usage, compacts: compacts))
+                .font(.subheadline.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+            Text(Constants.Context.compactExplanation)
+                .font(.footnote)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(action: onCompact) {
+                HStack(spacing: 8) {
+                    if compacting {
+                        ProgressView()
+                    } else {
+                        Image(systemName: Constants.Context.compactSystemImage)
+                    }
+                    Text(compacting ? Constants.Context.compactingLabel : Constants.Context.compactLabel)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!canCompact)
+            if !canCompact, !compacting {
+                Text(Constants.Context.nothingToCompactNote)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(Constants.Context.popoverPadding)
+        .frame(width: Constants.Context.popoverWidth)
     }
 }
