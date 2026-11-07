@@ -191,11 +191,11 @@ struct MessageView: View, Equatable {
     }
 
     /// Continuing a reply drops the messages after it, so only the last
-    /// reply the service stopped offers it.
+    /// reply the service stopped offers it: one with something to go on
+    /// from, or one the model ran out of room for, even as it reasoned.
     private var canContinueStoppedReply: Bool {
-        (message.replyStop == .stopped || message.replyStop == .truncated)
+        ((message.replyStop == .stopped && message.hasContinuableResponse) || message.replyStop == .truncated)
             && isLastMessage
-            && message.hasContinuableResponse
             && context.canGenerateInCurrentChat
             && !context.isChatLoading
     }

@@ -309,7 +309,7 @@ final class RunController: ObservableObject {
                         }
                         if event.isTerminal {
                             markCanceled(ChatReducer.canceled(by: event, in: base))
-                            markTruncated(ChatReducer.truncated(by: event))
+                            noteTruncation(ChatReducer.truncation(of: event))
                         }
                         outcome.progressed = true
                         outcome.state = next
@@ -513,8 +513,12 @@ final class RunController: ObservableObject {
         if !messageIds.isEmpty { canceled.formUnion(messageIds) }
     }
 
-    func markTruncated(_ messageIds: [String]) {
-        if !messageIds.isEmpty { truncated.formUnion(messageIds) }
+    /// Records whether the model ran out of room for each reply a run
+    /// committed as it ended, so a reply continued since says so only if it
+    /// ran out again.
+    func noteTruncation(_ truncation: (replies: [String], truncated: Bool)) {
+        guard !truncation.replies.isEmpty else { return }
+        if truncation.truncated { truncated.formUnion(truncation.replies) } else { truncated.subtract(truncation.replies) }
     }
 
     /// Returns once the run the open chat stops has ended, or the view moved

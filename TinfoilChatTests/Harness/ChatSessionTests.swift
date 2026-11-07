@@ -525,7 +525,7 @@ struct ChatSessionTests {
         #expect(!session.stopping)
     }
 
-    @Test func aReplyTheModelRanOutOfRoomForIsNamedAsItEndsAndCanGoOn() async throws {
+    @Test func aReplyTheModelRanOutOfRoomForIsNamedUntilAContinuationFinishesIt() async throws {
         let fixture = Fixture(userId: "user-1", answers: [Answers.json(firstQuestionWindow)])
         let session = fixture.session
         #expect(try await session.openChat(threadId, local: false) == .opened)
@@ -542,6 +542,20 @@ struct ChatSessionTests {
         #expect(session.controller.truncated == ["msg_6"])
         #expect(session.controller.canceled.isEmpty)
         #expect(session.endsOnStoppedReply)
+
+        await fixture.transport.push(Answers.events([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_4", "instance": "i", "messageId": "msg_6"],
+            ["type": "TEXT_MESSAGE_CHUNK", "messageId": "msg_6", "role": "assistant", "delta": " and the rest."],
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_4", "metadata": ["messages": [["id": "msg_6", "isInterrupted": false]]]],
+        ]))
+        let reply = try #require(session.state.messages.lastIndex { $0.id == "msg_6" })
+        #expect(await session.continueReply(at: reply))
+
+        let request = try #require(await fixture.transport.requests.last)
+        #expect(request.json["kind"] as? String == "continue")
+        #expect(request.json["messageId"] as? String == "msg_6")
+        #expect(session.controller.truncated.isEmpty)
+        #expect(!session.endsOnStoppedReply)
     }
 
     /// A stored chat of two exchanges, as the harness opens it.
