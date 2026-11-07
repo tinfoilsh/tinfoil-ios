@@ -18,7 +18,7 @@ private struct Fixture {
 
     /// A signed-out caller, whose chats live in memory, or an account with
     /// cloud sync whose key is held.
-    init(userId: String? = nil, answers: [ScriptedTransport.Answer], receipts: RunReceiptStore? = nil) {
+    init(userId: String? = nil, answers: [ScriptedTransport.Answer], receipts: RunReceiptStore? = nil, settings: MemoryProfileStorage = MemoryProfileStorage()) {
         transport = ScriptedTransport(answers)
         let controlPlane = FreeKeyControlPlane()
         let credentials = HarnessCredentialProvider(
@@ -32,7 +32,7 @@ private struct Fixture {
             client: client,
             credentials: credentials,
             keyBytes: { Data(repeating: 7, count: 32) },
-            settings: MemoryProfileStorage(),
+            settings: settings,
             cloudSync: userId != nil
         )
         session = ChatSession(account: account, device: DeviceThreadStore(directory: nil), cache: ChatListCache(directory: nil), receipts: receipts)
@@ -414,14 +414,14 @@ struct ChatSessionTests {
         #expect(!session.endsOnStoppedReply)
     }
 
-    @Test func aDeviceChatIsReadAloudByItsIdAtTheSpeedChosenHere() async throws {
-        let fixture = Fixture(answers: [])
+    @Test func aDeviceChatIsReadAloudByItsIdAtTheSpeedItsProfileHolds() async throws {
+        let settings = MemoryProfileStorage()
+        settings.local = ["readAloudSpeed": 1.5]
+        let fixture = Fixture(answers: [], settings: settings)
         let session = fixture.session
         _ = try await session.device.add(Self.stoppedReplyChat, originals: [:])
         session.list.reloadDevice()
         #expect(try await session.openChat(threadId, local: true) == .opened)
-        UserDefaults.standard.set(1.5, forKey: Constants.StorageKeys.Settings.readAloudSpeed)
-        defer { UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.readAloudSpeed) }
         await fixture.transport.push { _ in .collected(status: 200, headers: ["content-type": Constants.Speech.contentType], sealed: true, body: Data([0, 0])) }
 
         _ = try await session.speak("a1")

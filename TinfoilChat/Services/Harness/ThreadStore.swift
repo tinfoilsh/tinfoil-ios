@@ -283,7 +283,7 @@ final class CloudThreads: ThreadStore {
     }
 
     func speech(_ threadId: String, messageId: String) async throws -> HarnessResponse {
-        try await account.stream(.speech, SpeechRequest(threadId: threadId, messageId: messageId, speed: ReadAloudSpeed.requested))
+        try await account.stream(.speech, SpeechRequest(threadId: threadId, messageId: messageId, speed: ReadAloudSpeed.requested(account)))
     }
 
     func runKey() throws -> String? {
@@ -491,7 +491,7 @@ final class DeviceThreads: ThreadStore {
     /// The harness reads a message of the chat this device sends it.
     func speech(_ threadId: String, messageId: String) async throws -> HarnessResponse {
         guard let thread = try await store.get(threadId) else { throw Self.notOnDevice("chat") }
-        return try await account.stream(.speech, SpeechRequest(threadId: threadId, messageId: messageId, local: true, thread: thread, speed: ReadAloudSpeed.requested), keyless: true)
+        return try await account.stream(.speech, SpeechRequest(threadId: threadId, messageId: messageId, local: true, thread: thread, speed: ReadAloudSpeed.requested(account)), keyless: true)
     }
 
     func runKey() throws -> String? { nil }

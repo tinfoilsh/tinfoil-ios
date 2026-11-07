@@ -1,17 +1,20 @@
 import Foundation
 
-/// How fast replies are read aloud on this device, as a multiple of how fast
-/// the voice speaks.
+/// How fast replies are read aloud, as a multiple of how fast the voice
+/// speaks. The account's profile keeps it.
 enum ReadAloudSpeed {
-    /// The speed this device reads aloud at: one of Constants.Speech.speeds.
-    static var current: Double {
-        let stored = UserDefaults.standard.double(forKey: Constants.StorageKeys.Settings.readAloudSpeed)
-        return Constants.Speech.speeds.contains(stored) ? stored : Constants.Speech.voiceSpeed
+    /// A speed the profile holds, or the voice's own for one this app does
+    /// not offer.
+    static func offered(_ speed: Double?) -> Double {
+        guard let speed, Constants.Speech.speeds.contains(speed) else { return Constants.Speech.voiceSpeed }
+        return speed
     }
 
-    /// The speed a speech request names, nil at the voice's own.
-    static var requested: Double? {
-        let speed = current
+    /// The speed a speech request for the account names, nil at the voice's
+    /// own.
+    @MainActor
+    static func requested(_ account: HarnessAccount) -> Double? {
+        let speed = offered(account.effectiveProfile.readAloudSpeed)
         return speed == Constants.Speech.voiceSpeed ? nil : speed
     }
 }
