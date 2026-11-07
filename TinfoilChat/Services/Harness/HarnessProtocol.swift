@@ -170,6 +170,9 @@ enum HarnessErrorCode {
     /// A chat compacted on request holds nothing before its latest exchange
     /// to summarize.
     static let nothingToCompact = "NOTHING_TO_COMPACT"
+    /// A text read aloud holds nothing to read once its code, images and
+    /// bare links are left out.
+    static let nothingToRead = "NOTHING_TO_READ"
     /// The chat is too large to store.
     static let threadTooLarge = "THREAD_TOO_LARGE"
     static let modelUnavailable = "MODEL_UNAVAILABLE"

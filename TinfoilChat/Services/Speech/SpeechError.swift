@@ -31,6 +31,7 @@ enum SpeechError: Error, Equatable, LocalizedError {
             switch error.code {
             case HarnessErrorCode.quotaExhausted, HarnessErrorCode.rateLimited: return .rateLimited
             case HarnessErrorCode.toolUnavailable: return .unavailable
+            case HarnessErrorCode.nothingToRead: return .empty
             default: return .requestFailed
             }
         }

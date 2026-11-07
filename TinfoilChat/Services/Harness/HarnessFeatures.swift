@@ -410,7 +410,7 @@ enum HarnessSpeech {
 
     /// Reads a text aloud, as one stream of audio.
     static func speak(_ account: HarnessAccount, text: String) async throws -> HarnessResponse {
-        try await account.stream(.speech, SpeechRequest(text: text), keyless: true)
+        try await account.stream(.speech, SpeechRequest(text: text, speed: ReadAloudSpeed.requested), keyless: true)
     }
 }
 

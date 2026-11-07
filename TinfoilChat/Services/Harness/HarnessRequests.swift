@@ -340,9 +340,11 @@ struct SpeechRequest: Encodable, Equatable, Sendable {
     var text: String?
     var local: Bool?
     var thread: StoredThread?
+    /// How fast the audio plays, absent at the voice's own speed.
+    var speed: Double?
 
     private enum CodingKeys: String, CodingKey {
-        case key, threadId, messageId, text, local, thread
+        case key, threadId, messageId, text, local, thread, speed
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -353,6 +355,7 @@ struct SpeechRequest: Encodable, Equatable, Sendable {
         try container.encodeIfPresent(text, forKey: .text)
         try container.encodeIfPresent(local, forKey: .local)
         try container.encodeIfPresent(thread.map { JSONObject($0.fields) }, forKey: .thread)
+        try container.encodeIfPresent(speed, forKey: .speed)
     }
 }
 

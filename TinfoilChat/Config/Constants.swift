@@ -595,6 +595,11 @@ enum Constants {
         /// play.
         static let maxBufferedSeconds = 30
         static let maxBufferedSamples = maxBufferedSeconds * sampleRate
+        /// The speeds read aloud offers, as multiples of how fast the voice
+        /// speaks. The chat service plays the audio at the speed a request
+        /// names, keeping the voice's pitch.
+        static let speeds: [Double] = [1, 1.25, 1.5, 1.75, 2]
+        static let voiceSpeed: Double = 1
         static let actionSize: CGFloat = 32
         static let actionIconSize: CGFloat = 16
     }
@@ -633,6 +638,7 @@ enum Constants {
         enum Settings {
             static let selectedModel = "tinfoil-settings-selected-model"
             static let hapticFeedbackEnabled = "tinfoil-settings-haptic-feedback-enabled"
+            static let readAloudSpeed = "tinfoil-settings-read-aloud-speed"
             static let selectedLanguage = "tinfoil-settings-selected-language"
             static let webSearchEnabled = "tinfoil-settings-web-search-enabled"
             static let webSearchAvailable = "tinfoil-settings-web-search-available"
