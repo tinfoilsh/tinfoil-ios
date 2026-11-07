@@ -443,11 +443,15 @@ enum ReplyStop: Equatable {
     /// The chat service stopped it for a reason it does not record: the user,
     /// elsewhere or before a relaunch, or a restart of the service.
     case stopped
+    /// The model ran out of room for it in its context window, in this
+    /// session.
+    case truncated
 
     var note: String {
         switch self {
         case .canceledByUser: return "Response canceled by user"
         case .stopped: return "Response stopped"
+        case .truncated: return "Response reached the length limit"
         }
     }
 }

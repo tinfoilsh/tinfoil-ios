@@ -198,6 +198,13 @@ enum ChatReducer {
         return [last.id]
     }
 
+    /// The replies a run committed stopped because the model ran out of room
+    /// for them in its context window.
+    static func truncated(by event: RunEvent) -> [String] {
+        guard case .runFinished(let finished) = event, finished.metadata.truncated == true else { return [] }
+        return finished.metadata.messages?.map(\.id) ?? []
+    }
+
     /// A window of the chat's latest messages, after the earlier messages the
     /// view loaded before the window's first, with the compaction markers of
     /// both.

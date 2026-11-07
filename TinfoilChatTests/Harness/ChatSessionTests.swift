@@ -525,6 +525,25 @@ struct ChatSessionTests {
         #expect(!session.stopping)
     }
 
+    @Test func aReplyTheModelRanOutOfRoomForIsNamedAsItEndsAndCanGoOn() async throws {
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(firstQuestionWindow)])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        await fixture.transport.push(Answers.events([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_3", "instance": "i"],
+            ["type": "TEXT_MESSAGE_CHUNK", "messageId": "msg_6", "role": "assistant", "delta": "Half"],
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_3", "metadata": [
+                "cancelled": false, "truncated": true, "messages": [["id": "msg_6", "isInterrupted": true]],
+            ]],
+        ]))
+
+        #expect(await session.send(TurnFields(kind: .send, content: "again")))
+
+        #expect(session.controller.truncated == ["msg_6"])
+        #expect(session.controller.canceled.isEmpty)
+        #expect(session.endsOnStoppedReply)
+    }
+
     /// A stored chat of two exchanges, as the harness opens it.
     private static let twoExchangeWindow: [String: Any] = summary(messageCount: 4).merging([
         "revision": "rev-1", "presetId": NSNull(), "flagged": false,

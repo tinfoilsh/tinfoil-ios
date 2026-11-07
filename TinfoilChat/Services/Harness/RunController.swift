@@ -154,6 +154,9 @@ final class RunController: ObservableObject {
     /// The messages whose reply the user stopped in this session, which keep
     /// saying so as the chat is read again.
     @Published private(set) var canceled: Set<String> = []
+    /// The replies in this session the model ran out of room for, which keep
+    /// saying so as the chat is read again.
+    @Published private(set) var truncated: Set<String> = []
     /// When the open chat's error happened, so a wait the harness asks for
     /// counts from then.
     private(set) var errorAt: Date?
@@ -304,7 +307,10 @@ final class RunController: ObservableObject {
                                 if let widgetRetry { widgetRetry.failure = failed.error } else if shown { errorAt = Date() }
                             }
                         }
-                        if event.isTerminal { markCanceled(ChatReducer.canceled(by: event, in: base)) }
+                        if event.isTerminal {
+                            markCanceled(ChatReducer.canceled(by: event, in: base))
+                            markTruncated(ChatReducer.truncated(by: event))
+                        }
                         outcome.progressed = true
                         outcome.state = next
                         if shown { view = next }
@@ -505,6 +511,10 @@ final class RunController: ObservableObject {
 
     func markCanceled(_ messageIds: [String]) {
         if !messageIds.isEmpty { canceled.formUnion(messageIds) }
+    }
+
+    func markTruncated(_ messageIds: [String]) {
+        if !messageIds.isEmpty { truncated.formUnion(messageIds) }
     }
 
     /// Returns once the run the open chat stops has ended, or the view moved
