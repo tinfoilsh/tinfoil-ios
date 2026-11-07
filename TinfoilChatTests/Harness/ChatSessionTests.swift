@@ -414,6 +414,23 @@ struct ChatSessionTests {
         #expect(!session.endsOnStoppedReply)
     }
 
+    @Test func aDeviceChatIsReadAloudByItsId() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        _ = try await session.device.add(Self.stoppedReplyChat, originals: [:])
+        session.list.reloadDevice()
+        #expect(try await session.openChat(threadId, local: true) == .opened)
+        await fixture.transport.push { _ in .collected(status: 200, headers: ["content-type": Constants.Speech.contentType], sealed: true, body: Data([0, 0])) }
+
+        _ = try await session.speak("a1")
+
+        let request = try #require(await fixture.transport.requests.last)
+        #expect(request.route == .speech)
+        #expect(request.json["local"] as? Bool == true)
+        #expect(request.json["threadId"] as? String == threadId)
+        #expect(request.json["messageId"] as? String == "a1")
+    }
+
     @Test func aReplyTheUserStoppedHereIsNotOfferedToGoOn() async throws {
         let fixture = Fixture(answers: [])
         let session = fixture.session

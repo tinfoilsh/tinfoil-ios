@@ -11,6 +11,11 @@ struct SpeechPlayerTests {
         #expect(SpeechError.sanitized(HarnessError(HarnessErrorBody.unreachable, urlErrorCode: .notConnectedToInternet)) == .requestFailed)
     }
 
+    @Test func onlyAReplyWithNothingToReadSaysItHasNoReadableText() {
+        #expect(SpeechError.sanitized(HarnessError(code: HarnessErrorCode.nothingToRead, message: "There is nothing to read aloud", action: .stop)) == .empty)
+        #expect(SpeechError.sanitized(HarnessError(code: HarnessErrorCode.badRequest, message: "threadId must be a valid identifier", action: .stop)) == .requestFailed)
+    }
+
     @Test(.timeLimit(.minutes(1)))
     func aCurrentInterruptionStopsPlaybackAndSurfacesTheError() async throws {
         let output = SilentSpeechOutput()
