@@ -414,12 +414,14 @@ struct ChatSessionTests {
         #expect(!session.endsOnStoppedReply)
     }
 
-    @Test func aDeviceChatIsReadAloudByItsId() async throws {
+    @Test func aDeviceChatIsReadAloudByItsIdAtTheSpeedChosenHere() async throws {
         let fixture = Fixture(answers: [])
         let session = fixture.session
         _ = try await session.device.add(Self.stoppedReplyChat, originals: [:])
         session.list.reloadDevice()
         #expect(try await session.openChat(threadId, local: true) == .opened)
+        UserDefaults.standard.set(1.5, forKey: Constants.StorageKeys.Settings.readAloudSpeed)
+        defer { UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.readAloudSpeed) }
         await fixture.transport.push { _ in .collected(status: 200, headers: ["content-type": Constants.Speech.contentType], sealed: true, body: Data([0, 0])) }
 
         _ = try await session.speak("a1")
@@ -429,6 +431,7 @@ struct ChatSessionTests {
         #expect(request.json["local"] as? Bool == true)
         #expect(request.json["threadId"] as? String == threadId)
         #expect(request.json["messageId"] as? String == "a1")
+        #expect(request.json["speed"] as? Double == 1.5)
     }
 
     @Test func aReplyTheUserStoppedHereIsNotOfferedToGoOn() async throws {

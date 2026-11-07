@@ -22,6 +22,13 @@ class SettingsManager: ObservableObject {
             UserDefaults.standard.set(hapticFeedbackEnabled, forKey: Constants.StorageKeys.Settings.hapticFeedbackEnabled)
         }
     }
+
+    /// How fast replies are read aloud on this device.
+    @Published var readAloudSpeed: Double {
+        didSet {
+            UserDefaults.standard.set(readAloudSpeed, forKey: Constants.StorageKeys.Settings.readAloudSpeed)
+        }
+    }
     
     /// While true, turning cloud sync off is not announced: clearing the
     /// settings is not the user's change.
@@ -54,6 +61,7 @@ class SettingsManager: ObservableObject {
     private init() {
         // Initialize with stored values or defaults if not present
         self.hapticFeedbackEnabled = UserDefaults.standard.object(forKey: Constants.StorageKeys.Settings.hapticFeedbackEnabled) as? Bool ?? true
+        self.readAloudSpeed = ReadAloudSpeed.current
 
         // Initialize cloud sync setting
         // If no explicit value has been stored, auto-enable for existing users who already have an encryption key
@@ -79,6 +87,7 @@ class SettingsManager: ObservableObject {
     func clearAllSettings() {
         // Clear all user data from UserDefaults
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.hapticFeedbackEnabled)
+        UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.readAloudSpeed)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.Settings.selectedLanguage)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.personalizationEnabled)
         UserDefaults.standard.removeObject(forKey: Constants.StorageKeys.UserPrefs.nickname)
@@ -100,6 +109,7 @@ class SettingsManager: ObservableObject {
         isClearingSettings = true
         defer { isClearingSettings = false }
         hapticFeedbackEnabled = true
+        readAloudSpeed = Constants.Speech.voiceSpeed
         isCloudSyncEnabled = false
         isLocalOnlyModeEnabled = false
     }
@@ -395,6 +405,11 @@ struct SettingsView: View {
         Section {
             Toggle("Haptic Feedback", isOn: $settings.hapticFeedbackEnabled)
                 .tint(Color.accentPrimary)
+            Picker("Read Aloud Speed", selection: $settings.readAloudSpeed) {
+                ForEach(Constants.Speech.speeds, id: \.self) { speed in
+                    Text("\(speed.formatted())×").tag(speed)
+                }
+            }
             Toggle(isOn: Binding(
                 get: { profileManager.genUIEnabled },
                 set: { profileManager.setGenUIEnabled($0) }
