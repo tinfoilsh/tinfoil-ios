@@ -191,11 +191,11 @@ struct MessageView: View, Equatable {
     }
 
     /// Continuing a reply drops the messages after it, so only the last
-    /// reply the service stopped offers it.
+    /// reply the service stopped offers it: one with something to go on
+    /// from, or one the model ran out of room for, even as it reasoned.
     private var canContinueStoppedReply: Bool {
-        message.replyStop == .stopped
+        ((message.replyStop == .stopped && message.hasContinuableResponse) || message.replyStop == .truncated)
             && isLastMessage
-            && message.hasContinuableResponse
             && context.canGenerateInCurrentChat
             && !context.isChatLoading
     }
@@ -826,7 +826,8 @@ struct MessageView: View, Equatable {
                 
                 // A reply stopped early says so. Only one the user stopped in
                 // this session says who stopped it: the service stops replies
-                // when it restarts too.
+                // when it restarts too, and when the model runs out of room
+                // for them, which says so.
                 if message.role == .assistant, let stop = message.replyStop, !isRenderingStream {
                     HStack(spacing: 12) {
                         Text(stop.note)

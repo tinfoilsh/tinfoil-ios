@@ -320,6 +320,7 @@ extension Components {
                 case missingAttachment = "MISSING_ATTACHMENT"
                 case modelUnavailable = "MODEL_UNAVAILABLE"
                 case nothingToCompact = "NOTHING_TO_COMPACT"
+                case nothingToRead = "NOTHING_TO_READ"
                 case payloadTooLarge = "PAYLOAD_TOO_LARGE"
                 case projectsRequireCloud = "PROJECTS_REQUIRE_CLOUD"
                 case queueFull = "QUEUE_FULL"
@@ -1908,7 +1909,7 @@ extension Components {
                 }
             }
         }
-        /// A turn waiting behind its chat's running reply.
+        /// A turn waiting behind its chat's running reply. A run that ends lists the turn starting after it until that turn's run starts.
         ///
         /// - Remark: Generated from `#/components/schemas/QueueItem`.
         internal struct QueueItem: Codable, Hashable, Sendable {
@@ -2858,6 +2859,10 @@ extension Components {
             internal var rateLimit: Components.Schemas.RateLimit?
             /// - Remark: Generated from `#/components/schemas/RunMetadata/cancelled`.
             internal var cancelled: Swift.Bool?
+            /// The model filled the room its window left the run's reply, which ended it there. The reply is committed interrupted, so a continue turn goes on from where it stopped; a client may say why it stopped while it shows the run's end.
+            ///
+            /// - Remark: Generated from `#/components/schemas/RunMetadata/truncated`.
+            internal var truncated: Swift.Bool?
             /// Creates a new `RunMetadata`.
             ///
             /// - Parameters:
@@ -2866,18 +2871,21 @@ extension Components {
             ///   - usage:
             ///   - rateLimit:
             ///   - cancelled:
+            ///   - truncated: The model filled the room its window left the run's reply, which ended it there. The reply is committed interrupted, so a continue turn goes on from where it stopped; a client may say why it stopped while it shows the run's end.
             internal init(
                 messages: [Components.Schemas.CommittedReply]? = nil,
                 thread: Components.Schemas.ThreadRecord? = nil,
                 usage: Components.Schemas.RunMetadata.UsagePayload? = nil,
                 rateLimit: Components.Schemas.RateLimit? = nil,
-                cancelled: Swift.Bool? = nil
+                cancelled: Swift.Bool? = nil,
+                truncated: Swift.Bool? = nil
             ) {
                 self.messages = messages
                 self.thread = thread
                 self.usage = usage
                 self.rateLimit = rateLimit
                 self.cancelled = cancelled
+                self.truncated = truncated
             }
             internal enum CodingKeys: String, CodingKey {
                 case messages
@@ -2885,6 +2893,7 @@ extension Components {
                 case usage
                 case rateLimit
                 case cancelled
+                case truncated
             }
         }
         /// What a run commits to a reply beyond its streamed content.

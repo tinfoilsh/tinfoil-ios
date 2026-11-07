@@ -1165,6 +1165,7 @@ class ChatViewModel: ObservableObject {
         let model = choice.model ?? (open.model.isEmpty ? session.pickedModel : open.model)
         let replyModelName = findSelectableModel(id: model)?.responseDisplayName
         let canceled = session.controller.canceled
+        let truncated = session.controller.truncated
         // A compaction the user asked for streams no reply, so the last one
         // shows as it was.
         let compacting = session.compacting
@@ -1176,10 +1177,14 @@ class ChatViewModel: ObservableObject {
         let summarized = state.summarizedIds
         var messages = rows.rows(chatId: open.id, messages: state.messages, running: running && !stopping && !compacting, summaries: state.summaries, replyModelName: replyModelName).map { message -> Message in
             var view = message
-            // A reply the user stopped here says so, until a continuation
-            // finishes it.
+            // A reply the user stopped here, or the model ran out of room for,
+            // says so, until a continuation finishes it.
             let id = rows.messageId(ofRow: view.id)
-            if view.role == .assistant, id == stoppedId || (view.replyStop != nil && canceled.contains(id)) { view.replyStop = .canceledByUser }
+            if view.role == .assistant, id == stoppedId || (view.replyStop != nil && canceled.contains(id)) {
+                view.replyStop = .canceledByUser
+            } else if view.replyStop == .stopped, truncated.contains(id) {
+                view.replyStop = .truncated
+            }
             // A compaction marker shows above the message after it; one whose
             // summary is still being written shows while its run goes on.
             if let marker = state.markers[id], marker.compaction != nil || running { view.compaction = ChatViewMapping.compaction(marker) }
