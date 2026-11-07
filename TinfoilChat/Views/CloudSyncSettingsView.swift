@@ -266,7 +266,7 @@ struct CloudSyncSettingsView: View {
     /// it is recovered.
     @ViewBuilder
     private var syncStatusRow: some View {
-        if settings.isCloudSyncEnabled, let account = viewModel.account, account.cloud, !account.keyLocked {
+        if settings.isCloudSyncEnabled, let account = viewModel.account, account.cloud, account.keyReady {
             CloudSyncStatusRow(status: account.syncStatus, loadFailed: account.profileFailed)
         }
     }
