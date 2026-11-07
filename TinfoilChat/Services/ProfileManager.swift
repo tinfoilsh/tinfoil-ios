@@ -115,6 +115,7 @@ class ProfileManager: ObservableObject {
     @Published private(set) var webSearchAvailable: Bool = ProfileDefaults.webSearchAvailable
     @Published private(set) var piiCheckEnabled: Bool = ProfileDefaults.piiCheckEnabled
     @Published private(set) var genUIEnabled: Bool = ProfileDefaults.genUIEnabled
+    @Published private(set) var readAloudSpeed: Double = Constants.Speech.voiceSpeed
     /// Why the last change the chat service or this device refused was not
     /// saved, until the user has seen it.
     @Published var saveError: String?
@@ -154,6 +155,7 @@ class ProfileManager: ObservableObject {
         webSearchAvailable = profile.webSearchAvailable ?? ProfileDefaults.webSearchAvailable
         piiCheckEnabled = profile.piiCheckEnabled ?? ProfileDefaults.piiCheckEnabled
         genUIEnabled = profile.genUIEnabled ?? ProfileDefaults.genUIEnabled
+        readAloudSpeed = ReadAloudSpeed.offered(profile.readAloudSpeed)
     }
 
     /// Saves a change to the profile. The change shows at once through the
@@ -214,6 +216,12 @@ class ProfileManager: ObservableObject {
         guard enabled != genUIEnabled else { return }
         genUIEnabled = enabled
         save(["genUIEnabled": enabled])
+    }
+
+    func setReadAloudSpeed(_ speed: Double) {
+        guard speed != readAloudSpeed else { return }
+        readAloudSpeed = speed
+        save(["readAloudSpeed": speed])
     }
 
     var personalizationDraft: PersonalizationDraft {

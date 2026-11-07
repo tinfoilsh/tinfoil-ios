@@ -5403,6 +5403,10 @@ extension Components {
             internal var browserTabChatTitleEnabled: Swift.Bool?
             /// - Remark: Generated from `#/components/schemas/Profile/enterToNewlineEnabled`.
             internal var enterToNewlineEnabled: Swift.Bool?
+            /// How fast replies are read aloud, as the speed a speech request sends.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Profile/readAloudSpeed`.
+            internal var readAloudSpeed: Swift.Double?
             /// - Remark: Generated from `#/components/schemas/Profile/hasSeenOnboarding`.
             internal var hasSeenOnboarding: Swift.Bool?
             /// - Remark: Generated from `#/components/schemas/Profile/hasSeenWebSearchIntro`.
@@ -5454,6 +5458,7 @@ extension Components {
             ///   - pixelateSidebarChatTitlesEnabled:
             ///   - browserTabChatTitleEnabled:
             ///   - enterToNewlineEnabled:
+            ///   - readAloudSpeed: How fast replies are read aloud, as the speed a speech request sends.
             ///   - hasSeenOnboarding:
             ///   - hasSeenWebSearchIntro:
             ///   - dismissed:
@@ -5482,6 +5487,7 @@ extension Components {
                 pixelateSidebarChatTitlesEnabled: Swift.Bool? = nil,
                 browserTabChatTitleEnabled: Swift.Bool? = nil,
                 enterToNewlineEnabled: Swift.Bool? = nil,
+                readAloudSpeed: Swift.Double? = nil,
                 hasSeenOnboarding: Swift.Bool? = nil,
                 hasSeenWebSearchIntro: Swift.Bool? = nil,
                 dismissed: Components.Schemas.Profile.DismissedPayload? = nil
@@ -5510,6 +5516,7 @@ extension Components {
                 self.pixelateSidebarChatTitlesEnabled = pixelateSidebarChatTitlesEnabled
                 self.browserTabChatTitleEnabled = browserTabChatTitleEnabled
                 self.enterToNewlineEnabled = enterToNewlineEnabled
+                self.readAloudSpeed = readAloudSpeed
                 self.hasSeenOnboarding = hasSeenOnboarding
                 self.hasSeenWebSearchIntro = hasSeenWebSearchIntro
                 self.dismissed = dismissed
@@ -5539,6 +5546,7 @@ extension Components {
                 case pixelateSidebarChatTitlesEnabled
                 case browserTabChatTitleEnabled
                 case enterToNewlineEnabled
+                case readAloudSpeed
                 case hasSeenOnboarding
                 case hasSeenWebSearchIntro
                 case dismissed
@@ -5709,6 +5717,10 @@ extension Components {
             internal var browserTabChatTitleEnabled: Swift.Bool?
             /// - Remark: Generated from `#/components/schemas/ProfileView/enterToNewlineEnabled`.
             internal var enterToNewlineEnabled: Swift.Bool?
+            /// How fast replies are read aloud, as the speed a speech request sends.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ProfileView/readAloudSpeed`.
+            internal var readAloudSpeed: Swift.Double?
             /// - Remark: Generated from `#/components/schemas/ProfileView/hasSeenOnboarding`.
             internal var hasSeenOnboarding: Swift.Bool?
             /// - Remark: Generated from `#/components/schemas/ProfileView/hasSeenWebSearchIntro`.
@@ -5762,6 +5774,7 @@ extension Components {
             ///   - pixelateSidebarChatTitlesEnabled:
             ///   - browserTabChatTitleEnabled:
             ///   - enterToNewlineEnabled:
+            ///   - readAloudSpeed: How fast replies are read aloud, as the speed a speech request sends.
             ///   - hasSeenOnboarding:
             ///   - hasSeenWebSearchIntro:
             ///   - dismissed:
@@ -5791,6 +5804,7 @@ extension Components {
                 pixelateSidebarChatTitlesEnabled: Swift.Bool? = nil,
                 browserTabChatTitleEnabled: Swift.Bool? = nil,
                 enterToNewlineEnabled: Swift.Bool? = nil,
+                readAloudSpeed: Swift.Double? = nil,
                 hasSeenOnboarding: Swift.Bool? = nil,
                 hasSeenWebSearchIntro: Swift.Bool? = nil,
                 dismissed: Components.Schemas.ProfileView.DismissedPayload? = nil,
@@ -5820,6 +5834,7 @@ extension Components {
                 self.pixelateSidebarChatTitlesEnabled = pixelateSidebarChatTitlesEnabled
                 self.browserTabChatTitleEnabled = browserTabChatTitleEnabled
                 self.enterToNewlineEnabled = enterToNewlineEnabled
+                self.readAloudSpeed = readAloudSpeed
                 self.hasSeenOnboarding = hasSeenOnboarding
                 self.hasSeenWebSearchIntro = hasSeenWebSearchIntro
                 self.dismissed = dismissed
@@ -5850,6 +5865,7 @@ extension Components {
                 case pixelateSidebarChatTitlesEnabled
                 case browserTabChatTitleEnabled
                 case enterToNewlineEnabled
+                case readAloudSpeed
                 case hasSeenOnboarding
                 case hasSeenWebSearchIntro
                 case dismissed
