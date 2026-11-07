@@ -320,6 +320,7 @@ extension Components {
                 case missingAttachment = "MISSING_ATTACHMENT"
                 case modelUnavailable = "MODEL_UNAVAILABLE"
                 case nothingToCompact = "NOTHING_TO_COMPACT"
+                case nothingToRead = "NOTHING_TO_READ"
                 case payloadTooLarge = "PAYLOAD_TOO_LARGE"
                 case projectsRequireCloud = "PROJECTS_REQUIRE_CLOUD"
                 case queueFull = "QUEUE_FULL"
