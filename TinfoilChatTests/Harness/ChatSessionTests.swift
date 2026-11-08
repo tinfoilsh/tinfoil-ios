@@ -875,6 +875,41 @@ struct ChatSessionTests {
         #expect(session.open.failure == nil)
     }
 
+    @Test func aStoredChatOpenedWhileItsReplyRunsKeepsTheTitleTheUserSet() async throws {
+        // The user renamed the chat while its reply ran.
+        let window: [String: Any] = summary(title: "Dogs", titleState: "manual").merging([
+            "revision": "rev-2", "presetId": NSNull(), "flagged": false,
+            "activeRun": ["runId": "run_3", "expiresAt": "2999-01-01T00:00:00Z", "instance": "i"],
+            "messages": [["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"]],
+            "hasOlder": false,
+        ]) { $1 }
+        let (end, endRun) = AsyncStream<Void>.makeStream()
+        // Followed from its start, the run replays the chat as it started and
+        // the title it generated before the rename.
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(window), heldRun([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_3", "instance": "i"],
+            ["type": "STATE_SNAPSHOT", "snapshot": ["thread": summary(messageCount: 2), "queue": [], "rateLimit": ["kind": NSNull()]]],
+            ["type": "STATE_DELTA", "threadId": threadId, "delta": [
+                ["op": "replace", "path": "/thread/title", "value": "Cats"],
+                ["op": "replace", "path": "/thread/titleState", "value": "generated"],
+            ]],
+            ["type": "TEXT_MESSAGE_CHUNK", "messageId": "msg_6", "role": "assistant", "delta": "Half"],
+        ], then: [
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_3", "metadata": [:]],
+        ], until: end)])
+        let session = fixture.session
+
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        for await state in session.controller.$view.values where state.messages.last?.id == "msg_6" { break }
+
+        #expect(session.state.snapshot.thread?.title == "Dogs")
+        #expect(session.state.snapshot.thread?.titleState.value1 == .manual)
+        #expect(session.state.snapshot.thread?.messageCount == 2)
+        endRun.yield(())
+        for await state in session.controller.$view.values where state.status == .idle { break }
+        #expect(await fixture.transport.requests.map(\.route) == [.get, .follow])
+    }
+
     @Test func olderMessagesAreReadPastAPageThisClientShowsNothingOf() async throws {
         func page(_ messages: [[String: Any]], hasOlder: Bool) -> [String: Any] {
             summary().merging(["revision": "rev-1", "presetId": NSNull(), "flagged": false, "messages": messages, "hasOlder": hasOlder]) { $1 }
