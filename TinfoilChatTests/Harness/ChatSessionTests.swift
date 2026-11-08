@@ -45,7 +45,7 @@ private let threadId = "0000000000001_00000000-0000-4000-8000-000000000001"
 private let signedInSession: [String: Any] = [
     "protocol": ["version": 1, "minimum": 1], "user": ["id": "user-1", "anonymous": false], "rateLimit": ["kind": NSNull()],
     "models": [], "auto": ["default": "", "levels": []], "defaultModel": "gpt-oss-120b", "widgets": [], "profileDefaults": [:],
-    "composer": ["attachments": [], "projectDocuments": [], "pasteAsFileChars": 1000, "dictationMaxSeconds": 60],
+    "composer": ["attachments": [], "projectDocuments": [], "pasteAsFileChars": 1000, "dictationMaxSeconds": 60, "dictationSegmentSeconds": 30],
     "presets": [], "features": [:],
 ]
 
@@ -1222,7 +1222,7 @@ struct ChatSessionTests {
         let sessionAnswer: [String: Any] = [
             "protocol": ["version": 1, "minimum": 1], "user": ["id": "", "anonymous": true], "rateLimit": ["kind": NSNull()],
             "models": [], "auto": ["default": "", "levels": []], "defaultModel": "gpt-oss-120b", "widgets": [], "profileDefaults": [:],
-            "composer": ["attachments": [["accept": [".txt"], "maxBytes": 1000]], "projectDocuments": [], "pasteAsFileChars": 1000, "dictationMaxSeconds": 60],
+            "composer": ["attachments": [["accept": [".txt"], "maxBytes": 1000]], "projectDocuments": [], "pasteAsFileChars": 1000, "dictationMaxSeconds": 60, "dictationSegmentSeconds": 30],
             "presets": [], "features": [:],
         ]
         let converted: [String: Any] = ["id": "att_1", "kind": "document", "fileName": "notes.txt", "mimeType": "text/plain", "textContent": "Notes"]
@@ -1237,7 +1237,7 @@ struct ChatSessionTests {
     @Test func aFilePickedBeforeTheSessionLoadsIsCheckedAgainstItOnceItHas() async throws {
         var opened = signedInSession
         opened["user"] = ["id": "", "anonymous": true]
-        opened["composer"] = ["attachments": [["accept": [".txt"], "maxBytes": 1000]], "projectDocuments": [], "pasteAsFileChars": 1000, "dictationMaxSeconds": 60]
+        opened["composer"] = ["attachments": [["accept": [".txt"], "maxBytes": 1000]], "projectDocuments": [], "pasteAsFileChars": 1000, "dictationMaxSeconds": 60, "dictationSegmentSeconds": 30]
         let converted: [String: Any] = ["id": "att_1", "kind": "document", "fileName": "notes.txt", "mimeType": "text/plain", "textContent": "Notes"]
         let fixture = Fixture(answers: [Answers.json(opened), Answers.json(["attachment": converted])])
         #expect(fixture.account.session == nil)
