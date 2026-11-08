@@ -142,7 +142,7 @@ private struct ZoomableImage: View {
     private func imageContent(in size: CGSize) -> some View {
         if let parsed = URL(string: url),
            parsed.scheme?.lowercased() == "https" {
-            AsyncImage(url: parsed) { phase in
+            HarnessRemoteImage(url: parsed.absoluteString) { phase in
                 switch phase {
                 case .empty:
                     ProgressView().tint(.white)

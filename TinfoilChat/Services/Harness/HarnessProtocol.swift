@@ -18,6 +18,7 @@ typealias ErrorAction = Components.Schemas.ErrorAction.Value1Payload
 typealias ToolActivity = Components.Schemas.ToolActivity
 typealias CommittedReply = Components.Schemas.CommittedReply
 typealias HarnessSession = Components.Schemas.Session
+typealias RemoteImageReply = Components.Schemas.RemoteImage
 typealias ThreadWindow = Components.Schemas.ThreadWindow
 /// What a message sent of one questions widget's answers.
 typealias WidgetAnswers = Components.Schemas.WidgetAnswers
@@ -69,6 +70,7 @@ enum HarnessRoute: String, CaseIterable, Sendable {
     case projectDocumentUpload = "/v1/projects/documents/upload"
     case projectDocumentDelete = "/v1/projects/documents/delete"
     case favicon = "/v1/metadata/favicon"
+    case remoteImage = "/v1/metadata/image"
     case linkMetadata = "/v1/metadata/link"
     case speech = "/v1/speech"
     case transcriptions = "/v1/transcriptions"
@@ -94,7 +96,7 @@ enum HarnessRoute: String, CaseIterable, Sendable {
         switch self {
         case .session, .changes, .profileGet, .keysCurrent, .list, .search, .get, .shareStatus, .shareOpen,
              .transcript, .attachmentGet, .attachmentGetPublic, .projectsList, .projectsGet, .favicon,
-             .linkMetadata, .importStatus:
+             .linkMetadata, .remoteImage, .importStatus:
             return true
         default:
             return false

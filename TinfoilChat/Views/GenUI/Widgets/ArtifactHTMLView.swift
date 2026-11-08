@@ -12,8 +12,8 @@ import WebKit
 /// app and the network:
 /// - an in-memory data store per view, so nothing persists or is shared;
 /// - no script message handlers, so the page cannot call into the app;
-/// - a content rule list that blocks every load except HTTPS images, fonts,
-///   and media;
+/// - a content rule list that allows inline resources and image bytes fetched
+///   through the harness;
 /// - no navigation away from the artifact. Tapped links open outside the app
 ///   through `GenUIURLOpener`, and every other navigation is cancelled.
 ///
@@ -31,6 +31,8 @@ struct ArtifactHTMLView: UIViewRepresentable {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController = context.coordinator.contentController
+        configuration.setURLSchemeHandler(context.coordinator.images, forURLScheme: Constants.Artifacts.imageScheme)
+        configuration.userContentController.addUserScript(WKUserScript(source: ArtifactImageHandler.script, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         configuration.mediaTypesRequiringUserActionForPlayback = .all
 
@@ -50,6 +52,7 @@ struct ArtifactHTMLView: UIViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         let contentController = WKUserContentController()
+        let images = ArtifactImageHandler()
         private var hasInstalledRules = false
         private var loadedHTML: String?
         private var loadTask: Task<Void, Never>?
@@ -66,6 +69,7 @@ struct ArtifactHTMLView: UIViewRepresentable {
                         self.contentController.add(rules)
                         self.hasInstalledRules = true
                     }
+                    self.images.reset()
                     webView.loadHTMLString(html, baseURL: Constants.Artifacts.baseURL)
                 } catch {
                     guard !Task.isCancelled else { return }
@@ -149,7 +153,7 @@ enum ArtifactContentRules {
     }
 
     /// Later rules take precedence: block everything, then let the artifact
-    /// document, inline data, and HTTPS images, fonts, and media through.
+    /// document, inline data, and harness-fetched images through.
     static func encodedRules() throws -> String {
         let escapedBaseURL = Constants.Artifacts.baseURL.absoluteString
             .replacingOccurrences(of: ".", with: "\\.")
@@ -160,8 +164,8 @@ enum ArtifactContentRules {
             rule(urlFilter: "^blob:", action: "ignore-previous-rules"),
             rule(urlFilter: "^about:", action: "ignore-previous-rules"),
             rule(
-                urlFilter: "^https://",
-                resourceTypes: Constants.Artifacts.remoteResourceTypes,
+                urlFilter: "^\(Constants.Artifacts.imageScheme)://",
+                resourceTypes: ["image"],
                 action: "ignore-previous-rules"
             ),
         ]
