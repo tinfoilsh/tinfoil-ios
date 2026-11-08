@@ -563,7 +563,7 @@ final class DeviceThreads: ThreadStore {
         } else {
             var held = try await transcript(threadId).heldImages
             StoredThread.holdImages(attachments.uploads.values.compactMap { try? JSONValue(any: $0.jsonObject()) }, into: &held)
-            device = DeviceRun(threadId: threadId, store: store, images: held, since: controller.since(ofRun: runId))
+            device = DeviceRun(threadId: threadId, store: store, images: held, since: controller.since(ofRun: runId, threadId: threadId))
         }
         return (RunBody(key: nil, threadId: threadId, runId: runId), device)
     }

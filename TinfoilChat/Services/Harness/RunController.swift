@@ -7,6 +7,10 @@ struct RunReceipt: Codable, Equatable, Sendable {
     let threadId: String
     let runId: String
     let instance: String
+    /// The settings of the chat the user changed while the run went on,
+    /// which keep the user's values when the run's thread is stored after
+    /// a relaunch.
+    var changedSettings: [String]?
 }
 
 /// A run of a chat this device stores. Its final event returns the whole
@@ -247,12 +251,14 @@ final class RunController: ObservableObject {
         return clock
     }
 
-    /// The user changed settings of a device chat through the harness.
+    /// The user changed settings of a device chat through the harness. The
+    /// receipt of the chat's run keeps them while the run goes on.
     func settingsChanged(threadId: String, _ settings: [String]) {
         let at = tick()
         var changes = settingChanges[threadId] ?? [:]
         for setting in settings { changes[setting] = at }
         settingChanges[threadId] = changes
+        receipts?.note(changed: settings, threadId: threadId)
     }
 
     /// The settings of a device chat changed after a run's turn read it.
@@ -262,9 +268,14 @@ final class RunController: ObservableObject {
 
     /// When a device run's turn read its chat: a run this app started says,
     /// and one an earlier launch left behind read it before anything this
-    /// app changed.
-    func since(ofRun runId: String) -> Int {
-        runsSince[runId] ?? 0
+    /// app changed. The settings the user changed while such a run went on
+    /// then, which its receipt keeps, count as changed in this app.
+    func since(ofRun runId: String, threadId: String) -> Int {
+        if let since = runsSince[runId] { return since }
+        if let receipt = receipts?.read(threadId: threadId), receipt.runId == runId, let changed = receipt.changedSettings, !changed.isEmpty {
+            settingsChanged(threadId: threadId, changed)
+        }
+        return 0
     }
 
     func settle(_ run: DeviceRun) {
@@ -467,8 +478,11 @@ final class RunController: ObservableObject {
             deviceRuns[device.threadId] = device
             runsSince[receipt.runId] = device.since
             // A chat on this device is rejoined after a relaunch through this
-            // receipt, whichever chat the view shows.
-            receipts?.write(receipt)
+            // receipt, whichever chat the view shows, with the settings the
+            // user changed since the run's turn read the chat.
+            var kept = receipt
+            kept.changedSettings = settingsChangedSince(device)
+            receipts?.write(kept)
         }
         guard shown else { return }
         pending = nil
@@ -640,6 +654,15 @@ final class RunReceiptStore: Sendable {
     /// Keeps a run's receipt in place of its chat's earlier one.
     func write(_ receipt: RunReceipt) {
         save(all().filter { $0.threadId != receipt.threadId } + [receipt])
+    }
+
+    /// Adds settings the user changed to the receipt of the chat's run.
+    func note(changed settings: [String], threadId: String) {
+        var kept = all()
+        guard let index = kept.lastIndex(where: { $0.threadId == threadId }) else { return }
+        let noted = kept[index].changedSettings ?? []
+        kept[index].changedSettings = noted + settings.filter { !noted.contains($0) }
+        save(kept)
     }
 
     func forget(runId: String) {

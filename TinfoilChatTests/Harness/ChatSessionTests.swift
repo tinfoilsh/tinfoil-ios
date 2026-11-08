@@ -387,6 +387,46 @@ struct ChatSessionTests {
         #expect(stored.titleState.value1 == .manual)
     }
 
+    @Test func aDeviceChatRenamedWhileItsReplyRunsKeepsItsTitleWhenTheReplyIsCollectedAfterARelaunch() async throws {
+        let name = "ChatSessionTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let receipts = RunReceiptStore(userId: nil, defaults: defaults)
+        let fixture = Fixture(answers: [], receipts: receipts)
+        let session = fixture.session
+        let question: [String: Any] = ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"]
+        _ = try await session.device.add(try #require(StoredThread(json: record(messages: [question]))), originals: [:])
+        #expect(try await session.openChat(threadId, local: true) == .opened)
+        let (end, endRun) = AsyncStream<Void>.makeStream()
+        await fixture.transport.push(heldRun([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_2", "instance": "i"],
+            ["type": "TEXT_MESSAGE_CHUNK", "messageId": "msg_5", "role": "assistant", "delta": "Second"],
+        ], then: [
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_2", "metadata": ["thread": record(messages: [question])]],
+        ], until: end))
+        let replying = Task { await session.send(TurnFields(kind: .send, content: "second question")) }
+        for await runs in session.controller.$deviceRuns.values where runs[threadId] != nil { break }
+        await fixture.transport.push(renamed("Dogs"))
+        _ = try await session.update(threadId, ThreadPatch(title: "Dogs"))
+
+        // The app is closed before the reply ends and opened again. The run,
+        // followed from its start, returns the chat under the title it had
+        // when its turn read it.
+        let relaunched = ChatSession(account: fixture.account, device: session.device, cache: ChatListCache(directory: nil), receipts: receipts)
+        await fixture.transport.push(Answers.events(deviceRun(id: threadId, question: "second question", questionId: "u2")))
+        #expect(try await relaunched.openChat(threadId, local: true) == .opened)
+        for await state in relaunched.controller.$view.values where state.status == .idle && state.messages.last?.id == "msg_5" { break }
+        for await runs in relaunched.controller.$deviceRuns.values where runs[threadId] == nil { break }
+
+        let stored = try #require(try await relaunched.device.get(threadId))
+        #expect(stored.messages.count == 2)
+        #expect(stored.title == "Dogs")
+        #expect(stored.titleState.value1 == .manual)
+        #expect(receipts.read(threadId: threadId) == nil)
+        endRun.yield(())
+        _ = await replying.value
+    }
+
     /// The reply a device chat stores, as a cut-off run left it.
     private static func storedReply(_ session: ChatSession, _ threadId: String) async throws -> [String: JSONValue]? {
         try await session.device.get(threadId)?.messages.last?.objectValue
