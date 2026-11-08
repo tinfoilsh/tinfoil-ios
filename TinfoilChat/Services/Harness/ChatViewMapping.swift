@@ -35,6 +35,8 @@ enum ChatViewMapping {
         var searches: [WebSearchInstance] = []
         var fetches: [URLFetchState] = []
         var toolCalls: [GenUIToolCall] = []
+        // The sources of every search and page read, in the order found.
+        var found: [WebSearchSource] = []
         var timeline: [JSONValue] = []
         var thoughts = ""
         var text = ""
@@ -61,6 +63,7 @@ enum ChatViewMapping {
                 timeline.append(timelineBlock(block))
             case .toolCall:
                 guard isShownTool(block.name) else { continue }
+                if block.name == searchTool || block.name == fetchTool { found += block.display?.sources.map(source) ?? [] }
                 let toolCallId = block.toolCallId ?? block.id
                 let status = toolStatus(block, streaming: streaming)
                 if block.name == searchTool {
@@ -99,7 +102,17 @@ enum ChatViewMapping {
         message.urlFetches = fetches
         message.toolCalls = toolCalls
         message.timeline = timeline
-        message.isResearch = wire.research != nil
+        if wire.research != nil {
+            message.isResearch = true
+            // A research lists every source it searched and read, and those
+            // its report cites, once each.
+            let cited = (message.annotations ?? []).map { WebSearchSource(id: $0.url_citation.url, title: $0.url_citation.title, url: $0.url_citation.url) }
+            var listed: Set<String> = []
+            let sources = (found + cited).filter { !$0.url.isEmpty && listed.insert($0.url).inserted }
+            if !sources.isEmpty {
+                message.webSearchState = WebSearchState(query: searches.last?.query, status: searches.last?.status ?? .completed, sources: sources)
+            }
+        }
         return message
     }
 
