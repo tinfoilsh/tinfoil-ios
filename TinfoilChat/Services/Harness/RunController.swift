@@ -24,8 +24,12 @@ final class DeviceRun: @unchecked Sendable {
     /// event without the thread leaves the chat without anything the run
     /// streamed.
     var threadStored = false
-    /// When the run's turn read the chat, on the controller's clock.
+    /// When the run's turn read the chat, on the controller's clock. A turn
+    /// queued behind a run of the chat starts from that run's chat, so it
+    /// read the chat when that run's turn did.
     let since: Int
+    /// When this app saw the run start, on the same clock.
+    var startedAt: Int?
 
     init(threadId: String, store: LocalThreadStore, images: ImagesById = [:], originals: Originals = [:], since: Int) {
         self.threadId = threadId
@@ -36,21 +40,26 @@ final class DeviceRun: @unchecked Sendable {
     }
 }
 
-/// Orders the runs of each device chat by when their turns read the chat,
-/// so a run's final event does not store the chat over the thread a later
-/// run stored, which holds the earlier run's turn, as when the earlier
-/// run's event arrives last on a stream rejoined after the later run ended.
+/// Orders the runs of each device chat by when they started, so a run's
+/// final event does not store the chat over the thread a later run stored,
+/// which holds the earlier run's turn, as when the earlier run's event
+/// arrives last on a stream rejoined after the later run ended. A run this
+/// app did not see start counts from when its turn read the chat.
 final class StoredRuns: @unchecked Sendable {
     private let lock = NSLock()
-    /// When the turn of the latest run that stored each chat read it.
+    /// When the latest run that stored each chat started.
     private var latest: [String: Int] = [:]
+
+    private static func started(_ run: DeviceRun) -> Int {
+        run.startedAt ?? run.since
+    }
 
     /// Whether the run's final event may store its chat, which makes it the
     /// latest run that stored the chat.
     func claim(_ run: DeviceRun) -> Bool {
         lock.withLock { () -> Bool in
-            if let stored = latest[run.threadId], stored > run.since { return false }
-            latest[run.threadId] = run.since
+            if let stored = latest[run.threadId], stored > Self.started(run) { return false }
+            latest[run.threadId] = Self.started(run)
             return true
         }
     }
@@ -58,7 +67,7 @@ final class StoredRuns: @unchecked Sendable {
     /// Whether a later run stored the run's chat, whose thread then holds
     /// what the run streamed as the harness finished it.
     func superseded(_ run: DeviceRun) -> Bool {
-        lock.withLock { latest[run.threadId].map { $0 > run.since } ?? false }
+        lock.withLock { latest[run.threadId].map { $0 > Self.started(run) } ?? false }
     }
 }
 
@@ -454,6 +463,7 @@ final class RunController: ObservableObject {
         if let device {
             settle(device)
             device.run = receipt
+            if device.startedAt == nil { device.startedAt = tick() }
             deviceRuns[device.threadId] = device
             runsSince[receipt.runId] = device.since
             // A chat on this device is rejoined after a relaunch through this

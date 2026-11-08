@@ -225,7 +225,11 @@ struct RunControllerTests {
             ["id": "a2", "role": "assistant", "createdAt": "2026-01-01T00:00:03Z", "content": "Second answer."],
         ]
         let earlier = DeviceRun(threadId: "t", store: store, since: 1)
-        let later = DeviceRun(threadId: "t", store: store, originals: ["img": AttachmentOriginal(base64: "QUJD", mimeType: "image/png")], since: 2)
+        earlier.startedAt = 2
+        // A run queued behind another read the chat when that run's turn did,
+        // and starts after it.
+        let later = DeviceRun(threadId: "t", store: store, originals: ["img": AttachmentOriginal(base64: "QUJD", mimeType: "image/png")], since: 1)
+        later.startedAt = 3
 
         // The later run, queued behind the earlier one, ends first on its own
         // stream; the earlier run's final event arrives after it.
@@ -236,7 +240,7 @@ struct RunControllerTests {
         #expect(try await store.originals("t", attachmentIds: ["img"])["img"] != nil)
         // A run that started later stores the chat even when it holds fewer
         // messages, as a regenerated reply leaves it.
-        let regenerated = DeviceRun(threadId: "t", store: store, since: 3)
+        let regenerated = DeviceRun(threadId: "t", store: store, since: 4)
         #expect(try await DeviceRunStorage.store(regenerated, event: finished("run_3", first), changedSince: [], storedRuns: storedRuns) != nil)
         #expect(try await store.get("t")?.messages.count == 2)
     }

@@ -111,6 +111,17 @@ private func cutOffRun(_ request: HarnessRequest) -> [[String: Any]] {
     ]
 }
 
+/// The harness's answer to renaming a device chat: the chat it was sent,
+/// under the title the user set.
+private func renamed(_ title: String) -> ScriptedTransport.Answer {
+    { request in
+        var thread = request.json["thread"] as? [String: Any] ?? [:]
+        thread["title"] = title
+        thread["titleState"] = "manual"
+        return try Answers.json(["thread": thread])(request)
+    }
+}
+
 /// A run's stream that sends `head`, then `tail` once `release` yields.
 private func heldRun(_ head: [[String: Any]], then tail: [[String: Any]], until release: AsyncStream<Void>) -> ScriptedTransport.Answer {
     func text(_ frames: [[String: Any]], from first: Int) -> Data {
@@ -320,6 +331,60 @@ struct ChatSessionTests {
         #expect(try await session.device.get(threadId)?.messages.count == 2)
         // The reply is stored, so the run is not followed again.
         #expect(receipts.read(threadId: threadId) == nil)
+    }
+
+    @Test func aDeviceChatRenamedBeforeAMessageIsQueuedKeepsItsTitleOnceTheQueuedReplyEnds() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        let first: [[String: Any]] = [
+            ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "first question"],
+            ["id": "a1", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "content": "First answer."],
+        ]
+        let second = first + [
+            ["id": "u2", "role": "user", "createdAt": "2026-01-01T00:00:02Z", "content": "second question"],
+            ["id": "msg_5", "role": "assistant", "createdAt": "2026-01-01T00:00:03Z", "content": "Second answer."],
+        ]
+        let third = second + [
+            ["id": "u3", "role": "user", "createdAt": "2026-01-01T00:00:04Z", "content": "third question"],
+            ["id": "msg_6", "role": "assistant", "createdAt": "2026-01-01T00:00:05Z", "content": "Third answer."],
+        ]
+        _ = try await session.device.add(try #require(StoredThread(json: record(messages: first))), originals: [:])
+        #expect(try await session.openChat(threadId, local: true) == .opened)
+        let (secondEnd, endSecond) = AsyncStream<Void>.makeStream()
+        await fixture.transport.push(heldRun([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_2", "instance": "i"],
+            ["type": "TEXT_MESSAGE_CHUNK", "messageId": "msg_5", "role": "assistant", "delta": "Second"],
+        ], then: [
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_2", "metadata": ["thread": record(messages: second)]],
+        ], until: secondEnd))
+        let replying = Task { await session.send(TurnFields(kind: .send, content: "second question")) }
+        for await runs in session.controller.$deviceRuns.values where runs[threadId] != nil { break }
+
+        // The user renames the chat while its reply runs, then queues a
+        // message, whose run the harness starts from the chat the reply
+        // before it returns, under the title the chat had then.
+        await fixture.transport.push(renamed("Dogs"))
+        _ = try await session.update(threadId, ThreadPatch(title: "Dogs"))
+        let queued: [String: Any] = ["queueId": "run_3", "kind": "send", "content": "third question", "quote": NSNull(), "attachments": [], "createdAt": "2026-01-01T00:00:04Z"]
+        let (thirdEnd, endThird) = AsyncStream<Void>.makeStream()
+        await fixture.transport.push(heldRun([
+            ["type": "STATE_DELTA", "threadId": threadId, "runId": "run_3", "delta": [["op": "add", "path": "/queue/-", "value": queued]]],
+        ], then: [
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_3", "instance": "i"],
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_3", "metadata": ["thread": record(messages: third)]],
+        ], until: thirdEnd))
+        let queueing = Task { await session.send(TurnFields(kind: .send, content: "third question")) }
+        for await state in session.controller.$view.values where !state.snapshot.queue.isEmpty { break }
+
+        endSecond.yield(())
+        _ = await replying.value
+        endThird.yield(())
+        _ = await queueing.value
+
+        let stored = try #require(try await session.device.get(threadId))
+        #expect(stored.messages.count == 6)
+        #expect(stored.title == "Dogs")
+        #expect(stored.titleState.value1 == .manual)
     }
 
     /// The reply a device chat stores, as a cut-off run left it.
