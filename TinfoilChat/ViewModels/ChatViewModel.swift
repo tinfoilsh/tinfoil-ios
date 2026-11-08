@@ -746,6 +746,18 @@ class ChatViewModel: ObservableObject {
         account?.session?.features.additionalProperties["manualCompaction"] == true
     }
 
+    /// Deep research can be turned on: the chat service offers it to the
+    /// account, and web search is not turned off in Settings.
+    var canResearch: Bool { session?.researchAvailable == true }
+
+    /// The open chat's next questions are researched on the web at length
+    /// before they are answered.
+    var isResearchEnabled: Bool { session?.researching == true }
+
+    func setResearchEnabled(_ enabled: Bool) {
+        session?.setResearch(enabled)
+    }
+
     // MARK: - Safeguards
 
     private func bindSafeguardsStore() {
