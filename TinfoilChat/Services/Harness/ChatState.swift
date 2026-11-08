@@ -53,6 +53,13 @@ struct ChatState: Equatable, Sendable {
     var isRunning: Bool { [.submitting, .streaming, .queued].contains(status) }
     var isStopping: Bool { isRunning && stopping }
 
+    /// The id of the chat's latest message when it is a reply that researched
+    /// its question.
+    var researchedReply: String? {
+        guard let last = messages.last, last.role.value1 == .assistant, last.research != nil else { return nil }
+        return last.id
+    }
+
     /// Whether compacting the chat on request has anything to summarize, as
     /// the harness decides it: a message after the latest compaction marker
     /// that comes before the last question, which the harness keeps with its

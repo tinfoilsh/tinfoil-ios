@@ -71,6 +71,27 @@ private func questionsReply(answers: [String: [String]]? = nil) -> [String: Any]
     return ["id": "a1", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "content": "", "timeline": [block]]
 }
 
+/// The session the harness opens for a caller who may research questions in
+/// depth.
+private let researchSession: [String: Any] = signedInSession.merging([
+    "user": ["id": "", "anonymous": true], "features": ["research": true],
+]) { $1 }
+
+/// A device chat's run whose reply researched its question, or only asked
+/// what the research needs to know.
+private func researchRun(_ runId: String, reply: String, researched: Bool) -> ScriptedTransport.Answer {
+    { request in
+        let threadId = request.json["threadId"] as! String
+        var committed: [String: Any] = ["id": reply, "isInterrupted": false]
+        if researched { committed["research"] = ["version": 1] }
+        return try Answers.events([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": runId, "instance": "i"],
+            ["type": "TEXT_MESSAGE_CHUNK", "messageId": reply, "role": "assistant", "delta": "Report."],
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": runId, "metadata": ["messages": [committed]]],
+        ])(request)
+    }
+}
+
 /// A stored chat as the harness opens it, holding its first question.
 private let firstQuestionWindow: [String: Any] = summary().merging([
     "revision": "rev-1", "presetId": NSNull(), "flagged": false,
@@ -1084,5 +1105,57 @@ struct ChatSessionTests {
         #expect(attachment.id == "att_1")
         #expect(await fixture.transport.requests.map(\.route) == [.session, .attachmentUpload])
         #expect(fixture.account.session != nil)
+    }
+
+    @Test func deepResearchResearchesEachQuestionUntilAResearchEnds() async throws {
+        let fixture = Fixture(answers: [Answers.json(researchSession)])
+        try await fixture.account.refresh()
+        let session = fixture.session
+        session.newChat()
+        session.setResearch(true)
+        func sentResearch() async -> Bool? {
+            ((await fixture.transport.requests.last)?.json["options"] as? [String: Any])?["research"] as? Bool
+        }
+
+        // A first turn that only asked what the research needs to know leaves
+        // deep research on, so the answers are researched.
+        await fixture.transport.push(researchRun("run_2", reply: "msg_3", researched: false))
+        #expect(await session.send(TurnFields(kind: .send, content: "Compare lighthouses", options: TurnOptions(model: "kimi-k3"))))
+        #expect(await sentResearch() == true)
+        #expect(session.researching)
+
+        await fixture.transport.push(researchRun("run_4", reply: "msg_5", researched: true))
+        #expect(await session.send(TurnFields(kind: .send, content: "Maine and Vermont", options: TurnOptions(model: "kimi-k3"))))
+        #expect(await sentResearch() == true)
+        #expect(session.state.messages.last?.research?.version == 1)
+        #expect(!session.researching)
+
+        await fixture.transport.push(researchRun("run_6", reply: "msg_7", researched: false))
+        #expect(await session.send(TurnFields(kind: .send, content: "Thanks", options: TurnOptions(model: "kimi-k3"))))
+        #expect(await sentResearch() == nil)
+    }
+
+    @Test func deepResearchLeavesTurnsThatAskNoQuestionAndEndsWithItsChat() async throws {
+        let fixture = Fixture(answers: [Answers.json(researchSession)])
+        try await fixture.account.refresh()
+        let session = fixture.session
+        _ = try await session.device.add(Self.stoppedReplyChat, originals: [:])
+        session.list.reloadDevice()
+        #expect(try await session.openChat(threadId, local: true) == .opened)
+        session.setResearch(true)
+        await fixture.transport.push(Answers.events([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_5", "instance": "i", "messageId": "a1"],
+            ["type": "TEXT_MESSAGE_CHUNK", "messageId": "a1", "role": "assistant", "delta": ", then the rest."],
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_5", "metadata": ["messages": [["id": "a1", "isInterrupted": false]]]],
+        ]))
+
+        #expect(await session.continueReply(at: 1, options: TurnOptions(model: "kimi-k3")))
+
+        let request = try #require(await fixture.transport.requests.last)
+        #expect(request.json["kind"] as? String == "continue")
+        #expect((request.json["options"] as? [String: Any])?["research"] == nil)
+        #expect(session.researching)
+        session.newChat()
+        #expect(!session.researching)
     }
 }

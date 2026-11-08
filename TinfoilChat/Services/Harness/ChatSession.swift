@@ -22,6 +22,8 @@ struct OpenChat: Equatable {
     var modelChosen = false
     var webSearch: Bool?
     var projectId: String?
+    /// The user turned deep research on for the chat's next questions.
+    var research = false
 
     var onDevice: Bool { local || temporary }
 }
@@ -72,6 +74,9 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Harness")
     /// The id of the block holding a reply's rewritten text when it had none.
     private static let editedContentId = "edited-content"
+    /// The turns that ask a question, which research it while deep research
+    /// is on.
+    private static let researchKinds: Set<Turn.Kind> = [.send, .edit, .regenerate, .retry]
 
     let account: HarnessAccount
     let controller: RunController
@@ -115,6 +120,12 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         for child in [controller.objectWillChange.eraseToAnyPublisher(), list.objectWillChange.eraseToAnyPublisher(), account.objectWillChange.eraseToAnyPublisher()] {
             child.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
         }
+        // A research that ends in the open chat turns deep research off; a
+        // reply that only asked what the research needs to know leaves it on.
+        controller.$view.map(\.researchedReply).removeDuplicates().sink { [weak self] reply in
+            guard reply != nil, self?.open.research == true else { return }
+            self?.setResearch(false)
+        }.store(in: &cancellables)
     }
 
     var state: ChatState { controller.view }
@@ -246,6 +257,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             $0.chosenPresetId = nil
             $0.modelChosen = false
             $0.webSearch = nil
+            $0.research = false
         }
     }
 
@@ -616,6 +628,11 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         defaults.options = leaveToPreset(defaults.options, choice)
         var fields = fields
         fields.options = fields.options.flatMap { leaveToPreset($0, choice) }
+        if researching, Self.researchKinds.contains(fields.kind ?? defaults.kind) {
+            var options = fields.options ?? defaults.options ?? TurnOptions()
+            options.research = true
+            fields.options = options
+        }
         let shown = controller.track()
         let before = state.messages
         let markers = state.markers
@@ -840,6 +857,21 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
 
     func setWebSearch(_ enabled: Bool) {
         patch { $0.webSearch = enabled }
+    }
+
+    /// Whether the account may research its questions in depth: the harness
+    /// offers it to the caller, and web search is not turned off in Settings.
+    var researchAvailable: Bool {
+        account.session?.features.additionalProperties["research"] == true
+            && (account.effectiveProfile.webSearchAvailable ?? ProfileDefaults.webSearchAvailable)
+    }
+
+    /// The open chat's next questions are researched on the web at length
+    /// before they are answered.
+    var researching: Bool { open.research && researchAvailable }
+
+    func setResearch(_ enabled: Bool) {
+        patch { $0.research = enabled }
     }
 
     func setTemporary(_ temporary: Bool) {
