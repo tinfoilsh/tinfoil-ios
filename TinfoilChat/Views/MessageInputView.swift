@@ -157,10 +157,9 @@ struct MessageInputView: View {
     // other action paths don't re-toggle the microphone.
     @State private var isHoldToRecordActive = false
     @State private var isFloatingRecordingBubbleVisible = false
-    @State private var isFinishingRecording = false
 
     private var isTranscribingAudio: Bool {
-        isFinishingRecording || viewModel.isTranscribing
+        viewModel.isTranscribing
     }
 
     // The in-flight recorder startup for a hold, awaited on release so a
@@ -343,14 +342,25 @@ struct MessageInputView: View {
             .onAppear {
                 messageTextHasNonWhitespace = hasNonWhitespaceContent(messageText)
                 handleMessageEditSessionChange(viewModel.messageEditSession)
+                insertDictatedText()
             }
             .onChange(of: messageText) { _, newValue in
                 messageTextHasNonWhitespace = hasNonWhitespaceContent(newValue)
             }
+            .onChange(of: viewModel.dictatedText) { _, _ in
+                insertDictatedText()
+            }
+            .onChange(of: viewModel.canGenerateInCurrentChat) { _, _ in
+                insertDictatedText()
+            }
             .onReceive(AudioRecordingService.shared.$isRecording) { isRecording in
                 guard !isRecording, viewModel.isRecording else { return }
-                Task { await stopRecordingAndInsertTranscription() }
+                finishRecording()
             }
+            .animation(
+                reduceMotion ? nil : .easeInOut(duration: Constants.Audio.Waveform.completionTransitionDuration),
+                value: viewModel.isTranscribing
+            )
             .onChange(of: viewModel.messageEditSession) { _, newSession in
                 handleMessageEditSessionChange(newSession)
             }
@@ -575,6 +585,37 @@ struct MessageInputView: View {
         }
     }
 
+    /// Dictation still on its way to the composer: recordings transcribed
+    /// again, or ones that could not be, which wait for the user.
+    @ViewBuilder
+    private var dictationNotice: some View {
+        if viewModel.dictationFailed > 0 {
+            HStack(spacing: 6) {
+                Text("Couldn't transcribe part of your dictation")
+                Button("Try again") { viewModel.retryDictation() }
+                    .buttonStyle(.plain)
+                    .underline()
+                Button("Discard") { viewModel.discardFailedDictation() }
+                    .buttonStyle(.plain)
+                    .underline()
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(.orange)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .modifier(RateLimitNoticeBackground(color: Color.orange.opacity(0.08)))
+            .transition(.opacity)
+        } else if viewModel.dictationRetrying > 0 {
+            Text("Part of your dictation is taking longer to transcribe")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .modifier(RateLimitNoticeBackground(color: Color.secondary.opacity(0.06)))
+                .transition(.opacity)
+        }
+    }
+
     /// Says why the open chat cannot send: its chats are locked until the
     /// key is unlocked, the account could not load, or, once there is a
     /// draft, the chat service is still connecting.
@@ -679,6 +720,8 @@ struct MessageInputView: View {
 
                 accountNotices
 
+                dictationNotice
+
                 // Attachment preview bar
                 if !viewModel.pendingAttachments.isEmpty {
                     AttachmentPreviewBar(
@@ -713,6 +756,8 @@ struct MessageInputView: View {
                 rateLimitLabel
 
                 accountNotices
+
+                dictationNotice
 
                 // Attachment preview bar
                 if !viewModel.pendingAttachments.isEmpty {
@@ -1058,7 +1103,7 @@ struct MessageInputView: View {
             // stopping; otherwise a fast release finds nothing to stop
             // and the recording outlives the hold.
             await startTask?.value
-            await stopRecordingAndInsertTranscription()
+            finishRecording()
         }
     }
 
@@ -1180,9 +1225,7 @@ struct MessageInputView: View {
 
     private func handleAudioButtonTap() {
         if viewModel.isRecording {
-            Task {
-                await stopRecordingAndInsertTranscription()
-            }
+            finishRecording()
         } else {
             Task {
                 await viewModel.startAudioRecording()
@@ -1190,28 +1233,23 @@ struct MessageInputView: View {
         }
     }
 
-    private func stopRecordingAndInsertTranscription() async {
-        guard viewModel.isRecording, !isFinishingRecording else { return }
-        let chatId = viewModel.currentChat?.id
-        let accountId = authManager.localUserId
-        isFinishingRecording = true
-        defer {
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: Constants.Audio.Waveform.completionTransitionDuration)) {
-                isFinishingRecording = false
-            }
-        }
-        if let transcription = await viewModel.stopAudioRecordingAndTranscribe() {
-            guard viewModel.currentChat?.id == chatId,
-                  authManager.localUserId == accountId,
-                  viewModel.canGenerateInCurrentChat,
-                  !Task.isCancelled else { return }
+    private func finishRecording() {
+        guard viewModel.isRecording else { return }
+        viewModel.stopAudioRecording()
+    }
+
+    /// Dictated text joins whatever the draft already holds, as each
+    /// recording is transcribed, while the open chat can take a message.
+    private func insertDictatedText() {
+        guard viewModel.canGenerateInCurrentChat else { return }
+        for transcription in viewModel.takeDictatedText() {
             if !hasNonWhitespaceContent(messageText) {
                 messageText = transcription
             } else {
                 messageText += " " + transcription
             }
-            messageTextHasNonWhitespace = hasNonWhitespaceContent(messageText)
         }
+        messageTextHasNonWhitespace = hasNonWhitespaceContent(messageText)
     }
 
     private func processDocumentScan() {

@@ -559,7 +559,7 @@ enum Constants {
         static let microphoneIconName = "mic"
         /// Recordings are AAC in an MPEG-4 container.
         static let recordingMimeType = "audio/mp4"
-        static let recordingTimeoutSeconds: TimeInterval = 600  // 10 minutes
+        static let recordingFileExtension = "m4a"
         static let holdToRecordMinimumPressSeconds: TimeInterval = 0.3
         static let recordingButtonDiameter: CGFloat = 32
         static let recordingButtonHitTargetSize: CGFloat = 44
@@ -572,7 +572,29 @@ enum Constants {
         static let sampleRate: Double = 44100.0
         static let numberOfChannels: Int = 1  // Mono
 
+        /// Dictation is sent to be transcribed in recordings of about the
+        /// length the chat service names, while the user keeps talking.
+        enum Dictation {
+            /// How often the microphone's level is read to find a pause.
+            static let levelSampleInterval: TimeInterval = 0.1
+            /// A level below pauseDecibels held for pauseSeconds is a pause
+            /// between words.
+            static let pauseDecibels: Float = -40
+            static let pauseSeconds: TimeInterval = 0.5
+            /// A recording with no pause in it ends at this many times its
+            /// length.
+            static let longestSegmentFactor: Double = 1.5
+            /// The waits before each attempt after a recording failed to
+            /// transcribe, after which it waits for the user.
+            static let retryDelays: [TimeInterval] = [2, 5, 15, 30, 60, 120, 300]
+            /// An attempt not answered by then is abandoned. A recording
+            /// transcribes in seconds.
+            static let attemptTimeoutSeconds: TimeInterval = 60
+        }
+
         enum Waveform {
+            /// The recording time whose text sets the timer's width.
+            static let timerPlaceholderSeconds: TimeInterval = 600
             static let sampleInterval: TimeInterval = 0.05
             static let frameInterval: TimeInterval = 1.0 / 60.0
             static let completionTransitionDuration: TimeInterval = 0.2

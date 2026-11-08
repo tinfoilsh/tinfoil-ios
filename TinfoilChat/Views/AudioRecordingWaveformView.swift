@@ -19,7 +19,7 @@ struct AudioRecordingWaveformView: View {
 
     var body: some View {
         HStack(spacing: Constants.Audio.Waveform.contentSpacing) {
-            Text(Duration.seconds(Constants.Audio.recordingTimeoutSeconds).formatted(.time(pattern: .minuteSecond)))
+            Text(Duration.seconds(Constants.Audio.Waveform.timerPlaceholderSeconds).formatted(.time(pattern: .minuteSecond)))
                 .hidden()
                 .overlay(alignment: .leading) {
                     Text(elapsedText)

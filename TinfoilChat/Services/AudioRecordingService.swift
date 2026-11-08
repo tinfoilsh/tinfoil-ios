@@ -2,26 +2,36 @@
 //  AudioRecordingService.swift
 //  TinfoilChat
 //
-//  Service for recording audio and transcribing it to text
+//  Service for recording audio to be transcribed
 //
 
 import Foundation
 import AVFoundation
 import UIKit
 
-/// Service for managing audio recording and transcription
+/// Service for managing audio recording
 @MainActor
 class AudioRecordingService: NSObject, ObservableObject {
     static let shared = AudioRecordingService()
 
+    /// A recording handed over: its file, and its number in the dictation.
+    typealias HandOver = (_ recording: URL, _ index: Int) -> Void
+
     @Published private(set) var isRecording = false
-    @Published private(set) var isTranscribing = false
 
     private var audioRecorder: AVAudioRecorder?
     private var audioSessionLease: UUID?
-    private var timeoutTimer: Timer?
+    private var segmentTimer: Timer?
     private var recordingURL: URL?
     private var didDisableIdleTimer: Bool = false
+    /// The recording under way: its number, when it began, how long the
+    /// recordings before it ran, and since when it has been quiet.
+    private var segmentIndex = 0
+    private var segmentStartedAt = Date()
+    private var earlierSegmentsDuration: TimeInterval = .zero
+    private var quietSince: Date?
+    private var segmentSeconds: TimeInterval = .zero
+    private var handOver: HandOver?
 
     override init() {
         super.init()
@@ -45,65 +55,47 @@ class AudioRecordingService: NSObject, ObservableObject {
 
     // MARK: - Recording
 
-    /// Start recording audio
-    func startRecording() throws {
+    /// Starts recording. What is recorded is handed over in recordings of
+    /// about segmentSeconds, each ended at the first pause after that long,
+    /// while recording goes on, and the last one when it stops.
+    func startRecording(segmentSeconds: TimeInterval, handOver: @escaping HandOver) throws {
         guard !isRecording else { return }
 
         let lease = try AudioSessionCoordinator.shared.acquire(.recording)
         audioSessionLease = lease
         defer {
             if !isRecording {
-                audioRecorder = nil
-                cleanupRecordingFile()
                 AudioSessionCoordinator.shared.release(lease)
                 audioSessionLease = nil
             }
         }
 
-        let url = getRecordingURL()
-        recordingURL = url
-
-        let settings: [String: Any] = [
-            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: Constants.Audio.sampleRate,
-            AVNumberOfChannelsKey: Constants.Audio.numberOfChannels,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-        ]
-
-        audioRecorder = try AVAudioRecorder(url: url, settings: settings)
-        audioRecorder?.isMeteringEnabled = true
-        guard audioRecorder?.record() == true else {
-            throw AudioRecordingError.recordingFailed
-        }
+        audioRecorder = try beginSegment()
+        self.segmentSeconds = segmentSeconds
+        self.handOver = handOver
+        segmentIndex = 0
+        earlierSegmentsDuration = .zero
+        quietSince = nil
         isRecording = true
         disableIdleTimer()
 
-        // Auto-stop after timeout
-        let timer = Timer(timeInterval: Constants.Audio.recordingTimeoutSeconds, repeats: false) { [weak self] _ in
+        let timer = Timer(timeInterval: Constants.Audio.Dictation.levelSampleInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.stopRecording()
+                self?.endSegmentAtPause()
             }
         }
-        timeoutTimer = timer
+        segmentTimer = timer
         RunLoop.main.add(timer, forMode: .common)
     }
 
-    /// Stop recording and return the audio file URL
-    @discardableResult
-    func stopRecording() -> URL? {
-        guard isRecording else { return recordingURL }
-
-        timeoutTimer?.invalidate()
-        timeoutTimer = nil
-
-        audioRecorder?.stop()
-        audioRecorder = nil
-        isRecording = false
-        if let audioSessionLease { AudioSessionCoordinator.shared.release(audioSessionLease) }
-        audioSessionLease = nil
-        restoreIdleTimer()
-
-        return recordingURL
+    /// Stops recording and hands over the recording under way.
+    func stopRecording() {
+        guard isRecording else { return }
+        let index = segmentIndex
+        let handOver = self.handOver
+        if let url = finish() {
+            handOver?(url, index)
+        }
     }
 
     func meteringSample() -> AudioMeterSample? {
@@ -115,64 +107,99 @@ class AudioRecordingService: NSObject, ObservableObject {
         audioRecorder.updateMeters()
         return AudioMeterSample(
             decibels: audioRecorder.averagePower(forChannel: Constants.Audio.Waveform.meteringChannel),
-            elapsedTime: audioRecorder.currentTime
+            elapsedTime: earlierSegmentsDuration + audioRecorder.currentTime
         )
     }
 
-    /// Cancel recording without returning the file
+    /// Cancel recording, discarding the recording under way.
     func cancelRecording() {
-        stopRecording()
-        cleanupRecordingFile()
-    }
-
-    // MARK: - Transcription
-
-    /// Owns the recording until the request and its optional authentication retry finish.
-    /// The words of the recording, as `send` transcribes its bytes.
-    func transcribe(
-        fileURL: URL,
-        send: (_ recording: Data) async throws -> String
-    ) async throws -> String {
-        isTranscribing = true
-        defer {
-            isTranscribing = false
-            cleanupRecordingFile(at: fileURL)
+        guard isRecording else { return }
+        if let url = finish() {
+            try? FileManager.default.removeItem(at: url)
         }
-        try Task.checkCancellation()
-        let audioData = try await Task.detached {
-            try Data(contentsOf: fileURL)
-        }.value
-        guard !audioData.isEmpty else {
-            throw AudioRecordingError.emptyRecording
-        }
-        let result = try await send(audioData)
-        try Task.checkCancellation()
-        let transcription = result.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !transcription.isEmpty else {
-            throw AudioRecordingError.emptyTranscription
-        }
-        return transcription
     }
 
     // MARK: - Private Helpers
 
+    private func beginSegment() throws -> AVAudioRecorder {
+        let url = getRecordingURL()
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: Constants.Audio.sampleRate,
+            AVNumberOfChannelsKey: Constants.Audio.numberOfChannels,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+        ]
+
+        let recorder = try AVAudioRecorder(url: url, settings: settings)
+        recorder.isMeteringEnabled = true
+        guard recorder.record() else {
+            try? FileManager.default.removeItem(at: url)
+            throw AudioRecordingError.recordingFailed
+        }
+        recordingURL = url
+        segmentStartedAt = Date()
+        return recorder
+    }
+
+    /// Ends the recording under way at the first pause after it has run its
+    /// length, or at its longest without one, hands it over, and records on
+    /// in a new one. Cut in a pause, the moment between them is silent.
+    private func endSegmentAtPause() {
+        guard isRecording, let recorder = audioRecorder else { return }
+        guard recorder.isRecording else {
+            stopRecording()
+            return
+        }
+        recorder.updateMeters()
+        let now = Date()
+        if recorder.averagePower(forChannel: Constants.Audio.Waveform.meteringChannel) >= Constants.Audio.Dictation.pauseDecibels {
+            quietSince = nil
+        } else if quietSince == nil {
+            quietSince = now
+        }
+        let elapsed = now.timeIntervalSince(segmentStartedAt)
+        let paused = quietSince.map { now.timeIntervalSince($0) >= Constants.Audio.Dictation.pauseSeconds } ?? false
+        guard (elapsed >= segmentSeconds && paused)
+            || elapsed >= segmentSeconds * Constants.Audio.Dictation.longestSegmentFactor else { return }
+
+        let index = segmentIndex
+        guard let url = recordingURL else { return }
+        earlierSegmentsDuration += recorder.currentTime
+        recorder.stop()
+        do {
+            audioRecorder = try beginSegment()
+            segmentIndex += 1
+            quietSince = nil
+            handOver?(url, index)
+        } catch {
+            // No recording could follow, so dictation ends with this one.
+            audioRecorder = nil
+            recordingURL = url
+            stopRecording()
+        }
+    }
+
+    /// Stops the recorder and releases the microphone, and returns the
+    /// recording under way.
+    private func finish() -> URL? {
+        segmentTimer?.invalidate()
+        segmentTimer = nil
+        audioRecorder?.stop()
+        audioRecorder = nil
+        handOver = nil
+        isRecording = false
+        if let audioSessionLease { AudioSessionCoordinator.shared.release(audioSessionLease) }
+        audioSessionLease = nil
+        restoreIdleTimer()
+        let url = recordingURL
+        recordingURL = nil
+        return url
+    }
+
     private func getRecordingURL() -> URL {
         let tempDir = FileManager.default.temporaryDirectory
-        let filename = "recording_\(UUID().uuidString).m4a"
+        let filename = "recording_\(UUID().uuidString).\(Constants.Audio.recordingFileExtension)"
         return tempDir.appendingPathComponent(filename)
-    }
-
-    private func cleanupRecordingFile() {
-        guard let url = recordingURL else { return }
-        cleanupRecordingFile(at: url)
-    }
-
-    private func cleanupRecordingFile(at url: URL) {
-        try? FileManager.default.removeItem(at: url)
-        // A completed transcription must not discard a newer recording.
-        if recordingURL == url {
-            recordingURL = nil
-        }
     }
 
     private func disableIdleTimer() {
@@ -199,9 +226,6 @@ class AudioRecordingService: NSObject, ObservableObject {
 enum AudioRecordingError: LocalizedError {
     case permissionDenied
     case recordingFailed
-    case emptyRecording
-    case emptyTranscription
-    case transcriptionFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -209,12 +233,6 @@ enum AudioRecordingError: LocalizedError {
             return "Microphone access denied"
         case .recordingFailed:
             return "Could not start audio recording. Please try again."
-        case .emptyRecording:
-            return "Recording is empty"
-        case .emptyTranscription:
-            return "Transcription returned empty"
-        case .transcriptionFailed(let message):
-            return "Transcription failed: \(message)"
         }
     }
 }
