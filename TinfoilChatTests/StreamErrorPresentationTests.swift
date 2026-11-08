@@ -25,6 +25,16 @@ struct StreamErrorPresentationTests {
         #expect(daily.offersUpgrade && !daily.offersRetry)
     }
 
+    @Test func theDeepResearchLimitSaysWhenAnotherMayStartApartFromTheChatQuota() {
+        let resetsAt = "2026-10-28T15:00:00Z"
+        let research = StreamErrorPresentation(Self.error(HarnessErrorCode.researchLimitReached, .wait, retryAfter: 1_800, resetsAt: resetsAt), occurredAt: nil)
+        let quota = StreamErrorPresentation(Self.error(HarnessErrorCode.quotaExhausted, .wait, retryAfter: 1_800, resetsAt: resetsAt), occurredAt: nil)
+        #expect(research.title != quota.title)
+        let time = ChatAccessCache.date(of: resetsAt)!.formatted(date: .omitted, time: .shortened)
+        #expect(research.suggestion.contains(time))
+        #expect(!research.offersRetry && !research.offersUpgrade)
+    }
+
     @Test func aKeyThisDeviceMustUnlockOffersUnlockNotRetry() {
         let shown = StreamErrorPresentation(Self.error(HarnessErrorCode.keyMismatch, .unlock), occurredAt: nil)
         #expect(shown.kind == .key && shown.offersUnlock && !shown.offersRetry)

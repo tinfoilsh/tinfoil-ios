@@ -150,6 +150,8 @@ enum HarnessErrorCode {
     static let runInFlight = "RUN_IN_FLIGHT"
     static let quotaExhausted = "QUOTA_EXHAUSTED"
     static let rateLimited = "RATE_LIMITED"
+    /// The caller started a deep research within the hour, which allows one.
+    static let researchLimitReached = "RESEARCH_LIMIT_REACHED"
     static let keyRequired = "KEY_REQUIRED"
     static let keyMismatch = "KEY_MISMATCH"
     static let unauthenticated = "UNAUTHENTICATED"
