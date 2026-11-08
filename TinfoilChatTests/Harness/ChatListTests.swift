@@ -122,6 +122,20 @@ struct ChatListTests {
         #expect(list.pinnedListed.isEmpty)
     }
 
+    @Test func aRunsReportKeepsTheTitleTheUserSet() async throws {
+        let (list, transport) = await makeList()
+        var renamed = summary("a", title: "Mine", pinned: true)
+        renamed.titleState = .named(.manual)
+        await transport.push(ListPage.json([renamed], pinned: [renamed]))
+        try await list.refresh()
+        // A run followed from its start reports the title the chat had then.
+        list.cloud.reported(summary("a", title: "Old", at: "2026-01-02T00:00:00Z"))
+        #expect(list.cloudListed.first?.title == "Mine")
+        #expect(list.cloudListed.first?.titleState.value1 == .manual)
+        #expect(list.cloudListed.first?.activityAt == "2026-01-02T00:00:00Z")
+        #expect(list.pinnedListed.first?.title == "Mine")
+    }
+
     /// A first page as full as the list reads ahead, so the next waits for
     /// Load More.
     private var fullPage: [ThreadSummary] {
