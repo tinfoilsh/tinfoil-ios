@@ -651,7 +651,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             controller.retryPreparation = nil
             if let submission {
                 controller.submission = submission
-                controller.updateView { $0.status = .submitting; $0.runId = nil; $0.error = nil; $0.stopping = false; $0.compactTurn = fields.kind == .compact; $0.compacted = nil }
+                controller.updateView { $0.status = .submitting; $0.runId = nil; $0.error = nil; $0.stopping = false; $0.compactTurn = fields.kind == .compact; $0.researchTurn = fields.options?.research == true; $0.compacted = nil }
             }
             defer {
                 if let submission, controller.submission === submission {

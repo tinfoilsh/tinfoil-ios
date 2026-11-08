@@ -45,6 +45,9 @@ struct ChatState: Equatable, Sendable {
     /// The chat's latest turn compacts it on request instead of asking for a
     /// reply, so its last reply is not the one the run streams.
     var compactTurn = false
+    /// The chat's latest turn researches its question, so the reply its run
+    /// streams is a research before the run commits it as one.
+    var researchTurn = false
     /// The compaction marker a run of the chat completed as the chat showed
     /// it, which the chat points out until the user sends again or dismisses
     /// it: the marker sits above earlier messages, often out of view.

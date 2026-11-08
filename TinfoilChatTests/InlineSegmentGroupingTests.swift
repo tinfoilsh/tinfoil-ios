@@ -3,8 +3,9 @@ import Testing
 
 @MainActor
 struct InlineSegmentGroupingTests {
-    private func runs(_ segments: [MessageSegment]) -> [MessageView.IdentifiedInlineSegmentRun] {
+    private func runs(_ segments: [MessageSegment], research: Bool = false) -> [MessageView.IdentifiedInlineSegmentRun] {
         var message = Message(role: .assistant, content: "")
+        message.isResearch = research
         message.webSearches = ["first", "second", "third"].map {
             WebSearchInstance(id: $0, query: "query-\($0)", status: .completed, sources: [], reason: nil)
         }
@@ -108,6 +109,17 @@ struct InlineSegmentGroupingTests {
         }
         #expect(group.map(\.id) == ["page"])
         #expect(fetch.last?.id == "work:1:fetches:page")
+    }
+
+    @Test func aResearchShowsAsAResearchRunFromItsFirstStep() {
+        let lone = runs([.thinking(content: "Plan", isThinking: true, duration: nil)], research: true)
+        let grown = runs([.thinking(content: "Plan", isThinking: false, duration: 1), .webSearch(searchId: "first"), .text("Report")], research: true)
+        guard case .work(let first) = lone.first?.run, case .work(let research) = grown.first?.run else {
+            Issue.record("Expected research runs, got \(lone.map(\.id)) and \(grown.map(\.id))")
+            return
+        }
+        #expect(first.isResearch && research.isResearch)
+        #expect(lone.first?.id == grown.first?.id)
     }
 
     @Test func closedEmptyThoughtDoesNotSplitOrCountAsAStep() {

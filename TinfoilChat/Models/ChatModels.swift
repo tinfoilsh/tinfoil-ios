@@ -147,19 +147,23 @@ struct URLFetchState: Equatable, Identifiable {
     /// When the read started, in epoch ms, from which its header counts
     /// while it runs.
     var startedAt: Double?
+    /// When the read ended, in epoch ms.
+    var endedAt: Double?
 
     init(
         id: String = UUID().uuidString.lowercased(),
         url: String,
         status: URLFetchStatus = .fetching,
         sources: [WebSearchSource]? = nil,
-        startedAt: Double? = nil
+        startedAt: Double? = nil,
+        endedAt: Double? = nil
     ) {
         self.id = id
         self.url = url
         self.status = status
         self.sources = sources
         self.startedAt = startedAt
+        self.endedAt = endedAt
     }
 }
 
@@ -173,6 +177,8 @@ struct WebSearchInstance: Equatable, Identifiable {
     /// When the search started, in epoch ms, from which its header counts
     /// while it runs.
     var startedAt: Double? = nil
+    /// When the search ended, in epoch ms.
+    var endedAt: Double? = nil
 }
 
 /// An ordered segment of assistant content. Preserves the exact order in which
@@ -379,6 +385,9 @@ struct Message: Identifiable, Equatable {
     /// The message comes before the chat's latest compaction marker, whose
     /// summary the model reads in its place.
     var isOutOfContext: Bool = false
+    /// The reply researched its question at length before it answered, or
+    /// is the reply of a research still running.
+    var isResearch: Bool = false
 
     init(id: String = UUID().uuidString.lowercased(), role: MessageRole, content: String, timestamp: Date = Date()) {
         self.id = id

@@ -1201,6 +1201,9 @@ class ChatViewModel: ObservableObject {
             // summary is still being written shows while its run goes on.
             if let marker = state.markers[id], marker.compaction != nil || running { view.compaction = ChatViewMapping.compaction(marker) }
             view.isOutOfContext = summarized.contains(id)
+            // The reply a research turn streams is a research before its run
+            // commits it as one.
+            if running, state.researchTurn, view.role == .assistant, id == state.messages.last?.id { view.isResearch = true }
             if open.onDevice, !view.attachments.isEmpty {
                 // An image the previous client stored without a thumbnail
                 // shows its bytes; others load them when opened.

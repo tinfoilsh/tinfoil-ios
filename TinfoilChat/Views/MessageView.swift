@@ -368,10 +368,11 @@ struct MessageView: View, Equatable {
             }
             guard let startIndex = workStartIndex, let first = work.first else { return }
             // A lone step and the run it grows into share an id, so the row
-            // stays open as steps join it.
+            // stays open as steps join it. A research shows as a run from its
+            // first step.
             runs.append(IdentifiedInlineSegmentRun(
                 id: "work:\(startIndex):\(first.id)",
-                run: work.count > 1 ? .work(WorkRun(steps: work)) : .step(first)
+                run: work.count > 1 || message.isResearch ? .work(WorkRun(steps: work, isResearch: message.isResearch)) : .step(first)
             ))
         }
         func noteWorkStart(_ index: Int) {
