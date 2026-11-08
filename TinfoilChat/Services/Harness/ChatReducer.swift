@@ -475,6 +475,7 @@ enum ChatReducer {
             if let isError = reply.isError { message.isError = isError }
             if let isInterrupted = reply.isInterrupted { message.isInterrupted = isInterrupted }
             if let annotations = reply.annotations { message.annotations = annotations }
+            if let research = reply.research { message.research = research }
             return message
         }
     }
