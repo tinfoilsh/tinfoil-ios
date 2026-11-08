@@ -1105,6 +1105,13 @@ class ChatViewModel: ObservableObject {
     var hasActiveStreams: Bool { session.map { $0.running || !$0.controller.deviceRuns.isEmpty } == true }
     var canUseCurrentChatActions: Bool { session != nil && !isOpeningChat && session?.open.failedId == nil }
 
+    /// The open chat has a run that may still be going: one it streams, one
+    /// this device reads for it, or one the chat service reports live.
+    var openChatHasLiveRun: Bool {
+        guard let session, let id = session.open.id else { return false }
+        return session.running || session.controller.deviceRuns[id] != nil || currentChat?.activeRun?.isLive(at: Date()) == true
+    }
+
     var canGenerateInCurrentChat: Bool {
         guard let session, canUseCurrentChatActions, !isSafeguardGenerationBlocked else { return false }
         return session.sendBlock == nil
