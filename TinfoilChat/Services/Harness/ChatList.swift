@@ -442,7 +442,7 @@ final class ChatList: ObservableObject {
             if list.inScope(shown) { list.cloudListed = [shown] + list.cloudListed.filter { $0.id != shown.id } }
             if shown.pinned { list.pinnedListed = list.pinnedListed.map { $0.id == shown.id ? shown : $0 } }
             list.touched()
-            list.project?.cloud.reported(summary)
+            list.project?.cloud.reported(shown)
         }
     }
 
