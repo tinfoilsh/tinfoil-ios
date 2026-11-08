@@ -66,7 +66,7 @@ private func makeAccount(
 struct HarnessAccountTests {
     @Test func remoteImagesUseTheHarnessBodyAndNeedNoContentKey() async throws {
         let bytes = Data([1, 2, 3])
-        let (account, transport) = makeAccount(userId: nil, answers: [Answers.json([
+        let (account, transport) = makeAccount(userId: "user-1", answers: [Answers.json([
             "image_bytes": bytes.base64EncodedString(), "image_content_type": "image/png",
         ])], cloudSync: false)
         let imageURL = "https://images.example/private-token.png"
@@ -91,6 +91,48 @@ struct HarnessAccountTests {
         }
         #expect(await transport.requests.count == 1)
         account.dispose()
+    }
+
+    @Test func aCanceledImageWaiterStillWarmsItsAccountsCache() async throws {
+        let bytes = Data([1, 2, 3])
+        let (account, transport) = makeAccount(userId: nil, answers: [Answers.json([
+            "image_bytes": bytes.base64EncodedString(), "image_content_type": "image/png",
+        ])], cloudSync: false)
+        let service = LinkMetadataService()
+        await service.bind(account)
+        await transport.hold()
+        let pending = Task { try await service.image(for: "https://images.example/photo.png") }
+        await transport.arrived()
+        pending.cancel()
+        await transport.release()
+        await #expect(throws: CancellationError.self) { try await pending.value }
+        #expect(try await service.image(for: "https://images.example/photo.png") == bytes)
+        #expect(await transport.requests.count == 1)
+        account.dispose()
+    }
+
+    @Test func anImageFromAnOldAccountCannotReplaceTheNewAccountsCache() async throws {
+        let original = Data([1, 2, 3])
+        let replacement = Data([4, 5, 6])
+        let (first, firstTransport) = makeAccount(userId: nil, answers: [Answers.json([
+            "image_bytes": original.base64EncodedString(), "image_content_type": "image/png",
+        ])], cloudSync: false)
+        let (second, secondTransport) = makeAccount(userId: nil, answers: [Answers.json([
+            "image_bytes": replacement.base64EncodedString(), "image_content_type": "image/png",
+        ])], cloudSync: false)
+        let service = LinkMetadataService()
+        await service.bind(first)
+        await firstTransport.hold()
+        let pending = Task { try await service.image(for: "https://images.example/photo.png") }
+        await firstTransport.arrived()
+        await service.bind(second)
+        #expect(try await service.image(for: "https://images.example/photo.png") == replacement)
+        await firstTransport.release()
+        await #expect(throws: CancellationError.self) { try await pending.value }
+        #expect(try await service.image(for: "https://images.example/photo.png") == replacement)
+        #expect(await secondTransport.requests.count == 1)
+        first.dispose()
+        second.dispose()
     }
 
     @Test func settingsReadWithTheHeldKeyNeedNoReloadUntilTheKeyChanges() async throws {

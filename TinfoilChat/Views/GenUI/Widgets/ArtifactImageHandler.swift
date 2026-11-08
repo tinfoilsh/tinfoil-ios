@@ -14,7 +14,7 @@ final class ArtifactImageHandler: NSObject, WKURLSchemeHandler {
 
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
         guard startedRequests < Constants.Artifacts.imageRequestLimit,
-              urlSchemeTask.request.httpMethod == "GET",
+              (urlSchemeTask.request.httpMethod ?? "GET").uppercased() == "GET",
               let requestURL = urlSchemeTask.request.url,
               let components = URLComponents(url: requestURL, resolvingAgainstBaseURL: false),
               components.scheme == Constants.Artifacts.imageScheme,
@@ -52,13 +52,15 @@ final class ArtifactImageHandler: NSObject, WKURLSchemeHandler {
         (() => {
           const scheme = '\#(Constants.Artifacts.imageScheme):';
           const selector = 'img, image, video[poster], input[type="image"], picture source';
+          const xlinkNamespace = 'http://www.w3.org/1999/xlink';
+          const attributes = new Set(['src', 'srcset', 'href', 'poster', 'type']);
           function rewrite(element) {
             if (element.hasAttribute('srcset')) element.removeAttribute('srcset');
             if (element.localName === 'source') return;
             const attribute = element.localName === 'video' ? 'poster' : element.localName === 'image' ? 'href' : 'src';
-            const source = element.getAttribute(attribute) || (element.localName === 'image' ? element.getAttribute('xlink:href') : null);
+            const source = element.getAttribute(attribute) || (element.localName === 'image' ? element.getAttributeNS(xlinkNamespace, 'href') : null);
             if (!source || /^(data:|blob:)/i.test(source) || source.startsWith(scheme)) return;
-            if (element.localName === 'image') element.removeAttribute('xlink:href');
+            if (element.localName === 'image') element.removeAttributeNS(xlinkNamespace, 'href');
             element.setAttribute(attribute, scheme + '//fetch?url=' + encodeURIComponent(source));
           }
           function visit(node) {
@@ -68,10 +70,12 @@ final class ArtifactImageHandler: NSObject, WKURLSchemeHandler {
           }
           new MutationObserver(changes => {
             for (const change of changes) {
-              if (change.type === 'attributes') visit(change.target);
+              if (change.type === 'attributes') {
+                if (attributes.has(change.attributeName)) visit(change.target);
+              }
               else change.addedNodes.forEach(visit);
             }
-          }).observe(document, {subtree: true, childList: true, attributes: true, attributeFilter: ['src', 'srcset', 'href', 'xlink:href', 'poster']});
+          }).observe(document, {subtree: true, childList: true, attributes: true});
           if (document.documentElement) visit(document.documentElement);
         })();
         """#

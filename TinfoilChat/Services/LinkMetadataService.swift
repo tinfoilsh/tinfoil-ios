@@ -37,7 +37,7 @@ actor LinkMetadataService {
     private var imageInFlight: [String: Task<Data, Error>] = [:]
     private weak var account: HarnessAccount?
 
-    private init() {
+    init() {
         images.countLimit = Constants.Metadata.imageCacheEntryLimit
         images.totalCostLimit = Constants.Metadata.imageCacheBytes
     }
@@ -106,8 +106,9 @@ actor LinkMetadataService {
         }
         defer { if imageInFlight[key] == task { imageInFlight[key] = nil } }
         let data = try await task.value
-        guard self.account === account, !Task.isCancelled else { throw CancellationError() }
+        guard self.account === account else { throw CancellationError() }
         images.setObject(data as NSData, forKey: key as NSString, cost: data.count)
+        try Task.checkCancellation()
         return data
     }
 

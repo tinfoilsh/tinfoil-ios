@@ -23,8 +23,6 @@ private struct RemoteImageRequest<Content: View>: View {
                     try Task.checkCancellation()
                     guard let image = UIImage(data: data) else { throw LinkMetadataError.unavailable }
                     phase = .success(Image(uiImage: image))
-                } catch is CancellationError {
-                    return
                 } catch {
                     guard !Task.isCancelled else { return }
                     phase = .failure(error)
