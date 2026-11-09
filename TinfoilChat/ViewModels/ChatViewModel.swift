@@ -1209,6 +1209,7 @@ class ChatViewModel: ObservableObject {
         let stopping = session.stopping && !compacting
         let stoppedId = stopping ? state.messages.last?.id : nil
         let summarized = state.summarizedIds
+        let researchingReply = state.researchingReply
         var messages = rows.rows(chatId: open.id, messages: state.messages, running: running && !stopping && !compacting, summaries: state.summaries, replyModelName: replyModelName).map { message -> Message in
             var view = message
             // A reply the user stopped here, or the model ran out of room for,
@@ -1225,7 +1226,7 @@ class ChatViewModel: ObservableObject {
             view.isOutOfContext = summarized.contains(id)
             // The reply a research turn streams is a research before its run
             // commits it as one.
-            if running, state.researchTurn, view.role == .assistant, id == state.messages.last?.id { view.isResearch = true }
+            if id == researchingReply { view.isResearch = true }
             if open.onDevice, !view.attachments.isEmpty {
                 // An image the previous client stored without a thumbnail
                 // shows its bytes; others load them when opened.

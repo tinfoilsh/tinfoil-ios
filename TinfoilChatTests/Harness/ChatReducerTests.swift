@@ -532,4 +532,22 @@ struct ChatReducerTests {
         ], into: view)
         #expect(state.messagesWithMarkers.map(\.id) == ["old", "c", "m1"])
     }
+
+    @Test func theReplyToAQuestionThatAsksForDeepResearchIsAResearchWhileItRuns() throws {
+        func asked(research: Bool) -> [String: Any] {
+            var question: [String: Any] = ["id": "u", "role": "user", "createdAt": "", "content": "Compare lighthouses"]
+            if research { question["research"] = ["version": 1] }
+            return ["type": "MESSAGES_SNAPSHOT", "messages": [question], "hasOlder": false]
+        }
+        let researching = try Self.reduce([Self.started(), asked(research: true), Self.text("Report")])
+        #expect(researching.researchingReply == "m")
+        #expect(try Self.reduce([Self.finished()], from: 3, into: researching).researchingReply == nil)
+        #expect(try Self.reduce([Self.started(), asked(research: false), Self.text("Answer")]).researchingReply == nil)
+
+        // A compaction streams no reply: the one the chat ends on is not the
+        // run's.
+        var compacting = researching
+        compacting.compactTurn = true
+        #expect(compacting.researchingReply == nil)
+    }
 }
