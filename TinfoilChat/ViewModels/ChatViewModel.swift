@@ -765,8 +765,8 @@ class ChatViewModel: ObservableObject {
     /// account, and web search is not turned off in Settings.
     var canResearch: Bool { session?.researchAvailable == true }
 
-    /// The open chat's next questions are researched on the web at length
-    /// before they are answered.
+    /// The open chat's next question is researched on the web at length
+    /// before it is answered.
     var isResearchEnabled: Bool { session?.researching == true }
 
     func setResearchEnabled(_ enabled: Bool) {
