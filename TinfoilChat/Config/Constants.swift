@@ -460,6 +460,11 @@ enum Constants {
         static let noOverrideLabel = "No override set"
     }
 
+    enum ChatFavorites {
+        /// The most chats a user can pin to favorites.
+        static let maxChats = 50
+    }
+
     enum AddToChatSheet {
         static let height: CGFloat = 324
         static let heightWithContext: CGFloat = 368
