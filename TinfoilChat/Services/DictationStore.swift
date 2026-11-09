@@ -27,9 +27,8 @@ actor DictationStore {
     }
 
     static func directory(userId: String, create: Bool) throws -> URL {
-        let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: create)
         let safe = userId.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "..", with: "_")
-        let url = support.appendingPathComponent("tinfoil", isDirectory: true)
+        let url = try DeviceDataDirectory.url(create: create)
             .appendingPathComponent("dictation", isDirectory: true)
             .appendingPathComponent(safe, isDirectory: true)
         if create, !FileManager.default.fileExists(atPath: url.path) {
