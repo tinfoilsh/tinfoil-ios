@@ -1707,6 +1707,14 @@ class ChatViewModel: ObservableObject {
     private func toggleChatPin(id: String) {
         guard let session else { return }
         let pinned = !isChatPinned(id)
+        let limit = Constants.ChatFavorites.maxChats
+        if pinned, session.list.pinnedListed.count >= limit {
+            actionFailure = ChatActionFailure(
+                title: "Favorites Are Full",
+                message: "You can pin up to \(limit) chats. Remove one to pin another."
+            )
+            return
+        }
         Task { do { _ = try await session.update(id, ThreadPatch(pinned: pinned)) } catch { reportActionFailure("Couldn't Update Favorites", error) } }
     }
 
