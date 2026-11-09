@@ -274,8 +274,8 @@ class ChatViewModel: ObservableObject {
     /// be, which wait for the user.
     @Published var dictationRetrying = 0
     @Published var dictationFailed = 0
-    /// Dictated text that waits for the composer, in order.
-    @Published var dictatedText: [String] = []
+    /// The chats whose composer has dictated text to take.
+    @Published var dictationReadyChatIds: Set<String> = []
     @Published var audioError: String? = nil
     @Published var showMicrophonePermissionAlert: Bool = false
     var audioRecordingStartId: UUID?
@@ -393,7 +393,6 @@ class ChatViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .assign(to: &$isPasskeyRecoverySkipped)
         dictation.onChange = { [weak self] _ in self?.dictationChanged() }
-        dictation.onText = { [weak self] text in self?.dictatedText.append(text) }
         Task { await openSession() }
         objectWillChange.sink { [weak self] _ in self?.sidebarChanges.changed() }.store(in: &cancellables)
         observers.append(NotificationCenter.default.addObserver(forName: .cloudSyncSettingChanged, object: nil, queue: .main) { [weak self] _ in
@@ -475,7 +474,6 @@ class ChatViewModel: ObservableObject {
         rows = ChatRows()
         session = nil
         dictation.reset()
-        dictatedText = []
         showsKeptModels = true
         verification = VerificationInfo(isVerifying: true)
         // The account's settings load with its key as the session opens,

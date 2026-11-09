@@ -347,7 +347,7 @@ struct MessageInputView: View {
             .onChange(of: messageText) { _, newValue in
                 messageTextHasNonWhitespace = hasNonWhitespaceContent(newValue)
             }
-            .onChange(of: viewModel.dictatedText) { _, _ in
+            .onChange(of: viewModel.dictationReadyChatIds) { _, _ in
                 insertDictatedText()
             }
             .onChange(of: viewModel.canGenerateInCurrentChat) { _, _ in
@@ -366,6 +366,7 @@ struct MessageInputView: View {
             }
             .onChange(of: viewModel.currentChat?.id) { _, newChatId in
                 handleChatChange(newChatId)
+                insertDictatedText()
             }
             .disabled(!viewModel.canUseCurrentChatActions)
             .onChange(of: textHeight) { _, newHeight in
@@ -1238,8 +1239,8 @@ struct MessageInputView: View {
         viewModel.stopAudioRecording()
     }
 
-    /// Dictated text joins whatever the draft already holds, as each
-    /// recording is transcribed, while the open chat can take a message.
+    /// The open chat's dictated text joins whatever the draft already holds,
+    /// as each recording is transcribed, while the chat can take a message.
     private func insertDictatedText() {
         guard viewModel.canGenerateInCurrentChat else { return }
         for transcription in viewModel.takeDictatedText() {

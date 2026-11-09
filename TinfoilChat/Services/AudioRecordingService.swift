@@ -60,6 +60,8 @@ class AudioRecordingService: NSObject, ObservableObject {
     /// while recording goes on, and the last one when it stops.
     func startRecording(segmentSeconds: TimeInterval, handOver: @escaping HandOver) throws {
         guard !isRecording else { return }
+        // A recording with no length would be cut at every reading.
+        guard segmentSeconds > 0 else { throw AudioRecordingError.recordingFailed }
 
         let lease = try AudioSessionCoordinator.shared.acquire(.recording)
         audioSessionLease = lease

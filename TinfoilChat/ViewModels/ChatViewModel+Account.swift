@@ -156,7 +156,6 @@ extension ChatViewModel {
         cancelMessageEdit()
         cancelAudioRecording()
         dictation.reset()
-        dictatedText = []
         clearPendingAttachments()
         isAccountTeardownInProgress = true
         clearProjectState()

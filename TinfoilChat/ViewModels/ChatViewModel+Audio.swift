@@ -83,13 +83,14 @@ extension ChatViewModel {
             showMicrophonePermissionAlert = true
             return
         }
-        guard let segmentSeconds = account?.session?.composer.dictationSegmentSeconds else { return }
+        guard let chatId = currentChat?.id,
+              let segmentSeconds = account?.session?.composer.dictationSegmentSeconds else { return }
         let dictationId = UUID().uuidString
         let startedAt = Date()
         let persist = !isTemporaryMode
         do {
             try AudioRecordingService.shared.startRecording(segmentSeconds: TimeInterval(segmentSeconds)) { [weak self] recording, index in
-                self?.dictation.recorded(recording, dictationId: dictationId, index: index, startedAt: startedAt, persist: persist)
+                self?.dictation.recorded(recording, chatId: chatId, dictationId: dictationId, index: index, startedAt: startedAt, persist: persist)
             }
             recordingDictationId = dictationId
             isRecording = true
@@ -125,11 +126,11 @@ extension ChatViewModel {
         dictationChanged()
     }
 
-    /// The dictated text that waited for the composer, which now takes it.
+    /// The open chat's dictated text that waited for its composer, which
+    /// now takes it. Text dictated in another chat waits for that chat.
     func takeDictatedText() -> [String] {
-        let texts = dictatedText
-        if !texts.isEmpty { dictatedText = [] }
-        return texts
+        guard let chatId = currentChat?.id else { return [] }
+        return dictation.take(chatId: chatId)
     }
 
     func retryDictation() {
@@ -148,5 +149,6 @@ extension ChatViewModel {
         if isTranscribing != transcribing { isTranscribing = transcribing }
         if dictationRetrying != state.retrying { dictationRetrying = state.retrying }
         if dictationFailed != state.failed { dictationFailed = state.failed }
+        if dictationReadyChatIds != state.readyChatIds { dictationReadyChatIds = state.readyChatIds }
     }
 }

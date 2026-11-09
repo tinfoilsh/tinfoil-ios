@@ -2,9 +2,10 @@ import Foundation
 import os
 
 /// Dictation, sent to be transcribed in short recordings while the user keeps
-/// talking. Each recording's text reaches the composer in order, and a
-/// recording is kept on this device until its text has, so a failure, a
-/// relaunch or a crash loses no more than the recording under way.
+/// talking. Each recording's text waits, in order, for the composer of the
+/// chat it was dictated in, and the recording is kept on this device until
+/// the composer takes it, so a failure, a relaunch or a crash loses no more
+/// than the recording under way.
 @MainActor
 final class Dictation {
     typealias Transcribe = (_ recording: Data, _ fileName: String) async throws -> String
@@ -18,6 +19,8 @@ final class Dictation {
         /// Recordings that could not be transcribed, kept until the user
         /// tries them again or discards them.
         var failed = 0
+        /// The chats whose composer has dictated text to take.
+        var readyChatIds: Set<String> = []
     }
 
     private final class Segment {
@@ -34,7 +37,7 @@ final class Dictation {
         var attempts = 0
         var retries = 0
         var retryAt: Date?
-        var inFlight = false
+        var attempt: Task<Void, Never>?
         var failed = false
         /// The segment's writes to storage, in the order they were made.
         var saving: Task<Void, Never>?
@@ -45,14 +48,14 @@ final class Dictation {
         }
 
         var id: String { record.id }
+        var inFlight: Bool { attempt != nil }
         var waiting: Bool { text == nil && !failed }
     }
 
     private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Dictation")
 
-    /// Told each change of the state, and each recording's text in order.
+    /// Told each change of the state.
     var onChange: ((State) -> Void)?
-    var onText: ((String) -> Void)?
     private(set) var state = State()
 
     private let retryDelays: [TimeInterval]
@@ -91,27 +94,31 @@ final class Dictation {
                     self.segments[segment.id] = segment
                 }
             }
-            self.deliver()
             self.work()
         }
     }
 
-    /// Forgets dictation in memory, as when the account signs out. What the
-    /// account keeps on this device stays with it.
+    /// Forgets dictation in memory and stops transcribing it, as when the
+    /// account signs out. What the account keeps on this device stays with
+    /// it.
     func reset() {
         generation += 1
         wake?.cancel()
         wake = nil
+        for segment in segments.values {
+            segment.attempt?.cancel()
+        }
         segments = [:]
         store = nil
         transcribe = nil
         refresh()
     }
 
-    /// A recording ended: it is read, kept and transcribed. A dictation's
-    /// recordings are numbered in the order they were made.
-    func recorded(_ file: URL, dictationId: String, index: Int, startedAt: Date, persist: Bool) {
-        let record = DictationStore.Segment(dictationId: dictationId, index: index, startedAt: startedAt)
+    /// A recording of a chat's dictation ended: it is read, kept and
+    /// transcribed. A dictation's recordings are numbered in the order they
+    /// were made.
+    func recorded(_ file: URL, chatId: String, dictationId: String, index: Int, startedAt: Date, persist: Bool) {
+        let record = DictationStore.Segment(chatId: chatId, dictationId: dictationId, index: index, startedAt: startedAt)
         let segment = Segment(record: record, persist: persist)
         segment.reading = true
         segments[segment.id] = segment
@@ -119,18 +126,44 @@ final class Dictation {
         let generation = self.generation
         Task { [weak self] in
             let audio = try? await Task.detached { try Data(contentsOf: file) }.value
-            guard let self, self.generation == generation, self.segments[segment.id] === segment else { return }
-            segment.reading = false
-            guard let audio, !audio.isEmpty else {
-                self.segments[segment.id] = nil
-                self.deliver()
+            guard let self, self.generation == generation, self.segments[segment.id] === segment else {
+                try? FileManager.default.removeItem(at: file)
                 return
             }
-            try? FileManager.default.removeItem(at: file)
+            segment.reading = false
+            guard let audio, !audio.isEmpty else {
+                try? FileManager.default.removeItem(at: file)
+                self.segments[segment.id] = nil
+                self.refresh()
+                return
+            }
             segment.audio = audio
-            self.save(segment) { store in try await store.save(record, audio: audio) }
+            // The recorder's file goes once the recording is kept.
+            if segment.persist, self.store != nil {
+                self.save(segment) { store in
+                    try await store.save(record, audio: audio)
+                    try? FileManager.default.removeItem(at: file)
+                }
+            } else {
+                try? FileManager.default.removeItem(at: file)
+            }
             self.work()
         }
+    }
+
+    /// The dictated text of a chat, in order, up to the first recording
+    /// still waiting for its own; the chat's composer takes it.
+    func take(chatId: String) -> [String] {
+        var texts: [String] = []
+        for dictation in dictations(of: chatId) {
+            for segment in dictation {
+                guard let text = segment.text else { break }
+                forget(segment)
+                if !text.isEmpty { texts.append(text) }
+            }
+        }
+        refresh()
+        return texts
     }
 
     /// Forgets a dictation, as when its recording is canceled.
@@ -138,7 +171,7 @@ final class Dictation {
         for segment in segments.values where segment.record.dictationId == dictationId {
             forget(segment)
         }
-        deliver()
+        refresh()
     }
 
     /// Transcribes again the recordings that failed.
@@ -156,7 +189,7 @@ final class Dictation {
         for segment in segments.values where segment.failed {
             forget(segment)
         }
-        deliver()
+        refresh()
     }
 
     /// Starts the attempts that are due: one recording's first attempt and
@@ -190,18 +223,20 @@ final class Dictation {
 
     private func attempt(_ segment: Segment) {
         guard let transcribe, let audio = segment.audio else { return }
-        segment.inFlight = true
         let generation = self.generation
         let fileName = "\(segment.id).\(Constants.Audio.recordingFileExtension)"
-        Task { [weak self] in
+        segment.attempt = Task { [weak self] in
             let result: Result<String, Error>
             do {
-                result = .success(try await Dictation.withDeadline { try await transcribe(audio, fileName) })
+                result = .success(try await Dictation.withDeadline {
+                    try Task.checkCancellation()
+                    return try await transcribe(audio, fileName)
+                })
             } catch {
                 result = .failure(error)
             }
             guard let self, self.generation == generation, self.segments[segment.id] === segment else { return }
-            segment.inFlight = false
+            segment.attempt = nil
             switch result {
             case .success(let text):
                 segment.text = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -221,12 +256,12 @@ final class Dictation {
                     segment.failed = true
                 }
             }
-            self.deliver()
             self.work()
         }
     }
 
-    /// The transcription, abandoned when it is not answered in time.
+    /// The transcription, abandoned when it is not answered in time or the
+    /// recording is forgotten.
     private static func withDeadline(_ operation: @escaping () async throws -> String) async throws -> String {
         let work = Task { try await operation() }
         let deadline = Task {
@@ -234,7 +269,11 @@ final class Dictation {
             work.cancel()
         }
         defer { deadline.cancel() }
-        return try await work.value
+        return try await withTaskCancellationHandler {
+            try await work.value
+        } onCancel: {
+            work.cancel()
+        }
     }
 
     /// How long to wait before transcribing a recording again after an
@@ -247,21 +286,17 @@ final class Dictation {
         return max(delay, TimeInterval(refusal.detail.retryAfter ?? 0))
     }
 
-    /// Hands the composer each dictation's text in order, up to the first
-    /// recording still waiting for its own.
-    private func deliver() {
-        let dictations = Dictionary(grouping: segments.values, by: { $0.record.dictationId })
-        for dictation in dictations.values.sorted(by: { $0[0].record.startedAt < $1[0].record.startedAt }) {
-            for segment in dictation.sorted(by: Dictation.order) {
-                guard let text = segment.text else { break }
-                forget(segment)
-                if !text.isEmpty { onText?(text) }
-            }
-        }
-        refresh()
+    /// Each dictation's recordings in order, the earliest dictation first,
+    /// of one chat or of every chat.
+    private func dictations(of chatId: String? = nil) -> [[Segment]] {
+        let shown = segments.values.filter { chatId == nil || $0.record.chatId == chatId }
+        return Dictionary(grouping: shown, by: { $0.record.dictationId }).values
+            .map { $0.sorted(by: Dictation.order) }
+            .sorted { $0[0].record.startedAt < $1[0].record.startedAt }
     }
 
     private func forget(_ segment: Segment) {
+        segment.attempt?.cancel()
         segments[segment.id] = nil
         let id = segment.id
         save(segment) { store in await store.remove(id) }
@@ -285,7 +320,8 @@ final class Dictation {
         let next = State(
             transcribing: waiting.contains { $0.attempts == 0 },
             retrying: waiting.filter { $0.attempts > 0 }.count,
-            failed: segments.values.filter { $0.failed }.count
+            failed: segments.values.filter { $0.failed }.count,
+            readyChatIds: Set(dictations().filter { $0[0].text != nil }.map { $0[0].record.chatId })
         )
         guard next != state else { return }
         state = next

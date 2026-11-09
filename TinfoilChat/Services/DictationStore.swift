@@ -3,8 +3,9 @@ import Foundation
 /// The dictation an account keeps on this device until its text reaches the
 /// composer: each recording until it is transcribed, then its text.
 actor DictationStore {
-    /// A recording of a dictation, and its text once transcribed.
+    /// A recording of a dictation in a chat, and its text once transcribed.
     struct Segment: Codable, Equatable, Sendable {
+        let chatId: String
         let dictationId: String
         let index: Int
         let startedAt: Date
@@ -44,16 +45,17 @@ actor DictationStore {
         }
     }
 
-    /// Keeps a recording until it is transcribed.
+    /// Keeps a recording until it is transcribed. Its record is written
+    /// first, so audio is never kept that no record names; a record whose
+    /// audio was not written is forgotten when it is loaded. Neither is
+    /// written once the account's directory was wiped.
     func save(_ segment: Segment, audio: Data) throws {
-        try ensureDirectory()
-        try audio.write(to: audioURL(segment.id), options: [.atomic, .completeFileProtectionUnlessOpen])
         try JSONEncoder().encode(segment).write(to: recordURL(segment.id), options: [.atomic, .completeFileProtectionUnlessOpen])
+        try audio.write(to: audioURL(segment.id), options: [.atomic, .completeFileProtectionUnlessOpen])
     }
 
     /// Keeps a recording's text in its place until it reaches the composer.
     func save(transcribed segment: Segment) throws {
-        try ensureDirectory()
         try JSONEncoder().encode(segment).write(to: recordURL(segment.id), options: [.atomic, .completeFileProtectionUnlessOpen])
         try? FileManager.default.removeItem(at: audioURL(segment.id))
     }
@@ -71,12 +73,6 @@ actor DictationStore {
                   let segment = try? JSONDecoder().decode(Segment.self, from: data) else { return nil }
             let audio = segment.text == nil ? try? Data(contentsOf: audioURL(segment.id)) : nil
             return (segment, audio)
-        }
-    }
-
-    private func ensureDirectory() throws {
-        if !FileManager.default.fileExists(atPath: directory.path) {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.completeUnlessOpen])
         }
     }
 
