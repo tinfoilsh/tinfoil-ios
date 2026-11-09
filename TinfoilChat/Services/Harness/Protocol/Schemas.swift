@@ -844,31 +844,41 @@ extension Components {
             internal var projectDocuments: [Components.Schemas.FileGroup]
             /// - Remark: Generated from `#/components/schemas/Composer/pasteAsFileChars`.
             internal var pasteAsFileChars: Swift.Int
+            /// How long a client that sends dictation as one recording lets it run.
+            ///
             /// - Remark: Generated from `#/components/schemas/Composer/dictationMaxSeconds`.
             internal var dictationMaxSeconds: Swift.Int
+            /// How long a client lets dictation run before it sends what it recorded to be transcribed and records on: it ends each recording at the first pause after this long. Short recordings transcribe in seconds, and one that fails loses no more than itself.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Composer/dictationSegmentSeconds`.
+            internal var dictationSegmentSeconds: Swift.Int
             /// Creates a new `Composer`.
             ///
             /// - Parameters:
             ///   - attachments:
             ///   - projectDocuments:
             ///   - pasteAsFileChars:
-            ///   - dictationMaxSeconds:
+            ///   - dictationMaxSeconds: How long a client that sends dictation as one recording lets it run.
+            ///   - dictationSegmentSeconds: How long a client lets dictation run before it sends what it recorded to be transcribed and records on: it ends each recording at the first pause after this long. Short recordings transcribe in seconds, and one that fails loses no more than itself.
             internal init(
                 attachments: [Components.Schemas.FileGroup],
                 projectDocuments: [Components.Schemas.FileGroup],
                 pasteAsFileChars: Swift.Int,
-                dictationMaxSeconds: Swift.Int
+                dictationMaxSeconds: Swift.Int,
+                dictationSegmentSeconds: Swift.Int
             ) {
                 self.attachments = attachments
                 self.projectDocuments = projectDocuments
                 self.pasteAsFileChars = pasteAsFileChars
                 self.dictationMaxSeconds = dictationMaxSeconds
+                self.dictationSegmentSeconds = dictationSegmentSeconds
             }
             internal enum CodingKeys: String, CodingKey {
                 case attachments
                 case projectDocuments
                 case pasteAsFileChars
                 case dictationMaxSeconds
+                case dictationSegmentSeconds
             }
         }
         /// Files the composer takes by extension, and the largest each may be.

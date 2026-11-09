@@ -83,54 +83,72 @@ extension ChatViewModel {
             showMicrophonePermissionAlert = true
             return
         }
+        guard let chatId = currentChat?.id,
+              let segmentSeconds = account?.session?.composer.dictationSegmentSeconds else { return }
+        let dictationId = UUID().uuidString
+        let startedAt = Date()
+        let persist = !isTemporaryMode
         do {
-            try AudioRecordingService.shared.startRecording()
-            isRecording = true
-        } catch {
-            audioError = error.localizedDescription
-        }
-    }
-
-    /// Stops recording and has the chat service transcribe it.
-    func stopAudioRecordingAndTranscribe() async -> String? {
-        guard isRecording else { return nil }
-        guard canGenerateInCurrentChat, let session, let chatId = currentChat?.id else {
-            cancelAudioRecording()
-            return nil
-        }
-        let accountId = currentUserId
-        let transcription = UUID()
-        audioTranscriptionId = transcription
-        func isCurrentTranscription() -> Bool {
-            audioTranscriptionId == transcription
-                && currentChat?.id == chatId
-                && currentUserId == accountId
-                && canGenerateInCurrentChat
-                && !isAccountTeardownInProgress
-                && !Task.isCancelled
-        }
-        isRecording = false
-        guard let fileURL = AudioRecordingService.shared.stopRecording() else { return nil }
-        isTranscribing = true
-        defer { isTranscribing = false }
-        do {
-            let text = try await AudioRecordingService.shared.transcribe(fileURL: fileURL) { recording in
-                guard isCurrentTranscription() else { throw CancellationError() }
-                return try await HarnessSpeech.transcribe(session.account, recording: recording, fileName: fileURL.lastPathComponent, mimeType: Constants.Audio.recordingMimeType)
+            try AudioRecordingService.shared.startRecording(segmentSeconds: TimeInterval(segmentSeconds)) { [weak self] recording, index in
+                self?.dictation.recorded(recording, chatId: chatId, dictationId: dictationId, index: index, startedAt: startedAt, persist: persist)
             }
-            guard isCurrentTranscription() else { return nil }
-            return text
+            recordingDictationId = dictationId
+            isRecording = true
+            dictationChanged()
         } catch {
-            guard isCurrentTranscription() else { return nil }
             audioError = error.localizedDescription
-            return nil
         }
     }
 
+    /// Stops recording. What was recorded is still transcribed, and its text
+    /// joins the composer as it arrives.
+    func stopAudioRecording() {
+        guard isRecording else { return }
+        guard canGenerateInCurrentChat else {
+            cancelAudioRecording()
+            return
+        }
+        recordingDictationId = nil
+        isRecording = false
+        AudioRecordingService.shared.stopRecording()
+        dictationChanged()
+    }
+
+    /// Stops recording and forgets what it recorded.
     func cancelAudioRecording() {
         audioRecordingStartId = nil
-        audioTranscriptionId = nil
         isRecording = false
         AudioRecordingService.shared.cancelRecording()
+        if let recordingDictationId {
+            dictation.discard(dictationId: recordingDictationId)
+        }
+        recordingDictationId = nil
+        dictationChanged()
+    }
+
+    /// The open chat's dictated text that waited for its composer, which
+    /// now takes it. Text dictated in another chat waits for that chat.
+    func takeDictatedText() -> [String] {
+        guard let chatId = currentChat?.id else { return [] }
+        return dictation.take(chatId: chatId)
+    }
+
+    func retryDictation() {
+        dictation.retry()
+    }
+
+    func discardFailedDictation() {
+        dictation.discardFailed()
+    }
+
+    /// The composer waits for a stopped recording's first attempt, not for
+    /// the recordings transcribed while recording goes on.
+    func dictationChanged() {
+        let state = dictation.state
+        let transcribing = state.transcribing && !isRecording
+        if isTranscribing != transcribing { isTranscribing = transcribing }
+        if dictationRetrying != state.retrying { dictationRetrying = state.retrying }
+        if dictationFailed != state.failed { dictationFailed = state.failed }
+        if dictationReadyChatIds != state.readyChatIds { dictationReadyChatIds = state.readyChatIds }
     }
 }

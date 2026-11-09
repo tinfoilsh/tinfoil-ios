@@ -267,13 +267,20 @@ class ChatViewModel: ObservableObject {
     // MARK: - Audio
 
     let speechPlayer = SpeechPlayer()
+    let dictation = Dictation()
     @Published var isRecording: Bool = false
     @Published var isTranscribing: Bool = false
+    /// Dictated recordings being transcribed again, and ones that could not
+    /// be, which wait for the user.
+    @Published var dictationRetrying = 0
+    @Published var dictationFailed = 0
+    /// The chats whose composer has dictated text to take.
+    @Published var dictationReadyChatIds: Set<String> = []
     @Published var audioError: String? = nil
     @Published var showMicrophonePermissionAlert: Bool = false
     var audioRecordingStartId: UUID?
-    /// The transcription in progress; a newer one, or none, supersedes it.
-    var audioTranscriptionId: UUID?
+    /// The dictation being recorded.
+    var recordingDictationId: String?
 
     // MARK: - Attachments
 
@@ -385,6 +392,7 @@ class ChatViewModel: ObservableObject {
         passkeyManager.$recoverySkipped
             .receive(on: DispatchQueue.main)
             .assign(to: &$isPasskeyRecoverySkipped)
+        dictation.onChange = { [weak self] _ in self?.dictationChanged() }
         Task { await openSession() }
         objectWillChange.sink { [weak self] _ in self?.sidebarChanges.changed() }.store(in: &cancellables)
         observers.append(NotificationCenter.default.addObserver(forName: .cloudSyncSettingChanged, object: nil, queue: .main) { [weak self] _ in
@@ -465,6 +473,7 @@ class ChatViewModel: ObservableObject {
         isSavingTemporaryChat = false
         rows = ChatRows()
         session = nil
+        dictation.reset()
         showsKeptModels = true
         verification = VerificationInfo(isVerifying: true)
         // The account's settings load with its key as the session opens,
@@ -481,6 +490,12 @@ class ChatViewModel: ObservableObject {
         let store = DeviceThreadStore(directory: directory)
         let session = ChatSession(account: account, device: store, cache: ChatListCache(directory: directory), receipts: RunReceiptStore(userId: userId))
         self.session = session
+        // The account's dictation is transcribed through it, and what an
+        // earlier launch left of it is transcribed again.
+        dictation.open(store: userId.flatMap { try? DictationStore(userId: $0) }) { [weak account] recording, fileName in
+            guard let account else { throw CancellationError() }
+            return try await HarnessSpeech.transcribe(account, recording: recording, fileName: fileName, mimeType: Constants.Audio.recordingMimeType)
+        }
         ProfileManager.shared.bind(account)
         KeyRegistry.shared.bind(account)
         await LinkMetadataService.shared.bind(account)
