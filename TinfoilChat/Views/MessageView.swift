@@ -276,6 +276,16 @@ struct MessageView: View, Equatable {
         }
     }
 
+    /// Says under a question that it asked for deep research.
+    private var researchQuestionLabel: some View {
+        Label(Constants.Research.label, systemImage: Constants.Research.systemImage)
+            .labelStyle(.titleAndIcon)
+            .font(.caption2)
+            .foregroundStyle(isDarkMode ? Color.white.opacity(0.5) : Color.black.opacity(0.5))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Constants.Research.questionAccessibilityLabel)
+    }
+
     /// Secondary actions for assistant messages live behind an ellipsis so the
     /// inline row stays short enough for narrow screens.
     private var assistantMoreMenu: some View {
@@ -996,6 +1006,9 @@ struct MessageView: View, Equatable {
                 }
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
 
+            if message.role == .user && message.isResearch {
+                researchQuestionLabel
+            }
             }
         }
         .padding(.horizontal, 4)

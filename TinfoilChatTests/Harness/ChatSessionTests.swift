@@ -1247,7 +1247,7 @@ struct ChatSessionTests {
         #expect(fixture.account.session != nil)
     }
 
-    @Test func deepResearchResearchesEachQuestionUntilAResearchEnds() async throws {
+    @Test func deepResearchAsksForTheNextQuestionAlone() async throws {
         let fixture = Fixture(answers: [Answers.json(researchSession)])
         try await fixture.account.refresh()
         let session = fixture.session
@@ -1257,22 +1257,25 @@ struct ChatSessionTests {
             ((await fixture.transport.requests.last)?.json["options"] as? [String: Any])?["research"] as? Bool
         }
 
-        // A first turn that only asked what the research needs to know leaves
-        // deep research on, so the answers are researched.
+        // The question asks for deep research, which then turns off, though
+        // the reply only asked what the research needs to know.
         await fixture.transport.push(researchRun("run_2", reply: "msg_3", researched: false))
         #expect(await session.send(TurnFields(kind: .send, content: "Compare lighthouses", options: TurnOptions(model: "kimi-k3"))))
         #expect(await sentResearch() == true)
-        #expect(session.researching)
-
-        await fixture.transport.push(researchRun("run_4", reply: "msg_5", researched: true))
-        #expect(await session.send(TurnFields(kind: .send, content: "Maine and Vermont", options: TurnOptions(model: "kimi-k3"))))
-        #expect(await sentResearch() == true)
-        #expect(session.state.messages.last?.research?.version == 1)
         #expect(!session.researching)
 
-        await fixture.transport.push(researchRun("run_6", reply: "msg_7", researched: false))
-        #expect(await session.send(TurnFields(kind: .send, content: "Thanks", options: TurnOptions(model: "kimi-k3"))))
+        // The answers do not ask for it: the harness goes on with the research.
+        await fixture.transport.push(researchRun("run_4", reply: "msg_5", researched: true))
+        #expect(await session.send(TurnFields(kind: .send, content: "Maine and Vermont", options: TurnOptions(model: "kimi-k3"))))
         #expect(await sentResearch() == nil)
+
+        // A question the harness refuses leaves deep research off.
+        session.setResearch(true)
+        await fixture.transport.push(Answers.refusal(429, code: HarnessErrorCode.researchLimitReached, action: "wait"))
+        #expect(!(await session.send(TurnFields(kind: .send, content: "And Rhode Island?", options: TurnOptions(model: "kimi-k3")))))
+        #expect(await sentResearch() == true)
+        #expect(session.state.error?.code == HarnessErrorCode.researchLimitReached)
+        #expect(!session.researching)
     }
 
     @Test func deepResearchLeavesTurnsThatAskNoQuestionAndEndsWithItsChat() async throws {
@@ -1297,5 +1300,29 @@ struct ChatSessionTests {
         #expect(session.researching)
         session.newChat()
         #expect(!session.researching)
+    }
+
+    @Test func anEditedQuestionStillShowsItAskedForDeepResearch() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        let researched = StoredThread(json: record(messages: [
+            ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Compare lighthouses", "research": ["version": 1]],
+            ["id": "a1", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "content": "Report", "research": ["version": 1],
+             "timeline": [["id": "b1", "type": "content", "content": "Report"]]],
+        ]))!
+        _ = try await session.device.add(researched, originals: [:])
+        session.list.reloadDevice()
+        #expect(try await session.openChat(threadId, local: true) == .opened)
+        await fixture.transport.push(Answers.refusal(429, code: HarnessErrorCode.researchLimitReached, action: "wait"))
+        await fixture.transport.hold()
+
+        let editing = Task { await session.send(TurnFields(kind: .edit, content: "Compare lighthouses in Maine", messageId: "u1")) }
+        await fixture.transport.arrived()
+
+        // The edit shows as the harness applies it, before it answers.
+        #expect(session.state.messages.map(\.content) == ["Compare lighthouses in Maine"])
+        #expect(session.state.messages.first?.research?.version == 1)
+        await fixture.transport.release()
+        #expect(!(await editing.value))
     }
 }

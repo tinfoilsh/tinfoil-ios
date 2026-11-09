@@ -474,6 +474,9 @@ enum Constants {
     enum Research {
         static let label = "Deep Research"
         static let systemImage = "binoculars"
+        /// What VoiceOver says of the label under a question that asked for
+        /// deep research.
+        static let questionAccessibilityLabel = "Asked for deep research"
     }
 
     enum Context {

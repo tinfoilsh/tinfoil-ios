@@ -22,7 +22,7 @@ struct OpenChat: Equatable {
     var modelChosen = false
     var webSearch: Bool?
     var projectId: String?
-    /// The user turned deep research on for the chat's next questions.
+    /// The user turned deep research on for the chat's next question.
     var research = false
 
     var onDevice: Bool { local || temporary }
@@ -120,12 +120,6 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         for child in [controller.objectWillChange.eraseToAnyPublisher(), list.objectWillChange.eraseToAnyPublisher(), account.objectWillChange.eraseToAnyPublisher()] {
             child.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
         }
-        // A research that ends in the open chat turns deep research off; a
-        // reply that only asked what the research needs to know leaves it on.
-        controller.$view.map(\.researchedReply).removeDuplicates().sink { [weak self] reply in
-            guard reply != nil, self?.open.research == true else { return }
-            self?.setResearch(false)
-        }.store(in: &cancellables)
     }
 
     var state: ChatState { controller.view }
@@ -583,6 +577,8 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             var record = Components.Schemas.MessageRecord(id: turn.clientRequestId, role: .named(.user), createdAt: StoredThread.timestamp(Date()), content: turn.content ?? target.content ?? "", quote: turn.quote ?? target.quote)
             var edited = shownMessage(record)
             if let sent { record.attachments = sent.isEmpty ? nil : sent; edited = shownMessage(record) } else { edited.attachments = target.attachments }
+            // An edited question still asks for deep research if it did.
+            edited.research = target.research
             return Array(messages[..<index]) + [edited]
         default:
             return nil
@@ -628,10 +624,14 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         defaults.options = leaveToPreset(defaults.options, choice)
         var fields = fields
         fields.options = fields.options.flatMap { leaveToPreset($0, choice) }
+        // Deep research asks for the next question alone. The harness then
+        // researches the turns that go on with it, as the answers to what the
+        // research asked first, or an edit or regeneration of the question.
         if researching, Self.researchKinds.contains(fields.kind ?? defaults.kind) {
             var options = fields.options ?? defaults.options ?? TurnOptions()
             options.research = true
             fields.options = options
+            setResearch(false)
         }
         let shown = controller.track()
         let before = state.messages
@@ -651,7 +651,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             controller.retryPreparation = nil
             if let submission {
                 controller.submission = submission
-                controller.updateView { $0.status = .submitting; $0.runId = nil; $0.error = nil; $0.stopping = false; $0.compactTurn = fields.kind == .compact; $0.researchTurn = fields.options?.research == true; $0.compacted = nil }
+                controller.updateView { $0.status = .submitting; $0.runId = nil; $0.error = nil; $0.stopping = false; $0.compactTurn = fields.kind == .compact; $0.compacted = nil }
             }
             defer {
                 if let submission, controller.submission === submission {
@@ -866,8 +866,8 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             && (account.effectiveProfile.webSearchAvailable ?? ProfileDefaults.webSearchAvailable)
     }
 
-    /// The open chat's next questions are researched on the web at length
-    /// before they are answered.
+    /// The open chat's next question is researched on the web at length
+    /// before it is answered.
     var researching: Bool { open.research && researchAvailable }
 
     func setResearch(_ enabled: Bool) {

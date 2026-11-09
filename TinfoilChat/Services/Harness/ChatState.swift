@@ -45,9 +45,6 @@ struct ChatState: Equatable, Sendable {
     /// The chat's latest turn compacts it on request instead of asking for a
     /// reply, so its last reply is not the one the run streams.
     var compactTurn = false
-    /// The chat's latest turn researches its question, so the reply its run
-    /// streams is a research before the run commits it as one.
-    var researchTurn = false
     /// The compaction marker a run of the chat completed as the chat showed
     /// it, which the chat points out until the user sends again or dismisses
     /// it: the marker sits above earlier messages, often out of view.
@@ -56,11 +53,14 @@ struct ChatState: Equatable, Sendable {
     var isRunning: Bool { [.submitting, .streaming, .queued].contains(status) }
     var isStopping: Bool { isRunning && stopping }
 
-    /// The id of the chat's latest message when it is a reply that researched
-    /// its question.
-    var researchedReply: String? {
-        guard let last = messages.last, last.role.value1 == .assistant, last.research != nil else { return nil }
-        return last.id
+    /// The id of the reply a research streams, which is a research before
+    /// its run commits it as one: while a turn of the chat runs, the chat's
+    /// last message is a reply to a question that asks for deep research. A
+    /// compaction streams no reply.
+    var researchingReply: String? {
+        guard isRunning, !compactTurn, let reply = messages.last, reply.role.value1 == .assistant,
+              let question = messages.dropLast().last, question.role.value1 == .user, question.research != nil else { return nil }
+        return reply.id
     }
 
     /// Whether compacting the chat on request has anything to summarize, as
