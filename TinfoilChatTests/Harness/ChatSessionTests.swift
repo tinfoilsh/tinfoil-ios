@@ -1301,4 +1301,28 @@ struct ChatSessionTests {
         session.newChat()
         #expect(!session.researching)
     }
+
+    @Test func anEditedQuestionStillShowsItAskedForDeepResearch() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        let researched = StoredThread(json: record(messages: [
+            ["id": "u1", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Compare lighthouses", "research": ["version": 1]],
+            ["id": "a1", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "content": "Report", "research": ["version": 1],
+             "timeline": [["id": "b1", "type": "content", "content": "Report"]]],
+        ]))!
+        _ = try await session.device.add(researched, originals: [:])
+        session.list.reloadDevice()
+        #expect(try await session.openChat(threadId, local: true) == .opened)
+        await fixture.transport.push(Answers.refusal(429, code: HarnessErrorCode.researchLimitReached, action: "wait"))
+        await fixture.transport.hold()
+
+        let editing = Task { await session.send(TurnFields(kind: .edit, content: "Compare lighthouses in Maine", messageId: "u1")) }
+        await fixture.transport.arrived()
+
+        // The edit shows as the harness applies it, before it answers.
+        #expect(session.state.messages.map(\.content) == ["Compare lighthouses in Maine"])
+        #expect(session.state.messages.first?.research?.version == 1)
+        await fixture.transport.release()
+        #expect(!(await editing.value))
+    }
 }

@@ -577,6 +577,8 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             var record = Components.Schemas.MessageRecord(id: turn.clientRequestId, role: .named(.user), createdAt: StoredThread.timestamp(Date()), content: turn.content ?? target.content ?? "", quote: turn.quote ?? target.quote)
             var edited = shownMessage(record)
             if let sent { record.attachments = sent.isEmpty ? nil : sent; edited = shownMessage(record) } else { edited.attachments = target.attachments }
+            // An edited question still asks for deep research if it did.
+            edited.research = target.research
             return Array(messages[..<index]) + [edited]
         default:
             return nil
