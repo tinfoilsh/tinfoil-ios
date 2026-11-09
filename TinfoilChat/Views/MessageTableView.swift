@@ -238,11 +238,13 @@ struct MessageTableView: UIViewRepresentable {
             }
         } else if usesStreamingLayout && !messages.isEmpty {
             // A chat compacted while its reply streams marks the rows above
-            // the reply, which the update below leaves alone.
+            // the reply, as a research marks its question once the run sends
+            // it, which the update below leaves alone.
             for (index, message) in messages.dropLast().enumerated() {
                 guard let wrapper = context.coordinator.messageWrappers[message.id],
                       wrapper.message.compaction != message.compaction
-                        || wrapper.message.isOutOfContext != message.isOutOfContext else { continue }
+                        || wrapper.message.isOutOfContext != message.isOutOfContext
+                        || wrapper.message.isResearch != message.isResearch else { continue }
                 wrapper.update(
                     message: message,
                     isDarkMode: isDarkMode,

@@ -385,8 +385,9 @@ struct Message: Identifiable, Equatable {
     /// The message comes before the chat's latest compaction marker, whose
     /// summary the model reads in its place.
     var isOutOfContext: Bool = false
-    /// The reply researched its question at length before it answered, or
-    /// is the reply of a research still running.
+    /// The question asked for deep research; the reply researched its
+    /// question at length before it answered, or is the reply of a research
+    /// still running.
     var isResearch: Bool = false
 
     init(id: String = UUID().uuidString.lowercased(), role: MessageRole, content: String, timestamp: Date = Date()) {

@@ -28,6 +28,7 @@ enum ChatViewMapping {
         }
         message.attachments = wire.attachments?.map(attachment) ?? []
         message.answers = wire.answers ?? []
+        message.isResearch = wire.research != nil
         guard role == .assistant else { return message }
 
         let blocks = wire.timeline ?? []
@@ -103,7 +104,6 @@ enum ChatViewMapping {
         message.toolCalls = toolCalls
         message.timeline = timeline
         if wire.research != nil {
-            message.isResearch = true
             // A research lists every source it searched and read, and those
             // its report cites, once each.
             let cited = (message.annotations ?? []).map { WebSearchSource(id: $0.url_citation.url, title: $0.url_citation.title, url: $0.url_citation.url) }

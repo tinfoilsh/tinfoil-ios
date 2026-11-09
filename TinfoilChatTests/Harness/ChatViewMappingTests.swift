@@ -167,6 +167,12 @@ struct ChatViewMappingTests {
         #expect(shown.answers.first?.questions.first?.selected.map(\.label) == ["Paris"])
     }
 
+    @Test func aQuestionThatAskedForDeepResearchSaysSo() throws {
+        let question: [String: Any] = ["id": "u", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Compare lighthouses"]
+        #expect(try !ChatViewMapping.message(Self.message(question)).isResearch)
+        #expect(try ChatViewMapping.message(Self.message(question.merging(["research": ["version": 1]]) { $1 })).isResearch)
+    }
+
     @Test func aBlockOfATypeThisClientDoesNotKnowIsLeftOut() throws {
         let wire = try Self.reply([
             ["id": "x", "type": "diagram", "content": "<svg/>"],
