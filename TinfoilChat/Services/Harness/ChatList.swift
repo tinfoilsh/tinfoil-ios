@@ -427,15 +427,22 @@ final class ChatList: ObservableObject {
         /// A stored chat as the open chat's run reports it, which is newer
         /// than the listed copy: a new chat joins the list, and a chat whose
         /// reply goes on stays marked running until the list is read again.
-        /// The listed favorites still decide whether it is one.
+        /// The listed favorites still decide whether it is one, and a listed
+        /// title the user set stays, as the harness never replaces one: a run
+        /// followed from its start reports the title it started with.
         func reported(_ summary: ThreadSummary) {
             guard let list else { return }
             var shown = summary
             shown.pinned = list.pinnedListed.contains { $0.id == summary.id }
+            if let listed = list.cloudListed.first(where: { $0.id == summary.id }) ?? list.pinnedListed.first(where: { $0.id == summary.id }),
+               listed.titleState.value1 == .manual {
+                shown.title = listed.title
+                shown.titleState = listed.titleState
+            }
             if list.inScope(shown) { list.cloudListed = [shown] + list.cloudListed.filter { $0.id != shown.id } }
             if shown.pinned { list.pinnedListed = list.pinnedListed.map { $0.id == shown.id ? shown : $0 } }
             list.touched()
-            list.project?.cloud.reported(summary)
+            list.project?.cloud.reported(shown)
         }
     }
 

@@ -498,9 +498,10 @@ final class DeviceThreads: ThreadStore {
 
     /// A turn carries the thread as stored and the profile instead of the
     /// content key, which it never uses. The harness makes a new chat from
-    /// its first turn, as it does a stored one.
+    /// its first turn, as it does a stored one, and starts a turn queued
+    /// behind the chat's running reply from that run's chat.
     func prepareTurn(_ threadId: String, defaults: Turn, fields: TurnFields, key: String?, settings: TurnSettings) async throws -> PreparedTurn? {
-        let run = DeviceRun(threadId: threadId, store: store, since: controller.tick())
+        let run = DeviceRun(threadId: threadId, store: store, since: controller.deviceRuns[threadId]?.since ?? controller.tick())
         controller.begin(run)
         let shown = controller.track()
         let stored: StoredThread?
@@ -562,7 +563,7 @@ final class DeviceThreads: ThreadStore {
         } else {
             var held = try await transcript(threadId).heldImages
             StoredThread.holdImages(attachments.uploads.values.compactMap { try? JSONValue(any: $0.jsonObject()) }, into: &held)
-            device = DeviceRun(threadId: threadId, store: store, images: held, since: controller.since(ofRun: runId))
+            device = DeviceRun(threadId: threadId, store: store, images: held, since: controller.since(ofRun: runId, threadId: threadId))
         }
         return (RunBody(key: nil, threadId: threadId, runId: runId), device)
     }

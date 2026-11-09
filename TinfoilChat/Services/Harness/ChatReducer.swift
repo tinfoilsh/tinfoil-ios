@@ -73,13 +73,13 @@ enum ChatReducer {
                 next.sealed = sealOf(next.messages, messageId)
             }
         case .stateSnapshot(let snapshot):
-            next.snapshot = RunSnapshot(
+            next.snapshot = keepingTitle(next.snapshot, RunSnapshot(
                 thread: snapshot.snapshot.thread,
                 queue: snapshot.snapshot.queue,
                 rateLimit: snapshot.snapshot.rateLimit
-            )
+            ))
         case .stateDelta(let delta):
-            next.snapshot = try applyStateDelta(next.snapshot, delta.delta)
+            next.snapshot = try keepingTitle(next.snapshot, applyStateDelta(next.snapshot, delta.delta))
             if let runId = delta.runId, next.status != .streaming {
                 next.status = .queued
                 next.runId = runId
@@ -296,6 +296,16 @@ enum ChatReducer {
 
     private static func invalidPatch() -> HarnessError {
         HarnessError.invalidStream("The chat stream contained an invalid state patch.")
+    }
+
+    /// A run followed again replays the chat as it started, so a title the
+    /// user gave the chat since stays: the harness never replaces one.
+    private static func keepingTitle(_ shown: RunSnapshot, _ snapshot: RunSnapshot) -> RunSnapshot {
+        guard let titled = shown.thread, titled.titleState.value1 == .manual, snapshot.thread?.id == titled.id else { return snapshot }
+        var kept = snapshot
+        kept.thread?.title = titled.title
+        kept.thread?.titleState = titled.titleState
+        return kept
     }
 
     /// The queue and title changes a run sends.
