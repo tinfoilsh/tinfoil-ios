@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 
 /// Who is asking the harness, and the chat access they hold.
 protocol HarnessCredentials: Sendable {
@@ -13,26 +12,18 @@ protocol HarnessCredentials: Sendable {
     /// its refusal, as a HarnessError. The access held is minted again once
     /// it enters its renewal window; refreshing mints again at once.
     func chatAccess(identity: String, refresh: Bool) async throws -> String
-    /// When the held chat access enters its renewal window, if one is held.
-    func chatAccessRenewsAt() async -> Date?
 }
 
 /// The one client of the harness: it verifies the enclave, says who is
 /// asking, mints and renews their chat access, sends requests, reads
 /// refusals and streams runs.
 actor HarnessClient {
-    private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Harness")
-
     private let credentials: HarnessCredentials
     private let transport: HarnessTransport
     private let languages: @Sendable () -> [String]
     /// The instance holding each chat's latest run, by chat, which requests
     /// about the chat's runs are routed to.
     private var instances: [String: String] = [:]
-    /// The run streams this client reads, and the renewal of the chat access
-    /// their model calls use.
-    private var openRuns = 0
-    private var runRenewal: Task<Void, Never>?
     private var disposed = false
 
     private struct ErrorEnvelope: Decodable {
@@ -49,14 +40,8 @@ actor HarnessClient {
         self.languages = languages
     }
 
-    deinit {
-        runRenewal?.cancel()
-    }
-
     func dispose() {
         disposed = true
-        runRenewal?.cancel()
-        runRenewal = nil
     }
 
     /// The result of each verification of the enclave as it finishes. Of
@@ -126,11 +111,9 @@ actor HarnessClient {
         guard response.header("content-type")?.lowercased().hasPrefix("text/event-stream") == true else {
             throw HarnessError.invalidStream("The chat service did not return an event stream.")
         }
-        runOpened()
         let frames = HarnessEventStream.frames(from: response.body)
         return AsyncThrowingStream { continuation in
             let task = Task {
-                defer { self.runClosed() }
                 do {
                     for try await frame in frames {
                         if case .runStarted(let started) = frame.event {
@@ -262,53 +245,6 @@ actor HarnessClient {
     private func instanceFor(_ route: HarnessRoute, _ threadId: String?) -> String? {
         guard route.aboutRun, let threadId else { return nil }
         return instances[threadId]
-    }
-
-    // MARK: - Chat access renewal
-
-    /// A run's model calls can outlast the chat access it started with.
-    /// While a run stream is open, the access is minted again as it enters
-    /// its renewal window and presented to the harness, which gives a run
-    /// whose access expired the newest one the account presented.
-    private func runOpened() {
-        openRuns += 1
-        if openRuns == 1 { scheduleRunRenewal() }
-    }
-
-    private func runClosed() {
-        openRuns -= 1
-        if openRuns == 0 { scheduleRunRenewal() }
-    }
-
-    private func scheduleRunRenewal() {
-        runRenewal?.cancel()
-        runRenewal = nil
-        guard openRuns > 0, !disposed else { return }
-        runRenewal = Task {
-            let at = await credentials.chatAccessRenewsAt()
-            guard let at else { return }
-            let delay = at.timeIntervalSinceNow
-            do {
-                try await Task.sleep(for: .seconds(delay > 0 ? delay : Constants.Harness.runRenewalRetrySeconds))
-            } catch {
-                return
-            }
-            await renewForRuns()
-        }
-    }
-
-    private func renewForRuns() async {
-        runRenewal = nil
-        defer { scheduleRunRenewal() }
-        // Another request may have renewed and presented it since.
-        guard let at = await credentials.chatAccessRenewsAt(), at <= Date() else { return }
-        do {
-            _ = try await request(.session, json: EmptyBody())
-        } catch {
-            if !disposed {
-                Self.logger.error("Failed to renew chat access for a running reply: \(error, privacy: .public)")
-            }
-        }
     }
 }
 

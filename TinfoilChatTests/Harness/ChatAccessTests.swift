@@ -57,8 +57,6 @@ struct ChatAccessTests {
         #expect(await plane.calls == [.init(path: Constants.API.SessionToken.chatPath, identity: "jwt")])
         #expect(reported.limits.first?.kind?.value1 == .hourly)
         #expect(reported.limits.first?.inputTokens?.remaining == 990)
-        let renewal = try #require(await access.renewsAt())
-        #expect(renewal == ChatAccessCache.date(of: inAnHour)!.addingTimeInterval(-Constants.Harness.ChatAccess.renewBeforeExpirySeconds))
     }
 
     @Test func anAccountWithoutASubscriptionFallsBackToItsFreeKey() async throws {
@@ -72,8 +70,6 @@ struct ChatAccessTests {
         #expect(await plane.calls.map(\.path) == [Constants.API.SessionToken.chatPath, Constants.Harness.ChatAccess.freeKeyPath])
         #expect(reported.limits.first?.kind?.value1 == .freeDaily)
         #expect(reported.limits.first?.remaining == 19)
-        // A free key renews with the request that needs it, not ahead.
-        #expect(await access.renewsAt() == nil)
     }
 
     @Test func anHourlyCapIsKeptUntilItResets() async throws {
@@ -91,12 +87,10 @@ struct ChatAccessTests {
         #expect(first?.detail.kind == "hourly")
         #expect(first?.detail.resetsAt == resets)
         #expect(reported.limits.first?.remaining == 0)
-        // The refusal answers again without asking the control plane, and
-        // names when it lifts.
+        // The refusal answers again without asking the control plane.
         let second = await failure { try await access.get(identity: "jwt") }
         #expect(second == first)
         #expect(await plane.calls.count == 1)
-        #expect(await access.renewsAt() == ChatAccessCache.date(of: resets))
         // Once it lifts, the control plane is asked again.
         clock.now = ChatAccessCache.date(of: resets)!.addingTimeInterval(1)
         #expect(try await access.get(identity: "jwt") == "tok_2")
