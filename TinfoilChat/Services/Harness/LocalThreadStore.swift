@@ -50,9 +50,8 @@ actor DeviceThreadStore: LocalThreadStore {
     }
 
     static func directory(userId: String) throws -> URL {
-        let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         let safe = userId.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "..", with: "_")
-        let url = support.appendingPathComponent("tinfoil", isDirectory: true)
+        let url = try DeviceDataDirectory.url(create: true)
             .appendingPathComponent("harness", isDirectory: true)
             .appendingPathComponent(safe, isDirectory: true)
         if !FileManager.default.fileExists(atPath: url.path) {
