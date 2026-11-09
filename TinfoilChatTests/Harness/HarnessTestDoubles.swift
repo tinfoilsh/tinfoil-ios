@@ -91,7 +91,6 @@ actor ScriptedCredentials: HarnessCredentials {
     var identities: [String?]
     var anonymousKeys: [String]
     var access: [Result<String, HarnessError>]
-    var renewsAt: Date?
 
     init(identities: [String?] = [], anonymousKeys: [String] = [], access: [Result<String, HarnessError>] = []) {
         self.identities = identities
@@ -121,8 +120,6 @@ actor ScriptedCredentials: HarnessCredentials {
         }
         return try access.removeFirst().get()
     }
-
-    func chatAccessRenewsAt() async -> Date? { renewsAt }
 }
 
 

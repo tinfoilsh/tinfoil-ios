@@ -287,10 +287,6 @@ enum Constants {
         /// first, is abandoned after this long: the requests waiting on it
         /// fail, and the next one tries again.
         static let attestationTimeoutSeconds: TimeInterval = 20
-        /// A live run's chat access that could not be minted again, for a
-        /// reason that names no time to ask again, is asked for again after
-        /// this long.
-        static let runRenewalRetrySeconds: TimeInterval = 30
         /// How long a run's stream may go without a byte before the
         /// connection is given up.
         static let streamIdleTimeoutSeconds: TimeInterval = 120
@@ -348,7 +344,8 @@ enum Constants {
             static let freeKeyPrefix = "free_"
             static let maximumKeyLength = 256
             /// Chat access is minted again once it has less than this left,
-            /// so a reply started with it can finish first.
+            /// so no request carries access about to expire. The chat
+            /// service keeps a running reply's access current itself.
             static let renewBeforeExpirySeconds: TimeInterval = 5 * 60
             static let mintTimeoutSeconds: TimeInterval = 15
             /// A busy, unavailable or suspended answer that names no time to
