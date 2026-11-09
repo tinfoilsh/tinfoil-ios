@@ -559,9 +559,11 @@ struct ChatContainer: View {
         // 1. Enough time has passed (> 5 minutes)
         // 2. There are existing messages in the current chat
         // 3. User is authenticated (to avoid issues with unauthenticated state)
+        // 4. No reply is still running in it, as a long research may be
         if timeSinceBackground > backgroundTimeThreshold && 
            !viewModel.messages.isEmpty && 
-           authManager.isAuthenticated {
+           authManager.isAuthenticated &&
+           !viewModel.openChatHasLiveRun {
             viewModel.createNewChat()
             messageText = ""
         }

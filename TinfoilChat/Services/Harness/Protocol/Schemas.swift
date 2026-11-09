@@ -327,6 +327,7 @@ extension Components {
                 case quotaExhausted = "QUOTA_EXHAUSTED"
                 case rateLimited = "RATE_LIMITED"
                 case recordUnsupported = "RECORD_UNSUPPORTED"
+                case researchLimitReached = "RESEARCH_LIMIT_REACHED"
                 case requestTimeout = "REQUEST_TIMEOUT"
                 case revisionConflict = "REVISION_CONFLICT"
                 case runInFlight = "RUN_IN_FLIGHT"
@@ -526,7 +527,7 @@ extension Components {
             internal var composer: Components.Schemas.Composer
             /// - Remark: Generated from `#/components/schemas/Session/presets`.
             internal var presets: [Components.Schemas.Preset]
-            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request.
+            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. research is true while this caller may send a turn with options.research, which only a subscriber may.
             ///
             /// - Remark: Generated from `#/components/schemas/Session/features`.
             internal struct FeaturesPayload: Codable, Hashable, Sendable {
@@ -546,7 +547,7 @@ extension Components {
                     try encoder.encodeAdditionalProperties(additionalProperties)
                 }
             }
-            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request.
+            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. research is true while this caller may send a turn with options.research, which only a subscriber may.
             ///
             /// - Remark: Generated from `#/components/schemas/Session/features`.
             internal var features: Components.Schemas.Session.FeaturesPayload
@@ -563,7 +564,7 @@ extension Components {
             ///   - profileDefaults:
             ///   - composer:
             ///   - presets:
-            ///   - features: Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request.
+            ///   - features: Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. research is true while this caller may send a turn with options.research, which only a subscriber may.
             internal init(
                 _protocol: Components.Schemas.Session._ProtocolPayload,
                 user: Components.Schemas.Session.UserPayload,
@@ -1220,6 +1221,31 @@ extension Components {
             internal var piiCheck: Swift.Bool?
             /// - Remark: Generated from `#/components/schemas/TurnOptions/genUI`.
             internal var genUI: Swift.Bool?
+            /// The turn researches its question on the web at length, for up to
+            /// about half an hour, before it answers with a report. A client
+            /// sends it only while the session's features.research is true, and
+            /// only on a send, edit, regenerate or retry.
+            ///
+            /// The run searches the web whatever the chat's web search setting,
+            /// and is refused with TOOL_UNAVAILABLE when the settings turn web
+            /// search off. A caller may start one research an hour: a turn sent
+            /// within an hour of the last research's start is refused with
+            /// RESEARCH_LIMIT_REACHED and the resetsAt when the next may start.
+            /// A research's first model turn may instead ask the user what it
+            /// needs to know with the questions widget, when the turn's widgets
+            /// name it, and the run then ends; such a run does not count as the
+            /// hour's research, and the research starts with the turn that sends
+            /// the answers.
+            ///
+            /// While it researches, what the model writes between its tool calls
+            /// streams as reasoning, beside its web_search and web_fetch calls,
+            /// and only its report streams as the reply's text. The reply is
+            /// committed with research, and later turns read it as its report
+            /// alone.
+            ///
+            ///
+            /// - Remark: Generated from `#/components/schemas/TurnOptions/research`.
+            internal var research: Swift.Bool?
             /// 256 random bits the client keeps, hex encoded, which scope the model enclaves' prompt cache to the client. Turns without one share a cache only within their chat.
             ///
             /// - Remark: Generated from `#/components/schemas/TurnOptions/cacheSecret`.
@@ -1236,6 +1262,7 @@ extension Components {
             ///   - webSearch:
             ///   - piiCheck:
             ///   - genUI:
+            ///   - research: The turn researches its question on the web at length, for up to
             ///   - cacheSecret: 256 random bits the client keeps, hex encoded, which scope the model enclaves' prompt cache to the client. Turns without one share a cache only within their chat.
             internal init(
                 model: Swift.String? = nil,
@@ -1247,6 +1274,7 @@ extension Components {
                 webSearch: Swift.Bool? = nil,
                 piiCheck: Swift.Bool? = nil,
                 genUI: Swift.Bool? = nil,
+                research: Swift.Bool? = nil,
                 cacheSecret: Swift.String? = nil
             ) {
                 self.model = model
@@ -1258,6 +1286,7 @@ extension Components {
                 self.webSearch = webSearch
                 self.piiCheck = piiCheck
                 self.genUI = genUI
+                self.research = research
                 self.cacheSecret = cacheSecret
             }
             internal enum CodingKeys: String, CodingKey {
@@ -1270,6 +1299,7 @@ extension Components {
                 case webSearch
                 case piiCheck
                 case genUI
+                case research
                 case cacheSecret
             }
         }
@@ -2914,6 +2944,8 @@ extension Components {
             internal var isInterrupted: Swift.Bool?
             /// - Remark: Generated from `#/components/schemas/CommittedReply/annotations`.
             internal var annotations: [Components.Schemas.Annotation]?
+            /// - Remark: Generated from `#/components/schemas/CommittedReply/research`.
+            internal var research: Components.Schemas.Research?
             /// Creates a new `CommittedReply`.
             ///
             /// - Parameters:
@@ -2924,6 +2956,7 @@ extension Components {
             ///   - isError:
             ///   - isInterrupted:
             ///   - annotations:
+            ///   - research:
             internal init(
                 id: Swift.String,
                 model: Swift.String? = nil,
@@ -2931,7 +2964,8 @@ extension Components {
                 usage: Components.Schemas.MessageUsage? = nil,
                 isError: Swift.Bool? = nil,
                 isInterrupted: Swift.Bool? = nil,
-                annotations: [Components.Schemas.Annotation]? = nil
+                annotations: [Components.Schemas.Annotation]? = nil,
+                research: Components.Schemas.Research? = nil
             ) {
                 self.id = id
                 self.model = model
@@ -2940,6 +2974,7 @@ extension Components {
                 self.isError = isError
                 self.isInterrupted = isInterrupted
                 self.annotations = annotations
+                self.research = research
             }
             internal enum CodingKeys: String, CodingKey {
                 case id
@@ -2949,6 +2984,7 @@ extension Components {
                 case isError
                 case isInterrupted
                 case annotations
+                case research
             }
         }
         /// How a chat came by its title. A client shows the title of a state it does not know as it is.
@@ -3439,6 +3475,8 @@ extension Components {
             internal var answers: [Components.Schemas.WidgetAnswers]?
             /// - Remark: Generated from `#/components/schemas/MessageView/compaction`.
             internal var compaction: Components.Schemas.Compaction?
+            /// - Remark: Generated from `#/components/schemas/MessageView/research`.
+            internal var research: Components.Schemas.Research?
             /// Creates a new `MessageView`.
             ///
             /// - Parameters:
@@ -3457,6 +3495,7 @@ extension Components {
             ///   - attachments:
             ///   - answers: A question's answers to questions widgets, as it sent them to the model.
             ///   - compaction:
+            ///   - research:
             internal init(
                 id: Swift.String,
                 role: Components.Schemas.Role,
@@ -3472,7 +3511,8 @@ extension Components {
                 annotations: [Components.Schemas.Annotation]? = nil,
                 attachments: [Components.Schemas.AttachmentView]? = nil,
                 answers: [Components.Schemas.WidgetAnswers]? = nil,
-                compaction: Components.Schemas.Compaction? = nil
+                compaction: Components.Schemas.Compaction? = nil,
+                research: Components.Schemas.Research? = nil
             ) {
                 self.id = id
                 self.role = role
@@ -3489,6 +3529,7 @@ extension Components {
                 self.attachments = attachments
                 self.answers = answers
                 self.compaction = compaction
+                self.research = research
             }
             internal enum CodingKeys: String, CodingKey {
                 case id
@@ -3506,6 +3547,31 @@ extension Components {
                 case attachments
                 case answers
                 case compaction
+                case research
+            }
+        }
+        /// Set on a reply that researched its question, as TurnOptions.research
+        /// describes. Its timeline holds the research's reasoning and its
+        /// web_search and web_fetch calls, and its text is the report. A client
+        /// may show the research's steps apart from the report. The model reads
+        /// the reply back as its report alone.
+        ///
+        ///
+        /// - Remark: Generated from `#/components/schemas/Research`.
+        internal struct Research: Codable, Hashable, Sendable {
+            /// The version of the instructions it researched under.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Research/version`.
+            internal var version: Swift.Int
+            /// Creates a new `Research`.
+            ///
+            /// - Parameters:
+            ///   - version: The version of the instructions it researched under.
+            internal init(version: Swift.Int) {
+                self.version = version
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case version
             }
         }
         /// What a compaction marker records of its summary. A compaction marker
@@ -4557,6 +4623,8 @@ extension Components {
             internal var answers: [Components.Schemas.WidgetAnswers]?
             /// - Remark: Generated from `#/components/schemas/MessageRecord/compaction`.
             internal var compaction: Components.Schemas.Compaction?
+            /// - Remark: Generated from `#/components/schemas/MessageRecord/research`.
+            internal var research: Components.Schemas.Research?
             /// Creates a new `MessageRecord`.
             ///
             /// - Parameters:
@@ -4575,6 +4643,7 @@ extension Components {
             ///   - isInterrupted:
             ///   - answers:
             ///   - compaction:
+            ///   - research:
             internal init(
                 id: Swift.String,
                 role: Components.Schemas.Role,
@@ -4590,7 +4659,8 @@ extension Components {
                 isError: Swift.Bool? = nil,
                 isInterrupted: Swift.Bool? = nil,
                 answers: [Components.Schemas.WidgetAnswers]? = nil,
-                compaction: Components.Schemas.Compaction? = nil
+                compaction: Components.Schemas.Compaction? = nil,
+                research: Components.Schemas.Research? = nil
             ) {
                 self.id = id
                 self.role = role
@@ -4607,6 +4677,7 @@ extension Components {
                 self.isInterrupted = isInterrupted
                 self.answers = answers
                 self.compaction = compaction
+                self.research = research
             }
             internal enum CodingKeys: String, CodingKey {
                 case id
@@ -4624,6 +4695,7 @@ extension Components {
                 case isInterrupted
                 case answers
                 case compaction
+                case research
             }
         }
         /// A device chat as its client sends it: a ThreadRecord the harness returned, sent back whole, or a record without a recordVersion that an older client kept or a client made for a new chat. The harness refuses a ThreadRecord with a member its version does not have.

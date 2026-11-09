@@ -470,9 +470,10 @@ struct MessageInputView: View {
                 .environmentObject(authManager)
                 .presentationDetents([
                     .height(
-                        showContextIndicator
+                        (showContextIndicator
                             ? Constants.AddToChatSheet.heightWithContext
-                            : Constants.AddToChatSheet.height
+                            : Constants.AddToChatSheet.height)
+                            + (viewModel.canResearch ? Constants.AddToChatSheet.researchRowHeight : 0)
                     )
                 ])
                 .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
@@ -803,6 +804,8 @@ struct MessageInputView: View {
 
             modelControlsSelector
 
+            researchChip
+
             Spacer(minLength: 0)
 
             microphoneButton
@@ -843,6 +846,44 @@ struct MessageInputView: View {
             )
             .padding(.leading, 4)
         }
+    }
+
+    /// Says deep research is on for the open chat; tapping it turns it off.
+    /// The label gives way to the icon alone where the row has no room for it.
+    @ViewBuilder
+    private var researchChip: some View {
+        if viewModel.isResearchEnabled {
+            Button {
+                viewModel.setResearchEnabled(false)
+            } label: {
+                ViewThatFits(in: .horizontal) {
+                    researchChipLabel(showsText: true)
+                    researchChipLabel(showsText: false)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Constants.Research.label)
+            .accessibilityValue("On")
+            .accessibilityHint("Turns deep research off")
+            .padding(.leading, 4)
+        }
+    }
+
+    private func researchChipLabel(showsText: Bool) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: Constants.Research.systemImage)
+                .font(.system(size: 12, weight: .semibold))
+            if showsText {
+                Text(Constants.Research.label)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+            }
+        }
+        .foregroundColor(.primary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.12))
+        .clipShape(Capsule())
     }
 
     /// Collapsed picker label: "Auto · <level>" for Auto, else the model name.
@@ -1610,6 +1651,17 @@ struct AddToSheetView: View {
                         set: { viewModel.setWebSearchEnabled($0) }
                     )) {
                         Label("Web Search", systemImage: "globe")
+                    }
+                    .tint(.green)
+                    .padding(.horizontal, 20)
+                }
+
+                if viewModel.canResearch {
+                    Toggle(isOn: Binding(
+                        get: { viewModel.isResearchEnabled },
+                        set: { viewModel.setResearchEnabled($0) }
+                    )) {
+                        Label(Constants.Research.label, systemImage: Constants.Research.systemImage)
                     }
                     .tint(.green)
                     .padding(.horizontal, 20)

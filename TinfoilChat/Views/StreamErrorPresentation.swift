@@ -138,6 +138,7 @@ struct StreamErrorPresentation: Equatable {
         case HarnessErrorCode.keyRequired: return key
         case HarnessErrorCode.keyMismatch: return keyOutOfDate
         case HarnessErrorCode.quotaExhausted: return quota(error, occurredAt: occurredAt)
+        case HarnessErrorCode.researchLimitReached: return researchLimit(error, occurredAt: occurredAt)
         case HarnessErrorCode.rateLimited: return busy
         case HarnessErrorCode.queueFull: return queueFull
         case HarnessErrorCode.contextTooLarge: return contextLength
@@ -185,6 +186,16 @@ struct StreamErrorPresentation: Equatable {
                 resets.map { "The limit resets at \($0). \(notLost)" } ?? rateLimit.suggestion
             )
         }
+    }
+
+    /// Deep research has a limit of its own, apart from the chat quota, so
+    /// other messages still send.
+    private static func researchLimit(_ error: HarnessErrorBody, occurredAt: Date?) -> StreamErrorPresentation {
+        let resets = resetTime(error, occurredAt: occurredAt)
+        return StreamErrorPresentation(
+            .rateLimit, "Deep research limit reached",
+            "You can start one deep research an hour.\(resets.map { " You can start another at \($0)." } ?? "")"
+        )
     }
 
     /// When the error says its limit resets, as a local time of day.

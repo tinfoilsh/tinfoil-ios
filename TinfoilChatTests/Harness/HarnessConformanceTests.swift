@@ -32,6 +32,9 @@ struct HarnessConformanceTests {
                     let all = try JSONSerialization.jsonObject(with: encoder.encode(step)) as! [String: Any]
                     return all.filter { stepMembers.contains($0.key) }
                 }
+                if let research = message.research {
+                    shown["research"] = try JSONSerialization.jsonObject(with: encoder.encode(research))
+                }
                 return shown
             },
         ]

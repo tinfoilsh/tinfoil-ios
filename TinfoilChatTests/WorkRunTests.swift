@@ -6,7 +6,8 @@ struct WorkRunTests {
         _ id: String,
         status: WebSearchStatus = .completed,
         query: String? = nil,
-        startedAt: Double? = nil
+        startedAt: Double? = nil,
+        endedAt: Double? = nil
     ) -> WebSearchInstance {
         WebSearchInstance(
             id: id,
@@ -14,7 +15,8 @@ struct WorkRunTests {
             status: status,
             sources: [],
             reason: nil,
-            startedAt: startedAt
+            startedAt: startedAt,
+            endedAt: endedAt
         )
     }
 
@@ -115,6 +117,21 @@ struct WorkRunTests {
         let settled = WorkRun(steps: [thought(), .webSearches([search("a")])])
         #expect(settled.label(isActive: true) == WorkLabel(text: "Working", tone: .live, shimmers: true))
         #expect(settled.label(isActive: false) == WorkLabel(text: "Thought and searched the web", tone: .settled))
+    }
+
+    @Test func aResearchSaysItIsResearchingThenHowLongItTookAndWhatItSearchedAndRead() {
+        let research = WorkRun(steps: [
+            .thinking(content: "t", isThinking: false, duration: 2, startedAt: 1_000),
+            .webSearches([search("a", startedAt: 3_000, endedAt: 4_000), search("b", startedAt: 3_000, endedAt: 5_000)]),
+            thought(),
+            .webSearches([search("c", startedAt: 6_000, endedAt: 7_000)]),
+            .urlFetches([
+                URLFetchState(id: "f1", url: "https://a", status: .completed, startedAt: 8_000, endedAt: 734_000),
+                URLFetchState(id: "f2", url: "https://b", status: .failed, startedAt: 8_000, endedAt: 9_000),
+            ]),
+        ], isResearch: true)
+        #expect(research.label(isActive: true, thinkingSummary: "Comparing sources") == WorkLabel(text: "Researching…", tone: .live, shimmers: true))
+        #expect(research.label(isActive: false) == WorkLabel(text: "Researched for 12m 13s: 3 searches, 1 link read", tone: .settled))
     }
 
     @Test func stepHeaderSaysHowItEnded() {

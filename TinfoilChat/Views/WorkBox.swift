@@ -85,6 +85,20 @@ extension WorkStep {
         }
     }
 
+    /// When the step ended, in epoch milliseconds: the latest end of its
+    /// parts. A thought ends as long after it started as it thought.
+    var endedAt: Double? {
+        switch self {
+        case .thinking(_, _, let duration, let startedAt):
+            guard let startedAt, let duration else { return nil }
+            return startedAt + duration * Constants.UI.WorkSteps.millisecondsPerSecond
+        case .webSearches(let group):
+            return group.compactMap(\.endedAt).max()
+        case .urlFetches(let group):
+            return group.compactMap(\.endedAt).max()
+        }
+    }
+
     /// What the step's details hold, as VoiceOver names them.
     var detailsName: String {
         switch self {
@@ -224,10 +238,20 @@ enum ElapsedTime {
 /// as a single row naming what the run did.
 struct WorkRun: Equatable {
     let steps: [WorkStep]
+    /// The run is the research a reply made of its question before it
+    /// answered.
+    var isResearch = false
 
     /// When the run started, in epoch milliseconds: its earliest stamp.
     var startedAt: Double? {
         steps.compactMap(\.startedAt).min()
+    }
+
+    /// How long the run worked, in seconds: from its earliest stamp to the
+    /// latest end of its steps.
+    var duration: Double? {
+        guard let startedAt, let endedAt = steps.compactMap(\.endedAt).max(), endedAt >= startedAt else { return nil }
+        return (endedAt - startedAt) / Constants.UI.WorkSteps.millisecondsPerSecond
     }
 
     /// The row id a step of the run is opened under. A run can hold more
@@ -240,6 +264,7 @@ struct WorkRun: Equatable {
     /// and what it did once it settles.
     func label(isActive: Bool, thinkingSummary: String? = nil, webSearchSummary: String? = nil) -> WorkLabel {
         guard isActive else { return WorkLabel(text: summaryLabel, tone: .settled) }
+        if isResearch { return WorkLabel(text: "Researching…", tone: .live, shimmers: true) }
         switch liveActivity {
         case .thinking:
             return WorkLabel(text: WorkStep.nonEmpty(thinkingSummary) ?? "Thinking", tone: .live, shimmers: true)
@@ -267,6 +292,7 @@ struct WorkRun: Equatable {
     /// Names what the run did, each kind of action once in the order the run
     /// first took it: "Thought, searched the web, and read 3 links".
     var summaryLabel: String {
+        if isResearch { return researchLabel }
         var actions: [String] = []
         var hasThought = false
         var hasSearched = false
@@ -303,13 +329,32 @@ struct WorkRun: Equatable {
     /// The links the run read, across all its link reads; a run whose every
     /// read failed tried to read them.
     private var readAction: String {
-        let fetches = steps.flatMap { step -> [URLFetchState] in
-            if case .urlFetches(let group) = step { return group }
-            return []
-        }
         let read = fetches.filter { $0.status == .completed }.count
         if read > 0 { return read == 1 ? "read a link" : "read \(read) links" }
         return fetches.count == 1 ? "tried to read a link" : "tried to read \(fetches.count) links"
+    }
+
+    /// How long a research took, and how many searches it made and links it
+    /// read across all its steps: "Researched for 12m 3s: 14 searches, 23
+    /// links read".
+    private var researchLabel: String {
+        let searches = steps.reduce(0) { count, step in
+            if case .webSearches(let group) = step { return count + group.count }
+            return count
+        }
+        let read = fetches.filter { $0.status == .completed }.count
+        var counts: [String] = []
+        if searches > 0 { counts.append(searches == 1 ? "1 search" : "\(searches) searches") }
+        if read > 0 { counts.append(read == 1 ? "1 link read" : "\(read) links read") }
+        let researched = duration.map { "Researched for \(ElapsedTime.label($0))" } ?? "Researched"
+        return counts.isEmpty ? researched : "\(researched): \(counts.joined(separator: ", "))"
+    }
+
+    private var fetches: [URLFetchState] {
+        steps.flatMap { step -> [URLFetchState] in
+            if case .urlFetches(let group) = step { return group }
+            return []
+        }
     }
 }
 

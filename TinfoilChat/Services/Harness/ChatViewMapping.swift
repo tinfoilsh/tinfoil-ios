@@ -35,6 +35,8 @@ enum ChatViewMapping {
         var searches: [WebSearchInstance] = []
         var fetches: [URLFetchState] = []
         var toolCalls: [GenUIToolCall] = []
+        // The sources of every search and page read, in the order found.
+        var found: [WebSearchSource] = []
         var timeline: [JSONValue] = []
         var thoughts = ""
         var text = ""
@@ -61,12 +63,13 @@ enum ChatViewMapping {
                 timeline.append(timelineBlock(block))
             case .toolCall:
                 guard isShownTool(block.name) else { continue }
+                if block.name == searchTool || block.name == fetchTool { found += block.display?.sources.map(source) ?? [] }
                 let toolCallId = block.toolCallId ?? block.id
                 let status = toolStatus(block, streaming: streaming)
                 if block.name == searchTool {
                     searches.append(WebSearchInstance(
                         id: block.id, query: block.display?.query, status: status == .completed ? .completed : status == .failed ? .failed : .searching,
-                        sources: block.display?.sources.map(source), reason: nil, startedAt: block.startedAt
+                        sources: block.display?.sources.map(source), reason: nil, startedAt: block.startedAt, endedAt: block.endedAt
                     ))
                     segments.append(.webSearch(searchId: block.id))
                 } else if block.name == fetchTool {
@@ -76,7 +79,7 @@ enum ChatViewMapping {
                     for (position, url) in urls.enumerated() {
                         let id = position == 0 ? toolCallId : "\(toolCallId)-\(position)"
                         let fetchStatus: URLFetchStatus = status == .completed ? (unread.contains(url) ? .failed : .completed) : status == .failed ? .failed : .fetching
-                        fetches.append(URLFetchState(id: id, url: url, status: fetchStatus, sources: block.display?.sources.filter { $0.url == url }.map(source), startedAt: block.startedAt))
+                        fetches.append(URLFetchState(id: id, url: url, status: fetchStatus, sources: block.display?.sources.filter { $0.url == url }.map(source), startedAt: block.startedAt, endedAt: block.endedAt))
                         segments.append(.urlFetch(fetchId: id))
                     }
                 } else {
@@ -99,6 +102,17 @@ enum ChatViewMapping {
         message.urlFetches = fetches
         message.toolCalls = toolCalls
         message.timeline = timeline
+        if wire.research != nil {
+            message.isResearch = true
+            // A research lists every source it searched and read, and those
+            // its report cites, once each.
+            let cited = (message.annotations ?? []).map { WebSearchSource(id: $0.url_citation.url, title: $0.url_citation.title, url: $0.url_citation.url) }
+            var listed: Set<String> = []
+            let sources = (found + cited).filter { !$0.url.isEmpty && listed.insert($0.url).inserted }
+            if !sources.isEmpty {
+                message.webSearchState = WebSearchState(query: searches.last?.query, status: searches.last?.status ?? .completed, sources: sources)
+            }
+        }
         return message
     }
 

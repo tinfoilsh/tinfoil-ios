@@ -85,6 +85,34 @@ struct ChatViewMappingTests {
         #expect(shown.segments == [.webSearch(searchId: "s"), .urlFetch(fetchId: "f"), .urlFetch(fetchId: "f-1"), .text("Found it.")])
     }
 
+    @Test func aResearchListsEachSourceItFoundReadOrCitedOnceAndAReplyThoseOfItsLastSearch() throws {
+        func search(_ id: String, _ urls: [String]) -> [String: Any] {
+            ["id": id, "type": "tool_call", "toolCallId": id, "name": "web_search", "arguments": "{}", "complete": true, "startedAt": 1000, "endedAt": 2000,
+             "display": ["query": id, "status": "completed", "sources": urls.map { ["url": $0, "title": $0] }]]
+        }
+        let timeline: [[String: Any]] = [
+            search("s1", ["https://a.test", "https://b.test"]),
+            ["id": "f", "type": "tool_call", "toolCallId": "f", "name": "web_fetch", "arguments": #"{"url":"https://c.test"}"#, "complete": true,
+             "display": ["status": "completed", "sources": [["url": "https://c.test", "title": "C"]]]],
+            search("s2", ["https://b.test", "https://d.test"]),
+            ["id": "c", "type": "content", "content": "Report."],
+        ]
+        let annotations: [[String: Any]] = [
+            ["type": "url_citation", "url_citation": ["url": "https://d.test", "title": "D", "start_index": 0, "end_index": 1]],
+            ["type": "url_citation", "url_citation": ["url": "https://e.test", "title": "E", "start_index": 2, "end_index": 3]],
+        ]
+        let reply: [String: Any] = ["id": "m", "role": "assistant", "createdAt": "2026-01-01T00:00:00Z", "timeline": timeline, "annotations": annotations]
+
+        let answered = try ChatViewMapping.message(Self.message(reply))
+        #expect(!answered.isResearch)
+        #expect(answered.webSearchState?.sources.map(\.url) == ["https://b.test", "https://d.test"])
+
+        let researched = try ChatViewMapping.message(Self.message(reply.merging(["research": ["version": 1]]) { $1 }))
+        #expect(researched.isResearch)
+        #expect(researched.webSearchState?.sources.map(\.url) == ["https://a.test", "https://b.test", "https://c.test", "https://d.test", "https://e.test"])
+        #expect(researched.webSearches?.first?.endedAt == 2000)
+    }
+
     @Test func aToolStillRunningOnceTheReplyStoppedWasCutOff() throws {
         let wire = try Self.reply([
             ["id": "s", "type": "tool_call", "toolCallId": "s", "name": "web_search", "arguments": "{}", "display": ["status": "running", "sources": []]],

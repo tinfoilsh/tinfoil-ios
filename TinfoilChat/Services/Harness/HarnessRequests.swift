@@ -34,6 +34,7 @@ struct TurnOptions: Encodable, Equatable, Sendable {
     var webSearch: Bool?
     var piiCheck: Bool?
     var genUI: Bool?
+    var research: Bool?
     var cacheSecret: String?
 }
 

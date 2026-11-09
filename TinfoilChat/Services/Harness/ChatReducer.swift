@@ -58,9 +58,12 @@ enum ChatReducer {
         }
         switch event {
         case .runStarted(let started):
-            // A compaction is the run of the turn the chat submitted, not one
-            // queued after it.
-            if next.status != .submitting { next.compactTurn = false }
+            // A compaction or a research is the run of the turn the chat
+            // submitted, not one queued after it.
+            if next.status != .submitting {
+                next.compactTurn = false
+                next.researchTurn = false
+            }
             next.error = nil
             next.failedRun = nil
             next.sealed = [:]
@@ -485,6 +488,7 @@ enum ChatReducer {
             if let isError = reply.isError { message.isError = isError }
             if let isInterrupted = reply.isInterrupted { message.isInterrupted = isInterrupted }
             if let annotations = reply.annotations { message.annotations = annotations }
+            if let research = reply.research { message.research = research }
             return message
         }
     }

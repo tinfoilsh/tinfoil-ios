@@ -463,6 +463,15 @@ enum Constants {
     enum AddToChatSheet {
         static let height: CGFloat = 324
         static let heightWithContext: CGFloat = 368
+        /// The sheet grows by the deep research toggle's row where it shows.
+        static let researchRowHeight: CGFloat = 51
+    }
+
+    /// Deep research: a turn that researches its question on the web at
+    /// length before it answers with a report.
+    enum Research {
+        static let label = "Deep Research"
+        static let systemImage = "binoculars"
     }
 
     enum Context {

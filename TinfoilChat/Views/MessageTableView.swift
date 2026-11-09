@@ -1103,6 +1103,7 @@ class ObservableMessageWrapper: ObservableObject {
                             self.message.timeline != message.timeline ||
                             self.message.annotations != message.annotations ||
                             self.message.compaction != message.compaction ||
+                            self.message.isResearch != message.isResearch ||
                             self.isDarkMode != isDarkMode
 
         let metadataChanged = self.isLastMessage != isLastMessage ||
