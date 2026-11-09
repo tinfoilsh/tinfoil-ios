@@ -2136,7 +2136,7 @@ extension Notification.Name {
     /// Cloud sync was turned on or off in Settings.
     static let cloudSyncSettingChanged = Notification.Name("tinfoil.cloudSyncSettingChanged")
     /// The chat service refused the account's identity, after it was
-    /// refreshed: the user has to sign in again.
+    /// refreshed: an account left without a session has to sign in again.
     static let chatAuthenticationRequired = Notification.Name("tinfoil.chatAuthenticationRequired")
 }
 

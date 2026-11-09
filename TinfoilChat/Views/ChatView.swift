@@ -122,7 +122,9 @@ struct ChatContainer: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .chatAuthenticationRequired)) { _ in
-            if !showAuthView {
+            // An account that still holds its session has nothing to sign
+            // in to: the refusal shows as the failed request's error.
+            if Clerk.shared.session == nil, !showAuthView {
                 showAuthView = true
             }
         }
