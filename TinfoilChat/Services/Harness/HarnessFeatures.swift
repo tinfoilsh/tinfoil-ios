@@ -455,6 +455,18 @@ private struct FaviconReply: Decodable {
 
 @MainActor
 enum HarnessMetadata {
+    static func image(_ account: HarnessAccount, url: String) async throws -> Data {
+        let reply: RemoteImageReply = try await account.post(.remoteImage, Components.Schemas.PageRequest(url: url), keyless: true)
+        let encodedLimit = ((Constants.Metadata.imageMaxBytes + 2) / 3) * 4
+        guard reply.imageContentType == .imagePng,
+              reply.imageBytes.utf8.count <= encodedLimit,
+              let data = Data(base64Encoded: reply.imageBytes), !data.isEmpty,
+              data.count <= Constants.Metadata.imageMaxBytes else {
+            throw LinkMetadataError.unavailable
+        }
+        return data
+    }
+
     /// A page's title, description, image and site name, which the harness
     /// reads inside the enclave.
     static func link(_ account: HarnessAccount, url: String) async throws -> LinkPreview {

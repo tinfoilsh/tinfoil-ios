@@ -91,7 +91,7 @@ struct GenUITitle: View {
     }
 }
 
-/// Renders a remote image URL with a placeholder. Uses `AsyncImage` (iOS 15+).
+/// Renders image bytes fetched through the attested harness with a placeholder.
 struct GenUIRemoteImage: View {
     let url: String
     let isDarkMode: Bool
@@ -99,7 +99,7 @@ struct GenUIRemoteImage: View {
 
     var body: some View {
         if let parsed = URL(string: url), parsed.scheme?.lowercased() == "https" {
-            AsyncImage(url: parsed) { phase in
+            HarnessRemoteImage(url: parsed.absoluteString) { phase in
                 switch phase {
                 case .empty:
                     Rectangle()

@@ -33,14 +33,22 @@ actor LinkMetadataService {
     private var faviconCache: [String: Data] = [:]
     private var faviconCacheOrder: [String] = []
     private var faviconInFlight: [String: Task<Data, Error>] = [:]
+    private let images = NSCache<NSString, NSData>()
+    private var imageInFlight: [String: Task<Data, Error>] = [:]
     private weak var account: HarnessAccount?
 
-    private init() {}
+    init() {
+        images.countLimit = Constants.Metadata.imageCacheEntryLimit
+        images.totalCostLimit = Constants.Metadata.imageCacheBytes
+    }
 
     /// The account whose session reads previews, which changes as the
     /// account does. Previews in flight for the account before are not
     /// waited on: a card asks again through the new one.
     func bind(_ account: HarnessAccount?) {
+        imageInFlight.values.forEach { $0.cancel() }
+        imageInFlight = [:]
+        images.removeAllObjects()
         self.account = account
         inFlight = [:]
         faviconInFlight = [:]
@@ -76,6 +84,32 @@ actor LinkMetadataService {
         let result = try await task.value
         storeFaviconInCache(result, for: host)
         return result
+    }
+
+    func image(for rawURL: String) async throws -> Data {
+        guard rawURL.utf8.count <= Constants.Metadata.imageURLLengthLimit,
+              let url = URL(string: rawURL), url.scheme?.lowercased() == "https",
+              url.user == nil, url.password == nil else {
+            throw LinkMetadataError.invalidURL
+        }
+        guard let account else { throw LinkMetadataError.unavailable }
+        let key = url.absoluteString
+        if let cached = images.object(forKey: key as NSString) { return cached as Data }
+        let task: Task<Data, Error>
+        if let existing = imageInFlight[key] {
+            task = existing
+        } else {
+            task = Task<Data, Error> {
+                try await HarnessMetadata.image(account, url: key)
+            }
+            imageInFlight[key] = task
+        }
+        defer { if imageInFlight[key] == task { imageInFlight[key] = nil } }
+        let data = try await task.value
+        guard self.account === account else { throw CancellationError() }
+        images.setObject(data as NSData, forKey: key as NSString, cost: data.count)
+        try Task.checkCancellation()
+        return data
     }
 
     private func storeInCache(_ metadata: LinkPreview, for url: String) {

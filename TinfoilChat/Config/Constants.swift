@@ -553,6 +553,11 @@ enum Constants {
     enum Metadata {
         /// Cap on cached metadata and favicon entries.
         static let cacheEntryLimit = 200
+        static let imageCacheEntryLimit = 64
+        static let imageCacheBytes = 32 << 20
+        static let imageMaxBytes = 8 << 20
+        static let imageURLLengthLimit = 8192
+        static let imageContentType = "image/png"
     }
 
     enum Audio {
@@ -785,10 +790,8 @@ enum Constants {
         /// on a throwaway origin without any request reaching a real host.
         static let baseURL = URL(string: "https://artifact.invalid/")!
         static let contentRuleListIdentifier = "tinfoil-artifact-sandbox"
-        /// Resource types an artifact may load over HTTPS, matching the
-        /// webapp sandbox's img-src, font-src, and media-src. Every other
-        /// load is blocked.
-        static let remoteResourceTypes = ["image", "font", "media"]
+        static let imageScheme = "tinfoil-image"
+        static let imageRequestLimit = 64
     }
 }
 

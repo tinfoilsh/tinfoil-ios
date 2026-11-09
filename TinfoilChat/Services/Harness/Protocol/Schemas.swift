@@ -111,6 +111,35 @@ extension Components {
                 case url
             }
         }
+        /// - Remark: Generated from `#/components/schemas/RemoteImage`.
+        internal struct RemoteImage: Codable, Hashable, Sendable {
+            /// Base64-encoded PNG, no more than 8 MiB before base64 encoding.
+            ///
+            /// - Remark: Generated from `#/components/schemas/RemoteImage/image_bytes`.
+            internal var imageBytes: Swift.String
+            /// - Remark: Generated from `#/components/schemas/RemoteImage/image_content_type`.
+            internal enum ImageContentTypePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case imagePng = "image/png"
+            }
+            /// - Remark: Generated from `#/components/schemas/RemoteImage/image_content_type`.
+            internal var imageContentType: Components.Schemas.RemoteImage.ImageContentTypePayload
+            /// Creates a new `RemoteImage`.
+            ///
+            /// - Parameters:
+            ///   - imageBytes: Base64-encoded PNG, no more than 8 MiB before base64 encoding.
+            ///   - imageContentType:
+            internal init(
+                imageBytes: Swift.String,
+                imageContentType: Components.Schemas.RemoteImage.ImageContentTypePayload
+            ) {
+                self.imageBytes = imageBytes
+                self.imageContentType = imageContentType
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case imageBytes = "image_bytes"
+                case imageContentType = "image_content_type"
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/ErrorResponse`.
         internal struct ErrorResponse: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/ErrorResponse/error`.

@@ -29,6 +29,7 @@ private func citationStructuredText(
         .textual.highlighterTheme(isStreaming ? .plain : .default)
         .textual.citations(isStreaming ? [] : (citationUrls ?? []))
         .textual.citationFaviconProvider(citationFaviconData)
+        .textual.imageAttachmentLoader(HarnessImageAttachmentLoader())
         .if(textSelectionEnabled) { view in
             view.textual.textSelection(.enabled)
         }
