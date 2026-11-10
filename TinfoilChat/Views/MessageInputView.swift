@@ -1686,7 +1686,7 @@ struct AddToSheetView: View {
 
                 if profileManager.webSearchAvailable {
                     Toggle(isOn: Binding(
-                        get: { viewModel.isWebSearchEnabled },
+                        get: { viewModel.showsWebSearchEnabled },
                         set: { viewModel.setWebSearchEnabled($0) }
                     )) {
                         Label("Web Search", systemImage: "globe")

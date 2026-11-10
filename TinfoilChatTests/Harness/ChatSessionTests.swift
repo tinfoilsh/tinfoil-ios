@@ -1322,6 +1322,24 @@ struct ChatSessionTests {
         #expect(!session.researching)
     }
 
+    @Test func deepResearchTurnsOffWithWebSearchAndOnInAChatThatSearchesNothingElse() async throws {
+        let fixture = Fixture(answers: [Answers.json(researchSession)])
+        try await fixture.account.refresh()
+        let session = fixture.session
+        session.newChat()
+        session.setResearch(true)
+
+        session.setWebSearch(false)
+        #expect(!session.researching)
+
+        // The chat still searches nothing, and its next question is researched.
+        session.setResearch(true)
+        #expect(session.researching)
+        #expect(session.open.webSearch == false)
+        session.setWebSearch(true)
+        #expect(session.researching)
+    }
+
     @Test func anEditedQuestionStillShowsItAskedForDeepResearch() async throws {
         let fixture = Fixture(answers: [])
         let session = fixture.session

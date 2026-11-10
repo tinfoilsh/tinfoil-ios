@@ -719,8 +719,12 @@ class ChatViewModel: ObservableObject {
         keepWithOpenChat(ThreadPatch(model: model.id))
     }
 
-    /// Whether the open chat searches the web, as its toggle shows it.
+    /// Whether the open chat searches the web.
     var isWebSearchEnabled: Bool { currentChat?.webSearchEnabled ?? newChatWebSearch }
+
+    /// Whether the web search toggle shows on: a researched question
+    /// searches the web whatever its chat's setting.
+    var showsWebSearchEnabled: Bool { isWebSearchEnabled || isResearchEnabled }
 
     /// Whether a new chat searches the web until the user or its prompt
     /// chooses: as the profile says, which the chat service starts new chats
