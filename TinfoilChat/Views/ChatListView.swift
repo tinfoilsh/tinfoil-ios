@@ -64,6 +64,7 @@ struct ChatListView: View {
                 Color.chatBackground(isDarkMode: isDarkMode)
                 if messages.isEmpty {
                     GridTexture(isDarkMode: isDarkMode)
+                        .ignoresSafeArea(edges: .bottom)
                 }
             }
         }
