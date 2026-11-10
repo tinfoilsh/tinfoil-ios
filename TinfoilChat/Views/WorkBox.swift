@@ -373,6 +373,9 @@ struct WorkHeader: View {
     let isDarkMode: Bool
     /// What VoiceOver says of the header in place of its text, if anything.
     var spokenText: String? = nil
+    /// The symbol running work leads with in place of the progress dots, if
+    /// any.
+    var runningSystemImage: String? = nil
     let onToggle: () -> Void
 
     @State private var shownAt = Date()
@@ -396,7 +399,15 @@ struct WorkHeader: View {
         Button(action: onToggle) {
             HStack(spacing: Constants.UI.WorkSteps.headerSpacing) {
                 if elapsed != nil {
-                    InlineLoadingDotsView(isDarkMode: isDarkMode)
+                    if let runningSystemImage {
+                        Image(systemName: runningSystemImage)
+                            .font(.subheadline)
+                            .foregroundColor(isDarkMode ? .white.opacity(0.8) : .black.opacity(0.7))
+                            .symbolEffect(.pulse, isActive: !reduceMotion)
+                            .accessibilityHidden(true)
+                    } else {
+                        InlineLoadingDotsView(isDarkMode: isDarkMode)
+                    }
                 }
                 labelText
                 if let elapsed {
@@ -509,6 +520,7 @@ struct WorkBox: View {
                 isExpanded: isExpanded,
                 detailsName: "steps",
                 isDarkMode: isDarkMode,
+                runningSystemImage: run.isResearch ? Constants.Research.systemImage : nil,
                 onToggle: { expansion.toggle(rowId) }
             )
             if isExpanded {

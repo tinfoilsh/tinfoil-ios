@@ -26,6 +26,8 @@ private enum SentAnswersSymbol {
 struct SentAnswersView: View {
     let answers: [WidgetAnswers]
     let isDarkMode: Bool
+    /// The message the answers came with asked for deep research.
+    let showsResearchLip: Bool
 
     @State private var isExpanded = false
 
@@ -91,6 +93,7 @@ struct SentAnswersView: View {
             }
         }
         .padding(SentAnswersLayout.padding)
+        .fitsResearchLip(showsResearchLip)
         .background {
             if #available(iOS 26, *) {
                 RoundedRectangle(cornerRadius: SentAnswersLayout.cornerRadius)
@@ -100,6 +103,7 @@ struct SentAnswersView: View {
                     .fill(Color.userMessageBackground(isDarkMode: isDarkMode))
             }
         }
+        .researchLip(showsResearchLip, isDarkMode: isDarkMode)
     }
 
     /// What a question was answered with, as the model read it.

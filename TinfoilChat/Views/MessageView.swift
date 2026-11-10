@@ -276,14 +276,10 @@ struct MessageView: View, Equatable {
         }
     }
 
-    /// Says under a question that it asked for deep research.
-    private var researchQuestionLabel: some View {
-        Label(Constants.Research.label, systemImage: Constants.Research.systemImage)
-            .labelStyle(.titleAndIcon)
-            .font(.caption2)
-            .foregroundStyle(isDarkMode ? Color.white.opacity(0.5) : Color.black.opacity(0.5))
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Constants.Research.questionAccessibilityLabel)
+    /// A question that asked for deep research wears the lip on its top
+    /// bubble: its answers when it sent any, otherwise its text.
+    private var showsResearchLipOnText: Bool {
+        message.role == .user && message.isResearch && message.answers.isEmpty && !message.content.isEmpty
     }
 
     /// Secondary actions for assistant messages live behind an ellipsis so the
@@ -646,7 +642,7 @@ struct MessageView: View, Equatable {
             // The answers a message sent show above its text, or alone for a
             // message that sent only answers.
             if message.role == .user && !message.answers.isEmpty {
-                SentAnswersView(answers: message.answers, isDarkMode: isDarkMode)
+                SentAnswersView(answers: message.answers, isDarkMode: isDarkMode, showsResearchLip: message.isResearch)
                     .modifier(MessageBubbleModifier(isUserMessage: true))
                     .if(message.content.isEmpty && canDeleteMessage) { view in
                         view.contextMenu {
@@ -950,6 +946,7 @@ struct MessageView: View, Equatable {
                 }
                 .padding(.vertical, message.role == .user && message.content.isEmpty ? 0 : 8)
                 .padding(.horizontal, message.role == .user && !message.content.isEmpty ? 12 : 0)
+                .fitsResearchLip(showsResearchLipOnText)
                 .background {
                     if message.role == .user && !message.content.isEmpty {
                         if #available(iOS 26, *) {
@@ -1004,11 +1001,8 @@ struct MessageView: View, Equatable {
                         deleteMessageButton
                     }
                 }
+                .researchLip(showsResearchLipOnText, isDarkMode: isDarkMode)
                 .modifier(MessageBubbleModifier(isUserMessage: message.role == .user))
-
-            if message.role == .user && message.isResearch {
-                researchQuestionLabel
-            }
             }
         }
         .padding(.horizontal, 4)
