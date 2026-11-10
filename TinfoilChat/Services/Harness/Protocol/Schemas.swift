@@ -556,7 +556,7 @@ extension Components {
             internal var composer: Components.Schemas.Composer
             /// - Remark: Generated from `#/components/schemas/Session/presets`.
             internal var presets: [Components.Schemas.Preset]
-            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. research is true while this caller may send a turn with options.research, which only a subscriber may.
+            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes.
             ///
             /// - Remark: Generated from `#/components/schemas/Session/features`.
             internal struct FeaturesPayload: Codable, Hashable, Sendable {
@@ -576,7 +576,7 @@ extension Components {
                     try encoder.encodeAdditionalProperties(additionalProperties)
                 }
             }
-            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. research is true while this caller may send a turn with options.research, which only a subscriber may.
+            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes.
             ///
             /// - Remark: Generated from `#/components/schemas/Session/features`.
             internal var features: Components.Schemas.Session.FeaturesPayload
@@ -593,7 +593,7 @@ extension Components {
             ///   - profileDefaults:
             ///   - composer:
             ///   - presets:
-            ///   - features: Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. research is true while this caller may send a turn with options.research, which only a subscriber may.
+            ///   - features: Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes.
             internal init(
                 _protocol: Components.Schemas.Session._ProtocolPayload,
                 user: Components.Schemas.Session.UserPayload,
@@ -2892,7 +2892,7 @@ extension Components {
                 case metadata
             }
         }
-        /// What a run's last event reports. A device chat's run returns the whole chat.
+        /// What a run's last event reports. A device chat's run returns the whole chat, or the chat from the compaction marker its client sent it from, as ThreadInput describes.
         ///
         /// - Remark: Generated from `#/components/schemas/RunMetadata`.
         internal struct RunMetadata: Codable, Hashable, Sendable {
@@ -3635,7 +3635,7 @@ extension Components {
         ///
         /// - Remark: Generated from `#/components/schemas/Compaction`.
         internal struct Compaction: Codable, Hashable, Sendable {
-            /// How many messages the summary covers, those an earlier marker covered included.
+            /// How many messages the summary covers, those an earlier marker covered included, whether or not a device sent the harness the messages before that marker.
             ///
             /// - Remark: Generated from `#/components/schemas/Compaction/messages`.
             internal var messages: Swift.Int
@@ -3658,7 +3658,7 @@ extension Components {
             /// Creates a new `Compaction`.
             ///
             /// - Parameters:
-            ///   - messages: How many messages the summary covers, those an earlier marker covered included.
+            ///   - messages: How many messages the summary covers, those an earlier marker covered included, whether or not a device sent the harness the messages before that marker.
             ///   - startedAt: When the summary was started, in epoch milliseconds.
             ///   - endedAt: When the summary was written, in epoch milliseconds.
             ///   - model: The model that wrote the summary.
@@ -4747,7 +4747,28 @@ extension Components {
                 case research
             }
         }
-        /// A device chat as its client sends it: a ThreadRecord the harness returned, sent back whole, or a record without a recordVersion that an older client kept or a client made for a new chat. The harness refuses a ThreadRecord with a member its version does not have.
+        /// A device chat as its client sends it: a ThreadRecord the harness
+        /// returned, sent back whole, or a record without a recordVersion that an
+        /// older client kept or a client made for a new chat. The harness refuses
+        /// a ThreadRecord with a member its version does not have.
+        ///
+        /// While the session's features.partialThread is true, a client may send
+        /// a ThreadRecord from its latest compaction marker on, leaving out the
+        /// messages before that marker, which its summary covers. It may do so
+        /// in a turn, in a change of the chat's settings, in an answer to a
+        /// questions widget and in a request to read a message aloud, unless the
+        /// request names a message, a tool call or an attachment among the
+        /// messages left out, which sends the record whole. A turn also sends
+        /// the record whole unless a question after the marker comes before the
+        /// one it answers: the harness reads the exchange before the question a
+        /// turn answers, which the marker otherwise covers. The harness reads
+        /// the chat as it reads the whole record, except that a question sends
+        /// no answers to a questions widget among the messages left out. What it
+        /// returns of the chat starts at that marker too, a run's thread and
+        /// window among them, and its messageCount counts the messages sent: the
+        /// client keeps the messages it left out before the messages returned.
+        /// Every other request sends the record whole.
+        ///
         ///
         /// - Remark: Generated from `#/components/schemas/ThreadInput`.
         internal struct ThreadInput: Codable, Hashable, Sendable {
