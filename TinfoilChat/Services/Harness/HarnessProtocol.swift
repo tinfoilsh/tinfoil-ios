@@ -203,6 +203,9 @@ enum HarnessErrorCode {
     static let localSaveFailed = "LOCAL_SAVE_FAILED"
     /// A change that needs the account's settings before they have loaded.
     static let profileLoading = "PROFILE_LOADING"
+    /// The harness refused a sign-in or chat access the account had just
+    /// renewed.
+    static let signInUnconfirmed = "SIGN_IN_UNCONFIRMED"
     /// The chat ends on a reply that did not finish or on a message no reply
     /// answers.
     static let unfinishedReply = "UNFINISHED_REPLY"

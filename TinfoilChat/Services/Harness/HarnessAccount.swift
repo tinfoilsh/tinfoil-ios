@@ -582,8 +582,10 @@ final class HarnessAccount: ObservableObject {
         Self.noteAuthenticationRequired(cause)
     }
 
-    /// An identity the harness refused even once refreshed asks for a
-    /// sign-in, which the app shows.
+    /// An error that asks to sign in again, as of an account whose session
+    /// ended, asks for a sign-in, which the app shows. An account refused
+    /// with the identity it just renewed is signed in, and its error asks
+    /// for none.
     static func noteAuthenticationRequired(_ cause: Error) {
         guard let error = cause as? HarnessError, error.action == .reauthenticate else { return }
         NotificationCenter.default.post(name: .chatAuthenticationRequired, object: nil)

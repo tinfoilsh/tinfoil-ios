@@ -54,6 +54,12 @@ struct StreamErrorPresentationTests {
         #expect(shown.kind == .connection && shown.resends)
     }
 
+    @Test func aSignInRefusedThoughJustRenewedIsResentRatherThanSignedInAgain() {
+        let shown = StreamErrorPresentation(HarnessErrorBody.signInUnconfirmed, occurredAt: nil)
+        #expect(shown.kind == .connection)
+        #expect(shown.offersRetry && shown.resends)
+    }
+
     @Test func aChatServiceThatCouldNotBeVerifiedResendsTheMessageNeverSent() {
         let shown = StreamErrorPresentation(HarnessErrorBody.unverified, occurredAt: nil)
         #expect(shown.kind == .verification)

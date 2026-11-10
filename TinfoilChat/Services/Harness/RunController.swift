@@ -13,8 +13,8 @@ struct RunReceipt: Codable, Equatable, Sendable {
     var changedSettings: [String]?
 }
 
-/// A run of a chat this device stores. Its final event returns the whole
-/// thread, without the image bytes this device holds for it.
+/// A run of a chat this device stores. Its final event returns the thread
+/// as its turn sent it, without the image bytes this device holds for it.
 final class DeviceRun: @unchecked Sendable {
     let threadId: String
     let store: LocalThreadStore

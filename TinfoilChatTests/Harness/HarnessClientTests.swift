@@ -197,17 +197,32 @@ struct HarnessClientTests {
         ])
     }
 
-    @Test func aSecondRefusalToReauthenticateFailsAsUnauthenticated() async throws {
+    /// An account whose renewed session or chat access the harness refuses
+    /// too is signed in: its request was not answered in time, and signing
+    /// in again would change nothing.
+    @Test(arguments: ["UNAUTHENTICATED", "CREDENTIAL_REQUIRED"])
+    func aSignedInRequestRefusedAgainWithWhatItRenewedFailsAsOneToSendAgain(_ code: String) async throws {
+        let transport = ScriptedTransport([
+            Self.refusal(401, code: code, action: "reauthenticate"),
+            Self.refusal(401, code: code, action: "reauthenticate"),
+        ])
+        let credentials = ScriptedCredentials(identities: ["jwt", "jwt-2"], access: [.success("k"), .success("k-2")])
+        let error = await Self.failure { let _: Ok = try await Self.client(transport, credentials).post(.turn, Input(threadId: "t")) }
+        #expect(error == HarnessError(HarnessErrorBody.signInUnconfirmed))
+        let requests = await transport.requests
+        #expect(requests.map { $0.headers["Authorization"] } == ["Bearer jwt", "Bearer jwt-2"])
+        #expect(requests.map { $0.headers[HarnessHeader.inferenceKey] } == ["k", "k-2"])
+    }
+
+    @Test func aSignedOutCallerRefusedAgainWithAnotherFreeKeyFailsWithTheRefusal() async throws {
         let transport = ScriptedTransport([
             Self.refusal(401, code: "UNAUTHENTICATED", action: "reauthenticate"),
             Self.refusal(401, code: "UNAUTHENTICATED", action: "reauthenticate"),
         ])
-        let credentials = ScriptedCredentials(identities: ["jwt", "jwt-2"], access: [.success("k"), .success("k")])
-        let error = await Self.failure { let _: Ok = try await Self.client(transport, credentials).post(.get, Input(threadId: "t")) }
-        #expect(error?.code == HarnessErrorCode.unauthenticated)
-        #expect(error?.action == .reauthenticate)
-        #expect(error?.status == 401)
-        #expect(await transport.requests.count == 2)
+        let credentials = ScriptedCredentials(identities: [nil, nil], anonymousKeys: ["free_1", "free_2"])
+        let error = await Self.failure { let _: Ok = try await Self.client(transport, credentials).post(.session, Input(threadId: "t")) }
+        #expect(error == HarnessError(HarnessErrorBody(code: HarnessErrorCode.unauthenticated, message: "refused", action: .reauthenticate), status: 401))
+        #expect(await transport.requests.map { $0.headers["Authorization"] } == ["Bearer free_1", "Bearer free_2"])
     }
 
     @Test func anIdentityThatCannotBeRefreshedFailsAsUnauthenticated() async throws {

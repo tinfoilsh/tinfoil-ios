@@ -147,6 +147,98 @@ struct StoredThreadTests {
         #expect(thread.summary.activityAt == "2023-11-14T22:13:20.000Z")
         #expect(thread.recordVersion == nil)
     }
+
+    /// A chat whose first exchange a compaction summarized, with two
+    /// exchanges after its marker.
+    private static func compacted() throws -> StoredThread {
+        func message(_ id: String, _ role: String) -> [String: Any] {
+            ["id": id, "role": role, "createdAt": "2026-01-01T00:00:00Z", "content": id]
+        }
+        var record = Self.record
+        record["messages"] = [
+            message("u1", "user"), message("a1", "assistant"),
+            ["id": "c", "role": "compaction", "createdAt": "2026-01-01T00:00:00Z", "content": "A first exchange.",
+             "compaction": ["messages": 2, "startedAt": 1767225600000, "endedAt": 1767225601000, "model": "gpt-oss-120b", "version": 1]],
+            message("u2", "user"), message("a2", "assistant"), message("u3", "user"), message("a3", "assistant"),
+        ] as [[String: Any]]
+        return try #require(StoredThread(json: record))
+    }
+
+    private static func ids(_ thread: StoredThread) -> [String] {
+        thread.messages.compactMap { $0.objectValue?["id"]?.stringValue }
+    }
+
+    private static let wholeChat = ["u1", "a1", "c", "u2", "a2", "u3", "a3"]
+    private static let fromMarker = ["c", "u2", "a2", "u3", "a3"]
+
+    @Test func aRequestAboutAMessageSendsTheChatFromItsMarkerUnlessTheMarkerCoversTheMessage() throws {
+        let thread = try Self.compacted()
+        func sent(about messageId: String? = nil) -> [String] { Self.ids(thread.fromLatestCompaction(about: messageId)) }
+        #expect(sent() == Self.fromMarker)
+        #expect(sent(about: "u2") == Self.fromMarker)
+        #expect(sent(about: "a3") == Self.fromMarker)
+        #expect(sent(about: "a1") == Self.wholeChat)
+        #expect(sent(about: "c") == Self.wholeChat)
+        #expect(sent(about: "not in the chat") == Self.wholeChat)
+        // The rest of the record goes as it is.
+        #expect(thread.fromLatestCompaction()["aLaterMember"] == thread["aLaterMember"])
+    }
+
+    @Test func aTurnSendsTheChatFromItsMarkerOnlyWhenAnEarlierQuestionFollowsTheMarkerToo() throws {
+        let thread = try Self.compacted()
+        func sent(about messageId: String? = nil) -> [String] { Self.ids(thread.fromLatestCompaction(about: messageId, answering: true)) }
+        // A new question, and the last one asked or answered again, come
+        // after the question that follows the marker.
+        #expect(sent() == Self.fromMarker)
+        #expect(sent(about: "u3") == Self.fromMarker)
+        #expect(sent(about: "a3") == Self.fromMarker)
+        // The exchange before the first question after the marker is one
+        // the marker covers.
+        #expect(sent(about: "u2") == Self.wholeChat)
+        #expect(sent(about: "a2") == Self.wholeChat)
+        #expect(sent(about: "u1") == Self.wholeChat)
+        #expect(sent(about: "a1") == Self.wholeChat)
+        #expect(sent(about: "not in the chat") == Self.wholeChat)
+    }
+
+    @Test func aChatAnsweredFromItsMarkerOnFollowsTheMessagesThisDeviceHoldsBeforeIt() throws {
+        let stored = try Self.compacted()
+        let reply: JSONValue = .object(["id": .string("a4"), "role": .string("assistant"), "createdAt": .string("2026-01-01T00:00:00Z"), "content": .string("a4")])
+        var answered = stored.fromLatestCompaction()
+        answered.messages.append(reply)
+        answered.keepEarlier(stored.messages)
+        #expect(Self.ids(answered) == Self.wholeChat + ["a4"])
+
+        // A copy that lost the marker meanwhile, as when a message the
+        // marker covers was deleted, keeps what it holds before the answer.
+        var lost = stored
+        lost.messages.remove(at: 2)
+        lost.messages.removeFirst()
+        var late = stored.fromLatestCompaction()
+        late.keepEarlier(lost.messages)
+        #expect(Self.ids(late) == ["a1"] + Self.fromMarker)
+
+        // An answer that does not start at a marker is the whole chat.
+        var whole = stored
+        whole.messages.removeFirst()
+        whole.keepEarlier(stored.messages)
+        #expect(Self.ids(whole) == Array(Self.wholeChat.dropFirst()))
+    }
+
+    @Test func aToolCallNamesTheReplyThatHoldsIt() throws {
+        var record = Self.record
+        record["messages"] = [
+            ["id": "u", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Chart it"],
+            ["id": "a", "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "content": "", "timeline": [
+                ["id": "b0", "type": "content", "content": "Here:"],
+                ["id": "b1", "type": "tool_call", "toolCallId": "call_1", "name": "render_chart", "arguments": "{}", "complete": true],
+            ]],
+        ] as [[String: Any]]
+        let thread = try #require(StoredThread(json: record))
+        #expect(thread.messageId(holding: "call_1") == "a")
+        #expect(thread.messageId(holding: "b0") == nil)
+        #expect(thread.messageId(holding: "call_2") == nil)
+    }
 }
 
 @Suite("Device thread store")

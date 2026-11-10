@@ -210,6 +210,9 @@ actor HarnessClient {
                 continue
             }
             if needsCredential, let refusal { throw refusal }
+            // Refused again with what the account just renewed: it is signed
+            // in.
+            if detail.action == .reauthenticate, !anonymous { throw HarnessError(HarnessErrorBody.signInUnconfirmed) }
             throw HarnessError(detail, status: response.status)
         }
         throw HarnessError.unauthenticated

@@ -74,6 +74,16 @@ struct HarnessErrorBody: Equatable, Sendable {
     /// is unknown, as when the connection drops.
     static let unsealedAnswer = unreachable
 
+    /// Why a request failed when the harness refused a sign-in or chat
+    /// access the account had just renewed, as when the request took too
+    /// long to arrive. The account is signed in, so signing in again would
+    /// change nothing, and the request was not carried out.
+    static let signInUnconfirmed = HarnessErrorBody(
+        code: HarnessErrorCode.signInUnconfirmed,
+        message: "The chat service could not confirm your sign-in in time. Check your connection and try again.",
+        action: .retry
+    )
+
     /// Why a request failed when the enclave could not be verified: it was
     /// not sent.
     static let unverified = HarnessErrorBody(
