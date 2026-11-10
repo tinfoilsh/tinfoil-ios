@@ -405,7 +405,8 @@ final class DeviceThreads: ThreadStore {
         guard let data = reply.thread?.data, var thread = StoredThread(data: data) else {
             throw HarnessError(code: HarnessErrorCode.upstreamRefused, message: "The chat service returned an invalid chat.", action: .retry)
         }
-        thread.keepEarlier(stored.messages)
+        // A fork is another chat: nothing of its source goes before it.
+        if route != .fork { thread.keepEarlier(stored.messages) }
         thread.restore(stored.heldImages)
         return thread
     }
