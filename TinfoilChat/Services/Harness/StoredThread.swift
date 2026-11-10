@@ -299,6 +299,74 @@ extension StoredThread {
     }
 }
 
+extension StoredThread {
+    private static func idOf(_ message: JSONValue) -> String? {
+        message.objectValue?["id"]?.stringValue
+    }
+
+    private static func roleOf(_ message: JSONValue) -> String? {
+        message.objectValue?["role"]?.stringValue
+    }
+
+    /// The chat from its latest compaction marker on: the marker, whose
+    /// summary covers every message before it, and the messages after it.
+    /// The harness reads no more of the chat, unless a request is about a
+    /// message the marker covers, which sends the chat whole. To answer a
+    /// question it also reads the exchange before that question, so a turn
+    /// sends the chat whole unless an earlier question follows the marker
+    /// too.
+    func fromLatestCompaction(about messageId: String? = nil, answering: Bool = false) -> StoredThread {
+        let messages = messages
+        let roles = messages.map(Self.roleOf)
+        let user = Components.Schemas.Role.Value1Payload.user.rawValue
+        guard let marker = roles.lastIndex(of: Components.Schemas.Role.Value1Payload.compaction.rawValue), marker > 0 else { return self }
+        var subject = messages.count
+        if let messageId {
+            guard let named = messages.firstIndex(where: { Self.idOf($0) == messageId }) else { return self }
+            subject = named
+        }
+        if answering {
+            // The question a turn answers: the message itself, or the one
+            // its reply answers.
+            var question = subject
+            if subject < messages.count, roles[subject] == Components.Schemas.Role.Value1Payload.assistant.rawValue {
+                guard let asked = roles[..<subject].lastIndex(of: user) else { return self }
+                question = asked
+            }
+            guard question > marker, roles[(marker + 1)..<question].contains(user) else { return self }
+        } else {
+            guard subject > marker else { return self }
+        }
+        var sent = self
+        sent.messages = Array(messages[marker...])
+        return sent
+    }
+
+    /// Puts the messages this device holds before the chat's own once the
+    /// harness answered with the chat. An answer that starts at a compaction
+    /// marker is the chat from that marker on, as it was sent: it follows
+    /// the messages this device holds before the first one the answer holds
+    /// too.
+    mutating func keepEarlier(_ stored: [JSONValue]) {
+        let returned = messages
+        guard let first = returned.first, Self.roleOf(first) == Components.Schemas.Role.Value1Payload.compaction.rawValue else { return }
+        let held = Set(returned.compactMap(Self.idOf))
+        let from = stored.firstIndex { message in Self.idOf(message).map { held.contains($0) } ?? false } ?? stored.endIndex
+        messages = Array(stored[..<from]) + returned
+    }
+
+    /// The reply that holds a tool call, by the call's id.
+    func messageId(holding toolCallId: String) -> String? {
+        let toolCall = Components.Schemas.Block._TypePayload.Value1Payload.toolCall.rawValue
+        return messages.first { message in
+            (message.objectValue?["timeline"]?.arrayValue ?? []).contains { block in
+                guard let block = block.objectValue, block["type"]?.stringValue == toolCall else { return false }
+                return (block["toolCallId"]?.stringValue ?? block["id"]?.stringValue) == toolCallId
+            }
+        }.flatMap(Self.idOf)
+    }
+}
+
 /// The file a user picked for an image attachment, kept apart from the chat:
 /// the chat holds the copy models read; the original is only shown.
 struct AttachmentOriginal: Codable, Equatable, Sendable {

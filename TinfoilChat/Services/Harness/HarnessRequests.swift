@@ -76,7 +76,8 @@ struct Turn: Encodable, Equatable, Sendable {
     var kind: Kind = .send
     var ephemeral: Bool?
     var local: Bool?
-    /// A device chat as stored, sent back whole.
+    /// A device chat as stored, sent back whole or from its latest
+    /// compaction marker on.
     var thread: StoredThread?
     var profile: ProfileFieldsInput?
     var projectId: Nullable<String>?
@@ -230,8 +231,8 @@ struct ThreadUpdateRequest: Encodable, Equatable, Sendable {
     var webSearchEnabled: Bool?
     var pinned: Bool?
     var projectId: Nullable<String>?
-    /// A device chat, sent whole, with the settings the harness applies a
-    /// prompt from.
+    /// A device chat, sent whole or from its latest compaction marker on,
+    /// with the settings the harness applies a prompt from.
     var local: Bool?
     var thread: StoredThread?
     var profile: ProfileFieldsInput?
@@ -333,7 +334,7 @@ struct ThreadPageRequest: Encodable, Equatable, Sendable {
     var before: String?
 }
 
-/// A chat to read aloud a message of: stored, or sent whole.
+/// A chat to read aloud a message of: stored, or sent with the request.
 struct SpeechRequest: Encodable, Equatable, Sendable {
     var key: String?
     var threadId: String?

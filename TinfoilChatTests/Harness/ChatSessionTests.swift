@@ -168,6 +168,26 @@ private func heldRun(_ head: [[String: Any]], then tail: [[String: Any]], until 
     }
 }
 
+/// A run that answers a device chat's turn: it adds the turn's message and a
+/// reply to the chat as the turn sent it, and returns that chat.
+private func answeringRun(_ request: HarnessRequest) throws -> HarnessResponse {
+    let turn = request.json
+    let id = turn["threadId"] as! String
+    let sent = (turn["thread"] as? [String: Any])?["messages"] as? [[String: Any]] ?? []
+    let question: [String: Any] = ["id": turn["clientRequestId"] as! String, "role": "user", "createdAt": "2026-01-01T00:01:00Z", "content": turn["content"] as? String ?? ""]
+    let reply: [String: Any] = ["id": "msg_9", "role": "assistant", "createdAt": "2026-01-01T00:01:01Z", "content": "Third answer.",
+                                "timeline": [["id": "msg_9_content_0", "type": "content", "content": "Third answer."]]]
+    return try Answers.events([
+        ["type": "RUN_STARTED", "threadId": id, "runId": "run_9", "instance": "i"],
+        ["type": "MESSAGES_SNAPSHOT", "messages": sent + [question], "hasOlder": false],
+        ["type": "TEXT_MESSAGE_CHUNK", "messageId": "msg_9", "role": "assistant", "delta": "Third answer."],
+        ["type": "RUN_FINISHED", "threadId": id, "runId": "run_9", "metadata": [
+            "messages": [["id": "msg_9", "isInterrupted": false]],
+            "thread": record(id: id, messages: sent + [question, reply]),
+        ]],
+    ])(request)
+}
+
 @Suite("Chat session")
 @MainActor
 struct ChatSessionTests {
@@ -1324,5 +1344,163 @@ struct ChatSessionTests {
         #expect(session.state.messages.first?.research?.version == 1)
         await fixture.transport.release()
         #expect(!(await editing.value))
+    }
+
+    /// The marker of a compaction that summarized a chat's first exchange.
+    private static let compactionMarker: [String: Any] = [
+        "id": "c", "role": "compaction", "createdAt": "2026-01-01T00:00:02Z", "content": "## Goals and context\nA first question.",
+        "compaction": ["messages": 2, "startedAt": 1767225600000, "endedAt": 1767225601000, "model": "gpt-oss-120b", "version": 2],
+    ]
+
+    private static func questionRecord(_ id: String) -> [String: Any] {
+        ["id": id, "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "question \(id)"]
+    }
+
+    /// A reply, which holds a widget's call when one is named.
+    private static func replyRecord(_ id: String, toolCallId: String? = nil) -> [String: Any] {
+        var timeline: [[String: Any]] = [["id": "\(id)_content_0", "type": "content", "content": "answer \(id)"]]
+        if let toolCallId {
+            timeline.append(["id": toolCallId, "type": "tool_call", "toolCallId": toolCallId, "name": "render_chart", "arguments": "{}", "complete": true])
+        }
+        return ["id": id, "role": "assistant", "createdAt": "2026-01-01T00:00:01Z", "content": "answer \(id)", "timeline": timeline]
+    }
+
+    /// A session that shows a device chat whose first exchange a compaction
+    /// summarized, with the messages given after its marker. The harness
+    /// takes a device chat from its latest compaction marker on unless its
+    /// features say otherwise.
+    private static func compactedChat(after messages: [[String: Any]], features: [String: Bool] = ["partialThread": true]) async throws -> Fixture {
+        let opened: [String: Any] = signedInSession.merging(["user": ["id": "", "anonymous": true], "features": features]) { $1 }
+        let fixture = Fixture(answers: [Answers.json(opened)])
+        try await fixture.account.refresh()
+        let stored = try #require(StoredThread(json: record(messages: [questionRecord("u1"), replyRecord("a1"), compactionMarker] + messages)))
+        _ = try await fixture.session.device.add(stored, originals: [:])
+        fixture.session.list.reloadDevice()
+        #expect(try await fixture.session.openChat(threadId, local: true) == .opened)
+        return fixture
+    }
+
+    /// The ids of the messages of the chat a request carried.
+    private static func sentIds(_ request: HarnessRequest) -> [String] {
+        let thread = request.json["thread"] as? [String: Any]
+        return (thread?["messages"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
+    }
+
+    private static func ids(_ thread: StoredThread) -> [String] {
+        thread.messages.compactMap { $0.objectValue?["id"]?.stringValue }
+    }
+
+    @Test func aCompactedDeviceChatSendsATurnFromItsMarkerAndStoresItsRunAfterTheEarlierMessages() async throws {
+        let fixture = try await Self.compactedChat(after: [Self.questionRecord("u2"), Self.replyRecord("a2")])
+        let session = fixture.session
+        await fixture.transport.push(answeringRun)
+
+        #expect(await session.send(TurnFields(kind: .send, content: "third question")))
+
+        let turn = try #require(await fixture.transport.requests.last)
+        #expect(turn.route == .turn)
+        #expect(Self.sentIds(turn) == ["c", "u2", "a2"])
+        let asked = try #require(turn.json["clientRequestId"] as? String)
+        // The chat shows, and this device stores, the messages the turn left
+        // out before those its run returned.
+        #expect(session.state.messages.map(\.id) == ["u1", "a1", "u2", "a2", asked, "msg_9"])
+        #expect(session.state.markers["u2"]?.id == "c")
+        let stored = try #require(try await session.device.get(threadId))
+        #expect(Self.ids(stored) == ["u1", "a1", "c", "u2", "a2", asked, "msg_9"])
+    }
+
+    @Test func aCompactedDeviceChatIsSentWholeToAHarnessThatDoesNotTakeItFromItsMarker() async throws {
+        let fixture = try await Self.compactedChat(after: [Self.questionRecord("u2"), Self.replyRecord("a2")], features: [:])
+        await fixture.transport.push(answeringRun)
+
+        #expect(await fixture.session.send(TurnFields(kind: .send, content: "third question")))
+
+        let turn = try #require(await fixture.transport.requests.last)
+        #expect(Self.sentIds(turn) == ["u1", "a1", "c", "u2", "a2"])
+    }
+
+    @Test func aRetrySendsTheWholeChatWhenItsLastQuestionIsTheFirstAfterTheMarker() async throws {
+        let refused = Answers.refusal(429, code: "QUOTA_EXHAUSTED", action: "wait")
+        let first = try await Self.compactedChat(after: [Self.questionRecord("u2")])
+        await first.transport.push(refused)
+        #expect(!(await first.session.retry()))
+        let whole = try #require(await first.transport.requests.last)
+        #expect(whole.json["kind"] as? String == "retry")
+        #expect(Self.sentIds(whole) == ["u1", "a1", "c", "u2"])
+
+        let later = try await Self.compactedChat(after: [Self.questionRecord("u2"), Self.replyRecord("a2"), Self.questionRecord("u3")])
+        await later.transport.push(refused)
+        #expect(!(await later.session.retry()))
+        let partial = try #require(await later.transport.requests.last)
+        #expect(partial.json["kind"] as? String == "retry")
+        #expect(Self.sentIds(partial) == ["c", "u2", "a2", "u3"])
+    }
+
+    @Test func aWidgetsRetrySendsTheWholeChatUnlessAnEarlierQuestionFollowsTheMarkerToo() async throws {
+        let fixture = try await Self.compactedChat(after: [
+            Self.questionRecord("u2"), Self.replyRecord("a2", toolCallId: "call_1"), Self.questionRecord("u3"), Self.replyRecord("a3", toolCallId: "call_2"),
+        ])
+        let session = fixture.session
+        let refused = Answers.refusal(409, code: HarnessErrorCode.toolUnavailable, action: "stop")
+
+        await fixture.transport.push(refused)
+        #expect(await session.retryToolCall("call_2")?.code == HarnessErrorCode.toolUnavailable)
+        let later = try #require(await fixture.transport.requests.last)
+        #expect(later.json["toolCallId"] as? String == "call_2")
+        #expect(Self.sentIds(later) == ["c", "u2", "a2", "u3", "a3"])
+
+        // The reply that holds the call answers the first question after the
+        // marker, whose earlier exchange the marker covers.
+        await fixture.transport.push(refused)
+        #expect(await session.retryToolCall("call_1")?.code == HarnessErrorCode.toolUnavailable)
+        let first = try #require(await fixture.transport.requests.last)
+        #expect(first.json["toolCallId"] as? String == "call_1")
+        #expect(Self.sentIds(first) == ["u1", "a1", "c", "u2", "a2", "u3", "a3"])
+    }
+
+    @Test func aCompactedDeviceChatIsReadAloudWholeOnlyWhenTheMarkerCoversTheMessage() async throws {
+        let fixture = try await Self.compactedChat(after: [Self.questionRecord("u2"), Self.replyRecord("a2")])
+        let audio: ScriptedTransport.Answer = { _ in .collected(status: 200, headers: ["content-type": Constants.Speech.contentType], sealed: true, body: Data([0, 0])) }
+
+        await fixture.transport.push(audio)
+        _ = try await fixture.session.speak("a2")
+        let later = try #require(await fixture.transport.requests.last)
+        #expect(Self.sentIds(later) == ["c", "u2", "a2"])
+
+        await fixture.transport.push(audio)
+        _ = try await fixture.session.speak("a1")
+        let covered = try #require(await fixture.transport.requests.last)
+        #expect(Self.sentIds(covered) == ["u1", "a1", "c", "u2", "a2"])
+    }
+
+    @Test func aCompactedDeviceChatIsRenamedFromItsMarkerAndChangesItsMessagesWhole() async throws {
+        let fixture = try await Self.compactedChat(after: [Self.questionRecord("u2"), Self.replyRecord("a2")])
+        let session = fixture.session
+        await fixture.transport.push(renamed("Dogs"))
+
+        let updated = try await session.update(threadId, ThreadPatch(title: "Dogs"))
+
+        let rename = try #require(await fixture.transport.requests.last)
+        #expect(rename.route == .update)
+        #expect(Self.sentIds(rename) == ["c", "u2", "a2"])
+        #expect(updated?.title == "Dogs")
+        #expect(updated?.messageCount == 4)
+        let kept = try #require(try await session.device.get(threadId))
+        #expect(kept.title == "Dogs")
+        #expect(Self.ids(kept) == ["u1", "a1", "c", "u2", "a2"])
+
+        // A change of the chat's messages sends it whole.
+        await fixture.transport.push { request in
+            var thread = request.json["thread"] as? [String: Any] ?? [:]
+            thread["messages"] = (thread["messages"] as? [[String: Any]] ?? []).filter { $0["id"] as? String != "a2" }
+            return try Answers.json(["thread": thread])(request)
+        }
+        try await session.deleteMessage(at: 3)
+
+        let deletion = try #require(await fixture.transport.requests.last)
+        #expect(deletion.route == .messageDelete)
+        #expect(Self.sentIds(deletion) == ["u1", "a1", "c", "u2", "a2"])
+        let left = try #require(try await session.device.get(threadId))
+        #expect(Self.ids(left) == ["u1", "a1", "c", "u2"])
     }
 }

@@ -338,6 +338,10 @@ final class CloudThreads: ThreadStore {
 final class DeviceThreads: ThreadStore {
     private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TinfoilChat", category: "Harness")
 
+    /// The session feature under which the harness takes a chat kept on this
+    /// device from its latest compaction marker on.
+    private static let partialThreadFeature = "partialThread"
+
     let local = true
     private let account: HarnessAccount
     let store: LocalThreadStore
@@ -365,15 +369,41 @@ final class DeviceThreads: ThreadStore {
         try await store.get(threadId) ?? StoredThread.new(id: threadId)
     }
 
-    /// The harness applies an operation to the chat this device sends it.
-    /// The chat it answers with keeps the images this device holds where the
-    /// harness left them out.
-    private func request(_ route: HarnessRoute, _ sent: StoredThread, _ body: some Encodable) async throws -> StoredThread {
+    /// The chat a request sends: from its latest compaction marker on while
+    /// the harness takes it so and reads no more of it for the message the
+    /// request is about, or the question a turn answers, and otherwise
+    /// whole.
+    private func sendable(_ thread: StoredThread, about messageId: String? = nil, answering: Bool = false) -> StoredThread {
+        guard account.session?.features.additionalProperties[Self.partialThreadFeature] == true else { return thread }
+        return thread.fromLatestCompaction(about: messageId, answering: answering)
+    }
+
+    /// The chat a turn sends. A turn answers the question it names, or the
+    /// one the reply it names answers: a widget's retry names the reply by
+    /// the widget's call, and a retry answers the chat's last question
+    /// again.
+    private func sendable(_ thread: StoredThread, for fields: TurnFields) -> StoredThread {
+        var about = fields.messageId
+        if about == nil, let toolCallId = fields.toolCallId {
+            // A call this device does not find is the harness's to refuse.
+            guard let reply = thread.messageId(holding: toolCallId) else { return thread }
+            about = reply
+        }
+        if about == nil, fields.kind == .retry { about = thread.messages.last?.objectValue?["id"]?.stringValue }
+        return sendable(thread, about: about, answering: true)
+    }
+
+    /// The harness applies an operation to the chat this device sends it,
+    /// whole unless the operation says what it sends. The chat it answers
+    /// with follows the messages this device left out, and keeps the images
+    /// this device holds where the harness left them out.
+    private func request(_ route: HarnessRoute, _ stored: StoredThread, _ body: some Encodable) async throws -> StoredThread {
         let reply: DeviceThreadReply = try await account.post(route, body, keyless: true)
         guard let data = reply.thread?.data, var thread = StoredThread(data: data) else {
             throw HarnessError(code: HarnessErrorCode.upstreamRefused, message: "The chat service returned an invalid chat.", action: .retry)
         }
-        thread.restore(sent.heldImages)
+        thread.keepEarlier(stored.messages)
+        thread.restore(stored.heldImages)
         return thread
     }
 
@@ -421,7 +451,7 @@ final class DeviceThreads: ThreadStore {
         let changed = try await change(threadId, .update) { sent in
             ThreadUpdateRequest(
                 id: threadId, title: patch.title, model: patch.model, presetId: patch.presetId, webSearchEnabled: patch.webSearchEnabled,
-                local: true, thread: sent, profile: ProfileFieldsInput(profile)
+                local: true, thread: sendable(sent), profile: ProfileFieldsInput(profile)
             )
         }
         guard let summary = changed?.summary else { return nil }
@@ -475,7 +505,7 @@ final class DeviceThreads: ThreadStore {
         let changed = try await change(threadId, .messageAnswer) { sent in
             AnswerRequest(
                 threadId: threadId, messageId: messageId, toolCallId: toolCallId, answers: answers,
-                local: true, thread: sent, profile: ProfileFieldsInput(profile)
+                local: true, thread: sendable(sent, about: messageId), profile: ProfileFieldsInput(profile)
             )
         }
         return changed.map { ThreadResult(window: $0.window) }
@@ -491,15 +521,15 @@ final class DeviceThreads: ThreadStore {
     /// The harness reads a message of the chat this device sends it.
     func speech(_ threadId: String, messageId: String) async throws -> HarnessResponse {
         guard let thread = try await store.get(threadId) else { throw Self.notOnDevice("chat") }
-        return try await account.stream(.speech, SpeechRequest(threadId: threadId, messageId: messageId, local: true, thread: thread, speed: ReadAloudSpeed.requested(account)), keyless: true)
+        return try await account.stream(.speech, SpeechRequest(threadId: threadId, messageId: messageId, local: true, thread: sendable(thread, about: messageId), speed: ReadAloudSpeed.requested(account)), keyless: true)
     }
 
     func runKey() throws -> String? { nil }
 
-    /// A turn carries the thread as stored and the profile instead of the
-    /// content key, which it never uses. The harness makes a new chat from
-    /// its first turn, as it does a stored one, and starts a turn queued
-    /// behind the chat's running reply from that run's chat.
+    /// A turn carries the thread and the profile instead of the content key,
+    /// which it never uses. The harness makes a new chat from its first
+    /// turn, as it does a stored one, and starts a turn queued behind the
+    /// chat's running reply from that run's chat.
     func prepareTurn(_ threadId: String, defaults: Turn, fields: TurnFields, key: String?, settings: TurnSettings) async throws -> PreparedTurn? {
         let run = DeviceRun(threadId: threadId, store: store, since: controller.deviceRuns[threadId]?.since ?? controller.tick())
         controller.begin(run)
@@ -513,7 +543,7 @@ final class DeviceThreads: ThreadStore {
         }
         guard shown() else { return nil }
         var input = fields.applied(to: defaults)
-        input.thread = stored
+        input.thread = stored.map { sendable($0, for: fields) }
         input.presetId = settings.first && settings.presetChosen ? Nullable(settings.presetId) : nil
         input.threadId = threadId
         input.local = true
@@ -569,7 +599,7 @@ final class DeviceThreads: ThreadStore {
     }
 
     func askContext(_ threadId: String, profile: ProfileFields) async throws -> AskContext {
-        AskContext(threadId: threadId, local: true, thread: try await store.get(threadId), profile: profile)
+        AskContext(threadId: threadId, local: true, thread: try await store.get(threadId).map { sendable($0) }, profile: profile)
     }
 
     /// A chat on this device keeps a document's text in its descriptor.
@@ -597,12 +627,13 @@ final class DeviceThreads: ThreadStore {
     }
 }
 
-/// A device run's final event carries the whole thread, which this device
-/// stores with the images it holds where the harness left them out, and the
-/// originals of the images the turn sent. The settings the user changed
-/// after the run's turn read the chat keep the user's values. A run whose
-/// turn read the chat before a later run stored it leaves the later run's
-/// thread as it is.
+/// A device run's final event carries the thread as its turn sent it, with
+/// what the run added: this device stores it after the messages it left out
+/// of the turn, with the images it holds where the harness left them out,
+/// and the originals of the images the turn sent. The settings the user
+/// changed after the run's turn read the chat keep the user's values. A run
+/// whose turn read the chat before a later run stored it leaves the later
+/// run's thread as it is.
 enum DeviceRunStorage {
     @discardableResult
     static func store(_ run: DeviceRun, event: RunEvent, changedSince: [String], storedRuns: StoredRuns) async throws -> StoredThread? {
@@ -618,6 +649,7 @@ enum DeviceRunStorage {
         return try await run.store.update(run.threadId, originals: run.originals) { stored in
             guard storedRuns.claim(run) else { return nil }
             var next = base
+            next.keepEarlier(stored?.messages ?? [])
             var held = stored?.heldImages ?? [:]
             held.merge(run.images) { $1 }
             next.restore(held)
