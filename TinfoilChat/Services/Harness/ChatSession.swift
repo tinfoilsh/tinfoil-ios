@@ -855,8 +855,13 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         patch { $0.model = model; $0.modelChosen = true }
     }
 
+    /// Deep research searches the web, so turning web search off turns it
+    /// off.
     func setWebSearch(_ enabled: Bool) {
-        patch { $0.webSearch = enabled }
+        patch {
+            $0.webSearch = enabled
+            if !enabled { $0.research = false }
+        }
     }
 
     /// Whether the account may research its questions in depth: the harness
