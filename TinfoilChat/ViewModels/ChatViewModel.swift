@@ -2136,8 +2136,8 @@ class ChatViewModel: ObservableObject {
 extension Notification.Name {
     /// Cloud sync was turned on or off in Settings.
     static let cloudSyncSettingChanged = Notification.Name("tinfoil.cloudSyncSettingChanged")
-    /// The chat service refused the account's identity, after it was
-    /// refreshed: an account left without a session has to sign in again.
+    /// A request failed with an error that asks to sign in again: an account
+    /// left without a session has to.
     static let chatAuthenticationRequired = Notification.Name("tinfoil.chatAuthenticationRequired")
 }
 

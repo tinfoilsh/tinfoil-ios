@@ -79,6 +79,11 @@ struct StreamErrorPresentation: Equatable {
     private static let connection = StreamErrorPresentation(
         .connection, "Connection problem", "Check your internet connection, then resend your message. \(notLost)"
     )
+    /// The account is signed in, and its request reached the service too
+    /// late to be accepted. It is sent again, as after a lost connection.
+    private static let signInUnconfirmed = StreamErrorPresentation(
+        .connection, "Your sign-in could not be confirmed in time", connection.suggestion
+    )
     private static let verification = StreamErrorPresentation(
         .verification, "Unable to verify the chat service", "Nothing was sent. Resend your message in a moment. \(notLost)"
     )
@@ -135,6 +140,7 @@ struct StreamErrorPresentation: Equatable {
         }
         switch error.code {
         case HarnessErrorCode.unauthenticated: return auth
+        case HarnessErrorCode.signInUnconfirmed: return signInUnconfirmed
         case HarnessErrorCode.keyRequired: return key
         case HarnessErrorCode.keyMismatch: return keyOutOfDate
         case HarnessErrorCode.quotaExhausted: return quota(error, occurredAt: occurredAt)

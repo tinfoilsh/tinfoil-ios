@@ -36,13 +36,16 @@ private func makeAccount(
     answers: [ScriptedTransport.Answer],
     key: HeldKey? = nil,
     settings: MemoryProfileStorage = MemoryProfileStorage(),
-    cloudSync: Bool = true
+    cloudSync: Bool = true,
+    sessionEnded: Bool = false
 ) -> (account: HarnessAccount, transport: ScriptedTransport) {
     let key = key ?? HeldKey()
     let transport = ScriptedTransport(answers)
     let controlPlane = FreeKeyControlPlane()
+    // An account whose session ended still holds the token last issued, and
+    // is issued no other.
     let credentials = HarnessCredentialProvider(
-        identity: { _ in userId == nil ? nil : "jwt" },
+        identity: { refresh in userId == nil || (refresh && sessionEnded) ? nil : "jwt" },
         chatAccess: ChatAccessCache(controlPlane: controlPlane) { _ in },
         anonymousAccess: AnonymousAccessCache(controlPlane: controlPlane)
     )
@@ -228,12 +231,12 @@ struct HarnessAccountTests {
         #expect(account.syncStatus.lastSyncedAt == nil)
     }
 
-    @Test func settingsTheHarnessRefusesForTheIdentityAskForASignIn() async throws {
+    @Test func settingsTheHarnessRefusesAnAccountWhoseSessionEndedAskForASignIn() async throws {
         let prompts = SignInPrompts()
         let observer = NotificationCenter.default.addObserver(forName: .chatAuthenticationRequired, object: nil, queue: nil) { _ in prompts.count += 1 }
         defer { NotificationCenter.default.removeObserver(observer) }
         let refused = Answers.refusal(401, code: HarnessErrorCode.unauthenticated, action: "reauthenticate")
-        let (account, _) = makeAccount(userId: "user-1", answers: [Answers.json(sessionAnswer), refused, refused, refused, refused])
+        let (account, _) = makeAccount(userId: "user-1", answers: [Answers.json(sessionAnswer), refused, refused], sessionEnded: true)
         try await account.refresh()
         #expect(prompts.count == 1)
         await #expect(throws: HarnessError.self) { try await account.updateProfile(["language": "French"]) }
