@@ -126,27 +126,18 @@ final class Dictation {
         let generation = self.generation
         Task { [weak self] in
             let audio = try? await Task.detached { try Data(contentsOf: file) }.value
-            guard let self, self.generation == generation, self.segments[segment.id] === segment else {
-                try? FileManager.default.removeItem(at: file)
-                return
-            }
+            // The recorder's file goes once it is read, as it is not
+            // encrypted; the recording is kept encrypted, if at all.
+            try? FileManager.default.removeItem(at: file)
+            guard let self, self.generation == generation, self.segments[segment.id] === segment else { return }
             segment.reading = false
             guard let audio, !audio.isEmpty else {
-                try? FileManager.default.removeItem(at: file)
                 self.segments[segment.id] = nil
                 self.refresh()
                 return
             }
             segment.audio = audio
-            // The recorder's file goes once the recording is kept.
-            if segment.persist, self.store != nil {
-                self.save(segment) { store in
-                    try await store.save(record, audio: audio)
-                    try? FileManager.default.removeItem(at: file)
-                }
-            } else {
-                try? FileManager.default.removeItem(at: file)
-            }
+            self.save(segment) { store in try await store.save(record, audio: audio) }
             self.work()
         }
     }
