@@ -381,7 +381,8 @@ final class DeviceThreads: ThreadStore {
     /// The chat a turn sends. A turn answers the question it names, or the
     /// one the reply it names answers: a widget's retry names the reply by
     /// the widget's call, and a retry answers the chat's last question
-    /// again.
+    /// again. A turn that names an attachment the chat holds sends the chat
+    /// whole unless the messages it would send hold the attachment.
     private func sendable(_ thread: StoredThread, for fields: TurnFields) -> StoredThread {
         var about = fields.messageId
         if about == nil, let toolCallId = fields.toolCallId {
@@ -390,7 +391,9 @@ final class DeviceThreads: ThreadStore {
             about = reply
         }
         if about == nil, fields.kind == .retry { about = thread.messages.last?.objectValue?["id"]?.stringValue }
-        return sendable(thread, about: about, answering: true)
+        let sent = sendable(thread, about: about, answering: true)
+        let named = (fields.attachments ?? []).filter { $0.uploaded == nil }.map(\.id)
+        return named.allSatisfy { sent.attachmentFields($0) != nil } ? sent : thread
     }
 
     /// The harness applies an operation to the chat this device sends it,

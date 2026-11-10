@@ -1369,11 +1369,16 @@ struct ChatSessionTests {
     /// summarized, with the messages given after its marker. The harness
     /// takes a device chat from its latest compaction marker on unless its
     /// features say otherwise.
-    private static func compactedChat(after messages: [[String: Any]], features: [String: Bool] = ["partialThread": true]) async throws -> Fixture {
+    private static func compactedChat(
+        before summarized: [[String: Any]]? = nil,
+        after messages: [[String: Any]],
+        features: [String: Bool] = ["partialThread": true]
+    ) async throws -> Fixture {
         let opened: [String: Any] = signedInSession.merging(["user": ["id": "", "anonymous": true], "features": features]) { $1 }
         let fixture = Fixture(answers: [Answers.json(opened)])
         try await fixture.account.refresh()
-        let stored = try #require(StoredThread(json: record(messages: [questionRecord("u1"), replyRecord("a1"), compactionMarker] + messages)))
+        let earlier = summarized ?? [questionRecord("u1"), replyRecord("a1")]
+        let stored = try #require(StoredThread(json: record(messages: earlier + [compactionMarker] + messages)))
         _ = try await fixture.session.device.add(stored, originals: [:])
         fixture.session.list.reloadDevice()
         #expect(try await fixture.session.openChat(threadId, local: true) == .opened)
@@ -1434,6 +1439,31 @@ struct ChatSessionTests {
         let partial = try #require(await later.transport.requests.last)
         #expect(partial.json["kind"] as? String == "retry")
         #expect(Self.sentIds(partial) == ["c", "u2", "a2", "u3"])
+    }
+
+    @Test func aTurnThatNamesAnAttachmentTheMarkerCoversSendsTheWholeChat() async throws {
+        func withImage(_ message: [String: Any], _ id: String) -> [String: Any] {
+            let image: [String: Any] = ["id": id, "kind": "image", "fileName": "\(id).png", "mimeType": "image/png", "base64": "QUJD"]
+            return message.merging(["attachments": [image]]) { $1 }
+        }
+        let refused = Answers.refusal(429, code: "QUOTA_EXHAUSTED", action: "wait")
+        func sent(naming attachmentId: String) async throws -> [String] {
+            let fixture = try await Self.compactedChat(
+                before: [withImage(Self.questionRecord("u1"), "early"), Self.replyRecord("a1")],
+                after: [withImage(Self.questionRecord("u2"), "late"), Self.replyRecord("a2")]
+            )
+            await fixture.transport.push(refused)
+            let ran = await fixture.session.send(TurnFields(kind: .send, content: "And this one?", attachments: [.held(id: attachmentId)]))
+            #expect(!ran)
+            let turn = try #require(await fixture.transport.requests.last)
+            #expect((turn.json["attachments"] as? [[String: Any]])?.first?["id"] as? String == attachmentId)
+            return Self.sentIds(turn)
+        }
+
+        let late = try await sent(naming: "late")
+        #expect(late == ["c", "u2", "a2"])
+        let early = try await sent(naming: "early")
+        #expect(early == ["u1", "a1", "c", "u2", "a2"])
     }
 
     @Test func aWidgetsRetrySendsTheWholeChatUnlessAnEarlierQuestionFollowsTheMarkerToo() async throws {
