@@ -488,13 +488,16 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
 
     // MARK: - Turns
 
-    /// The fields every turn of the open chat has.
+    /// The fields every turn of the open chat has. A compaction on request
+    /// summarizes the latest exchange too, as the chat shows a marker at its
+    /// end.
     private func turnDefaults(_ threadId: String) -> Turn {
         let offered = account.session?.widgets ?? []
         return Turn(
             clientRequestId: UUID().uuidString.lowercased(),
             threadId: threadId,
             widgets: GenUIRegistry.widgetNames.filter { offered.contains($0) },
+            compactLatest: true,
             options: TurnOptions(model: open.model, timezone: TimeZone.current.identifier)
         )
     }
@@ -586,12 +589,14 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     }
 
     /// The compaction markers of messages a turn changed: a message it
-    /// replaces, as an edit replaces its question, keeps the marker above it.
+    /// replaces, as an edit replaces its question, keeps the marker above it,
+    /// and a marker at the end of the chat goes with the messages it covered.
     private static func keptMarkers(_ markers: [String: HarnessMessage], of messages: [HarnessMessage], replacedBy applied: [HarnessMessage]) -> [String: HarnessMessage] {
         var kept = markers
         for (index, message) in applied.enumerated() where messages.indices.contains(index) && messages[index].id != message.id {
             if let marker = markers[messages[index].id] { kept[message.id] = marker }
         }
+        kept.removeValue(forKey: chatEndMarkerKey)
         return kept
     }
 
@@ -637,7 +642,14 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         let before = state.messages
         let markers = state.markers
         let sent = sentMessage(fields.applied(to: defaults))
-        if let sent { controller.updateView { $0.messages.append(shownMessage(sent)) } }
+        if let sent {
+            controller.updateView {
+                $0.messages.append(shownMessage(sent))
+                // A marker that ended the chat sits before the question sent
+                // after it.
+                if let end = $0.markers.removeValue(forKey: chatEndMarkerKey) { $0.markers[sent.id] = end }
+            }
+        }
         let applied = appliedTurn(fields.applied(to: defaults))
         if let applied { controller.updateView { $0.markers = Self.keptMarkers($0.markers, of: $0.messages, replacedBy: applied); $0.messages = applied } }
         // A turn that did not start leaves the chat as the harness stores it.
@@ -804,14 +816,14 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     }
 
     /// Whether the open chat can be compacted now: it is stored, no reply
-    /// runs, and it holds earlier messages to summarize.
+    /// runs, and it holds a reply its latest compaction did not summarize.
     var canCompact: Bool {
         guard let id = open.id, open.unsaved != id, open.failedId == nil, !running, acceptsTurn else { return false }
         return state.compactable
     }
 
-    /// Compacts the open chat on request: the harness summarizes its earlier
-    /// messages without asking the model.
+    /// Compacts the open chat on request: the harness summarizes its messages,
+    /// the latest exchange included, without asking the model.
     @discardableResult
     func compact(options: TurnOptions? = nil) async -> Bool {
         guard canCompact else { return false }

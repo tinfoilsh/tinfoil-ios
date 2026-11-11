@@ -116,9 +116,10 @@ enum ChatViewMapping {
         return message
     }
 
-    /// A compaction marker as the view shows it above the message after it.
-    /// One whose summary is still being written has no compaction member,
-    /// and counts from when it opened.
+    /// A compaction marker as the view shows it above the message after it,
+    /// or under the last message when it ends the chat. One whose summary is
+    /// still being written has no compaction member, and counts from when it
+    /// opened.
     static func compaction(_ marker: HarnessMessage) -> CompactionMarker {
         CompactionMarker(
             id: marker.id,

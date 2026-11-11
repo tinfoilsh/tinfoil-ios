@@ -269,11 +269,11 @@ enum ChatReducer {
     }
 
     /// Opens a compaction marker while its summary is written, above the
-    /// message the event names. A marker whose message is not loaded sits
-    /// among earlier messages the view has not loaded, so the view leaves it
-    /// out.
+    /// message the event names, or after the last message when it names
+    /// none. A marker whose message is not loaded sits among earlier messages
+    /// the view has not loaded, so the view leaves it out.
     private static func startedCompaction(_ state: ChatState, _ start: Components.Schemas.CompactionStartEvent) -> [String: HarnessMessage] {
-        guard state.messages.contains(where: { $0.id == start.beforeMessageId }) else {
+        guard placed(start.beforeMessageId, in: state) else {
             return state.markers
         }
         var markers = state.markers.filter { $0.value.id != start.messageId }
@@ -282,16 +282,21 @@ enum ChatReducer {
     }
 
     /// Closes a compaction marker. A completed one is kept as the event
-    /// carries it, above the message the event names; a failed one, or one
-    /// whose outcome this client does not know, is removed.
+    /// carries it, where the event places it; a failed one, or one whose
+    /// outcome this client does not know, is removed.
     private static func endedCompaction(_ state: ChatState, _ end: Components.Schemas.CompactionEndEvent) -> [String: HarnessMessage] {
         var markers = state.markers.filter { $0.value.id != end.messageId }
-        guard end.outcome.value1 == .completed, let marker = end.marker,
-              state.messages.contains(where: { $0.id == end.beforeMessageId }) else {
+        guard end.outcome.value1 == .completed, let marker = end.marker, placed(end.beforeMessageId, in: state) else {
             return markers
         }
         markers[end.beforeMessageId] = marker
         return markers
+    }
+
+    /// Whether the chat shows where a compaction event places its marker:
+    /// before a loaded message, or at the end of the chat.
+    private static func placed(_ beforeMessageId: String, in state: ChatState) -> Bool {
+        beforeMessageId == chatEndMarkerKey || state.messages.contains { $0.id == beforeMessageId }
     }
 
     private static func invalidPatch() -> HarnessError {

@@ -736,17 +736,21 @@ struct ChatSessionTests {
         "hasOlder": false,
     ]) { $1 }
 
+    /// A compaction the user asks for, which summarizes both exchanges into
+    /// a marker at the end of the chat.
     private static let compactionStarted: [[String: Any]] = [
         ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_3", "instance": "i"],
-        ["type": "COMPACTION_START", "messageId": "c", "beforeMessageId": "u2"],
+        ["type": "COMPACTION_START", "messageId": "c", "beforeMessageId": chatEndMarkerKey],
     ]
 
-    private static let compactionFailed: [String: Any] = ["type": "COMPACTION_END", "messageId": "c", "beforeMessageId": "u2", "outcome": "failed"]
+    private static let compactionFailed: [String: Any] = ["type": "COMPACTION_END", "messageId": "c", "beforeMessageId": chatEndMarkerKey, "outcome": "failed"]
 
-    private static let compactionCompleted: [String: Any] = ["type": "COMPACTION_END", "messageId": "c", "beforeMessageId": "u2", "outcome": "completed", "marker": [
+    private static let compactionMarker: [String: Any] = [
         "id": "c", "role": "compaction", "createdAt": "2026-01-01T00:00:04Z", "content": "## Goals and context\nTwo questions.",
-        "compaction": ["messages": 2, "startedAt": 1767225600000, "endedAt": 1767225601000, "model": "gpt-oss-120b", "version": 2],
-    ]]
+        "compaction": ["messages": 4, "startedAt": 1767225600000, "endedAt": 1767225601000, "model": "gpt-oss-120b", "version": 2],
+    ]
+
+    private static let compactionCompleted: [String: Any] = ["type": "COMPACTION_END", "messageId": "c", "beforeMessageId": chatEndMarkerKey, "outcome": "completed", "marker": compactionMarker]
 
     @Test func aMessageSentWhileTheChatCompactsWaitsInTheQueueAndIsAnsweredOnceItEnds() async throws {
         let fixture = Fixture(userId: "user-1", answers: [Answers.json(Self.twoExchangeWindow)])
@@ -759,15 +763,20 @@ struct ChatSessionTests {
         ], until: compaction))
         let queued: [String: Any] = ["queueId": "run_4", "kind": "send", "content": "third question", "quote": NSNull(), "attachments": [], "createdAt": "2026-01-01T00:00:05Z"]
         let (queue, started) = AsyncStream<Void>.makeStream()
+        let compactedMessages = (Self.twoExchangeWindow["messages"] as? [[String: Any]] ?? []) + [
+            Self.compactionMarker,
+            ["id": "u3", "role": "user", "createdAt": "2026-01-01T00:00:05Z", "content": "third question"],
+        ]
         await fixture.transport.push(heldRun([
             ["type": "STATE_DELTA", "threadId": threadId, "runId": "run_4", "delta": [["op": "add", "path": "/queue/-", "value": queued]]],
         ], then: [
             ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_4", "instance": "i"],
+            ["type": "MESSAGES_SNAPSHOT", "messages": compactedMessages, "hasOlder": false],
             ["type": "TEXT_MESSAGE_CHUNK", "messageId": "msg_7", "role": "assistant", "delta": "Third answer."],
             ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_4", "metadata": [:]],
         ], until: queue))
         let compacting = Task { await session.compact() }
-        for await state in session.controller.$view.values where state.markers["u2"] != nil { break }
+        for await state in session.controller.$view.values where state.markers[chatEndMarkerKey] != nil { break }
 
         #expect(session.acceptsTurn)
         let sending = Task { await session.send(TurnFields(kind: .send, content: "third question")) }
@@ -783,7 +792,8 @@ struct ChatSessionTests {
         started.yield(())
         _ = await sending.value
         #expect(session.state.messages.last?.timeline?.first?.content == "Third answer.")
-        #expect(session.state.markers["u2"]?.compaction?.messages == 2)
+        // The marker that ended the chat sits above the question it queued.
+        #expect(session.state.markers.mapValues(\.id) == ["u3": "c"])
         // The message it queued does not hide that the chat was compacted.
         #expect(session.state.compacted == "c")
     }
@@ -799,13 +809,14 @@ struct ChatSessionTests {
             ["type": "RUN_ERROR", "threadId": threadId, "runId": "run_3", "code": HarnessErrorCode.compactionFailed, "message": "failed", "action": "retry"],
         ], until: release))
         let compacting = Task { await session.compact() }
-        for await state in session.controller.$view.values where state.markers["u2"] != nil { break }
+        for await state in session.controller.$view.values where state.markers[chatEndMarkerKey] != nil { break }
 
         #expect(session.compacting)
         #expect(!session.canCompact)
         let turn = try #require(await fixture.transport.requests.last)
         #expect(turn.route == .turn)
         #expect(turn.json["kind"] as? String == "compact")
+        #expect(turn.json["compactLatest"] as? Bool == true)
         #expect(turn.json["content"] == nil)
         failed.yield(())
         _ = await compacting.value
@@ -813,7 +824,7 @@ struct ChatSessionTests {
 
         await fixture.transport.push(Answers.events([
             ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_4", "instance": "i"],
-            ["type": "COMPACTION_START", "messageId": "c", "beforeMessageId": "u2"],
+            ["type": "COMPACTION_START", "messageId": "c", "beforeMessageId": chatEndMarkerKey],
             Self.compactionCompleted,
             ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_4", "metadata": [:]],
         ]))
@@ -821,17 +832,23 @@ struct ChatSessionTests {
 
         let retried = try #require(await fixture.transport.requests.last)
         #expect(retried.json["kind"] as? String == "compact")
-        #expect(session.state.markers["u2"]?.compaction?.messages == 2)
+        #expect(retried.json["compactLatest"] as? Bool == true)
+        #expect(session.state.markers[chatEndMarkerKey]?.compaction?.messages == 4)
+        #expect(session.state.summarizedIds == ["u1", "a1", "u2", "a2"])
         #expect(!session.canCompact)
         #expect(session.state.compacted == "c")
 
-        // The next message the user sends puts the compaction behind them.
+        // The next message the user sends puts the compaction behind them,
+        // and the marker above it.
         await fixture.transport.push(Answers.events([
             ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_5", "instance": "i"],
             ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_5", "metadata": [:]],
         ]))
         await session.send(TurnFields(kind: .send, content: "next question"))
+        let sent = try #require(await fixture.transport.requests.last)
+        let asked = try #require(sent.json["clientRequestId"] as? String)
         #expect(session.state.compacted == nil)
+        #expect(session.state.markers.mapValues(\.id) == [asked: "c"])
     }
 
     @Test func stoppingACompactionSaysNothingOfTheReplyBeforeIt() async throws {
@@ -845,7 +862,7 @@ struct ChatSessionTests {
         ], until: release))
         await fixture.transport.push(Answers.json([:]))
         let compacting = Task { await session.compact() }
-        for await state in session.controller.$view.values where state.markers["u2"] != nil { break }
+        for await state in session.controller.$view.values where state.markers[chatEndMarkerKey] != nil { break }
 
         try await session.cancel()
 

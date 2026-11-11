@@ -382,6 +382,9 @@ struct Message: Identifiable, Equatable {
     var replyStop: ReplyStop? = nil
     /// The compaction marker that sits before the message, shown above it.
     var compaction: CompactionMarker? = nil
+    /// The compaction marker that ends the chat after the message, shown
+    /// under it.
+    var compactionAfter: CompactionMarker? = nil
     /// The message comes before the chat's latest compaction marker, whose
     /// summary the model reads in its place.
     var isOutOfContext: Bool = false
