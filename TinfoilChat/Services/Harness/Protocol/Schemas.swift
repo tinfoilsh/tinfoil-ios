@@ -1095,7 +1095,8 @@ extension Components {
             /// compact compacts the chat on request, as COMPACTION_START describes,
             /// and asks the model nothing: its run sends the compaction and ends.
             /// It is refused with NOTHING_TO_COMPACT when no message after the
-            /// chat's latest compaction marker comes before its last question, and
+            /// chat's latest compaction marker comes before its last question, or
+            /// with compactLatest when no reply comes after that marker, and
             /// with RUN_IN_FLIGHT while the chat has a running reply. A retry after
             /// a compact turn failed compacts again. A client sends it only while
             /// the session's features.manualCompaction is true.
@@ -1117,7 +1118,8 @@ extension Components {
             /// compact compacts the chat on request, as COMPACTION_START describes,
             /// and asks the model nothing: its run sends the compaction and ends.
             /// It is refused with NOTHING_TO_COMPACT when no message after the
-            /// chat's latest compaction marker comes before its last question, and
+            /// chat's latest compaction marker comes before its last question, or
+            /// with compactLatest when no reply comes after that marker, and
             /// with RUN_IN_FLIGHT while the chat has a running reply. A retry after
             /// a compact turn failed compacts again. A client sends it only while
             /// the session's features.manualCompaction is true.
@@ -1161,6 +1163,10 @@ extension Components {
             ///
             /// - Remark: Generated from `#/components/schemas/Turn/widgets`.
             internal var widgets: [Swift.String]?
+            /// A compact turn, or a retry that compacts again, summarizes the chat's latest exchange too, as COMPACTION_START describes. A client sends it when it shows a compaction marker at the end of a chat.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Turn/compactLatest`.
+            internal var compactLatest: Swift.Bool?
             /// - Remark: Generated from `#/components/schemas/Turn/options`.
             internal var options: Components.Schemas.TurnOptions?
             /// Creates a new `Turn`.
@@ -1182,6 +1188,7 @@ extension Components {
             ///   - toolCallId: The widget call a retryToolCall regenerates.
             ///   - attachments:
             ///   - widgets: The widgets this client renders.
+            ///   - compactLatest: A compact turn, or a retry that compacts again, summarizes the chat's latest exchange too, as COMPACTION_START describes. A client sends it when it shows a compaction marker at the end of a chat.
             ///   - options:
             internal init(
                 key: Swift.String? = nil,
@@ -1200,6 +1207,7 @@ extension Components {
                 toolCallId: Swift.String? = nil,
                 attachments: [Components.Schemas.SentAttachment]? = nil,
                 widgets: [Swift.String]? = nil,
+                compactLatest: Swift.Bool? = nil,
                 options: Components.Schemas.TurnOptions? = nil
             ) {
                 self.key = key
@@ -1218,6 +1226,7 @@ extension Components {
                 self.toolCallId = toolCallId
                 self.attachments = attachments
                 self.widgets = widgets
+                self.compactLatest = compactLatest
                 self.options = options
             }
             internal enum CodingKeys: String, CodingKey {
@@ -1237,6 +1246,7 @@ extension Components {
                 case toolCallId
                 case attachments
                 case widgets
+                case compactLatest
                 case options
             }
         }
@@ -2602,10 +2612,14 @@ extension Components {
         /// first question it keeps, or else before the turn's question. A run
         /// compacts at most once, before its first model turn or between two of
         /// them. A compact turn compacts its chat the same way, taking the chat's
-        /// last question and what follows it for the turn's question.
-        /// beforeMessageId names a message of the run's MESSAGES_SNAPSHOT.
-        /// A client shows the marker before that message, and the messages
-        /// before it as ones the model no longer reads.
+        /// last question and what follows it for the turn's question. One with
+        /// compactLatest instead summarizes every message from the chat's latest
+        /// marker on up to its last reply, and its marker sits after that reply:
+        /// before a question without a reply, or else at the end of the chat.
+        /// beforeMessageId names a message of the run's MESSAGES_SNAPSHOT, or
+        /// is empty for a marker at the end of the chat. A client shows the
+        /// marker before that message, or after the chat's last message, and
+        /// the messages before it as ones the model no longer reads.
         ///
         ///
         /// - Remark: Generated from `#/components/schemas/CompactionStartEvent`.
@@ -2643,7 +2657,7 @@ extension Components {
                 case beforeMessageId
             }
         }
-        /// Closes a compaction marker, which sits before the message beforeMessageId names, as COMPACTION_START named it. A completed one carries the marker, which the chat keeps even if the reply then fails, and is followed by a STATE_SNAPSHOT with the context the turn's prompt now fills. A client removes a failed one, after which the run ends with COMPACTION_FAILED.
+        /// Closes a compaction marker, which sits where beforeMessageId places it, as COMPACTION_START placed it. A completed one carries the marker, which the chat keeps even if the reply then fails, and is followed by a STATE_SNAPSHOT with the context the turn's prompt now fills. A client removes a failed one, after which the run ends with COMPACTION_FAILED.
         ///
         /// - Remark: Generated from `#/components/schemas/CompactionEndEvent`.
         internal struct CompactionEndEvent: Codable, Hashable, Sendable {
@@ -3625,10 +3639,12 @@ extension Components {
         }
         /// What a compaction marker records of its summary. A compaction marker
         /// is a message of role compaction whose content summarizes every message
-        /// before it, which the model reads in their place. It always sits
-        /// directly before a question. A client shows the messages before a
-        /// chat's latest marker as ones the model no longer reads, and the marker
-        /// as a step the user can open to read the summary. The marker is not one
+        /// before it, which the model reads in their place. It sits directly
+        /// before a question, or, after a compact turn with compactLatest, at
+        /// the end of the chat until the next question. A client shows the
+        /// messages before a chat's latest marker as ones the model no longer
+        /// reads, and the marker as a step the user can open to read the
+        /// summary. The marker is not one
         /// of the chat's messages: messageCount leaves it out, and a client offers
         /// no action on it.
         ///
