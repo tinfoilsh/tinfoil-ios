@@ -672,6 +672,7 @@ struct TabbedWelcomeView: View {
     @ObservedObject var authManager: AuthManager
     let onRequestSignIn: () -> Void
     @ObservedObject private var profileManager = ProfileManager.shared
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showPrivacySheet = false
 
     private static let privacyText = "Your messages are encrypted directly to the AI models running inside secure hardware enclaves. These are hardware-isolated environments powered by confidential computing GPUs with verifiable confidentiality and integrity guarantees. Not even Tinfoil can access your data. This applies to all chats, images, documents, and voice input. Our open-source stack lets you verify this yourself by inspecting the hardware attestation."
@@ -700,14 +701,25 @@ struct TabbedWelcomeView: View {
                 showPrivacySheet = true
             } label: {
                 HStack(spacing: 6) {
-                    Image(tinfoil: .checkmarkCircle)
-                        .font(.system(size: 13))
-                    Text("Your chats are private by design")
+                    Text(Constants.WelcomePrivacy.label)
                         .font(.system(size: 15, weight: .medium))
                     Image(tinfoil: .chevronRight)
                         .font(.system(size: 10, weight: .semibold))
                 }
                 .foregroundColor(.secondary)
+                .padding(.horizontal, Constants.WelcomePrivacy.horizontalPadding)
+                .padding(.vertical, Constants.WelcomePrivacy.verticalPadding)
+                .background(
+                    RoundedRectangle(cornerRadius: Constants.WelcomePrivacy.cornerRadius)
+                        .fill(Color.chatBackground(isDarkMode: colorScheme == .dark))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Constants.WelcomePrivacy.cornerRadius)
+                        .strokeBorder(
+                            Color.secondary.opacity(Constants.WelcomePrivacy.borderOpacity),
+                            lineWidth: Constants.WelcomePrivacy.borderWidth
+                        )
+                )
             }
             .buttonStyle(.plain)
         }
@@ -748,7 +760,7 @@ struct PrivacyExplainerSheet: View {
                         Image(tinfoil: .checkmarkCircle)
                             .font(.system(size: 18))
                             .foregroundColor(.green)
-                        Text("Your chats are private by design")
+                        Text(Constants.WelcomePrivacy.label)
                             .font(.system(size: 17, weight: .semibold))
                     }
 

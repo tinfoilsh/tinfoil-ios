@@ -522,6 +522,16 @@ enum Constants {
         static let compactedNoticeTitle = "Conversation compacted"
     }
 
+    /// The note on the welcome screen that opens the privacy explainer.
+    enum WelcomePrivacy {
+        static let label = "Your chats are private"
+        static let horizontalPadding: CGFloat = 12
+        static let verticalPadding: CGFloat = 6
+        static let cornerRadius: CGFloat = 8
+        static let borderWidth: CGFloat = 1
+        static let borderOpacity = 0.3
+    }
+
     /// The cover shown while the app is not active, and the placeholder
     /// over keys while the screen is recorded or shared.
     enum Privacy {
