@@ -1095,11 +1095,12 @@ extension Components {
             /// compact compacts the chat on request, as COMPACTION_START describes,
             /// and asks the model nothing: its run sends the compaction and ends.
             /// It is refused with NOTHING_TO_COMPACT when no message after the
-            /// chat's latest compaction marker comes before its last question, or
-            /// with compactLatest when no reply comes after that marker, and
-            /// with RUN_IN_FLIGHT while the chat has a running reply. A retry after
-            /// a compact turn failed compacts again. A client sends it only while
-            /// the session's features.manualCompaction is true.
+            /// chat's latest compaction marker comes before its last question,
+            /// or, when it sends compactLatest, when no reply comes after that
+            /// marker. It is refused with RUN_IN_FLIGHT while the chat has a
+            /// running reply. A retry after a compact turn failed compacts again.
+            /// A client sends it only while the session's
+            /// features.manualCompaction is true.
             ///
             ///
             /// - Remark: Generated from `#/components/schemas/Turn/kind`.
@@ -1118,11 +1119,12 @@ extension Components {
             /// compact compacts the chat on request, as COMPACTION_START describes,
             /// and asks the model nothing: its run sends the compaction and ends.
             /// It is refused with NOTHING_TO_COMPACT when no message after the
-            /// chat's latest compaction marker comes before its last question, or
-            /// with compactLatest when no reply comes after that marker, and
-            /// with RUN_IN_FLIGHT while the chat has a running reply. A retry after
-            /// a compact turn failed compacts again. A client sends it only while
-            /// the session's features.manualCompaction is true.
+            /// chat's latest compaction marker comes before its last question,
+            /// or, when it sends compactLatest, when no reply comes after that
+            /// marker. It is refused with RUN_IN_FLIGHT while the chat has a
+            /// running reply. A retry after a compact turn failed compacts again.
+            /// A client sends it only while the session's
+            /// features.manualCompaction is true.
             ///
             ///
             /// - Remark: Generated from `#/components/schemas/Turn/kind`.
