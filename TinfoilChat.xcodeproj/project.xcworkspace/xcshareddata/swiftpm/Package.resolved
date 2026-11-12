@@ -1,5 +1,5 @@
 {
-  "originHash" : "86e695d7e552ccf28f5c6b7a44d4c92e3d5bc6294e696ce918ca8d01bc8718af",
+  "originHash" : "02848b9f68e98448aef42d52df99a91897e50803f5c4f7df4ba8fb5aaca5090e",
   "pins" : [
     {
       "identity" : "clerk-ios",
@@ -134,6 +134,15 @@
       "state" : {
         "revision" : "e7ceec149c1e2863852fec1c9838b051c87f6e87",
         "version" : "0.0.15"
+      }
+    },
+    {
+      "identity" : "tinfoil-icons",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tinfoilsh/tinfoil-icons",
+      "state" : {
+        "revision" : "8f873e5bacb31dc45a03b388f7935bbe5bf42d50",
+        "version" : "2.7.0"
       }
     },
     {

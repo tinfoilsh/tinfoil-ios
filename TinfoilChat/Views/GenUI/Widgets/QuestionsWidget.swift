@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 private enum QuestionsLayout {
     static let sectionSpacing: CGFloat = 16
@@ -24,11 +25,11 @@ private enum QuestionsLayout {
 }
 
 private enum QuestionsSymbol {
-    static let singleSelected = "largecircle.fill.circle"
-    static let single = "circle"
-    static let multipleSelected = "checkmark.square.fill"
-    static let multiple = "square"
-    static let saveFailed = "exclamationmark.circle"
+    static let singleSelected: TinfoilIcon = .circleDot
+    static let single: TinfoilIcon = .circle
+    static let multipleSelected: TinfoilIcon = .boxCheck
+    static let multiple: TinfoilIcon = .square
+    static let saveFailed: TinfoilIcon = .exclamationCircle
 }
 
 struct QuestionsWidget: GenUIWidget {
@@ -108,7 +109,7 @@ private struct QuestionsView: View {
             pick(option, of: question)
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: QuestionsLayout.indicatorSpacing) {
-                Image(systemName: indicator(for: question.selection, selected: selected))
+                Image(tinfoil: indicator(for: question.selection, selected: selected))
                     .font(.body)
                     .foregroundColor(selected ? GenUIStyle.accent : GenUIStyle.mutedText(isDarkMode))
                     .accessibilityHidden(true)
@@ -155,7 +156,7 @@ private struct QuestionsView: View {
         }
     }
 
-    private func indicator(for selection: QuestionSet.Selection, selected: Bool) -> String {
+    private func indicator(for selection: QuestionSet.Selection, selected: Bool) -> TinfoilIcon {
         switch selection {
         case .single: return selected ? QuestionsSymbol.singleSelected : QuestionsSymbol.single
         case .multiple: return selected ? QuestionsSymbol.multipleSelected : QuestionsSymbol.multiple
@@ -197,7 +198,7 @@ private struct QuestionsView: View {
             .accessibilityElement(children: .combine)
         case .failed:
             HStack(spacing: QuestionsLayout.statusSpacing) {
-                Image(systemName: QuestionsSymbol.saveFailed)
+                Image(tinfoil: QuestionsSymbol.saveFailed)
                     .foregroundColor(.red)
                     .accessibilityHidden(true)
                 Text("Couldn't save")

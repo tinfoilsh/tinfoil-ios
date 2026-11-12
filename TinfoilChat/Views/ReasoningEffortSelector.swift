@@ -15,6 +15,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 private enum EffortOption: String, CaseIterable, Identifiable {
     case high
@@ -146,7 +147,7 @@ struct ReasoningEffortSelector: View {
     /// effort menu. Uses the SF Symbols `slider.horizontal.3` glyph.
     @ViewBuilder
     private func iconLabel(active: Bool) -> some View {
-        let pill = Image(systemName: "slider.horizontal.3")
+        let pill = Image(tinfoil: .adjustmentToggle)
             .font(.system(size: 12, weight: .semibold))
             .foregroundColor(active ? .primary : .secondary.opacity(0.45))
             .padding(.horizontal, 10)

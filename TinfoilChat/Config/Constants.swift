@@ -6,6 +6,7 @@
 //  Copyright © 2025 Tinfoil. All rights reserved.
 
 import Foundation
+import TinfoilIcons
 import TinfoilPasskeyKit
 
 /// Application-wide constants
@@ -490,7 +491,7 @@ enum Constants {
     /// length before it answers with a report.
     enum Research {
         static let label = "Deep Research"
-        static let systemImage = "binoculars"
+        static let icon: TinfoilIcon = .webSearch
         /// What VoiceOver says of the label under a question that asked for
         /// deep research.
         static let questionAccessibilityLabel = "Asked for deep research"
@@ -508,7 +509,7 @@ enum Constants {
         static let popoverSpacing: CGFloat = 12
         static let compactLabel = "Compact Chat"
         static let compactingLabel = "Compacting…"
-        static let compactSystemImage = "rectangle.compress.vertical"
+        static let compactIcon: TinfoilIcon = .stack
         static let compactExplanation = "Compacting summarizes earlier messages so the chat uses less of the context window. The latest exchange is kept as it is."
         /// The explanation where the chat service summarizes the latest
         /// exchange too.
@@ -519,6 +520,16 @@ enum Constants {
         static let compactingStatusDetail = "This can take a minute or two. Messages you send now are sent once it is done."
         /// The notice above the composer once a compaction completes.
         static let compactedNoticeTitle = "Conversation compacted"
+    }
+
+    /// The note on the welcome screen that opens the privacy explainer.
+    enum WelcomePrivacy {
+        static let label = "Your chats are private"
+        static let horizontalPadding: CGFloat = 12
+        static let verticalPadding: CGFloat = 6
+        static let cornerRadius: CGFloat = 8
+        static let borderWidth: CGFloat = 1
+        static let borderOpacity = 0.3
     }
 
     /// The cover shown while the app is not active, and the placeholder
@@ -549,26 +560,26 @@ enum Constants {
         static let overlayFadeSeconds: TimeInterval = 0.15
         static let sidebarSpinnerLabel = "Saving conversation"
         static let actionLabel = "Fork from here"
-        static let actionSystemImage = "arrow.triangle.branch"
+        static let actionIcon: TinfoilIcon = .fork
     }
 
     enum MessageActions {
         static let iconSize: CGFloat = 16
         static let buttonSize: CGFloat = 32
         static let moreLabel = "More actions"
-        static let moreSystemImage = "ellipsis"
+        static let moreIcon: TinfoilIcon = .horizontalEllipsis
         static let shareLabel = "Share"
-        static let shareSystemImage = "square.and.arrow.up"
+        static let shareIcon: TinfoilIcon = .share
         static let deleteLabel = "Delete message"
-        static let deleteSystemImage = "trash"
+        static let deleteIcon: TinfoilIcon = .trash
         static let deleteConfirmationTitle = "Delete message?"
         static let deleteConfirmationMessage = "This message will be removed from the conversation. This cannot be undone."
         static let continueLabel = "Continue"
         static let continueAccessibilityLabel = "Continue response"
-        static let continueSystemImage = "forward"
+        static let continueIcon: TinfoilIcon = .fastForward
         static let tryAgainLabel = "Try again"
         static let resendLabel = "Resend message"
-        static let tryAgainSystemImage = "arrow.clockwise"
+        static let tryAgainIcon: TinfoilIcon = .refreshTwoArrows
     }
 
     enum Verification {
@@ -586,7 +597,7 @@ enum Constants {
     }
 
     enum Audio {
-        static let microphoneIconName = "mic"
+        static let microphoneIcon: TinfoilIcon = .microphone
         /// Recordings are AAC in an MPEG-4 container.
         static let recordingMimeType = "audio/mp4"
         static let recordingFileExtension = "m4a"

@@ -6,6 +6,7 @@
 //  Copyright © 2026 Tinfoil. All rights reserved.
 
 import SwiftUI
+import TinfoilIcons
 
 /// Raw favicon image fetched through the attested metadata enclave.
 /// Owns its async load + state so it can be dropped into any parent
@@ -26,7 +27,7 @@ struct FaviconImage: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
             } else if loadFailed {
-                Image(systemName: "globe")
+                Image(tinfoil: .globe)
                     .font(.system(size: placeholderFontSize))
                     .foregroundColor(placeholderColor)
             } else {
@@ -116,7 +117,7 @@ struct SourceRowView: View {
 
                 Spacer()
 
-                Image(systemName: "arrow.up.right")
+                Image(tinfoil: .arrowUpRight)
                     .font(.system(size: 10, weight: .medium))
                     .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
             }
@@ -188,17 +189,17 @@ struct WebSearchQueryRow: View {
                 .scaleEffect(0.6)
                 .frame(width: 16, height: 16)
         case .completed:
-            Image(systemName: "globe")
+            Image(tinfoil: .globe)
                 .font(.system(size: 13))
                 .foregroundColor(isDarkMode ? .white.opacity(0.6) : .black.opacity(0.5))
                 .frame(width: 16, height: 16)
         case .failed:
-            Image(systemName: "xmark.circle.fill")
+            Image(tinfoil: .xmarkCircle)
                 .font(.system(size: 13))
                 .foregroundColor(.red.opacity(0.8))
                 .frame(width: 16, height: 16)
         case .blocked:
-            Image(systemName: "exclamationmark.triangle.fill")
+            Image(tinfoil: .warning)
                 .font(.system(size: 13))
                 .foregroundColor(.orange.opacity(0.8))
                 .frame(width: 16, height: 16)

@@ -6,6 +6,7 @@
 //  Copyright © 2026 Tinfoil. All rights reserved.
 
 import SwiftUI
+import TinfoilIcons
 
 /// One step inside a run of agentic work: a thinking round, an adjacent
 /// group of web searches, or an adjacent group of URL fetches.
@@ -375,7 +376,7 @@ struct WorkHeader: View {
     var spokenText: String? = nil
     /// The symbol running work leads with in place of the progress dots, if
     /// any.
-    var runningSystemImage: String? = nil
+    var runningIcon: TinfoilIcon? = nil
     let onToggle: () -> Void
 
     @State private var shownAt = Date()
@@ -399,8 +400,8 @@ struct WorkHeader: View {
         Button(action: onToggle) {
             HStack(spacing: Constants.UI.WorkSteps.headerSpacing) {
                 if elapsed != nil {
-                    if let runningSystemImage {
-                        Image(systemName: runningSystemImage)
+                    if let runningIcon {
+                        Image(tinfoil: runningIcon)
                             .font(.subheadline)
                             .foregroundColor(isDarkMode ? .white.opacity(0.8) : .black.opacity(0.7))
                             .symbolEffect(.pulse, isActive: !reduceMotion)
@@ -417,7 +418,7 @@ struct WorkHeader: View {
                         .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.45))
                         .fixedSize()
                 }
-                Image(systemName: "chevron.right")
+                Image(tinfoil: .chevronRight)
                     .font(.caption.weight(.semibold))
                     .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
                     .rotationEffect(.degrees(isExpanded ? Constants.UI.WorkSteps.chevronExpandedRotation : 0))
@@ -520,7 +521,7 @@ struct WorkBox: View {
                 isExpanded: isExpanded,
                 detailsName: "steps",
                 isDarkMode: isDarkMode,
-                runningSystemImage: run.isResearch ? Constants.Research.systemImage : nil,
+                runningIcon: run.isResearch ? Constants.Research.icon : nil,
                 onToggle: { expansion.toggle(rowId) }
             )
             if isExpanded {

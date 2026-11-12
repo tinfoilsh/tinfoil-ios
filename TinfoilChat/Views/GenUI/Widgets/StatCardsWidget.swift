@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 struct StatCardsWidget: GenUIWidget {
     struct Stat: Decodable {
@@ -57,11 +58,11 @@ private struct StatCardsView: View {
                             .font(.title3.weight(.semibold))
                             .foregroundColor(GenUIStyle.primaryText(isDarkMode))
                         if stat.trend == "up" {
-                            Image(systemName: "arrow.up.right")
+                            Image(tinfoil: .arrowUpRight)
                                 .font(.caption.weight(.semibold))
                                 .foregroundColor(.green)
                         } else if stat.trend == "down" {
-                            Image(systemName: "arrow.down.right")
+                            Image(tinfoil: .arrowDownRight)
                                 .font(.caption.weight(.semibold))
                                 .foregroundColor(.red)
                         }

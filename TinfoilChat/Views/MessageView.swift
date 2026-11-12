@@ -10,6 +10,7 @@ import SwiftUI
 import Textual
 import SwiftMath
 import UIKit
+import TinfoilIcons
 
 func shouldShowStreamError(message: Message) -> Bool {
     message.role == .assistant && message.streamError != nil
@@ -66,7 +67,7 @@ private struct MessageSecurityMetadataView: View {
                     .font(.caption2)
             }
             HStack(spacing: 3) {
-                Image(systemName: "lock")
+                Image(tinfoil: .lock)
                     .font(.system(size: Constants.MessageMetadata.iconSize))
                 Text("Encrypted")
                     .font(.system(size: Constants.MessageMetadata.encryptedFontSize))
@@ -236,14 +237,14 @@ struct MessageView: View, Equatable {
         case .continueResponse:
             return ErrorMessageView.Retry(
                 label: Constants.MessageActions.continueLabel,
-                systemImage: Constants.MessageActions.continueSystemImage
+                icon: Constants.MessageActions.continueIcon
             ) {
                 viewModel.continueLastResponse()
             }
         case .regenerate:
             return ErrorMessageView.Retry(
                 label: resends ? Constants.MessageActions.resendLabel : Constants.MessageActions.tryAgainLabel,
-                systemImage: Constants.MessageActions.tryAgainSystemImage
+                icon: Constants.MessageActions.tryAgainIcon
             ) {
                 viewModel.retryLastResponse()
             }
@@ -264,7 +265,7 @@ struct MessageView: View, Equatable {
                 messagePendingDeletion = (chatId: chatId, messageId: message.id)
                 showDeleteConfirmation = true
             } label: {
-                Label(Constants.MessageActions.deleteLabel, systemImage: Constants.MessageActions.deleteSystemImage)
+                Label(Constants.MessageActions.deleteLabel, tinfoil: Constants.MessageActions.deleteIcon)
             }
         }
     }
@@ -285,7 +286,7 @@ struct MessageView: View, Equatable {
                 } label: {
                     Label(
                         Constants.MessageActions.shareLabel,
-                        systemImage: Constants.MessageActions.shareSystemImage
+                        tinfoil: Constants.MessageActions.shareIcon
                     )
                 }
             }
@@ -294,14 +295,14 @@ struct MessageView: View, Equatable {
                 Button(action: forkFromHere) {
                     Label(
                         Constants.ChatFork.actionLabel,
-                        systemImage: Constants.ChatFork.actionSystemImage
+                        tinfoil: Constants.ChatFork.actionIcon
                     )
                 }
             }
 
             deleteMessageButton
         } label: {
-            Image(systemName: Constants.MessageActions.moreSystemImage)
+            Image(tinfoil: Constants.MessageActions.moreIcon)
                 .font(.system(size: Constants.MessageActions.iconSize))
                 .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
                 .frame(
@@ -839,7 +840,7 @@ struct MessageView: View, Equatable {
                             Button {
                                 viewModel.continueLastResponse()
                             } label: {
-                                Label(Constants.MessageActions.continueLabel, systemImage: Constants.MessageActions.continueSystemImage)
+                                Label(Constants.MessageActions.continueLabel, tinfoil: Constants.MessageActions.continueIcon)
                                     .font(.caption.weight(.medium))
                             }
                             .buttonStyle(.plain)
@@ -867,7 +868,7 @@ struct MessageView: View, Equatable {
                                     Button {
                                         showRawContentModal = true
                                     } label: {
-                                        Image(systemName: "doc.on.doc")
+                                        Image(tinfoil: .copy)
                                             .font(.system(size: 16))
                                             .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
                                             .frame(width: 32, height: 32)
@@ -896,7 +897,7 @@ struct MessageView: View, Equatable {
                                     Button {
                                         viewModel.regenerateLastResponse()
                                     } label: {
-                                        Image(systemName: "arrow.clockwise")
+                                        Image(tinfoil: .refreshTwoArrows)
                                             .font(.system(size: 16))
                                             .foregroundColor(isDarkMode ? .white.opacity(0.5) : .black.opacity(0.5))
                                             .frame(width: 32, height: 32)
@@ -965,20 +966,20 @@ struct MessageView: View, Equatable {
                                 userTextSelectionRequest &+= 1
                             }
                         } label: {
-                            Label("Select Text", systemImage: "selection.pin.in.out")
+                            Label("Select Text", tinfoil: .quote)
                         }
 
                         Button {
                             UIPasteboard.general.string = message.content
                         } label: {
-                            Label("Copy", systemImage: "doc.on.doc")
+                            Label("Copy", tinfoil: .copy)
                         }
 
                         if canUseUserMessageActions {
                             Button {
                                 viewModel.beginMessageEdit(at: messageIndex)
                             } label: {
-                                Label("Edit", systemImage: "pencil")
+                                Label("Edit", tinfoil: .writing2)
                             }
                         }
 
@@ -986,7 +987,7 @@ struct MessageView: View, Equatable {
                             Button(action: forkFromHere) {
                                 Label(
                                     "Fork",
-                                    systemImage: Constants.ChatFork.actionSystemImage
+                                    tinfoil: Constants.ChatFork.actionIcon
                                 )
                             }
                         }
@@ -1394,14 +1395,14 @@ private struct RawContentModalView: View {
                 VStack(spacing: 10) {
                     copyButton(
                         action: copyAll,
-                        icon: showCopyAllFeedback ? "checkmark" : "doc.on.doc",
+                        icon: showCopyAllFeedback ? .checkmark : .copy,
                         label: showCopyAllFeedback ? "Copied All!" : "Copy All"
                     )
 
                     if hasThoughts && !responseContent.isEmpty {
                         copyButton(
                             action: copyResponse,
-                            icon: showCopyResponseFeedback ? "checkmark" : "text.quote",
+                            icon: showCopyResponseFeedback ? .checkmark : .quote,
                             label: showCopyResponseFeedback ? "Copied Response!" : "Copy Response"
                         )
                     }
@@ -1409,7 +1410,7 @@ private struct RawContentModalView: View {
                     if hasThoughts {
                         copyButton(
                             action: copyThoughts,
-                            icon: showCopyThoughtsFeedback ? "checkmark" : "brain",
+                            icon: showCopyThoughtsFeedback ? .checkmark : .brain,
                             label: showCopyThoughtsFeedback ? "Copied Thoughts!" : "Copy Thoughts"
                         )
                     }
@@ -1424,7 +1425,7 @@ private struct RawContentModalView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark")
+                        Image(tinfoil: .xmark)
                             .font(.system(size: 18, weight: .medium))
                     }
                 }
@@ -1432,10 +1433,10 @@ private struct RawContentModalView: View {
         }
     }
 
-    private func copyButton(action: @escaping () -> Void, icon: String, label: String) -> some View {
+    private func copyButton(action: @escaping () -> Void, icon: TinfoilIcon, label: String) -> some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Image(systemName: icon)
+                Image(tinfoil: icon)
                 Text(label)
             }
             .font(.system(size: 15, weight: .medium))
@@ -1795,7 +1796,7 @@ struct UnsupportedGenUINoticeView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "sparkles")
+            Image(tinfoil: .sparkle)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundColor(.orange)
 
@@ -1826,7 +1827,7 @@ struct UnsupportedGenUINoticeView: View {
 struct ErrorMessageView: View {
     struct Retry {
         let label: String
-        let systemImage: String
+        let icon: TinfoilIcon
         let action: () -> Void
     }
 
@@ -1850,13 +1851,13 @@ struct ErrorMessageView: View {
         }
     }
 
-    private var headerIcon: String {
+    private var headerIcon: TinfoilIcon {
         switch presentation.kind {
-        case .rateLimit: return "gauge.with.dots.needle.67percent"
-        case .connection: return "wifi.exclamationmark"
-        case .verification: return "exclamationmark.shield"
-        case .key: return "key.slash"
-        default: return "exclamationmark.triangle"
+        case .rateLimit: return .gauge
+        case .connection: return .globeX
+        case .verification: return .shieldWithExclamation
+        case .key: return .keySlash
+        default: return .warning
         }
     }
 
@@ -1871,7 +1872,7 @@ struct ErrorMessageView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                Image(systemName: headerIcon)
+                Image(tinfoil: headerIcon)
                     .foregroundColor(accentColor)
                     .font(.system(size: 16))
 
@@ -1885,7 +1886,7 @@ struct ErrorMessageView: View {
                     Button {
                         withAnimation { showsDetails.toggle() }
                     } label: {
-                        Image(systemName: "chevron.down")
+                        Image(tinfoil: .chevronDown)
                             .font(.caption)
                             .rotationEffect(.degrees(showsDetails ? 180 : 0))
                             .foregroundColor(secondaryTextColor)
@@ -1927,7 +1928,7 @@ struct ErrorMessageView: View {
             }
 
             if let onUnlock, presentation.offersUnlock {
-                outlinedButton(label: "Unlock", systemImage: "key", action: onUnlock)
+                outlinedButton(label: "Unlock", icon: .key, action: onUnlock)
             }
 
             if let retry, presentation.offersRetry {
@@ -1936,14 +1937,14 @@ struct ErrorMessageView: View {
                         let seconds = Int(ceil(retryAt.timeIntervalSince(context.date)))
                         outlinedButton(
                             label: seconds > 0 ? "\(retry.label) in \(seconds)s" : retry.label,
-                            systemImage: retry.systemImage,
+                            icon: retry.icon,
                             action: retry.action
                         )
                         .disabled(seconds > 0)
                         .opacity(seconds > 0 ? 0.5 : 1)
                     }
                 } else {
-                    outlinedButton(label: retry.label, systemImage: retry.systemImage, action: retry.action)
+                    outlinedButton(label: retry.label, icon: retry.icon, action: retry.action)
                 }
             }
         }
@@ -1959,9 +1960,9 @@ struct ErrorMessageView: View {
         )
     }
 
-    private func outlinedButton(label: String, systemImage: String, action: @escaping () -> Void) -> some View {
+    private func outlinedButton(label: String, icon: TinfoilIcon, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label(label, systemImage: systemImage)
+            Label(label, tinfoil: icon)
                 .font(.subheadline.weight(.medium))
                 .foregroundColor(isDarkMode ? .white : .black)
                 .padding(.horizontal, 16)
@@ -2123,7 +2124,7 @@ private struct SourcesSheetView: View {
 
                                 Spacer(minLength: 8)
 
-                                Image(systemName: "arrow.up.right")
+                                Image(tinfoil: .arrowUpRight)
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundColor(.secondary)
                             }

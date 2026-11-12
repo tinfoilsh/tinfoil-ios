@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AVFoundation
+import TinfoilIcons
 
 struct EncryptionKeyInputView: View {
     @Binding var isPresented: Bool
@@ -51,7 +52,7 @@ struct EncryptionKeyInputView: View {
                     // Manual input section
                     VStack(alignment: .leading, spacing: 12) {
                         if !isKeyFieldFocused {
-                            Label("Enter Key Manually", systemImage: "keyboard")
+                            Label("Enter Key Manually", tinfoil: .writing2)
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
                                 .textCase(.uppercase)
@@ -92,7 +93,7 @@ struct EncryptionKeyInputView: View {
                             Button(action: {
                                 isKeyVisible.toggle()
                             }) {
-                                Image(systemName: isKeyVisible ? "eye.slash.fill" : "eye.fill")
+                                Image(tinfoil: isKeyVisible ? .eyeSlash : .eye)
                                     .font(.body)
                                     .foregroundColor(.secondary)
                                     .frame(width: 44, height: 44)
@@ -103,7 +104,7 @@ struct EncryptionKeyInputView: View {
                         }
                         
                         if let error = keyError {
-                            Label(error, systemImage: "exclamationmark.circle.fill")
+                            Label(error, tinfoil: .exclamationCircle)
                                 .font(.caption)
                                 .foregroundColor(.red)
                         }
@@ -137,7 +138,7 @@ struct EncryptionKeyInputView: View {
                             }
                         }) {
                             HStack {
-                                Image(systemName: "qrcode.viewfinder")
+                                Image(tinfoil: .qrCode)
                                     .font(.title3)
                                 Text("Scan QR Code")
                                     .fontWeight(.medium)

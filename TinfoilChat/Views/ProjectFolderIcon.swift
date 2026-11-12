@@ -1,4 +1,5 @@
 import SwiftUI
+import TinfoilIcons
 
 struct ProjectFolderIcon: View {
     let color: String?
@@ -9,7 +10,7 @@ struct ProjectFolderIcon: View {
     }
 
     var body: some View {
-        Image(systemName: "folder.fill")
+        Image(tinfoil: .folder)
             .font(.system(size: size * 0.5, weight: .medium))
             .foregroundColor(tint)
             .frame(width: size, height: size)

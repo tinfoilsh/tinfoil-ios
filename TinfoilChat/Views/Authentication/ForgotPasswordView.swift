@@ -8,6 +8,7 @@
 
 import SwiftUI
 import ClerkKit
+import TinfoilIcons
 
 struct ForgotPasswordView: View {
     @Environment(Clerk.self) private var clerk
@@ -35,7 +36,7 @@ struct ForgotPasswordView: View {
                         resetSignInState()
                         isPresented = false 
                     }) {
-                        Image(systemName: "xmark")
+                        Image(tinfoil: .xmark)
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(Color(.systemGray))
                     }
@@ -173,7 +174,7 @@ struct ForgotPasswordView: View {
                 forceResetView = true
             }) {
                 HStack {
-                    Image(systemName: "arrow.counterclockwise")
+                    Image(tinfoil: .refresh)
                         .font(.system(size: 14, weight: .medium))
                     Text("Request New Code")
                         .font(.system(size: 15, weight: .medium))

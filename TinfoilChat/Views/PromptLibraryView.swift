@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 /// Strips the `<system>...</system>` wrapper used to store prompts.
 func stripSystemTags(_ prompt: String) -> String {
@@ -68,7 +69,7 @@ struct PromptSuggestionsBar: View {
                 Button {
                     viewModel.setPromptPreset(isActive ? nil : preset.id)
                 } label: {
-                    pill(iconName: preset.iconName, title: preset.name, isActive: isActive)
+                    pill(icon: preset.icon, title: preset.name, isActive: isActive)
                 }
                 .buttonStyle(.plain)
             }
@@ -76,7 +77,7 @@ struct PromptSuggestionsBar: View {
             Button {
                 onOpenLibrary()
             } label: {
-                pill(iconName: "square.grid.2x2", title: "More", isActive: false)
+                pill(icon: .tools, title: "More", isActive: false)
             }
             .buttonStyle(.plain)
         }
@@ -85,9 +86,9 @@ struct PromptSuggestionsBar: View {
     }
 
     @ViewBuilder
-    private func pill(iconName: String, title: String, isActive: Bool) -> some View {
+    private func pill(icon: TinfoilIcon, title: String, isActive: Bool) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: iconName)
+            Image(tinfoil: icon)
                 .font(.system(size: 13))
             Text(title)
                 .font(.system(.footnote, weight: .medium))
@@ -158,7 +159,7 @@ struct PromptLibraryView: View {
                     Button {
                         editorTarget = .create
                     } label: {
-                        Image(systemName: "plus")
+                        Image(tinfoil: .plus)
                     }
                     .accessibilityLabel("New prompt")
                 }
@@ -208,7 +209,7 @@ struct PromptLibraryView: View {
             )
         } label: {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: preset.iconName)
+                Image(tinfoil: preset.icon)
                     .font(.system(size: 16))
                     .foregroundColor(.secondary)
                     .frame(width: 24)
@@ -225,19 +226,19 @@ struct PromptLibraryView: View {
                 }
                 Spacer()
                 if profileManager.isDefaultPreset(preset.id) {
-                    Image(systemName: "bookmark.fill")
+                    Image(tinfoil: .bookmarkFilled)
                         .font(.caption)
                         .foregroundColor(.accentColor)
                         .accessibilityLabel("Default for new chats")
                 }
                 if profileManager.isFavoritePreset(preset.id) {
-                    Image(systemName: "star.fill")
+                    Image(tinfoil: .thumbtack)
                         .font(.caption)
                         .foregroundColor(.yellow)
                         .accessibilityLabel("Favorite")
                 }
                 if activePresetId == preset.id {
-                    Image(systemName: "checkmark.circle.fill")
+                    Image(tinfoil: .checkmarkCircle)
                         .font(.caption)
                         .foregroundColor(.green)
                         .accessibilityLabel("Active")
@@ -251,7 +252,7 @@ struct PromptLibraryView: View {
             } label: {
                 Label(
                     isFavorite ? "Unfavorite" : "Favorite",
-                    systemImage: isFavorite ? "star.slash" : "star"
+                    tinfoil: isFavorite ? .thumbtackSlash : .thumbtack
                 )
             }
             .tint(.yellow)
@@ -296,7 +297,7 @@ struct PromptDetailView: View {
         Form {
             Section {
                 HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: preset.iconName)
+                    Image(tinfoil: preset.icon)
                         .font(.system(size: 20))
                         .foregroundColor(.secondary)
                         .frame(width: 28, alignment: .center)
@@ -330,7 +331,7 @@ struct PromptDetailView: View {
                         }
                     } label: {
                         HStack {
-                            Image(systemName: "plus.bubble")
+                            Image(tinfoil: .chatPlus)
                             Text("Start chat with this prompt")
                         }
                     }
@@ -345,7 +346,7 @@ struct PromptDetailView: View {
                         }
                     } label: {
                         HStack {
-                            Image(systemName: isActive ? "xmark.circle" : "sparkles")
+                            Image(tinfoil: isActive ? .xmarkCircle : .sparkle)
                             Text(isActive ? "Stop using" : "Use for this chat")
                         }
                     }
@@ -356,7 +357,7 @@ struct PromptDetailView: View {
                     profileManager.toggleFavoritePreset(preset.id)
                 } label: {
                     HStack {
-                        Image(systemName: isFavorite ? "star.slash" : "star")
+                        Image(tinfoil: isFavorite ? .thumbtackSlash : .thumbtack)
                         Text(isFavorite ? "Remove from Favorites" : "Add to Favorites")
                     }
                 }
@@ -367,7 +368,7 @@ struct PromptDetailView: View {
                     profileManager.setDefaultPromptPreset(isDefault ? nil : preset.id)
                 } label: {
                     HStack {
-                        Image(systemName: isDefault ? "bookmark.slash" : "bookmark")
+                        Image(tinfoil: isDefault ? .bookmarkSlash : .bookmark)
                         Text(isDefault ? "Stop using for new chats" : "Use for new chats")
                     }
                 }
@@ -402,14 +403,14 @@ struct PromptDetailView: View {
                         profileManager.duplicatePromptPreset(id: presetId)
                     }
                 } label: {
-                    Label("Duplicate", systemImage: "plus.square.on.square")
+                    Label("Duplicate", tinfoil: .copy)
                 }
 
                 if !preset.isBuiltIn {
                     Button {
                         onEdit(preset.id)
                     } label: {
-                        Label("Edit", systemImage: "pencil")
+                        Label("Edit", tinfoil: .writing2)
                     }
 
                     Button(role: .destructive) {
@@ -419,7 +420,7 @@ struct PromptDetailView: View {
                             onRequestDelete(target)
                         }
                     } label: {
-                        Label("Delete", systemImage: "trash")
+                        Label("Delete", tinfoil: .trash)
                             .foregroundColor(.red)
                     }
                 }

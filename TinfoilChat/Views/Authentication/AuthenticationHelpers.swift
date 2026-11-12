@@ -8,6 +8,7 @@
 import AuthenticationServices
 import SwiftUI
 import ClerkKit
+import TinfoilIcons
 
 // MARK: - Error Banner
 
@@ -16,7 +17,7 @@ struct AuthErrorBanner: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
+            Image(tinfoil: .warning)
                 .font(.system(size: 14))
                 .foregroundColor(.red)
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import TinfoilIcons
 
 struct LegalConsentView: View {
     @Binding var isAccepted: Bool
@@ -8,7 +9,7 @@ struct LegalConsentView: View {
             Button {
                 isAccepted.toggle()
             } label: {
-                Image(systemName: isAccepted ? "checkmark.square.fill" : "square")
+                Image(tinfoil: isAccepted ? .boxCheck : .square)
                     .font(.system(size: Constants.Legal.checkboxSize))
                     .frame(
                         width: Constants.Legal.checkboxHitTargetSize,

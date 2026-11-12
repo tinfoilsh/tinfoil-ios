@@ -1,4 +1,5 @@
 import SwiftUI
+import TinfoilIcons
 
 struct NoInternetView: View {
     let retryAction: () -> Void
@@ -13,7 +14,7 @@ struct NoInternetView: View {
             VStack(spacing: Constants.UI.initFailedContentSpacing) {
                 Spacer()
 
-                Image(systemName: "wifi.slash")
+                Image(tinfoil: .globeX)
                     .font(.system(size: Constants.UI.initFailedIconSize))
                     .foregroundColor(.primary)
                     .accessibilityHidden(true)
@@ -36,7 +37,7 @@ struct NoInternetView: View {
 
                 Button(action: retryAction) {
                     HStack(spacing: 8) {
-                        Image(systemName: "arrow.clockwise")
+                        Image(tinfoil: .refreshTwoArrows)
                             .font(.system(.callout, weight: .medium))
                         Text("Try Again")
                             .font(.system(.body, weight: .semibold))

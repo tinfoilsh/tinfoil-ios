@@ -10,6 +10,7 @@ import SwiftUI
 import Textual
 import SwiftMath
 import UIKit
+import TinfoilIcons
 
 /// Resolves a citation's favicon bytes from the attested metadata enclave so citation chips never
 /// reach an external icon host directly.
@@ -1328,7 +1329,7 @@ private struct UnsupportedLaTeXView: View {
                     }
                 }) {
                     HStack(spacing: 4) {
-                        Image(systemName: "safari")
+                        Image(tinfoil: .globe)
                             .font(.subheadline)
                         Text("View on web")
                             .font(.subheadline.weight(.medium))

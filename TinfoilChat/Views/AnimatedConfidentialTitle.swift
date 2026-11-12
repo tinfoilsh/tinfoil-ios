@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 import UIKit
 
 struct AnimatedConfidentialTitle: View {
@@ -30,7 +31,7 @@ struct AnimatedConfidentialTitle: View {
                 .multilineTextAlignment(.center)
             
             if showLock {
-                Image(systemName: isLocked ? "lock.fill" : "lock.open.fill")
+                Image(tinfoil: isLocked ? .lock : .lockOpened)
                     .font(.title2)
                     .foregroundColor(.primary)
                     .scaleEffect(isLocked ? 1.0 : 0.9)

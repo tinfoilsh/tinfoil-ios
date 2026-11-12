@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 struct ShareChatView: View {
     let chatTitle: String?
@@ -53,7 +54,7 @@ struct ShareChatView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark")
+                        Image(tinfoil: .xmark)
                             .font(.system(size: 18, weight: .medium))
                     }
                     .accessibilityLabel("Close")
@@ -76,7 +77,7 @@ struct ShareChatView: View {
                 .font(.system(.callout, weight: .semibold))
                 .lineLimit(2)
             Spacer()
-            Image(systemName: "bubble.left.fill")
+            Image(tinfoil: .chat)
                 .foregroundStyle(.tertiary)
                 .accessibilityHidden(true)
         }
@@ -118,13 +119,13 @@ struct ShareChatView: View {
 
     private var accessOptions: some View {
         VStack(spacing: 0) {
-            accessRow(icon: "lock.fill", label: "Only you have access", selected: hasShare == false && !isShareEnabled) {
+            accessRow(icon: .lock, label: "Only you have access", selected: hasShare == false && !isShareEnabled) {
                 selectPrivate()
             }
 
             Divider().padding(.leading, 48)
 
-            accessRow(icon: "globe", label: "Anyone with the link", selected: hasShare != nil && isShareEnabled) {
+            accessRow(icon: .globe, label: "Anyone with the link", selected: hasShare != nil && isShareEnabled) {
                 isShareEnabled = true
             }
         }
@@ -133,10 +134,10 @@ struct ShareChatView: View {
         .disabled(!canChangeSharing)
     }
 
-    private func accessRow(icon: String, label: String, selected: Bool, action: @escaping () -> Void) -> some View {
+    private func accessRow(icon: TinfoilIcon, label: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                Image(systemName: icon)
+                Image(tinfoil: icon)
                     .font(.system(size: 16))
                     .foregroundStyle(.secondary)
                     .frame(width: 24)
@@ -147,7 +148,7 @@ struct ShareChatView: View {
                 Spacer()
 
                 if selected {
-                    Image(systemName: "checkmark")
+                    Image(tinfoil: .checkmark)
                         .font(.system(size: 14, weight: .semibold))
                 }
             }
@@ -169,7 +170,7 @@ struct ShareChatView: View {
                     }
                 } else {
                     HStack(spacing: 8) {
-                        Image(systemName: "square.and.arrow.up")
+                        Image(tinfoil: .share)
                         Text(hasShare == true ? "Replace Share Link" : "Share Link")
                     }
                 }
@@ -267,7 +268,7 @@ struct ShareChatView: View {
 
                 Button(action: copyShareUrl) {
                     HStack(spacing: 4) {
-                        Image(systemName: isLinkCopied ? "checkmark" : "doc.on.doc")
+                        Image(tinfoil: isLinkCopied ? .checkmark : .copy)
                         Text(isLinkCopied ? "Copied!" : "Copy")
                     }
                     .font(.system(size: 13, weight: .semibold))
