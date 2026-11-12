@@ -118,7 +118,7 @@ enum PasskeyDiagnostics {
         guard SentrySDK.isEnabled else { return }
         let crumb = Breadcrumb(level: level, category: breadcrumbCategory)
         crumb.message = message
-        if let detail { crumb.data = [breadcrumbDetailKey: detail] }
+        if let detail { crumb.setData(value: detail, key: breadcrumbDetailKey) }
         SentrySDK.addBreadcrumb(crumb)
     }
 }
