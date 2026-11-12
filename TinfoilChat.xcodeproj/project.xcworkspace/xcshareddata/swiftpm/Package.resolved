@@ -137,6 +137,15 @@
       }
     },
     {
+      "identity" : "tinfoil-icons",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tinfoilsh/tinfoil-icons",
+      "state" : {
+        "revision" : "8f873e5bacb31dc45a03b388f7935bbe5bf42d50",
+        "version" : "2.7.0"
+      }
+    },
+    {
       "identity" : "tinfoil-passkey-kit",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/tinfoil-passkey-kit",
