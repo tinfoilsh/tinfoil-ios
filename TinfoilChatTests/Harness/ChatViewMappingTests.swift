@@ -50,6 +50,32 @@ struct ChatViewMappingTests {
         ])
     }
 
+    @Test func onlyTheStepAReplyStreamsHasALiveSummary() throws {
+        var state = ChatState()
+        state.status = .streaming
+        state.summaries = ["t1": "Pondering"]
+        state.messages = [try Self.reply([["id": "t1", "type": "thinking", "content": "Hmm"]])]
+        #expect(ChatViewMapping.thinkingSummary(of: state) == "Pondering")
+        #expect(ChatViewMapping.webSearchSummary(of: state) == "")
+
+        // The reply went on to a search, then to reading a page.
+        let search: [String: Any] = ["id": "s", "type": "tool_call", "toolCallId": "s", "name": "web_search", "arguments": "{}",
+                                     "display": ["query": "cats", "status": "running", "sources": []]]
+        state.messages = [try Self.reply([["id": "t1", "type": "thinking", "content": "Hmm"], search])]
+        #expect(ChatViewMapping.thinkingSummary(of: state) == "")
+        #expect(ChatViewMapping.webSearchSummary(of: state) == "Searching the web: cats")
+        let fetch: [String: Any] = ["id": "f", "type": "tool_call", "toolCallId": "f", "name": "web_fetch", "arguments": "{}",
+                                    "display": ["url": "https://cats.test", "status": "running", "sources": []]]
+        state.messages = [try Self.reply([search, fetch])]
+        #expect(ChatViewMapping.webSearchSummary(of: state) == "Reading https://cats.test")
+
+        // A reply that is not streaming has none.
+        state.status = .idle
+        #expect(ChatViewMapping.webSearchSummary(of: state) == "")
+        state.messages = [try Self.reply([["id": "t1", "type": "thinking", "content": "Hmm"]])]
+        #expect(ChatViewMapping.thinkingSummary(of: state) == "")
+    }
+
     @Test func aStreamingReplyThinksOnlyInItsLastBlock() throws {
         let thinkingLast = try Self.reply([
             ["id": "c1", "type": "content", "content": "So far"],

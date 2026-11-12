@@ -110,6 +110,25 @@ enum ChatViewMapping {
         return message
     }
 
+    /// The latest summary of the reasoning the reply is thinking through,
+    /// while it streams.
+    static func thinkingSummary(of state: ChatState) -> String {
+        guard state.status == .streaming,
+              let last = state.messages.last, last.role.value1 == .assistant,
+              let block = last.timeline?.last, block._type.value1 == .thinking else { return "" }
+        return state.summaries[block.id] ?? ""
+    }
+
+    /// What the search or page read the reply waits for is doing, while it
+    /// streams.
+    static func webSearchSummary(of state: ChatState) -> String {
+        guard state.status == .streaming,
+              let last = state.messages.last, let block = last.timeline?.last, block._type.value1 == .toolCall else { return "" }
+        if block.name == searchTool, let query = block.display?.query { return "Searching the web: \(query)" }
+        if block.name == fetchTool, let url = block.display?.url ?? block.display?.sources.first?.url { return "Reading \(url)" }
+        return ""
+    }
+
     /// A compaction marker as the view shows it above the message after it,
     /// or under the last message when it ends the chat. One whose summary is
     /// still being written has no compaction member, and counts from when it
