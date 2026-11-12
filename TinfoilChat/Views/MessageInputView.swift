@@ -2064,7 +2064,7 @@ struct CustomTextEditor: UIViewRepresentable {
         /// editor and then resynced into the binding, undoing the clear.
         var clearedDraft: String?
         var draftReplacement: (replaced: String, replacement: String)?
-        private var lastMeasurement: (text: String, width: CGFloat, pointSize: CGFloat, height: CGFloat)?
+        private var lastMeasurement: (text: String, width: CGFloat, pointSize: CGFloat, showsPlaceholder: Bool, height: CGFloat)?
 
         init(_ parent: CustomTextEditor) {
             self.parent = parent
@@ -2106,9 +2106,11 @@ struct CustomTextEditor: UIViewRepresentable {
         func measuredHeight(for textView: UITextView, width: CGFloat) -> CGFloat {
             let text = currentTextSnapshot
             let pointSize = textView.font?.pointSize ?? 0
+            // An empty editor is as tall as the placeholder it shows.
+            let showsPlaceholder = (textView as? PastingTextView)?.showsPlaceholder ?? false
 
             if let last = lastMeasurement,
-               last.text == text, last.width == width, last.pointSize == pointSize {
+               last.text == text, last.width == width, last.pointSize == pointSize, last.showsPlaceholder == showsPlaceholder {
                 return last.height
             }
 
@@ -2120,7 +2122,7 @@ struct CustomTextEditor: UIViewRepresentable {
                 height = min(MessageInputView.Layout.maximumHeight, max(MessageInputView.Layout.minimumHeight, size.height))
             }
 
-            lastMeasurement = (text, width, pointSize, height)
+            lastMeasurement = (text, width, pointSize, showsPlaceholder, height)
             return height
         }
 
@@ -2218,6 +2220,8 @@ final class PastingTextView: UITextView {
         }
     }
 
+    var showsPlaceholder: Bool { !placeholderLabel.isHidden }
+
     private lazy var placeholderLabel: UILabel = {
         let label = UILabel()
         label.textColor = .lightGray
@@ -2269,7 +2273,7 @@ final class PastingTextView: UITextView {
     /// text sizes.
     override func sizeThatFits(_ size: CGSize) -> CGSize {
         let fitting = super.sizeThatFits(size)
-        guard !placeholderLabel.isHidden else { return fitting }
+        guard showsPlaceholder else { return fitting }
         let height = textContainerInset.top + placeholderHeight(in: size.width) + textContainerInset.bottom
         return CGSize(width: fitting.width, height: max(fitting.height, height))
     }
