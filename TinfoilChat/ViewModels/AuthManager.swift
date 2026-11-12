@@ -60,14 +60,15 @@ struct CachedUserDataStore {
     private let key = Constants.StorageKeys.Auth.userData
     /// The keychain can keep a write waiting for seconds, so the details are
     /// saved off the caller's thread, in the order they were given. A read or
-    /// a removal waits for the saves before it.
-    private let writes = DispatchQueue(label: "CachedUserDataStore", qos: .userInitiated)
+    /// a removal waits for the saves before it, whichever store made them:
+    /// the stores share the queue as they share the item they keep.
+    private static let writes = DispatchQueue(label: "CachedUserDataStore", qos: .userInitiated)
 
     /// The details, and whether they are the copy an older version kept in
     /// the defaults, which go with the app: only this install can have kept
     /// that copy.
     func load() -> (data: Data, isFromOlderVersion: Bool)? {
-        writes.sync { read() }
+        Self.writes.sync { read() }
     }
 
     private func read() -> (data: Data, isFromOlderVersion: Bool)? {
@@ -88,7 +89,7 @@ struct CachedUserDataStore {
     }
 
     func save(_ data: Data) {
-        writes.async { [keychain, key] in
+        Self.writes.async { [keychain, key] in
             do {
                 try keychain.save(data, for: key, service: nil)
             } catch {
@@ -98,7 +99,7 @@ struct CachedUserDataStore {
     }
 
     func clear() {
-        writes.sync {
+        Self.writes.sync {
             if !keychain.delete(for: key, service: nil) {
                 Self.logger.error("Failed to remove the signed-in user's details")
             }
