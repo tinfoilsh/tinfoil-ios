@@ -765,6 +765,11 @@ class ChatViewModel: ObservableObject {
         account?.session?.features.additionalProperties["manualCompaction"] == true
     }
 
+    /// A compaction the user asks for summarizes the latest exchange too.
+    var compactsLatestExchange: Bool {
+        session?.compactsLatestExchange == true
+    }
+
     /// Deep research can be turned on: the chat service offers it to the
     /// account, and web search is not turned off in Settings.
     var canResearch: Bool { session?.researchAvailable == true }

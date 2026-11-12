@@ -745,17 +745,49 @@ struct ChatSessionTests {
 
     private static let compactionFailed: [String: Any] = ["type": "COMPACTION_END", "messageId": "c", "beforeMessageId": chatEndMarkerKey, "outcome": "failed"]
 
-    private static let compactionMarker: [String: Any] = [
+    private static let wholeChatMarker: [String: Any] = [
         "id": "c", "role": "compaction", "createdAt": "2026-01-01T00:00:04Z", "content": "## Goals and context\nTwo questions.",
         "compaction": ["messages": 4, "startedAt": 1767225600000, "endedAt": 1767225601000, "model": "gpt-oss-120b", "version": 2],
     ]
 
-    private static let compactionCompleted: [String: Any] = ["type": "COMPACTION_END", "messageId": "c", "beforeMessageId": chatEndMarkerKey, "outcome": "completed", "marker": compactionMarker]
+    private static let compactionCompleted: [String: Any] = ["type": "COMPACTION_END", "messageId": "c", "beforeMessageId": chatEndMarkerKey, "outcome": "completed", "marker": wholeChatMarker]
+
+    /// A stored chat of two exchanges, open on a harness that compacts a
+    /// chat on request, its latest exchange too unless told otherwise.
+    private static func compactableChat(compactsLatest: Bool = true) async throws -> Fixture {
+        let opened = signedInSession.merging(["features": ["manualCompaction": true, "compactLatest": compactsLatest]]) { $1 }
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(opened), Answers.json(twoExchangeWindow)])
+        _ = try await fixture.account.loadedSession()
+        #expect(try await fixture.session.openChat(threadId, local: false) == .opened)
+        return fixture
+    }
+
+    @Test func aHarnessThatKeepsTheLatestExchangeIsNotAskedToCompactIt() async throws {
+        let fixture = try await Self.compactableChat(compactsLatest: false)
+        let session = fixture.session
+        #expect(session.canCompact)
+        var kept = Self.wholeChatMarker
+        kept["compaction"] = ["messages": 2, "startedAt": 1767225600000, "endedAt": 1767225601000, "model": "gpt-oss-120b", "version": 2] as [String: Any]
+        await fixture.transport.push(Answers.events([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_3", "instance": "i"],
+            ["type": "COMPACTION_START", "messageId": "c", "beforeMessageId": "u2"],
+            ["type": "COMPACTION_END", "messageId": "c", "beforeMessageId": "u2", "outcome": "completed", "marker": kept],
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_3", "metadata": [:]],
+        ]))
+
+        #expect(await session.compact())
+
+        let turn = try #require(await fixture.transport.requests.last)
+        #expect(turn.json["kind"] as? String == "compact")
+        #expect(turn.json["compactLatest"] == nil)
+        // The exchange the harness kept is all that follows its marker.
+        #expect(session.state.markers.mapValues(\.id) == ["u2": "c"])
+        #expect(!session.canCompact)
+    }
 
     @Test func aMessageSentWhileTheChatCompactsWaitsInTheQueueAndIsAnsweredOnceItEnds() async throws {
-        let fixture = Fixture(userId: "user-1", answers: [Answers.json(Self.twoExchangeWindow)])
+        let fixture = try await Self.compactableChat()
         let session = fixture.session
-        #expect(try await session.openChat(threadId, local: false) == .opened)
         let (compaction, compacted) = AsyncStream<Void>.makeStream()
         await fixture.transport.push(heldRun(Self.compactionStarted, then: [
             Self.compactionCompleted,
@@ -764,7 +796,7 @@ struct ChatSessionTests {
         let queued: [String: Any] = ["queueId": "run_4", "kind": "send", "content": "third question", "quote": NSNull(), "attachments": [], "createdAt": "2026-01-01T00:00:05Z"]
         let (queue, started) = AsyncStream<Void>.makeStream()
         let compactedMessages = (Self.twoExchangeWindow["messages"] as? [[String: Any]] ?? []) + [
-            Self.compactionMarker,
+            Self.wholeChatMarker,
             ["id": "u3", "role": "user", "createdAt": "2026-01-01T00:00:05Z", "content": "third question"],
         ]
         await fixture.transport.push(heldRun([
@@ -799,9 +831,8 @@ struct ChatSessionTests {
     }
 
     @Test func aCompactionTheUserAsksForThatFailsCompactsAgainWhenRetried() async throws {
-        let fixture = Fixture(userId: "user-1", answers: [Answers.json(Self.twoExchangeWindow)])
+        let fixture = try await Self.compactableChat()
         let session = fixture.session
-        #expect(try await session.openChat(threadId, local: false) == .opened)
         #expect(session.canCompact)
         let (release, failed) = AsyncStream<Void>.makeStream()
         await fixture.transport.push(heldRun(Self.compactionStarted, then: [
@@ -852,9 +883,8 @@ struct ChatSessionTests {
     }
 
     @Test func stoppingACompactionSaysNothingOfTheReplyBeforeIt() async throws {
-        let fixture = Fixture(userId: "user-1", answers: [Answers.json(Self.twoExchangeWindow)])
+        let fixture = try await Self.compactableChat()
         let session = fixture.session
-        #expect(try await session.openChat(threadId, local: false) == .opened)
         let (release, stopped) = AsyncStream<Void>.makeStream()
         await fixture.transport.push(heldRun(Self.compactionStarted, then: [
             Self.compactionFailed,

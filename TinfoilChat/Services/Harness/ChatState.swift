@@ -65,12 +65,20 @@ struct ChatState: Equatable, Sendable {
     }
 
     /// Whether compacting the chat on request has anything to summarize, as
-    /// the harness decides it for a turn that compacts the latest exchange
-    /// too: a reply after the latest compaction marker.
-    var compactable: Bool {
-        guard markers[chatEndMarkerKey] == nil,
-              let reply = messages.lastIndex(where: { $0.role.value1 == .assistant }) else { return false }
-        return reply >= (messages.lastIndex(where: { markers[$0.id] != nil }) ?? 0)
+    /// the harness decides it. A turn that compacts the latest exchange too
+    /// needs a reply after the latest compaction marker. Any other needs a
+    /// message after that marker that comes before the last question, which
+    /// the harness keeps with its reply.
+    func compactable(includingLatest: Bool) -> Bool {
+        // A marker that ends the chat summarized every message.
+        guard markers[chatEndMarkerKey] == nil else { return false }
+        let marker = messages.lastIndex(where: { markers[$0.id] != nil }) ?? 0
+        if includingLatest {
+            guard let reply = messages.lastIndex(where: { $0.role.value1 == .assistant }) else { return false }
+            return reply >= marker
+        }
+        guard let question = messages.lastIndex(where: { $0.role.value1 == .user }) else { return false }
+        return question > marker
     }
 
     /// The messages with each compaction marker before the message it shows

@@ -488,16 +488,16 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
 
     // MARK: - Turns
 
-    /// The fields every turn of the open chat has. A compaction on request
-    /// summarizes the latest exchange too, as the chat shows a marker at its
-    /// end.
+    /// The fields every turn of the open chat has. Where the harness offers
+    /// it, a compaction on request summarizes the latest exchange too, as the
+    /// chat shows a marker at its end.
     private func turnDefaults(_ threadId: String) -> Turn {
         let offered = account.session?.widgets ?? []
         return Turn(
             clientRequestId: UUID().uuidString.lowercased(),
             threadId: threadId,
             widgets: GenUIRegistry.widgetNames.filter { offered.contains($0) },
-            compactLatest: true,
+            compactLatest: compactsLatestExchange ? true : nil,
             options: TurnOptions(model: open.model, timezone: TimeZone.current.identifier)
         )
     }
@@ -815,15 +815,21 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         return await send(TurnFields(kind: failedRun && state.compactTurn ? .compact : .retry, options: options))
     }
 
-    /// Whether the open chat can be compacted now: it is stored, no reply
-    /// runs, and it holds a reply its latest compaction did not summarize.
-    var canCompact: Bool {
-        guard let id = open.id, open.unsaved != id, open.failedId == nil, !running, acceptsTurn else { return false }
-        return state.compactable
+    /// The harness summarizes a chat's latest exchange too when the user
+    /// asks it to compact the chat, rather than keeping it as it is.
+    var compactsLatestExchange: Bool {
+        account.session?.features.additionalProperties["compactLatest"] == true
     }
 
-    /// Compacts the open chat on request: the harness summarizes its messages,
-    /// the latest exchange included, without asking the model.
+    /// Whether the open chat can be compacted now: it is stored, no reply
+    /// runs, and it holds messages for the harness to summarize.
+    var canCompact: Bool {
+        guard let id = open.id, open.unsaved != id, open.failedId == nil, !running, acceptsTurn else { return false }
+        return state.compactable(includingLatest: compactsLatestExchange)
+    }
+
+    /// Compacts the open chat on request: the harness summarizes its
+    /// messages without asking the model.
     @discardableResult
     func compact(options: TurnOptions? = nil) async -> Bool {
         guard canCompact else { return false }

@@ -493,7 +493,10 @@ enum Constants {
         static let compactLabel = "Compact Chat"
         static let compactingLabel = "Compacting…"
         static let compactSystemImage = "rectangle.compress.vertical"
-        static let compactExplanation = "Compacting summarizes the conversation so far, including the latest exchange, so the chat uses less of the context window."
+        static let compactExplanation = "Compacting summarizes earlier messages so the chat uses less of the context window. The latest exchange is kept as it is."
+        /// The explanation where the chat service summarizes the latest
+        /// exchange too.
+        static let compactLatestExplanation = "Compacting summarizes the conversation so far, including the latest exchange, so the chat uses less of the context window."
         static let nothingToCompactNote = "Nothing to compact right now."
         /// The status above the composer while a compaction runs.
         static let compactingStatusTitle = "Compacting conversation"
