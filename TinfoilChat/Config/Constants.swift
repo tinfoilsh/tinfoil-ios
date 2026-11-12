@@ -181,8 +181,9 @@ enum Constants {
         /// The app Tinfoil ships, the only one whose reports Tinfoil reads.
         static let reportingBundleIdentifier = "sh.tinfoil.TinfoilChat"
         /// Whether this build sends crash and performance reports. A debug
-        /// build stops at breakpoints, which reads as a hang, and a build
-        /// under another identifier is not the app Tinfoil ships.
+        /// build runs unoptimized and uploads no symbols, so its reports
+        /// are neither the shipped app's nor readable, and a build under
+        /// another identifier is not the app Tinfoil ships.
         static var sendsReports: Bool {
             #if DEBUG
             return false
