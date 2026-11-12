@@ -693,7 +693,7 @@ struct CloudSyncOnboardingView: View {
                     generatedKey = newKey
                     generatedKeyMode = activationMode
                 }
-                await completeSetup(with: newKey, activationMode: activationMode)
+                await completeSetup(with: newKey, activationMode: activationMode, showingKeyOnFailure: true)
                 return
             }
 
@@ -728,18 +728,18 @@ struct CloudSyncOnboardingView: View {
         }
     }
 
-    private func completeSetup(with key: String, activationMode: CloudKeyActivationMode) async {
+    /// Sets the key up. A failure shows on the step the user is on, unless
+    /// `showingKeyOnFailure` asks for the key display: a key generated while
+    /// a passkey is active skipped it, and shows there beside the error so it
+    /// can be saved and set up again.
+    private func completeSetup(with key: String, activationMode: CloudKeyActivationMode, showingKeyOnFailure: Bool = false) async {
         let errorMessage = await onSetupComplete?(key, activationMode) ?? nil
 
         await MainActor.run {
             isProcessing = false
             if let errorMessage {
                 keyError = errorMessage
-                // A key generated while a passkey is active skipped the key
-                // display, where it now shows beside the error so it can be
-                // saved and set up again. A restored key stays on the step
-                // it was entered on, which shows the error.
-                if currentStep == .generateOrRestore {
+                if showingKeyOnFailure && currentStep != .keyDisplay {
                     direction = .trailing
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
                         currentStep = .keyDisplay
