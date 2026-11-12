@@ -735,7 +735,11 @@ struct CloudSyncOnboardingView: View {
             isProcessing = false
             if let errorMessage {
                 keyError = errorMessage
-                if currentStep != .keyDisplay {
+                // A key generated while a passkey is active skipped the key
+                // display, where it now shows beside the error so it can be
+                // saved and set up again. A restored key stays on the step
+                // it was entered on, which shows the error.
+                if currentStep == .generateOrRestore {
                     direction = .trailing
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
                         currentStep = .keyDisplay
