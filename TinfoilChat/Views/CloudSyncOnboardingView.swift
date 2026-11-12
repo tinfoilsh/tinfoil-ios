@@ -476,9 +476,17 @@ struct CloudSyncOnboardingView: View {
                 }
 
                 Button(action: { handleComplete() }) {
-                    Text("Done")
-                        .onboardingPrimaryButton()
+                    Group {
+                        if isProcessing {
+                            ProgressView()
+                                .tint(colorScheme == .dark ? .black : .white)
+                        } else {
+                            Text("Done")
+                        }
+                    }
+                    .onboardingPrimaryButton()
                 }
+                .disabled(isProcessing)
                 .padding(.horizontal, 24)
                 .padding(.top, 8)
 
@@ -693,7 +701,7 @@ struct CloudSyncOnboardingView: View {
                     generatedKey = newKey
                     generatedKeyMode = activationMode
                 }
-                await completeSetup(with: newKey, activationMode: activationMode)
+                await completeSetup(with: newKey, activationMode: activationMode, showingKeyOnFailure: true)
                 return
             }
 
@@ -721,21 +729,25 @@ struct CloudSyncOnboardingView: View {
     }
 
     private func handleComplete() {
-        guard let key = generatedKey else { return }
+        guard let key = generatedKey, !isProcessing else { return }
         isProcessing = true
         Task {
             await completeSetup(with: key, activationMode: generatedKeyMode)
         }
     }
 
-    private func completeSetup(with key: String, activationMode: CloudKeyActivationMode) async {
+    /// Sets the key up. A failure shows on the step the user is on, unless
+    /// `showingKeyOnFailure` asks for the key display: a key generated while
+    /// a passkey is active skipped it, and shows there beside the error so it
+    /// can be saved and set up again.
+    private func completeSetup(with key: String, activationMode: CloudKeyActivationMode, showingKeyOnFailure: Bool = false) async {
         let errorMessage = await onSetupComplete?(key, activationMode) ?? nil
 
         await MainActor.run {
             isProcessing = false
             if let errorMessage {
                 keyError = errorMessage
-                if currentStep != .keyDisplay {
+                if showingKeyOnFailure && currentStep != .keyDisplay {
                     direction = .trailing
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
                         currentStep = .keyDisplay
