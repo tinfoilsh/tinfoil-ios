@@ -77,9 +77,6 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// The turns that ask a question, which research it while deep research
     /// is on.
     private static let researchKinds: Set<Turn.Kind> = [.send, .edit, .regenerate, .retry]
-    /// The turns that may compact the chat on request: a compaction, and a
-    /// retry, which compacts again after one failed.
-    private static let compactingKinds: Set<Turn.Kind> = [.compact, .retry]
 
     let account: HarnessAccount
     let controller: RunController
@@ -631,7 +628,7 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         fields.options = fields.options.flatMap { leaveToPreset($0, choice) }
         // Where the harness offers it, a compaction on request summarizes the
         // latest exchange too, as the chat shows a marker at its end.
-        if compactsLatestExchange, Self.compactingKinds.contains(fields.kind ?? defaults.kind) {
+        if compactsLatestExchange, (fields.kind ?? defaults.kind) == .compact {
             defaults.compactLatest = true
         }
         // Deep research asks for the next question alone. The harness then

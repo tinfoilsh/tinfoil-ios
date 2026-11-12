@@ -88,8 +88,7 @@ struct Turn: Encodable, Equatable, Sendable {
     var toolCallId: String?
     var attachments: [SentAttachment]?
     var widgets: [String]?
-    /// A compaction, or a retry that compacts again, summarizes the chat's
-    /// latest exchange too.
+    /// A compaction summarizes the chat's latest exchange too.
     var compactLatest: Bool?
     var options: TurnOptions?
 
