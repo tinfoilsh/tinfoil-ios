@@ -29,11 +29,13 @@ fi
 export SENTRY_ORG="$SENTRY_ORGANIZATION"
 export SENTRY_PROJECT="$SENTRY_PROJECT_SLUG"
 
-if ! sentry debug-files upload --include-sources "$DWARF_DSYM_FOLDER_PATH"; then
-  echo "error: the debug symbols could not be uploaded to Sentry, so reports from this archive would name none of its functions."
+# No input, so a CLI that would ask something fails instead of waiting.
+if ! sentry debug-files upload --include-sources "$DWARF_DSYM_FOLDER_PATH" </dev/null; then
+  echo "error: the debug symbols could not be uploaded to Sentry, so reports from this archive would name none of its functions. Check the network, and run 'sentry auth login' if the CLI is signed out."
   exit 1
 fi
 
 if [ -n "${SCRIPT_OUTPUT_FILE_0:-}" ]; then
+  mkdir -p "$(dirname "$SCRIPT_OUTPUT_FILE_0")"
   touch "$SCRIPT_OUTPUT_FILE_0"
 fi
