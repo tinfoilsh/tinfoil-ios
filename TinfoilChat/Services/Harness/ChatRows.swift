@@ -56,7 +56,10 @@ final class ChatRows {
         var rows = messages.enumerated().map { index, wire -> Message in
             let streaming = running && index == messages.count - 1
             let shownId = shownIds[wire.id] ?? wire.id
-            if let previous = mapped[wire.id], previous.streaming == streaming, previous.view.id == shownId, previous.wire == wire {
+            // The reply streaming changes with nearly every frame, and telling
+            // whether it did compares every step it holds, the pages a search
+            // read included, so it is built again without asking.
+            if !streaming, let previous = mapped[wire.id], previous.streaming == streaming, previous.view.id == shownId, previous.wire == wire {
                 kept[wire.id] = previous
                 return previous.view
             }
