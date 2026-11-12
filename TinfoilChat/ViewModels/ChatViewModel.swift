@@ -1165,22 +1165,6 @@ class ChatViewModel: ObservableObject {
             && account?.session?.features.additionalProperties["speech"] == true && isVerified
     }
 
-    /// The latest summary of the reasoning the reply is thinking through.
-    var thinkingSummary: String {
-        guard let state = session?.state, state.status == .streaming,
-              let last = state.messages.last, last.role.value1 == .assistant,
-              let block = last.timeline?.last, block._type.value1 == .thinking else { return "" }
-        return state.summaries[block.id] ?? ""
-    }
-
-    var webSearchSummary: String {
-        guard let state = session?.state, state.status == .streaming,
-              let last = state.messages.last, let block = last.timeline?.last, block._type.value1 == .toolCall else { return "" }
-        if block.name == "web_search", let query = block.display?.query { return "Searching the web: \(query)" }
-        if block.name == "web_fetch", let url = block.display?.url ?? block.display?.sources.first?.url { return "Reading \(url)" }
-        return ""
-    }
-
     var queuedMessages: [QueuedMessage] {
         (session?.state.snapshot.queue ?? []).map { item in
             QueuedMessage(id: item.queueId, text: item.content ?? "", attachments: ChatViewMapping.queuedAttachments(item))
@@ -1220,7 +1204,7 @@ class ChatViewModel: ObservableObject {
         let summarized = state.summarizedIds
         let lastId = state.messages.last?.id
         let researchingReply = state.researchingReply
-        var messages = rows.rows(chatId: open.id, messages: state.messages, running: running && !stopping && !compacting, summaries: state.summaries, replyModelName: replyModelName).map { message -> Message in
+        var messages = rows.rows(chatId: open.id, messages: state.messages, running: running && !stopping && !compacting, replyModelName: replyModelName).map { message -> Message in
             var view = message
             // A reply the user stopped here, or the model ran out of room for,
             // says so, until a continuation finishes it.
@@ -1241,6 +1225,11 @@ class ChatViewModel: ObservableObject {
             // The reply a research turn streams is a research before its run
             // commits it as one.
             if id == researchingReply { view.isResearch = true }
+            // Only the reply streaming has live summaries of its step.
+            if id == lastId {
+                view.thinkingSummary = ChatViewMapping.thinkingSummary(of: state)
+                view.webSearchSummary = ChatViewMapping.webSearchSummary(of: state)
+            }
             if open.onDevice, !view.attachments.isEmpty {
                 // An image the previous client stored without a thumbnail
                 // shows its bytes; others load them when opened.

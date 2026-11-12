@@ -436,7 +436,8 @@ enum ChatReducer {
     ) -> [HarnessMessage] {
         let type: TimelineBlock._TypePayload.Value1Payload = thinking ? .thinking : .content
         let sealed = state.sealed[id] ?? 0
-        let at = millis(of: timestamp)
+        // Only reasoning is timed.
+        let at = thinking ? millis(of: timestamp) : nil
         return withReply(state.messages, id: id, createdAt: timestamp) { blocks in
             // Reasoning that arrives after the reply's text began is the tail
             // of the reasoning before that text, as the harness keeps it.
