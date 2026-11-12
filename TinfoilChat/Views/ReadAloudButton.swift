@@ -1,4 +1,5 @@
 import SwiftUI
+import TinfoilIcons
 
 struct ReadAloudButton: View {
     @ObservedObject var player: SpeechPlayer
@@ -34,7 +35,7 @@ struct ReadAloudButton: View {
                     ProgressView()
                         .controlSize(.small)
                 } else {
-                    Image(systemName: isPlaying ? "stop.fill" : "speaker.wave.2")
+                    Image(tinfoil: isPlaying ? .stop : .audio)
                         .font(.system(size: Constants.Speech.actionIconSize))
                         .symbolEffect(.pulse, options: .repeating, isActive: isPlaying && !reduceMotion)
                 }

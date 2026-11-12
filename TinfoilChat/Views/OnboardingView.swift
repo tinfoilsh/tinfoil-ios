@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 // MARK: - Onboarding Flow Container
 
@@ -144,7 +145,7 @@ private struct OnboardingPrivacyPage: View {
 
     var body: some View {
         VStack(spacing: Constants.Onboarding.contentSpacing) {
-            Image(systemName: privacyEnabled ? "lock.fill" : "lock.open")
+            Image(tinfoil: privacyEnabled ? .lock : .lockOpened)
                 .font(.system(size: Constants.Onboarding.iconSize))
                 .frame(height: Constants.Onboarding.iconAreaHeight)
                 .accessibilityHidden(true)
@@ -172,7 +173,7 @@ private struct OnboardingPrivacyPage: View {
                         .fill(.white)
                         .frame(width: Constants.Onboarding.toggleThumbSize, height: Constants.Onboarding.toggleThumbSize)
                         .overlay {
-                            Image(systemName: "checkmark")
+                            Image(tinfoil: .checkmark)
                                 .font(.system(size: Constants.Onboarding.checkmarkSize, weight: .bold))
                                 .foregroundStyle(Color.tinfoilAccentDark)
                                 .opacity(privacyEnabled ? 1 : 0)
@@ -203,7 +204,7 @@ private struct OnboardingSafeguardsPage: View {
 
     var body: some View {
         VStack(spacing: Constants.Onboarding.contentSpacing) {
-            Image(systemName: "checkmark.shield")
+            Image(tinfoil: .shieldCheck)
                 .font(.system(size: Constants.Onboarding.iconSize))
                 .foregroundStyle(colorScheme == .dark ? Color.white : .tinfoilAccentBlue)
                 .frame(height: Constants.Onboarding.iconAreaHeight)

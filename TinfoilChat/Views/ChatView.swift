@@ -11,6 +11,7 @@ import SafariServices
 import ClerkKit
 import RevenueCat
 import RevenueCatUI
+import TinfoilIcons
 
 
 // MARK: - ChatContainer
@@ -228,7 +229,7 @@ struct ChatContainer: View {
                             }
                         }
                     } label: {
-                        Image(systemName: "chevron.left")
+                        Image(tinfoil: .chevronLeft)
                             .font(.system(size: 18, weight: .semibold))
                             .frame(width: 24, height: 24)
                             .foregroundColor(toolbarContentColor)
@@ -298,7 +299,7 @@ struct ChatContainer: View {
                        let preset = profileManager.promptPreset(for: presetId),
                        !isSidebarOpen && !isVerificationBadgeExpanded {
                         HStack(spacing: 4) {
-                            Image(systemName: preset.iconName)
+                            Image(tinfoil: preset.icon)
                                 .font(.system(size: 9, weight: .semibold))
                             Text(preset.name)
                                 .font(.system(.caption2, weight: .medium))
@@ -347,7 +348,7 @@ struct ChatContainer: View {
             if authManager.isAuthenticated && viewModel.activeProject == nil && showsChatToolbarActions && !(viewModel.currentChat?.isBlankChat ?? true) {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: createNewChat) {
-                        Image(systemName: "plus")
+                        Image(tinfoil: .plus)
                             .font(.system(size: 18, weight: .medium))
                             .foregroundColor(toolbarContentColor)
                     }
@@ -608,12 +609,12 @@ struct ChatContainer: View {
         } label: {
             HStack(spacing: 3) {
                 if isLocal {
-                    Image(systemName: "internaldrive")
+                    Image(tinfoil: .hardDrive)
                         .font(.system(size: 9))
                     Text("Local")
                         .font(.system(.caption2, weight: .medium))
                 } else {
-                    Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90.icloud")
+                    Image(tinfoil: .cloudSync)
                         .font(.system(size: 9))
                     Text("Cloud")
                         .font(.system(.caption2, weight: .medium))
@@ -699,11 +700,11 @@ struct TabbedWelcomeView: View {
                 showPrivacySheet = true
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
+                    Image(tinfoil: .checkmarkCircle)
                         .font(.system(size: 13))
                     Text("Your chats are private by design")
                         .font(.system(size: 15, weight: .medium))
-                    Image(systemName: "chevron.right")
+                    Image(tinfoil: .chevronRight)
                         .font(.system(size: 10, weight: .semibold))
                 }
                 .foregroundColor(.secondary)
@@ -744,7 +745,7 @@ struct PrivacyExplainerSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
+                        Image(tinfoil: .checkmarkCircle)
                             .font(.system(size: 18))
                             .foregroundColor(.green)
                         Text("Your chats are private by design")
@@ -757,8 +758,8 @@ struct PrivacyExplainerSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     HStack(spacing: 10) {
-                        linkButton(icon: "cpu", title: "Technology", urlString: "https://tinfoil.sh/technology")
-                        linkButton(icon: "chevron.left.forwardslash.chevron.right", title: "Source Code", urlString: "https://github.com/tinfoilsh")
+                        linkButton(icon: .cpuCheck, title: "Technology", urlString: "https://tinfoil.sh/technology")
+                        linkButton(icon: .code2, title: "Source Code", urlString: "https://github.com/tinfoilsh")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -772,7 +773,7 @@ struct PrivacyExplainerSheet: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark")
+                        Image(tinfoil: .xmark)
                             .font(.system(size: 18, weight: .medium))
                     }
                     .accessibilityLabel("Close")
@@ -782,12 +783,12 @@ struct PrivacyExplainerSheet: View {
         .presentationDetents([.medium])
     }
 
-    private func linkButton(icon: String, title: String, urlString: String) -> some View {
+    private func linkButton(icon: TinfoilIcon, title: String, urlString: String) -> some View {
         Button {
             UIApplication.shared.open(URL(string: urlString)!)
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: icon)
+                Image(tinfoil: icon)
                     .font(.system(size: 12))
                 Text(title)
                     .font(.system(size: 13, weight: .medium))
@@ -878,13 +879,13 @@ struct VerificationStatusIndicator: View {
     @Binding var isCollapsed: Bool
     @State private var collapseTask: Task<Void, Never>?
 
-    private var iconName: String {
+    private var icon: TinfoilIcon {
         if viewModel.isVerified && viewModel.verificationError == nil {
-            return "lock.fill"
+            return .lock
         } else if viewModel.isVerifying {
-            return "lock.open.fill"
+            return .lockOpened
         } else {
-            return "exclamationmark.shield.fill"
+            return .shieldWithExclamation
         }
     }
 
@@ -922,7 +923,7 @@ struct VerificationStatusIndicator: View {
     var body: some View {
         Button(action: { viewModel.showVerifier() }) {
             HStack(spacing: isCollapsed ? 0 : 4) {
-                Image(systemName: iconName)
+                Image(tinfoil: icon)
                     .foregroundStyle(iconColor)
                     .font(.system(size: 14))
 

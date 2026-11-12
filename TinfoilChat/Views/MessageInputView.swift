@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 import VisionKit
 import RevenueCat
 import RevenueCatUI
+import TinfoilIcons
 
 enum CameraPermissionAction: Equatable {
     case presentCamera
@@ -235,19 +236,19 @@ struct MessageInputView: View {
         )
     }
 
-    private var voiceIconName: String {
-        showsRecordingState ? "stop.fill" : "waveform"
+    private var voiceSymbol: TinfoilIcon {
+        showsRecordingState ? .stop : .microphone
     }
 
     private var voiceAccessibilityLabel: String {
         showsRecordingState ? "Stop recording" : "Voice input"
     }
 
-    private var trailingActionIconName: String {
+    private var trailingActionSymbol: TinfoilIcon {
         switch trailingAction {
-        case .voice: return voiceIconName
-        case .send: return "arrow.up"
-        case .stop: return "stop.fill"
+        case .voice: return voiceSymbol
+        case .send: return .arrowUp
+        case .stop: return .stop
         }
     }
 
@@ -304,7 +305,7 @@ struct MessageInputView: View {
                 .progressViewStyle(CircularProgressViewStyle(tint: trailingActionForegroundColor))
                 .scaleEffect(0.8)
         } else {
-            Image(systemName: trailingActionIconName)
+            Image(tinfoil: trailingActionSymbol)
                 .font(.system(size: 16, weight: .semibold))
         }
     }
@@ -814,7 +815,7 @@ struct MessageInputView: View {
                 Spacer(minLength: 8)
 
                 Button(action: cancelMessageEdit) {
-                    Image(systemName: "xmark")
+                    Image(tinfoil: .xmark)
                         .font(.system(size: 16, weight: .semibold))
                         .frame(width: 32, height: 32)
                 }
@@ -867,7 +868,7 @@ struct MessageInputView: View {
         Button {
             viewModel.showAddSheet = true
         } label: {
-            Image(systemName: "plus")
+            Image(tinfoil: .plus)
                 .font(.system(size: 20))
                 .foregroundColor(.secondary)
                 .frame(width: 24, height: 24)
@@ -918,7 +919,7 @@ struct MessageInputView: View {
 
     private func researchChipLabel(showsText: Bool) -> some View {
         HStack(spacing: 4) {
-            Image(systemName: Constants.Research.systemImage)
+            Image(tinfoil: Constants.Research.icon)
                 .font(.system(size: 12, weight: .semibold))
             if showsText {
                 Text(Constants.Research.label)
@@ -969,7 +970,7 @@ struct MessageInputView: View {
         } label: {
             HStack(spacing: 4) {
                 modelSelectorLabel
-                Image(systemName: "chevron.up.chevron.down")
+                Image(tinfoil: .chevronUpDown)
                     .font(.system(size: 10, weight: .semibold))
             }
             .foregroundColor(.secondary)
@@ -999,7 +1000,7 @@ struct MessageInputView: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
-                        Image(systemName: showsRecordingState ? "stop.fill" : Constants.Audio.microphoneIconName)
+                        Image(tinfoil: showsRecordingState ? .stop : Constants.Audio.microphoneIcon)
                             .font(.system(size: Constants.Audio.recordingButtonIconPointSize))
                     }
                 }
@@ -1594,7 +1595,7 @@ private final class FloatingRecordingBubbleView: UIView {
             pointSize: Constants.Audio.recordingButtonIconPointSize,
             weight: .semibold
         )
-        iconView.image = UIImage(systemName: "stop.fill", withConfiguration: configuration)
+        iconView.image = UIImage(tinfoil: .stop, with: configuration)
         iconView.tintColor = .white
         iconView.contentMode = .center
         iconView.frame = circleView.bounds
@@ -1639,14 +1640,14 @@ struct AddToSheetView: View {
         profileManager.promptPreset(for: viewModel.currentChat?.promptPresetId)
     }
 
-    private var promptDisplay: (name: String, icon: String) {
+    private var promptDisplay: (name: String, icon: TinfoilIcon) {
         if let selectedPrompt {
-            return (selectedPrompt.name, selectedPrompt.iconName)
+            return (selectedPrompt.name, selectedPrompt.icon)
         }
         if viewModel.currentChat?.promptPresetId != nil {
-            return ("Unavailable", "exclamationmark.triangle")
+            return ("Unavailable", .warning)
         }
-        return ("Default", "text.quote")
+        return ("Default", .quote)
     }
 
     var body: some View {
@@ -1656,21 +1657,21 @@ struct AddToSheetView: View {
                 HStack(spacing: 12) {
                     if viewModel.currentModel.isMultimodal {
                         if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                            attachmentButton(icon: "camera", label: "Camera") {
+                            attachmentButton(icon: .camera, label: "Camera") {
                                 onCamera()
                             }
                         }
                         if VNDocumentCameraViewController.isSupported {
-                            attachmentButton(icon: "doc.viewfinder", label: "Scan") {
+                            attachmentButton(icon: .documentProcessing, label: "Scan") {
                                 onScan()
                             }
                             .accessibilityLabel("Scan documents")
                         }
-                        attachmentButton(icon: "photo.on.rectangle", label: "Photos") {
+                        attachmentButton(icon: .image, label: "Photos") {
                             onPhotos()
                         }
                     }
-                    attachmentButton(icon: "doc.badge.arrow.up", label: "Files") {
+                    attachmentButton(icon: .documentPlus, label: "Files") {
                         onFiles()
                     }
                 }
@@ -1690,7 +1691,7 @@ struct AddToSheetView: View {
                         get: { viewModel.showsWebSearchEnabled },
                         set: { viewModel.setWebSearchEnabled($0) }
                     )) {
-                        Label("Web Search", systemImage: "globe")
+                        Label("Web Search", tinfoil: .globe)
                     }
                     .tint(.green)
                     .padding(.horizontal, 20)
@@ -1701,7 +1702,7 @@ struct AddToSheetView: View {
                         get: { viewModel.isResearchEnabled },
                         set: { viewModel.setResearchEnabled($0) }
                     )) {
-                        Label(Constants.Research.label, systemImage: Constants.Research.systemImage)
+                        Label(Constants.Research.label, tinfoil: Constants.Research.icon)
                     }
                     .tint(.green)
                     .padding(.horizontal, 20)
@@ -1714,12 +1715,12 @@ struct AddToSheetView: View {
                     )
                 } label: {
                     HStack {
-                        Label("Prompt", systemImage: promptDisplay.icon)
+                        Label("Prompt", tinfoil: promptDisplay.icon)
                         Spacer()
                         Text(promptDisplay.name)
                             .foregroundColor(.secondary)
                             .lineLimit(1)
-                        Image(systemName: "chevron.right")
+                        Image(tinfoil: .chevronRight)
                             .font(.caption.weight(.semibold))
                             .foregroundColor(.secondary)
                     }
@@ -1769,7 +1770,7 @@ struct AddToSheetView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark")
+                        Image(tinfoil: .xmark)
                             .font(.system(size: 18, weight: .medium))
                     }
                     .accessibilityLabel("Close")
@@ -1780,17 +1781,17 @@ struct AddToSheetView: View {
 
     private func contextRow(_ usage: ContextUsage) -> some View {
         HStack {
-            Label("Context Used", systemImage: "text.alignleft")
+            Label("Context Used", tinfoil: .gauge)
             Spacer()
             ContextUsageIndicator(usage: usage, compacts: viewModel.compactsChats)
         }
     }
 
     @ViewBuilder
-    private func attachmentButton(icon: String, label: String, action: @escaping () -> Void) -> some View {
+    private func attachmentButton(icon: TinfoilIcon, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 8) {
-                Image(systemName: icon)
+                Image(tinfoil: icon)
                     .font(.system(size: 22))
                 Text(label)
                     .font(.system(size: 12, weight: .medium))
@@ -1820,7 +1821,7 @@ struct ModelSelectorSheetView: View {
     @ViewBuilder
     private func modelIcon(for model: ModelType) -> some View {
         if model.isAuto {
-            Image(systemName: "shuffle")
+            Image(tinfoil: .shuffle)
                 .resizable()
                 .scaledToFit()
                 .frame(width: 28, height: 28)
@@ -1856,7 +1857,7 @@ struct ModelSelectorSheetView: View {
                         Spacer()
 
                         if isSelected {
-                            Image(systemName: "checkmark")
+                            Image(tinfoil: .checkmark)
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(.blue)
                         }
@@ -1875,7 +1876,7 @@ struct ModelSelectorSheetView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark")
+                        Image(tinfoil: .xmark)
                             .font(.system(size: 18, weight: .medium))
                     }
                     .accessibilityLabel("Close")

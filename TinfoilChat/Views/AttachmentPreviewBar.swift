@@ -5,6 +5,7 @@
 //  Copyright © 2025 Tinfoil. All rights reserved.
 
 import SwiftUI
+import TinfoilIcons
 
 struct AttachmentPreviewBar: View {
     let attachments: [Attachment]
@@ -64,7 +65,7 @@ private struct AttachmentPreviewChip: View {
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
                     } else if attachment.processingState == .failed {
-                        Image(systemName: "exclamationmark.triangle.fill")
+                        Image(tinfoil: .warning)
                             .font(.system(size: 10))
                             .foregroundColor(.red)
                         Text("Failed")
@@ -90,7 +91,7 @@ private struct AttachmentPreviewChip: View {
         .padding(.trailing, 6)
         .overlay(alignment: .topTrailing) {
             Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
+                Image(tinfoil: .xmarkCircle)
                     .font(.system(size: 16))
                     .foregroundColor(.secondary)
             }
@@ -111,7 +112,7 @@ private struct AttachmentPreviewChip: View {
                 ZStack {
                     RoundedRectangle(cornerRadius: 6)
                         .fill(isDarkMode ? Color.white.opacity(0.08) : Color.black.opacity(0.06))
-                    Image(systemName: iconName)
+                    Image(tinfoil: icon)
                         .font(.system(size: 22))
                         .foregroundColor(.secondary)
                 }
@@ -120,15 +121,15 @@ private struct AttachmentPreviewChip: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(isDarkMode ? Color.white.opacity(0.08) : Color.black.opacity(0.06))
-                Image(systemName: iconName)
+                Image(tinfoil: icon)
                     .font(.system(size: 22))
                     .foregroundColor(.secondary)
             }
         }
     }
 
-    private var iconName: String {
-        FilePreviewClassifier.iconName(for: attachment.fileName)
+    private var icon: TinfoilIcon {
+        FilePreviewClassifier.icon(for: attachment.fileName)
     }
 
     private var formattedFileSize: String {

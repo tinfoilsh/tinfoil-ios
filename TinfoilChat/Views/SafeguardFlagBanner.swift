@@ -1,4 +1,5 @@
 import SwiftUI
+import TinfoilIcons
 
 struct SafeguardFlagBanner: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -19,7 +20,7 @@ struct SafeguardFlagBanner: View {
     var body: some View {
         if store.isFlagged(chatId) {
             HStack(alignment: .top, spacing: Constants.Safeguards.contentSpacing) {
-                Image(systemName: "flag.fill")
+                Image(tinfoil: .flagFilled)
                     .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: Constants.Safeguards.Banner.textSpacing) {

@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 struct ProjectPage: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -55,14 +56,14 @@ struct ProjectPage: View {
                     NavigationLink {
                         ProjectDetailsView(viewModel: viewModel)
                     } label: {
-                        Label("Details", systemImage: "slider.horizontal.3")
+                        Label("Details", tinfoil: .adjustmentToggle)
                     }
 
                     NavigationLink {
                         ProjectDocumentsView(viewModel: viewModel)
                     } label: {
                         HStack {
-                            Label("Documents", systemImage: "doc.text")
+                            Label("Documents", tinfoil: .document)
                             Spacer()
                             if !viewModel.projectDocuments.isEmpty {
                                 Text("\(viewModel.projectDocuments.count)")
@@ -75,7 +76,7 @@ struct ProjectPage: View {
                     NavigationLink {
                         ProjectSettingsView(viewModel: viewModel)
                     } label: {
-                        Label("Settings", systemImage: "gearshape")
+                        Label("Settings", tinfoil: .setting)
                     }
                 }
                 .listRowBackground(Color.cardSurface(for: colorScheme))
@@ -84,7 +85,7 @@ struct ProjectPage: View {
                     Button {
                         viewModel.startNewProjectChat()
                     } label: {
-                        Label("New project chat", systemImage: "square.and.pencil")
+                        Label("New project chat", tinfoil: .writing)
                     }
                     .disabled(project == nil || !viewModel.hasPremiumAccess)
 
@@ -176,12 +177,12 @@ struct ProjectPage: View {
                 }
                 Spacer()
                 if viewModel.isChatPinned(chat.id) {
-                    Image(systemName: "pin.fill")
+                    Image(tinfoil: .thumbtack)
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .accessibilityLabel("Pinned")
                 }
-                Image(systemName: "chevron.right")
+                Image(tinfoil: .chevronRight)
                     .font(.caption.weight(.semibold))
                     .foregroundColor(.secondary)
             }
@@ -194,7 +195,7 @@ struct ProjectPage: View {
                 } label: {
                     Label(
                         viewModel.isChatPinned(chat.id) ? "Unpin" : "Pin",
-                        systemImage: viewModel.isChatPinned(chat.id) ? "pin.slash" : "pin"
+                        tinfoil: viewModel.isChatPinned(chat.id) ? .thumbtackSlash : .thumbtack
                     )
                 }
                 .tint(.blue)
@@ -205,7 +206,7 @@ struct ProjectPage: View {
                 deletingChatId = chat.id
                 showDeleteChatAlert = true
             } label: {
-                Label("Delete", systemImage: "trash")
+                Label("Delete", tinfoil: .trash)
             }
             .tint(.red)
             Button {
@@ -213,7 +214,7 @@ struct ProjectPage: View {
                     await viewModel.removeChatFromProject(chatId: chat.id)
                 }
             } label: {
-                Label("Remove", systemImage: "arrow.uturn.left")
+                Label("Remove", tinfoil: .detach)
             }
             .tint(.orange)
         }
@@ -224,7 +225,7 @@ struct ProjectPage: View {
                 } label: {
                     Label(
                         viewModel.isChatPinned(chat.id) ? "Unpin" : "Pin",
-                        systemImage: viewModel.isChatPinned(chat.id) ? "pin.slash" : "pin"
+                        tinfoil: viewModel.isChatPinned(chat.id) ? .thumbtackSlash : .thumbtack
                     )
                 }
             }
@@ -234,7 +235,7 @@ struct ProjectPage: View {
                     await viewModel.removeChatFromProject(chatId: chat.id)
                 }
             } label: {
-                Label("Remove from Project", systemImage: "arrow.uturn.left")
+                Label("Remove from Project", tinfoil: .detach)
             }
 
             MoveToProjectMenu(
@@ -402,7 +403,7 @@ struct ProjectDocumentsView: View {
                 Button {
                     showDocumentPicker = true
                 } label: {
-                    Image(systemName: "plus")
+                    Image(tinfoil: .plus)
                 }
                 .disabled(viewModel.isUploadingProjectDocument || !viewModel.hasPremiumAccess)
                 .accessibilityLabel("Add document")
@@ -456,7 +457,7 @@ struct ProjectDocumentsView: View {
                         await viewModel.deleteProjectDocument(document.id)
                     }
                 } label: {
-                    Label("Delete", systemImage: "trash")
+                    Label("Delete", tinfoil: .trash)
                 }
                 .tint(.red)
             }
@@ -501,7 +502,7 @@ struct ProjectSettingsView: View {
                 Button(role: .destructive) {
                     showDeleteAlert = true
                 } label: {
-                    Label("Delete project", systemImage: "trash")
+                    Label("Delete project", tinfoil: .trash)
                 }
                 .disabled(project == nil || !viewModel.hasPremiumAccess)
             } footer: {

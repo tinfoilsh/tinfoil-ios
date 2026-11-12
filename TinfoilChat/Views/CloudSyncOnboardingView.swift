@@ -8,6 +8,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import AVFoundation
+import TinfoilIcons
 
 enum CloudSyncOnboardingStep {
     case intro
@@ -137,7 +138,7 @@ struct CloudSyncOnboardingView: View {
                 // Close button
                 HStack {
                     Button(action: { handleClose() }) {
-                        Image(systemName: "xmark")
+                        Image(tinfoil: .xmark)
                             .accessibilityLabel("Close")
                             .font(.system(size: 12, weight: .bold))
                             .foregroundColor(.secondary)
@@ -243,7 +244,7 @@ struct CloudSyncOnboardingView: View {
                         .fill(Color.primary.opacity(0.1))
                         .frame(width: 88, height: 88)
 
-                    Image(systemName: "icloud.and.arrow.up")
+                    Image(tinfoil: .cloudUpload)
                         .font(.system(size: 36))
                         .foregroundColor(.primary)
                 }
@@ -272,8 +273,8 @@ struct CloudSyncOnboardingView: View {
                 // Feature highlights
                 VStack(spacing: 12) {
                     ForEach(Array([
-                        ("lock.fill", "End-to-End Encrypted", "All chats are encrypted before leaving your device"),
-                        ("key.fill", "You Control Your Key", "Only you have access to your encryption key"),
+                        (TinfoilIcon.lock, "End-to-End Encrypted", "All chats are encrypted before leaving your device"),
+                        (TinfoilIcon.key, "You Control Your Key", "Only you have access to your encryption key"),
                     ].enumerated()), id: \.offset) { index, feature in
                         featureRow(
                             icon: feature.0,
@@ -346,7 +347,7 @@ struct CloudSyncOnboardingView: View {
                         .fill(Color.primary.opacity(0.1))
                         .frame(width: 88, height: 88)
 
-                    Image(systemName: "key.fill")
+                    Image(tinfoil: .key)
                         .font(.system(size: 36))
                         .foregroundColor(.primary)
                 }
@@ -446,7 +447,7 @@ struct CloudSyncOnboardingView: View {
                             .stroke(tint, style: StrokeStyle(lineWidth: FrowningFace.lineWidth, lineCap: .round))
                             .frame(width: 40, height: 40)
                     } else {
-                        Image(systemName: "checkmark")
+                        Image(tinfoil: .checkmark)
                             .font(.system(size: 36, weight: .bold))
                             .foregroundColor(.green)
                     }
@@ -482,7 +483,7 @@ struct CloudSyncOnboardingView: View {
 
                         // Save to Files button
                         Button(action: { saveKeyToFiles() }) {
-                            Image(systemName: "arrow.down.doc")
+                            Image(tinfoil: .download)
                                 .font(.body)
                                 .foregroundColor(.primary)
                                 .frame(width: 36, height: 36)
@@ -493,7 +494,7 @@ struct CloudSyncOnboardingView: View {
 
                         // Copy button
                         Button(action: { copyKeyToClipboard() }) {
-                            Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
+                            Image(tinfoil: isCopied ? .checkmark : .copy)
                                 .font(.body)
                                 .foregroundColor(isCopied ? .white : .primary)
                                 .frame(width: 36, height: 36)
@@ -583,7 +584,7 @@ struct CloudSyncOnboardingView: View {
                         }
 
                     Button(action: { showFilePicker = true }) {
-                        Image(systemName: "arrow.up.doc")
+                        Image(tinfoil: .documentPlus)
                             .font(.body)
                             .foregroundColor(.primary)
                             .frame(width: 48, height: 48)
@@ -624,7 +625,7 @@ struct CloudSyncOnboardingView: View {
                     }
                 }) {
                     HStack {
-                        Image(systemName: "qrcode.viewfinder")
+                        Image(tinfoil: .qrCode)
                             .font(.title3)
                         Text("Scan QR Code")
                             .fontWeight(.semibold)
@@ -679,9 +680,9 @@ struct CloudSyncOnboardingView: View {
         }
     }
 
-    private func featureRow(icon: String, title: String, description: String) -> some View {
+    private func featureRow(icon: TinfoilIcon, title: String, description: String) -> some View {
         HStack(alignment: .top, spacing: 14) {
-            Image(systemName: icon)
+            Image(tinfoil: icon)
                 .font(.system(size: 18))
                 .foregroundColor(.primary)
                 .frame(width: 32, height: 32)

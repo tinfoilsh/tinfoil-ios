@@ -8,6 +8,7 @@
 //  widget.
 
 import SwiftUI
+import TinfoilIcons
 
 enum GenUIToolCallPresentation {
     static func showsPlaceholder(arguments: String, isRenderingStream: Bool) -> Bool {
@@ -141,7 +142,7 @@ struct GenUIToolCallView: View {
             if let onRetry {
                 Button(action: onRetry) {
                     HStack(spacing: 4) {
-                        Image(systemName: "arrow.clockwise").font(.caption)
+                        Image(tinfoil: .refreshTwoArrows).font(.caption)
                         Text("Try again").font(.caption.weight(.semibold))
                     }
                     .padding(.horizontal, 10)

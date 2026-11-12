@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AVFoundation
+import TinfoilIcons
 
 struct CloudSyncSettingsView: View {
     @Environment(\.colorScheme) var colorScheme
@@ -94,7 +95,7 @@ struct CloudSyncSettingsView: View {
                                         copiedToClipboard = false
                                     }
                                 }) {
-                                    Image(systemName: copiedToClipboard ? "checkmark.circle.fill" : "doc.on.doc")
+                                    Image(tinfoil: copiedToClipboard ? .checkmarkCircle : .copy)
                                         .foregroundColor(copiedToClipboard ? .adaptiveAccent : .primary)
                                 }
                                 .accessibilityLabel(copiedToClipboard ? "Key copied" : "Copy key")
@@ -110,7 +111,7 @@ struct CloudSyncSettingsView: View {
                         Button(action: {
                             showBackupKeySheet = true
                         }) {
-                            Label("Reveal Backup Key", systemImage: "key.viewfinder")
+                            Label("Reveal Backup Key", tinfoil: .key)
                                 .foregroundColor(.primary)
                         }
                     }
@@ -248,7 +249,7 @@ struct CloudSyncSettingsView: View {
                     viewModel.getCurrentEncryptionKey() == nil
                         ? "Sync is paused because your encryption key needs to be recovered."
                         : "This device's encryption key doesn't match your cloud data and needs to be recovered.",
-                    systemImage: "exclamationmark.circle"
+                    tinfoil: .exclamationCircle
                 )
                     .font(.caption)
                     .foregroundColor(.orange)
@@ -283,7 +284,7 @@ struct CloudSyncSettingsView: View {
                 if passkeyManager.passkeyActive {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 6) {
-                            Image(systemName: "person.badge.key.fill")
+                            Image(tinfoil: .personKey)
                                 .font(.subheadline)
                                 .foregroundColor(.primary)
                             Text("Sync and backup using Passkeys")
@@ -294,7 +295,7 @@ struct CloudSyncSettingsView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                         HStack(spacing: 4) {
-                            Image(systemName: "checkmark.shield.fill")
+                            Image(tinfoil: .shieldCheck)
                                 .font(.caption)
                             Text("Passkey active")
                                 .font(.caption)
@@ -373,7 +374,7 @@ struct CloudSyncSettingsView: View {
         }) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Image(systemName: "person.badge.key.fill")
+                    Image(tinfoil: .personKey)
                         .font(.subheadline)
                         .foregroundColor(.primary)
                     Text(title)
@@ -448,7 +449,7 @@ struct CloudSyncSettingsView: View {
         return HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Image(systemName: "person.badge.key.fill")
+                    Image(tinfoil: .personKey)
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Text(isCurrentPlatform ? "This platform" : "Other platform")
@@ -583,7 +584,7 @@ private struct CloudSyncStatusRow: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: Constants.CloudSync.statusTickSeconds)) { context in
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Image(systemName: symbolName)
+                Image(tinfoil: symbol)
                     .font(.subheadline)
                     .foregroundColor(symbolColor)
                     .accessibilityHidden(true)
@@ -601,9 +602,9 @@ private struct CloudSyncStatusRow: View {
         }
     }
 
-    private var symbolName: String {
-        if paused { return "exclamationmark.triangle" }
-        return status.lastSyncedAt == nil ? "icloud" : "checkmark.circle"
+    private var symbol: TinfoilIcon {
+        if paused { return .warning }
+        return status.lastSyncedAt == nil ? .cloudPlain : .checkmarkCircle
     }
 
     private var symbolColor: Color {
@@ -651,7 +652,7 @@ private struct BackupEncryptionKeySheet: View {
                     Circle()
                         .fill(Color.accentColor.opacity(0.15))
                         .frame(width: 64, height: 64)
-                    Image(systemName: "key.viewfinder")
+                    Image(tinfoil: .key)
                         .font(.system(size: 28))
                         .foregroundColor(.accentColor)
                 }
@@ -687,7 +688,7 @@ private struct BackupEncryptionKeySheet: View {
                                     showFullKey.toggle()
                                 }
                             }) {
-                                Label(showFullKey ? "Hide" : "Reveal", systemImage: showFullKey ? "eye.slash" : "eye")
+                                Label(showFullKey ? "Hide" : "Reveal", tinfoil: showFullKey ? .eyeSlash : .eye)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 12)
                                     .background(Color(UIColor.tertiarySystemBackground))
@@ -696,7 +697,7 @@ private struct BackupEncryptionKeySheet: View {
 
                             Button(action: { copyKey(key) }) {
                                 Label(isCopied ? "Copied" : "Copy",
-                                      systemImage: isCopied ? "checkmark" : "doc.on.doc")
+                                      tinfoil: isCopied ? .checkmark : .copy)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 12)
                                     .background(isCopied ? Color.green.opacity(0.2) : Color(UIColor.tertiarySystemBackground))

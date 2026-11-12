@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 /// Mirrors the webapp's `ContextUsage` shape.
 struct ContextUsage: Equatable {
@@ -128,7 +129,7 @@ struct ContextCompactionPopover: View {
                     if compacting {
                         ProgressView()
                     } else {
-                        Image(systemName: Constants.Context.compactSystemImage)
+                        Image(tinfoil: Constants.Context.compactIcon)
                     }
                     Text(compacting ? Constants.Context.compactingLabel : Constants.Context.compactLabel)
                 }

@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import TinfoilIcons
 
 /// A prompt preset surfaced in the prompt library and welcome screen.
 ///
@@ -18,8 +19,7 @@ struct PromptPreset: Identifiable, Equatable {
     let id: String
     let name: String
     let description: String
-    /// SF Symbol name used to render the preset's icon.
-    let iconName: String
+    let icon: TinfoilIcon
     let systemPrompt: String
     let isBuiltIn: Bool
     /// Model picker id (a real model name or the Auto id) applied to a chat
@@ -32,14 +32,14 @@ struct PromptPreset: Identifiable, Equatable {
 
     static let userIdPrefix = "user:"
 
-    /// Default SF Symbol used for user-created presets.
-    static let defaultUserIcon = "square.and.pencil"
+    /// The icon of user-created presets.
+    static let defaultUserIcon: TinfoilIcon = .writing
 
     init(from stored: SyncedPromptPreset) {
         self.id = stored.id
         self.name = stored.name
         self.description = stored.description
-        self.iconName = PromptPreset.defaultUserIcon
+        self.icon = PromptPreset.defaultUserIcon
         self.systemPrompt = stored.systemPrompt
         self.isBuiltIn = false
         self.model = stored.model
@@ -50,7 +50,7 @@ struct PromptPreset: Identifiable, Equatable {
         id: String,
         name: String,
         description: String,
-        iconName: String,
+        icon: TinfoilIcon,
         systemPrompt: String,
         isBuiltIn: Bool,
         model: String? = nil,
@@ -59,7 +59,7 @@ struct PromptPreset: Identifiable, Equatable {
         self.id = id
         self.name = name
         self.description = description
-        self.iconName = iconName
+        self.icon = icon
         self.systemPrompt = systemPrompt
         self.isBuiltIn = isBuiltIn
         self.model = model
@@ -80,7 +80,7 @@ extension PromptPreset {
             id: "builtin:tutor",
             name: "Tutor",
             description: "Patient teacher who explains step by step",
-            iconName: "graduationcap",
+            icon: .scholar,
             systemPrompt: wrap("""
 You are a patient tutor. Open by gauging the learner's current level with one
 short, specific question — do not lecture before you know what they already
@@ -108,7 +108,7 @@ Respond in {LANGUAGE}. The user's timezone is {TIMEZONE}.
             id: "builtin:code-reviewer",
             name: "Code Reviewer",
             description: "Thorough reviewer who finds bugs, security issues, and design smells",
-            iconName: "chevron.left.forwardslash.chevron.right",
+            icon: .code2,
             systemPrompt: wrap("""
 You review code carefully. For each snippet the user shares, work through it
 in this order:
@@ -141,7 +141,7 @@ Respond in {LANGUAGE}. The user's timezone is {TIMEZONE}.
             id: "builtin:writing-coach",
             name: "Writing Coach",
             description: "Editor who sharpens prose without flattening your voice",
-            iconName: "pencil.line",
+            icon: .writing2,
             systemPrompt: wrap("""
 You sharpen writing without erasing the writer's voice. Work as an analyzer
 first, a rewriter only when asked.
@@ -172,7 +172,7 @@ Respond in {LANGUAGE}. The user's timezone is {TIMEZONE}.
             id: "builtin:brainstorm",
             name: "Brainstorming Partner",
             description: "Divergence engine that resists settling on the obvious answer",
-            iconName: "lightbulb",
+            icon: .lightbulb,
             systemPrompt: wrap("""
 You are a divergence engine. When the user shares a problem, your job is to
 widen the space of ideas before narrowing it.
@@ -205,7 +205,7 @@ Respond in {LANGUAGE}. The user's timezone is {TIMEZONE}.
             id: "builtin:translator",
             name: "Translator",
             description: "Faithful translator that preserves tone, register, and formatting",
-            iconName: "globe",
+            icon: .globe,
             systemPrompt: wrap("""
 You translate accurately and faithfully. Detect the source language. If the
 target language isn't specified in the user's preferences or message, ask
@@ -239,7 +239,7 @@ Respond in {LANGUAGE}. The user's timezone is {TIMEZONE}.
             id: "builtin:roleplay",
             name: "Role-play",
             description: "Collaborative storyteller with in-character dialogue",
-            iconName: "theatermasks",
+            icon: .mask,
             systemPrompt: wrap("""
 <role>
 You are a collaborative role-play partner running an in-character scene with
@@ -294,7 +294,7 @@ Respond in {LANGUAGE}. The user's timezone is {TIMEZONE}.
             id: "builtin:concise",
             name: "Concise Assistant",
             description: "No-fluff answers with the minimum needed context",
-            iconName: "bolt",
+            icon: .lightning,
             systemPrompt: wrap("""
 Answer in the fewest words that fully address the question. Treat brevity as
 a hard constraint, not a style preference.

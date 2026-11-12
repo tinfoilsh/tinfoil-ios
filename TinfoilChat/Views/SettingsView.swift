@@ -11,6 +11,7 @@ import ClerkKit
 import UIKit
 import RevenueCat
 import RevenueCatUI
+import TinfoilIcons
 
 // Settings Manager to handle persistence
 @MainActor
@@ -266,7 +267,7 @@ struct SettingsView: View {
                         Text("Edit Profile")
                             .foregroundColor(.primary)
                         Spacer()
-                        Image(systemName: "chevron.right")
+                        Image(tinfoil: .chevronRight)
                             .font(.caption2)
                             .foregroundColor(Color(UIColor.quaternaryLabel))
                             .accessibilityHidden(true)
@@ -533,7 +534,7 @@ struct SettingsView: View {
                     }
                     Spacer()
                     if profileManager.isUsingPersonalization {
-                        Image(systemName: "checkmark.circle.fill")
+                        Image(tinfoil: .checkmarkCircle)
                             .font(.caption)
                             .foregroundColor(.green)
                             .accessibilityLabel("Enabled")
@@ -566,7 +567,7 @@ struct SettingsView: View {
                         Text("Export Chats")
                             .foregroundColor(.primary)
                         Spacer()
-                        Image(systemName: "arrow.up.forward.square")
+                        Image(tinfoil: .externalLink)
                             .font(.footnote)
                             .foregroundColor(Color(UIColor.tertiaryLabel))
                     }
@@ -724,7 +725,7 @@ struct SettingsView: View {
                         Text("Manage Subscription")
                             .foregroundColor(.primary)
                         Spacer()
-                        Image(systemName: "arrow.up.forward.square")
+                        Image(tinfoil: .externalLink)
                             .font(.footnote)
                             .foregroundColor(Color(UIColor.tertiaryLabel))
                             .accessibilityHidden(true)
@@ -736,7 +737,7 @@ struct SettingsView: View {
                 }) {
                     HStack(spacing: 8) {
                         Spacer()
-                        Image(systemName: "sparkles")
+                        Image(tinfoil: .sparkle)
                             .font(.subheadline.weight(.semibold))
                         Text("Subscribe to Premium")
                             .font(.body.weight(.semibold))
@@ -780,7 +781,7 @@ struct SettingsView: View {
                     Text("Terms of Service")
                         .foregroundColor(.primary)
                     Spacer()
-                    Image(systemName: "arrow.up.forward.square")
+                    Image(tinfoil: .externalLink)
                         .font(.footnote)
                         .foregroundColor(Color(UIColor.tertiaryLabel))
                         .accessibilityHidden(true)
@@ -794,7 +795,7 @@ struct SettingsView: View {
                     Text("Privacy Policy")
                         .foregroundColor(.primary)
                     Spacer()
-                    Image(systemName: "arrow.up.forward.square")
+                    Image(tinfoil: .externalLink)
                         .font(.footnote)
                         .foregroundColor(Color(UIColor.tertiaryLabel))
                         .accessibilityHidden(true)
@@ -826,7 +827,7 @@ struct SettingsView: View {
                                 onOpenChat: { dismiss() }
                             )
                         } label: {
-                            Label("Safeguards", systemImage: "shield.lefthalf.filled")
+                            Label("Safeguards", tinfoil: .shield)
                                 .foregroundColor(.primary)
                         }
                     }
@@ -843,7 +844,7 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(action: { dismiss() }) {
-                        Image(systemName: "xmark")
+                        Image(tinfoil: .xmark)
                             .font(.system(size: 18, weight: .medium))
                     }
                     .accessibilityLabel("Close")
@@ -927,7 +928,7 @@ struct LanguagePickerView: View {
                     Text(ResponseLanguageResolver.displayName(for: language))
                     Spacer()
                     if normalizedSelection == language {
-                        Image(systemName: "checkmark")
+                        Image(tinfoil: .checkmark)
                             .foregroundColor(.accentColor)
                     }
                 }
@@ -1040,17 +1041,17 @@ struct DefaultPromptPresetView: View {
     var body: some View {
         Form {
             Section {
-                presetRow(id: nil, name: "Tinfoil default", iconName: "text.quote")
+                presetRow(id: nil, name: "Tinfoil default", icon: .quote)
                 if isDefaultUnavailable {
                     HStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle")
+                        Image(tinfoil: .warning)
                             .font(.system(size: 16))
                             .foregroundColor(.secondary)
                             .frame(width: 24)
                         Text("Unavailable")
                             .font(.body)
                         Spacer()
-                        Image(systemName: "checkmark")
+                        Image(tinfoil: .checkmark)
                             .font(.body.weight(.semibold))
                             .foregroundColor(.green)
                             .accessibilityLabel("Selected")
@@ -1068,7 +1069,7 @@ struct DefaultPromptPresetView: View {
             if !customPresets.isEmpty {
                 Section {
                     ForEach(customPresets) { preset in
-                        presetRow(id: preset.id, name: preset.name, iconName: preset.iconName)
+                        presetRow(id: preset.id, name: preset.name, icon: preset.icon)
                     }
                 } header: {
                     Text("Your Prompts")
@@ -1078,7 +1079,7 @@ struct DefaultPromptPresetView: View {
 
             Section {
                 ForEach(builtInPresets) { preset in
-                    presetRow(id: preset.id, name: preset.name, iconName: preset.iconName)
+                    presetRow(id: preset.id, name: preset.name, icon: preset.icon)
                 }
             } header: {
                 Text("Built-in")
@@ -1092,7 +1093,7 @@ struct DefaultPromptPresetView: View {
     }
 
     @ViewBuilder
-    private func presetRow(id: String?, name: String, iconName: String) -> some View {
+    private func presetRow(id: String?, name: String, icon: TinfoilIcon) -> some View {
         let isSelected = id == nil
             ? profileManager.defaultPromptPresetId.isEmpty
             : profileManager.defaultPromptPresetId == id
@@ -1100,7 +1101,7 @@ struct DefaultPromptPresetView: View {
             profileManager.setDefaultPromptPreset(id)
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: iconName)
+                Image(tinfoil: icon)
                     .font(.system(size: 16))
                     .foregroundColor(.secondary)
                     .frame(width: 24)
@@ -1109,7 +1110,7 @@ struct DefaultPromptPresetView: View {
                     .foregroundColor(.primary)
                 Spacer()
                 if isSelected {
-                    Image(systemName: "checkmark")
+                    Image(tinfoil: .checkmark)
                         .font(.body.weight(.semibold))
                         .foregroundColor(.green)
                         .accessibilityLabel("Selected")

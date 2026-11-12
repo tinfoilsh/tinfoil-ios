@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 struct PasskeyRecoveryChoiceView: View {
     @Environment(\.dismiss) private var dismiss
@@ -43,7 +44,7 @@ struct PasskeyRecoveryChoiceView: View {
                 Circle()
                     .fill(Color.secondary.opacity(0.15))
                     .frame(width: 64, height: 64)
-                Image(systemName: "lock.open")
+                Image(tinfoil: .lockOpened)
                     .font(.system(size: 28))
                     .foregroundColor(.primary)
             }
@@ -85,7 +86,7 @@ struct PasskeyRecoveryChoiceView: View {
                             ProgressView()
                                 .tint(.white)
                         } else {
-                            Label("Unlock with Passkey", systemImage: "key.fill")
+                            Label("Unlock with Passkey", tinfoil: .key)
                         }
                     }
                     .font(.subheadline)
@@ -107,7 +108,7 @@ struct PasskeyRecoveryChoiceView: View {
                             ProgressView()
                                 .tint(.primary)
                         } else {
-                            Label("Start Fresh with New Key", systemImage: "key.fill"
+                            Label("Start Fresh with New Key", tinfoil: .key
                             )
                         }
                     }
@@ -125,7 +126,7 @@ struct PasskeyRecoveryChoiceView: View {
 
                 // Manual key entry — bypass passkey entirely
                 Button(action: handleManualKeyEntry) {
-                    Label("Enter Key Manually", systemImage: "keyboard")
+                    Label("Enter Key Manually", tinfoil: .writing2)
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .foregroundColor(.primary)
