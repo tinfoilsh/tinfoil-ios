@@ -59,7 +59,8 @@ final class ChatRows {
             // The reply streaming changes with nearly every frame, and telling
             // whether it did compares every step it holds, the pages a search
             // read included, so it is built again without asking.
-            if !streaming, let previous = mapped[wire.id], previous.streaming == streaming, previous.view.id == shownId, previous.wire == wire {
+            let streamsReply = streaming && wire.role.value1 == .assistant
+            if !streamsReply, let previous = mapped[wire.id], previous.streaming == streaming, previous.view.id == shownId, previous.wire == wire {
                 kept[wire.id] = previous
                 return previous.view
             }
