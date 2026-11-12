@@ -295,7 +295,7 @@ enum PasskeyKeyFlow {
             return .failure(.bundleDecryptFailed, message: "\(reason): \(detail)")
         }
         guard let keyIdHex = validatedKeyId(cek: cek, enclaveKeyId: state.keyId) else {
-            return .failure(.bundleDecryptFailed, message: "unwrapped key did not match the registered key id")
+            return .failure(.bundleDecryptFailed, message: "unwrapped key failed the key id check")
         }
         return .success(
             cek: cek,
