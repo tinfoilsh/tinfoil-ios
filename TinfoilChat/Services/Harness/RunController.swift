@@ -318,10 +318,14 @@ final class RunController: ObservableObject {
                     if case .runStarted = event { outcome.started = true }
                     let base = shown ? view : outcome.state
                     let next = try ChatReducer.reduce(base, frame, runHint: outcome.runId, widgetRetry: widgetRetry != nil)
-                    let replayed = next == base && (!event.isTerminal || device == nil || device?.saved == true)
+                    // A frame the state had not applied moves its run's cursor,
+                    // which tells the states apart without comparing every
+                    // message they hold, as each frame of a reply would.
+                    let changed = next.cursors != base.cursors || next != base
+                    let replayed = !changed && (!event.isTerminal || device == nil || device?.saved == true)
                     // A replayed frame leaves the view as it was.
                     if !replayed {
-                        if next != base {
+                        if changed {
                             reportQuota(event)
                             if case .runError(let failed) = event {
                                 if let widgetRetry { widgetRetry.failure = failed.error } else if shown { errorAt = Date() }
