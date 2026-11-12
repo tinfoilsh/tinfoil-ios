@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import AVFoundation
 import PhotosUI
+import UniformTypeIdentifiers
 import VisionKit
 import RevenueCat
 import RevenueCatUI
@@ -2286,8 +2287,14 @@ final class PastingTextView: UITextView {
     /// File URLs win over any string representation on the pasteboard:
     /// copying a file (e.g. from the Files app) often includes its name as
     /// plain text, and pasting that name instead of the file would be wrong.
+    /// Reading the URLs waits for whichever app copied them to hand them
+    /// over, which can take seconds, so they are read only once the
+    /// pasteboard says it holds a file: pasting text or a link reads none.
     private var pasteboardFileURLs: [URL] {
-        UIPasteboard.general.urls?.filter { $0.isFileURL } ?? []
+        let pasteboard = UIPasteboard.general
+        let holdsFile = pasteboard.itemProviders.contains { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
+        guard holdsFile else { return [] }
+        return pasteboard.urls?.filter { $0.isFileURL } ?? []
     }
 
     private var acceptsImagePaste: Bool {
