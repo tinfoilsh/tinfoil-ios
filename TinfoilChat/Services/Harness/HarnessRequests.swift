@@ -88,11 +88,14 @@ struct Turn: Encodable, Equatable, Sendable {
     var toolCallId: String?
     var attachments: [SentAttachment]?
     var widgets: [String]?
+    /// A compaction, or a retry that compacts again, summarizes the chat's
+    /// latest exchange too.
+    var compactLatest: Bool?
     var options: TurnOptions?
 
     private enum CodingKeys: String, CodingKey {
         case key, clientRequestId, threadId, kind, ephemeral, local, thread, profile, projectId, presetId
-        case content, quote, messageId, toolCallId, attachments, widgets, options
+        case content, quote, messageId, toolCallId, attachments, widgets, compactLatest, options
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -113,6 +116,7 @@ struct Turn: Encodable, Equatable, Sendable {
         try container.encodeIfPresent(toolCallId, forKey: .toolCallId)
         try container.encodeIfPresent(attachments, forKey: .attachments)
         try container.encodeIfPresent(widgets, forKey: .widgets)
+        try container.encodeIfPresent(compactLatest, forKey: .compactLatest)
         try container.encodeIfPresent(options, forKey: .options)
     }
 

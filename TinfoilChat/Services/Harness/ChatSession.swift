@@ -77,6 +77,9 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// The turns that ask a question, which research it while deep research
     /// is on.
     private static let researchKinds: Set<Turn.Kind> = [.send, .edit, .regenerate, .retry]
+    /// The turns that may compact the chat on request: a compaction, and a
+    /// retry, which compacts again after one failed.
+    private static let compactingKinds: Set<Turn.Kind> = [.compact, .retry]
 
     let account: HarnessAccount
     let controller: RunController
@@ -488,16 +491,13 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
 
     // MARK: - Turns
 
-    /// The fields every turn of the open chat has. Where the harness offers
-    /// it, a compaction on request summarizes the latest exchange too, as the
-    /// chat shows a marker at its end.
+    /// The fields every turn of the open chat has.
     private func turnDefaults(_ threadId: String) -> Turn {
         let offered = account.session?.widgets ?? []
         return Turn(
             clientRequestId: UUID().uuidString.lowercased(),
             threadId: threadId,
             widgets: GenUIRegistry.widgetNames.filter { offered.contains($0) },
-            compactLatest: compactsLatestExchange ? true : nil,
             options: TurnOptions(model: open.model, timezone: TimeZone.current.identifier)
         )
     }
@@ -629,6 +629,11 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         defaults.options = leaveToPreset(defaults.options, choice)
         var fields = fields
         fields.options = fields.options.flatMap { leaveToPreset($0, choice) }
+        // Where the harness offers it, a compaction on request summarizes the
+        // latest exchange too, as the chat shows a marker at its end.
+        if compactsLatestExchange, Self.compactingKinds.contains(fields.kind ?? defaults.kind) {
+            defaults.compactLatest = true
+        }
         // Deep research asks for the next question alone. The harness then
         // researches the turns that go on with it, as the answers to what the
         // research asked first, or an edit or regeneration of the question.

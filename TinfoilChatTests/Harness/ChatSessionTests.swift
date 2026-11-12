@@ -878,6 +878,8 @@ struct ChatSessionTests {
         await session.send(TurnFields(kind: .send, content: "next question"))
         let sent = try #require(await fixture.transport.requests.last)
         let asked = try #require(sent.json["clientRequestId"] as? String)
+        // Only a turn that may compact asks for the latest exchange too.
+        #expect(sent.json["compactLatest"] == nil)
         #expect(session.state.compacted == nil)
         #expect(session.state.markers.mapValues(\.id) == [asked: "c"])
     }
