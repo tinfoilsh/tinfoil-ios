@@ -7,7 +7,9 @@ final class TinfoilPasskeyPresentationAnchorProvider: PasskeyPresentationAnchorP
     typealias Resolver = @MainActor () -> UIWindow?
 
     private let resolver: Resolver
-    private let fallbackAnchor = UIWindow(frame: .zero)
+    /// Made when first asked for: making a window redraws the app's scenes,
+    /// which read the passkey services still being made around this one.
+    private lazy var fallbackAnchor = UIWindow(frame: .zero)
 
     init(resolver: @escaping Resolver = TinfoilPasskeyPresentationAnchorProvider.activeWindow) {
         self.resolver = resolver
