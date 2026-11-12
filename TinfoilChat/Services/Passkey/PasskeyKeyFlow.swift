@@ -192,10 +192,10 @@ enum PasskeyKeyFlow {
         do {
             state = try await KeyRegistry.shared.current()
         } catch let err as HarnessError {
-            PasskeyDiagnostics.failure("unlock: keyCurrent failed: \(err.localizedDescription)")
+            PasskeyDiagnostics.failure("unlock: keyCurrent failed", detail: err.localizedDescription)
             return .failure(failureFromRegistryError(err), message: err.localizedDescription)
         } catch {
-            PasskeyDiagnostics.failure("unlock: keyCurrent failed: \(PasskeyDiagnostics.describe(error))")
+            PasskeyDiagnostics.failure("unlock: keyCurrent failed", detail: PasskeyDiagnostics.describe(error))
             return .failure(.enclaveUnavailable, message: error.localizedDescription)
         }
 
@@ -215,9 +215,7 @@ enum PasskeyKeyFlow {
         )
         guard case .success(let cek, let derivedKeyIdHex, let credentialId, _) = result else {
             if case .failure(let failure, let message) = result {
-                PasskeyDiagnostics.failure(
-                    "unlock: failed (\(failure.rawValue)): \(message ?? "-")"
-                )
+                PasskeyDiagnostics.failure("unlock: failed (\(failure.rawValue))", detail: message)
             }
             return result
         }
@@ -256,7 +254,7 @@ enum PasskeyKeyFlow {
             + "preferKnown=\(prefer != nil) silent=\(immediatelyAvailable)"
         )
         guard !candidates.credentialIds.isEmpty else {
-            PasskeyDiagnostics.failure("recovery: no candidate credentials")
+            PasskeyDiagnostics.failure("recovery: no candidate passkeys")
             return .failure(.noRemoteBundle)
         }
 
@@ -270,17 +268,19 @@ enum PasskeyKeyFlow {
         } catch let err {
             let failure = failureFromPasskeyError(err)
             PasskeyDiagnostics.failure(
-                "recovery: ceremony failed (\(failure.rawValue)): \(PasskeyDiagnostics.describe(err))"
+                "recovery: ceremony failed (\(failure.rawValue))",
+                detail: PasskeyDiagnostics.describe(err)
             )
             return .failure(failure, message: err.localizedDescription)
         }
         PasskeyDiagnostics.step("recovery: ceremony succeeded, resolving asserted credential")
 
+        // Each way a bundle can fail to give the key back says which it
+        // was in the result, so the report of the failure does too.
         guard let candidate = candidates.current.current(credentialId: evaluated.credentialId) else {
-            PasskeyDiagnostics.failure(
-                "recovery: asserted credential resolved no usable bundle"
-            )
-            return .failure(.bundleDecryptFailed)
+            let reason = "asserted credential resolved no usable bundle"
+            PasskeyDiagnostics.failure("recovery: \(reason)")
+            return .failure(.bundleDecryptFailed, message: reason)
         }
         let cek: Data
         do {
@@ -289,13 +289,13 @@ enum PasskeyKeyFlow {
                 prfResult: evaluated.prfResult
             )
         } catch {
-            PasskeyDiagnostics.failure(
-                "recovery: bundle unwrap failed: \(PasskeyDiagnostics.describe(error))"
-            )
-            return .failure(.bundleDecryptFailed)
+            let reason = "bundle unwrap failed"
+            let detail = PasskeyDiagnostics.describe(error)
+            PasskeyDiagnostics.failure("recovery: \(reason)", detail: detail)
+            return .failure(.bundleDecryptFailed, message: "\(reason): \(detail)")
         }
         guard let keyIdHex = validatedKeyId(cek: cek, enclaveKeyId: state.keyId) else {
-            return .failure(.bundleDecryptFailed)
+            return .failure(.bundleDecryptFailed, message: "unwrapped key did not match the registered key id")
         }
         return .success(
             cek: cek,
@@ -463,7 +463,8 @@ enum PasskeyKeyFlow {
             }
         }
         PasskeyDiagnostics.warn(
-            "mapping unrecognized passkey error to userCancelled: \(err.localizedDescription)"
+            "mapping unrecognized passkey error to userCancelled",
+            detail: err.localizedDescription
         )
         return .userCancelled
     }

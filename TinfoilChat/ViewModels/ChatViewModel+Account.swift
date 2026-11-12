@@ -325,7 +325,7 @@ extension ChatViewModel {
 
     func retryPasskeyRecovery() async -> Bool {
         guard let operationUserId = currentUserId else {
-            PasskeyDiagnostics.failure("retryRecovery: no current user id (auth still settling?)")
+            PasskeyDiagnostics.failure("retryRecovery: no current user id (sign-in still settling?)")
             return false
         }
         let operationTask = Task { [passkeyManager] in

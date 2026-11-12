@@ -241,7 +241,8 @@ final class PasskeyManager: ObservableObject {
             state = try await KeyRegistry.shared.current()
         } catch {
             PasskeyDiagnostics.failure(
-                "attemptRecovery: keyCurrent failed: \(PasskeyDiagnostics.describe(error))"
+                "attemptRecovery: keyCurrent failed",
+                detail: PasskeyDiagnostics.describe(error)
             )
             return canMutateAccountKey ? .temporarilyUnavailable : .recoveryFailed
         }
@@ -275,7 +276,8 @@ final class PasskeyManager: ObservableObject {
                 PasskeyDiagnostics.failure("attemptRecovery: recovered key failed validation")
             case .failure(let failure, let message):
                 PasskeyDiagnostics.failure(
-                    "attemptRecovery: silent ceremony failed (\(failure.rawValue)): \(message ?? "-")"
+                    "attemptRecovery: silent ceremony failed (\(failure.rawValue))",
+                    detail: message
                 )
             }
             surfaceRecoveryChoice(forKeyId: state.keyId)
@@ -297,7 +299,8 @@ final class PasskeyManager: ObservableObject {
                 current = try await KeyRegistry.shared.current()
             } catch {
                 PasskeyDiagnostics.failure(
-                    "attemptRecovery: keyCurrent failed before setup: \(PasskeyDiagnostics.describe(error))"
+                    "attemptRecovery: keyCurrent failed before setup",
+                    detail: PasskeyDiagnostics.describe(error)
                 )
                 return canMutateAccountKey ? .temporarilyUnavailable : .recoveryFailed
             }
@@ -409,7 +412,8 @@ final class PasskeyManager: ObservableObject {
             try await applyRecoveredCek(cek: cek)
         } catch {
             PasskeyDiagnostics.failure(
-                "applyRecovery: applying recovered key failed: \(PasskeyDiagnostics.describe(error))"
+                "applyRecovery: applying recovered key failed",
+                detail: PasskeyDiagnostics.describe(error)
             )
             return false
         }
@@ -542,7 +546,8 @@ final class PasskeyManager: ObservableObject {
             state = try await KeyRegistry.shared.current()
         } catch {
             PasskeyDiagnostics.failure(
-                "retryRecovery: keyCurrent failed: \(PasskeyDiagnostics.describe(error))"
+                "retryRecovery: keyCurrent failed",
+                detail: PasskeyDiagnostics.describe(error)
             )
             return false
         }
@@ -570,7 +575,7 @@ final class PasskeyManager: ObservableObject {
                 result,
                 expectedAccount: recoveryAccount
             ) else {
-                PasskeyDiagnostics.report("retryRecovery: recovered key failed validation")
+                PasskeyDiagnostics.report("retryRecovery: recovered key failed validation", kind: .recoveredKeyInvalid)
                 return false
             }
             PasskeyDiagnostics.step("retryRecovery: interactive recovery succeeded")
@@ -581,13 +586,18 @@ final class PasskeyManager: ObservableObject {
                 resume: { Self.takeRecoveryCompletion(&self.onRecoveryComplete)?() }
             )
         case .failure(let failure, let message):
-            // A user-cancelled prompt is a normal outcome, not an error
-            // worth a Sentry event; keep it as a breadcrumb only.
-            if failure == .userCancelled {
+            // A prompt the user cancelled, or left until it timed out, is a
+            // normal outcome, not an error worth a Sentry event; keep it as
+            // a breadcrumb only.
+            switch failure {
+            case .userCancelled:
                 PasskeyDiagnostics.step("retryRecovery: interactive ceremony cancelled by user")
-            } else {
+            case .timedOut:
+                PasskeyDiagnostics.step("retryRecovery: interactive ceremony timed out")
+            default:
                 PasskeyDiagnostics.report(
-                    "retryRecovery: interactive ceremony failed (\(failure.rawValue)): \(message ?? "-")"
+                    "retryRecovery: interactive ceremony failed (\(failure.rawValue)): \(message ?? "-")",
+                    kind: .ceremony(failure)
                 )
             }
             return false
@@ -612,7 +622,7 @@ final class PasskeyManager: ObservableObject {
     func retryPasskeySetup() async -> PasskeyRecoveryResult {
         if EncryptionService.shared.hasEncryptionKey() {
             guard await ensureCurrentPrimaryKeyAuthorized() else {
-                PasskeyDiagnostics.failure("retrySetup: local key not authorized for cloud writes")
+                PasskeyDiagnostics.failure("retrySetup: local key not approved for cloud writes")
                 passkeySetupAvailable = true
                 return .manualRecoveryRequired
             }
