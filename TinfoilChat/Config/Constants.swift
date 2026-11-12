@@ -178,6 +178,18 @@ enum Constants {
     enum Observability {
         static let traceSampleRate = 0.1
         static let profileSessionSampleRate: Float = 0.1
+        /// The app Tinfoil ships, the only one whose reports Tinfoil reads.
+        static let reportingBundleIdentifier = "sh.tinfoil.TinfoilChat"
+        /// Whether this build sends crash and performance reports. A debug
+        /// build stops at breakpoints, which reads as a hang, and a build
+        /// under another identifier is not the app Tinfoil ships.
+        static var sendsReports: Bool {
+            #if DEBUG
+            return false
+            #else
+            return Bundle.main.bundleIdentifier == reportingBundleIdentifier
+            #endif
+        }
     }
 
     enum MessageMetadata {
