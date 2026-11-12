@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import AVFoundation
 import PhotosUI
+import UniformTypeIdentifiers
 import VisionKit
 import RevenueCat
 import RevenueCatUI
@@ -1959,15 +1960,10 @@ struct CustomTextEditor: UIViewRepresentable {
         context.coordinator.textView = textView
         context.coordinator.currentTextSnapshot = text
 
-        // Initialize with placeholder or actual text
-        if text.isEmpty {
-            textView.text = placeholderText
-            textView.textColor = .lightGray
-        } else {
-            textView.text = text
-            textView.textColor = UIColor { traitCollection in
-                return traitCollection.userInterfaceStyle == .dark ? .white : .black
-            }
+        textView.placeholder = placeholderText
+        textView.text = text
+        textView.textColor = UIColor { traitCollection in
+            return traitCollection.userInterfaceStyle == .dark ? .white : .black
         }
 
         handle?.attach(context.coordinator)
@@ -1984,6 +1980,7 @@ struct CustomTextEditor: UIViewRepresentable {
             pastingView.onPasteImage = onPasteImage
             pastingView.onPasteFile = onPasteFile
             pastingView.onPasteFileError = onPasteFileError
+            pastingView.placeholder = placeholderText
         }
         let isCurrentlyEditing = context.coordinator.isEditing
 
@@ -2021,29 +2018,18 @@ struct CustomTextEditor: UIViewRepresentable {
             }
         }
 
-        if text.isEmpty && !isCurrentlyEditing && (uiView.textColor != .lightGray || uiView.text != placeholderText) {
-            uiView.text = placeholderText
-            uiView.textColor = .lightGray
-            context.coordinator.currentTextSnapshot = ""
-        } else if text.isEmpty && isCurrentlyEditing {
-            if uiView.text.isEmpty && uiView.textColor == .lightGray {
+        if text.isEmpty && !isCurrentlyEditing {
+            if uiView.hasText {
                 uiView.text = ""
                 context.coordinator.currentTextSnapshot = ""
-                uiView.textColor = UIColor { traitCollection in
-                    return traitCollection.userInterfaceStyle == .dark ? .white : .black
-                }
-            } else if !uiView.text.isEmpty && uiView.textColor != .lightGray {
+            }
+        } else if text.isEmpty && isCurrentlyEditing {
+            if uiView.hasText {
                 let snapshot = context.coordinator.immutableTextSnapshot(from: uiView)
                 context.coordinator.currentTextSnapshot = snapshot
                 self.text = snapshot
             }
-        } else if !text.isEmpty && uiView.textColor == .lightGray {
-            uiView.text = text
-            context.coordinator.currentTextSnapshot = text
-            uiView.textColor = UIColor { traitCollection in
-                return traitCollection.userInterfaceStyle == .dark ? .white : .black
-            }
-        } else if !text.isEmpty && context.coordinator.currentTextSnapshot != text && uiView.textColor != .lightGray {
+        } else if !uiView.hasText || context.coordinator.currentTextSnapshot != text {
             uiView.text = text
             context.coordinator.currentTextSnapshot = text
         }
@@ -2078,7 +2064,7 @@ struct CustomTextEditor: UIViewRepresentable {
         /// editor and then resynced into the binding, undoing the clear.
         var clearedDraft: String?
         var draftReplacement: (replaced: String, replacement: String)?
-        private var lastMeasurement: (text: String, width: CGFloat, pointSize: CGFloat, height: CGFloat)?
+        private var lastMeasurement: (text: String, width: CGFloat, pointSize: CGFloat, showsPlaceholder: Bool, height: CGFloat)?
 
         init(_ parent: CustomTextEditor) {
             self.parent = parent
@@ -2094,15 +2080,7 @@ struct CustomTextEditor: UIViewRepresentable {
             guard let textView else { return }
             draftReplacement = nil
             clearedDraft = immutableTextSnapshot(from: textView)
-            if isEditing {
-                textView.text = ""
-                textView.textColor = UIColor { traitCollection in
-                    return traitCollection.userInterfaceStyle == .dark ? .white : .black
-                }
-            } else {
-                textView.text = parent.placeholderText
-                textView.textColor = .lightGray
-            }
+            textView.text = ""
             parent.text = ""
             currentTextSnapshot = ""
             refreshAccessibility(textView)
@@ -2114,9 +2092,6 @@ struct CustomTextEditor: UIViewRepresentable {
             clearedDraft = nil
             draftReplacement = (replacedDraft, text)
             textView.text = text
-            textView.textColor = UIColor { traitCollection in
-                return traitCollection.userInterfaceStyle == .dark ? .white : .black
-            }
             parent.text = text
             currentTextSnapshot = text
             textView.selectedRange = NSRange(location: text.utf16.count, length: 0)
@@ -2131,9 +2106,11 @@ struct CustomTextEditor: UIViewRepresentable {
         func measuredHeight(for textView: UITextView, width: CGFloat) -> CGFloat {
             let text = currentTextSnapshot
             let pointSize = textView.font?.pointSize ?? 0
+            // An empty editor is as tall as the placeholder it shows.
+            let showsPlaceholder = (textView as? PastingTextView)?.showsPlaceholder ?? false
 
             if let last = lastMeasurement,
-               last.text == text, last.width == width, last.pointSize == pointSize {
+               last.text == text, last.width == width, last.pointSize == pointSize, last.showsPlaceholder == showsPlaceholder {
                 return last.height
             }
 
@@ -2145,7 +2122,7 @@ struct CustomTextEditor: UIViewRepresentable {
                 height = min(MessageInputView.Layout.maximumHeight, max(MessageInputView.Layout.minimumHeight, size.height))
             }
 
-            lastMeasurement = (text, width, pointSize, height)
+            lastMeasurement = (text, width, pointSize, showsPlaceholder, height)
             return height
         }
 
@@ -2159,13 +2136,11 @@ struct CustomTextEditor: UIViewRepresentable {
             return false
         }
 
-        /// Keeps VoiceOver from reading the gray placeholder as if it were
-        /// entered text: the field always reports a stable "Message" label and
-        /// only exposes a value once real text has been typed.
+        /// The field always reports a stable "Message" label and only
+        /// exposes a value once real text has been typed.
         func refreshAccessibility(_ textView: UITextView) {
             textView.accessibilityLabel = "Message"
-            let isShowingPlaceholder = textView.textColor == .lightGray
-            if isShowingPlaceholder {
+            if !textView.hasText {
                 textView.accessibilityValue = ""
             } else if UIAccessibility.isVoiceOverRunning {
                 textView.accessibilityValue = immutableTextSnapshot(from: textView)
@@ -2204,35 +2179,20 @@ struct CustomTextEditor: UIViewRepresentable {
         }
         
         func textViewDidChange(_ textView: UITextView) {
-            // Only update if the text is not the placeholder
-            if textView.textColor != .lightGray {
-                let snapshot = immutableTextSnapshot(from: textView)
-                currentTextSnapshot = snapshot
-                parent.text = snapshot
-            }
+            let snapshot = immutableTextSnapshot(from: textView)
+            currentTextSnapshot = snapshot
+            parent.text = snapshot
+            (textView as? PastingTextView)?.updatePlaceholderVisibility()
             refreshAccessibility(textView)
         }
         
         func textViewDidBeginEditing(_ textView: UITextView) {
             isEditing = true
-            // Clear placeholder when editing begins
-            if textView.textColor == .lightGray {
-                textView.text = ""
-                currentTextSnapshot = ""
-                textView.textColor = UIColor { traitCollection in
-                    return traitCollection.userInterfaceStyle == .dark ? .white : .black
-                }
-            }
             refreshAccessibility(textView)
         }
         
         func textViewDidEndEditing(_ textView: UITextView) {
             isEditing = false
-            // Add placeholder if needed when editing ends
-            if textView.text.isEmpty {
-                textView.text = parent.placeholderText
-                textView.textColor = .lightGray
-            }
             refreshAccessibility(textView)
         }
     }
@@ -2247,11 +2207,98 @@ final class PastingTextView: UITextView {
     var onPasteFile: ((ManagedStagedFile) -> Void)?
     var onPasteFileError: ((String) -> Void)?
 
+    /// What the editor shows while it is empty and not being edited. It is a
+    /// label over the editor rather than text in it: putting text in and
+    /// taking it out as editing begins and ends edits the document while the
+    /// keyboard attaches, which UIKit can wait on for seconds.
+    var placeholder: String? {
+        get { placeholderLabel.text }
+        set {
+            guard placeholderLabel.text != newValue else { return }
+            placeholderLabel.text = newValue
+            setNeedsLayout()
+        }
+    }
+
+    var showsPlaceholder: Bool { !placeholderLabel.isHidden }
+
+    private lazy var placeholderLabel: UILabel = {
+        let label = UILabel()
+        label.textColor = .lightGray
+        label.numberOfLines = 0
+        label.isAccessibilityElement = false
+        addSubview(label)
+        return label
+    }()
+
+    override var text: String! {
+        didSet { updatePlaceholderVisibility() }
+    }
+
+    /// Typing changes the text without setting it, so the editor's delegate
+    /// calls this as the text changes.
+    func updatePlaceholderVisibility() {
+        let hidesPlaceholder = hasText || isFirstResponder
+        guard placeholderLabel.isHidden != hidesPlaceholder else { return }
+        placeholderLabel.isHidden = hidesPlaceholder
+        if !hidesPlaceholder { setNeedsLayout() }
+    }
+
+    @discardableResult
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        updatePlaceholderVisibility()
+        return became
+    }
+
+    @discardableResult
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        updatePlaceholderVisibility()
+        return resigned
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard !placeholderLabel.isHidden else { return }
+        placeholderLabel.frame = CGRect(
+            x: textContainerInset.left + textContainer.lineFragmentPadding,
+            y: textContainerInset.top,
+            width: placeholderWidth(in: bounds.width),
+            height: placeholderHeight(in: bounds.width)
+        )
+    }
+
+    /// An empty editor is as tall as its placeholder, which wraps at large
+    /// text sizes.
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        let fitting = super.sizeThatFits(size)
+        guard showsPlaceholder else { return fitting }
+        let height = textContainerInset.top + placeholderHeight(in: size.width) + textContainerInset.bottom
+        return CGSize(width: fitting.width, height: max(fitting.height, height))
+    }
+
+    private func placeholderWidth(in width: CGFloat) -> CGFloat {
+        max(.zero, width - textContainerInset.left - textContainerInset.right - 2 * textContainer.lineFragmentPadding)
+    }
+
+    private func placeholderHeight(in width: CGFloat) -> CGFloat {
+        if placeholderLabel.font != font { placeholderLabel.font = font }
+        let fitting = CGSize(width: placeholderWidth(in: width), height: .greatestFiniteMagnitude)
+        return placeholderLabel.sizeThatFits(fitting).height
+    }
+
     /// File URLs win over any string representation on the pasteboard:
     /// copying a file (e.g. from the Files app) often includes its name as
     /// plain text, and pasting that name instead of the file would be wrong.
+    /// Reading the URLs waits for whichever app copied them to hand them
+    /// over, which can take seconds, so they are read only once the
+    /// pasteboard says it holds a file: pasting text or a link reads none.
     private var pasteboardFileURLs: [URL] {
-        UIPasteboard.general.urls?.filter { $0.isFileURL } ?? []
+        let pasteboard = UIPasteboard.general
+        let holdsFile = pasteboard.itemProviders.contains { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
+        guard holdsFile else { return [] }
+        return pasteboard.urls?.filter { $0.isFileURL } ?? []
     }
 
     private var acceptsImagePaste: Bool {
