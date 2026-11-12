@@ -476,9 +476,17 @@ struct CloudSyncOnboardingView: View {
                 }
 
                 Button(action: { handleComplete() }) {
-                    Text("Done")
-                        .onboardingPrimaryButton()
+                    Group {
+                        if isProcessing {
+                            ProgressView()
+                                .tint(colorScheme == .dark ? .black : .white)
+                        } else {
+                            Text("Done")
+                        }
+                    }
+                    .onboardingPrimaryButton()
                 }
+                .disabled(isProcessing)
                 .padding(.horizontal, 24)
                 .padding(.top, 8)
 
@@ -721,7 +729,7 @@ struct CloudSyncOnboardingView: View {
     }
 
     private func handleComplete() {
-        guard let key = generatedKey else { return }
+        guard let key = generatedKey, !isProcessing else { return }
         isProcessing = true
         Task {
             await completeSetup(with: key, activationMode: generatedKeyMode)
