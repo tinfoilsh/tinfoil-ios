@@ -127,31 +127,33 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         RevenueCatManager.shared.configure(apiKey: "appl_NsqQinGVxyvuivFgGKjKcIqHlsk")
 
         // Configure Sentry
-        SentrySDK.start { options in
-            options.dsn = "https://6f1fb6f77a16359e4d05acd52bbb2b93@o4509288836694016.ingest.us.sentry.io/4509290148069376"
-            options.tracesSampleRate = NSNumber(value: Constants.Observability.traceSampleRate)
-            options.enableAutoSessionTracking = true
-            // Disable PII collection for privacy
-            // For more information, visit: https://docs.sentry.io/platforms/apple/data-management/data-collected/
-            options.sendDefaultPii = false
-            // A failed request's event carries its headers, which include the
-            // chat access token; breadcrumbs carry the URLs of images a reply
-            // names; trace headers would tag requests to the chat service
-            // with an id Sentry's events share.
-            options.enableCaptureFailedRequests = false
-            options.enableNetworkBreadcrumbs = false
-            options.tracePropagationTargets = []
+        if Constants.Observability.sendsReports {
+            SentrySDK.start { options in
+                options.dsn = "https://6f1fb6f77a16359e4d05acd52bbb2b93@o4509288836694016.ingest.us.sentry.io/4509290148069376"
+                options.tracesSampleRate = NSNumber(value: Constants.Observability.traceSampleRate)
+                options.enableAutoSessionTracking = true
+                // Disable PII collection for privacy
+                // For more information, visit: https://docs.sentry.io/platforms/apple/data-management/data-collected/
+                options.sendDefaultPii = false
+                // A failed request's event carries its headers, which include the
+                // chat access token; breadcrumbs carry the URLs of images a reply
+                // names; trace headers would tag requests to the chat service
+                // with an id Sentry's events share.
+                options.enableCaptureFailedRequests = false
+                options.enableNetworkBreadcrumbs = false
+                options.tracePropagationTargets = []
 
-            // Configure profiling. Visit https://docs.sentry.io/platforms/apple/profiling/ to learn more.
-            options.configureProfiling = { profileOptions in
-                profileOptions.sessionSampleRate = Constants.Observability.profileSessionSampleRate
-                profileOptions.lifecycle = .trace
+                // Configure profiling. Visit https://docs.sentry.io/platforms/apple/profiling/ to learn more.
+                options.configureProfiling = { profileOptions in
+                    profileOptions.sessionSampleRate = Constants.Observability.profileSessionSampleRate
+                    profileOptions.lifecycle = .trace
+                }
+
+                // We only enable stack traces (anonymized) for privacy
+                // Uncomment the following lines to add more data to your events
+                // options.attachScreenshot = true // This adds a screenshot to the error events
+                // options.attachViewHierarchy = true // This adds the view hierarchy to the error events
             }
-
-            // We only enable stack traces (anonymized) for privacy
-            // Uncomment the following lines to add more data to your events
-            // options.attachScreenshot = true // This adds a screenshot to the error events
-            // options.attachViewHierarchy = true // This adds the view hierarchy to the error events
         }
 
         // Before any scene shows, so it cannot remove a key file being shared.

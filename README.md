@@ -12,6 +12,8 @@ The iOS app for Tinfoil Chat, a private AI assistant. Its chats run in the attes
 
 Open `TinfoilChat.xcodeproj` in Xcode and run the `TinfoilChat` scheme.
 
+Archiving the shipped app uploads its debug symbols with the [Sentry CLI](https://cli.sentry.dev), which must be installed and signed in (`sentry auth login`).
+
 ## Reporting Vulnerabilities
 
 Please report security vulnerabilities by either:

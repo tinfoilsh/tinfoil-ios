@@ -28,31 +28,59 @@ enum PasskeyDiagnostics {
     /// cyclic userInfo chains.
     private static let maxErrorChainDepth = 5
 
+    /// What a reported failure is. Sentry groups the reports by it: they
+    /// all come from the same few lines, which is all it would otherwise
+    /// have to tell them apart by.
+    enum ReportKind {
+        case settingsAlert
+        case recoveredKeyInvalid
+        case ceremony(PasskeyFlowFailure)
+
+        fileprivate var fingerprint: [String] {
+            switch self {
+            case .settingsAlert: return [fingerprintPrefix, "settings-alert"]
+            case .recoveredKeyInvalid: return [fingerprintPrefix, "recovered-key-invalid"]
+            case .ceremony(let failure): return [fingerprintPrefix, "ceremony", failure.rawValue]
+            }
+        }
+    }
+
+    private static let fingerprintPrefix = "passkey"
+    private static let breadcrumbCategory = "passkey"
+    private static let breadcrumbDetailKey = "detail"
+
     /// Log a flow milestone (which path was taken, candidate counts).
     static func step(_ message: String) {
         logger.info("\(message, privacy: .public)")
         addBreadcrumb(message, level: .info)
     }
 
-    /// Log a non-fatal anomaly worth seeing in a report.
-    static func warn(_ message: String) {
-        logger.warning("\(message, privacy: .public)")
-        addBreadcrumb(message, level: .warning)
+    /// Log a non-fatal anomaly worth seeing in a report. The detail is
+    /// what a framework or a service said of it, as for `failure`.
+    static func warn(_ message: String, detail: String? = nil) {
+        logger.warning("\(line(message, detail), privacy: .public)")
+        addBreadcrumb(message, level: .warning, detail: detail)
     }
 
     /// Log a step failure. Breadcrumbs accumulate so the terminal
-    /// `report` carries every intermediate failure.
-    static func failure(_ message: String) {
-        logger.error("\(message, privacy: .public)")
-        addBreadcrumb(message, level: .error)
+    /// `report` carries every intermediate failure. The detail is what a
+    /// framework or a service said of the failure, kept apart from the
+    /// message: Sentry's data scrubber drops any text holding one of its
+    /// sensitive words, "auth" among them, which the names of the
+    /// frameworks behind a passkey hold. Kept apart, the scrubber takes
+    /// only the detail, and the line saying which step failed stays.
+    static func failure(_ message: String, detail: String? = nil) {
+        logger.error("\(line(message, detail), privacy: .public)")
+        addBreadcrumb(message, level: .error, detail: detail)
     }
 
     /// Capture a terminal, user-visible recovery failure as a Sentry
     /// event so the preceding breadcrumb trail is attached.
-    static func report(_ message: String) {
+    static func report(_ message: String, kind: ReportKind) {
         logger.fault("\(message, privacy: .public)")
         SentrySDK.capture(message: message) { scope in
             scope.setLevel(.error)
+            scope.setFingerprint(kind.fingerprint)
         }
     }
 
@@ -81,9 +109,16 @@ enum PasskeyDiagnostics {
         return parts.joined(separator: " <- ")
     }
 
-    private static func addBreadcrumb(_ message: String, level: SentryLevel) {
-        let crumb = Breadcrumb(level: level, category: "passkey")
+    private static func line(_ message: String, _ detail: String?) -> String {
+        detail.map { "\(message): \($0)" } ?? message
+    }
+
+    private static func addBreadcrumb(_ message: String, level: SentryLevel, detail: String? = nil) {
+        // Sentry logs an error for each breadcrumb it is handed while off.
+        guard SentrySDK.isEnabled else { return }
+        let crumb = Breadcrumb(level: level, category: breadcrumbCategory)
         crumb.message = message
+        if let detail { crumb.setData(value: detail, key: breadcrumbDetailKey) }
         SentrySDK.addBreadcrumb(crumb)
     }
 }
