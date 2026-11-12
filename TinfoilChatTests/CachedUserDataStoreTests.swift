@@ -56,6 +56,16 @@ struct CachedUserDataStoreTests {
         #expect(keychain.items[item] == nil)
     }
 
+    @Test func aSecondStoreReadsWhatTheFirstIsStillSaving() throws {
+        let (defaults, cleanup) = try makeDefaults()
+        defer { cleanup() }
+        let keychain = MemoryKeychain()
+
+        CachedUserDataStore(keychain: keychain, defaults: defaults).save(details)
+        let read = CachedUserDataStore(keychain: keychain, defaults: defaults).load()
+        #expect(read?.data == details)
+    }
+
     private func makeDefaults() throws -> (UserDefaults, () -> Void) {
         let name = "CachedUserDataStoreTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: name))
