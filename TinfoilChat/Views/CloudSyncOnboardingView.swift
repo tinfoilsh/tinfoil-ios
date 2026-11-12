@@ -65,6 +65,39 @@ private extension View {
     }
 }
 
+/// A frowning face in the style of the `face.smiling` symbol, which has no
+/// frowning counterpart. It is stroked with `lineWidth` and round caps.
+private struct FrowningFace: Shape {
+    static let lineWidth: CGFloat = 3
+
+    /// Where the eyes and the mouth sit, as fractions of the face's size.
+    private static let eyeX: CGFloat = 0.34
+    private static let eyeY: CGFloat = 0.4
+    private static let eyeHeight: CGFloat = 0.04
+    private static let mouthX: CGFloat = 0.32
+    private static let mouthEndY: CGFloat = 0.7
+    private static let mouthPeakY: CGFloat = 0.54
+
+    func path(in rect: CGRect) -> Path {
+        // The stroke is centered on the outline, which is inset to keep it
+        // inside the frame.
+        let face = rect.insetBy(dx: Self.lineWidth / 2, dy: Self.lineWidth / 2)
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: face.minX + x * face.width, y: face.minY + y * face.height)
+        }
+        var path = Path(ellipseIn: face)
+        // An eye is a short stroke, which its round caps make an oval.
+        for x in [Self.eyeX, 1 - Self.eyeX] {
+            path.move(to: point(x, Self.eyeY - Self.eyeHeight / 2))
+            path.addLine(to: point(x, Self.eyeY + Self.eyeHeight / 2))
+        }
+        // The mouth curves up to its middle, so its ends turn down.
+        path.move(to: point(Self.mouthX, Self.mouthEndY))
+        path.addQuadCurve(to: point(1 - Self.mouthX, Self.mouthEndY), control: point(0.5, Self.mouthPeakY))
+        return path
+    }
+}
+
 struct CloudSyncOnboardingView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
@@ -393,23 +426,34 @@ struct CloudSyncOnboardingView: View {
             VStack(spacing: 24) {
                 Spacer().frame(height: 30)
 
-                // Success icon
+                // A key that could not be set up shows as an error until Done
+                // sets it up.
+                let failed = keyError != nil
+                let tint: Color = failed ? .red : .green
+
+                // Success or error icon
                 ZStack {
                     Circle()
-                        .strokeBorder(Color.green.opacity(0.2), lineWidth: 2)
+                        .strokeBorder(tint.opacity(0.2), lineWidth: 2)
                         .frame(width: 120, height: 120)
 
                     Circle()
-                        .fill(Color.green.opacity(0.1))
+                        .fill(tint.opacity(0.1))
                         .frame(width: 88, height: 88)
 
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 36, weight: .bold))
-                        .foregroundColor(.green)
+                    if failed {
+                        FrowningFace()
+                            .stroke(tint, style: StrokeStyle(lineWidth: FrowningFace.lineWidth, lineCap: .round))
+                            .frame(width: 40, height: 40)
+                    } else {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 36, weight: .bold))
+                            .foregroundColor(.green)
+                    }
                 }
 
                 // Title
-                Text("Success!")
+                Text(failed ? "Error" : "Success!")
                     .font(.title)
                     .fontWeight(.bold)
                     .accessibilityAddTraits(.isHeader)
