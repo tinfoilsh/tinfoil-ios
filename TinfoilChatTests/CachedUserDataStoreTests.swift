@@ -47,9 +47,10 @@ struct CachedUserDataStoreTests {
         let store = CachedUserDataStore(keychain: keychain, defaults: defaults)
 
         store.save(details)
+        // The details are saved off this thread; a read waits for them.
+        #expect(store.load()?.isFromOlderVersion == false)
         #expect(keychain.items[item] == details)
         #expect(defaults.object(forKey: Constants.StorageKeys.Auth.userData) == nil)
-        #expect(store.load()?.isFromOlderVersion == false)
 
         store.clear()
         #expect(keychain.items[item] == nil)

@@ -247,9 +247,21 @@ actor ChatAccessCache {
         return formatter
     }()
     private static let wholeDates = ISO8601DateFormatter()
+    /// The dates parsed so far, by their text. The chat lists and the open chat
+    /// read the same ones each time they are built, and parsing one costs
+    /// enough for a long list to stall the main thread.
+    private static let parsedDates: NSCache<NSString, NSDate> = {
+        let cache = NSCache<NSString, NSDate>()
+        cache.countLimit = Constants.Harness.parsedDateLimit
+        return cache
+    }()
 
     static func date(of text: String) -> Date? {
-        fractionalDates.date(from: text) ?? wholeDates.date(from: text)
+        let key = text as NSString
+        if let parsed = parsedDates.object(forKey: key) { return parsed as Date }
+        guard let date = fractionalDates.date(from: text) ?? wholeDates.date(from: text) else { return nil }
+        parsedDates.setObject(date as NSDate, forKey: key)
+        return date
     }
 }
 

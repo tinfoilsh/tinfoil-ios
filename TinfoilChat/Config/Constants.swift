@@ -315,6 +315,9 @@ enum Constants {
         /// Where the models the last session offered are kept, which the
         /// model picker offers until the next session loads.
         static let keptModelsKey = "tinfoil-harness-session-models"
+        /// The most dates kept once parsed from the chat service's text, so
+        /// the same one is not parsed again each time a list is built.
+        static let parsedDateLimit = 8_192
 
         enum Search {
             static let debounceSeconds: TimeInterval = 0.3
