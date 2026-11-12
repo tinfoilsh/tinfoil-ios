@@ -373,9 +373,11 @@ struct Message: Identifiable, Equatable {
     var segments: [MessageSegment]? = nil
     var webSearches: [WebSearchInstance]? = nil
     var toolCalls: [GenUIToolCall] = []
-    /// The reply's blocks as the chat service sent them, which the widgets
-    /// read their state from.
-    var timeline: [JSONValue]? = nil
+    /// The chat service's live summaries of the step the reply streams: the
+    /// reasoning it is thinking through, and the search or page read under
+    /// way.
+    var thinkingSummary = ""
+    var webSearchSummary = ""
     /// The answers to questions widgets a question sent the model.
     var answers: [WidgetAnswers] = []
     /// Why the reply ended before it finished, if it did.
@@ -424,7 +426,6 @@ struct Message: Identifiable, Equatable {
                 || !urlFetches.isEmpty
                 || !toolCalls.isEmpty
                 || annotations?.isEmpty == false
-                || timeline?.isEmpty == false
         )
     }
 

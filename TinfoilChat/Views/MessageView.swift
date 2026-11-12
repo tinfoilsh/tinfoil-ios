@@ -89,9 +89,6 @@ struct MessageRowContext: Equatable {
     var canFork = false
     var canUseReadAloud = false
     var chatId: String?
-    /// The live summaries of the reply streaming, which only its row shows.
-    var thinkingSummary = ""
-    var webSearchSummary = ""
     var genUIRetryStates: [String: GenUIRetryState] = [:]
     /// The answers of the row's questions widgets, by widget call.
     var answers: [String: GenUIAnswersState] = [:]
@@ -111,10 +108,6 @@ struct MessageRowContext: Equatable {
         canFork = viewModel.canForkMessage(at: messageIndex)
         canUseReadAloud = viewModel.canUseReadAloud
         chatId = viewModel.currentChat?.id
-        if isRenderingStream {
-            thinkingSummary = viewModel.thinkingSummary
-            webSearchSummary = viewModel.webSearchSummary
-        }
         for toolCall in message.toolCalls {
             if let state = viewModel.genUIRetryState(toolCallId: toolCall.id) { genUIRetryStates[toolCall.id] = state }
             if toolCall.name == QuestionSet.widgetName {
@@ -497,8 +490,8 @@ struct MessageView: View, Equatable {
                         isActive: isRenderingStream && identifiedRun.id == runs.last?.id,
                         isStreaming: isRenderingStream,
                         isDarkMode: isDarkMode,
-                        thinkingSummary: isRenderingStream ? context.thinkingSummary : nil,
-                        webSearchSummary: isRenderingStream ? context.webSearchSummary : nil,
+                        thinkingSummary: isRenderingStream ? message.thinkingSummary : nil,
+                        webSearchSummary: isRenderingStream ? message.webSearchSummary : nil,
                         expansion: stepExpansion
                     )
                 }
@@ -514,8 +507,8 @@ struct MessageView: View, Equatable {
             rowId: rowId,
             isActive: isActive,
             isDarkMode: isDarkMode,
-            thinkingSummary: isActive ? context.thinkingSummary : nil,
-            webSearchSummary: isActive ? context.webSearchSummary : nil,
+            thinkingSummary: isActive ? message.thinkingSummary : nil,
+            webSearchSummary: isActive ? message.webSearchSummary : nil,
             expansion: stepExpansion
         )
     }

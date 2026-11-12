@@ -37,7 +37,7 @@ struct ChatViewMappingTests {
             ["id": "c1", "type": "content", "content": "Hello "],
             ["id": "c2", "type": "content", "content": "world"],
         ])
-        let shown = ChatViewMapping.message(wire, streaming: false, summaries: ["t1": "Thinking about it"])
+        let shown = ChatViewMapping.message(wire, streaming: false)
         #expect(shown.role == .assistant)
         #expect(shown.content == "Hello world")
         #expect(shown.thoughts == "why")
@@ -48,7 +48,6 @@ struct ChatViewMappingTests {
             .text("Hello "),
             .text("world"),
         ])
-        #expect(shown.timeline?.first?.objectValue?["summary"]?.stringValue == "Thinking about it")
     }
 
     @Test func aStreamingReplyThinksOnlyInItsLastBlock() throws {

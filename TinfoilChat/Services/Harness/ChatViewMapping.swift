@@ -11,12 +11,11 @@ enum ChatViewMapping {
         return name == searchTool || name == fetchTool || name.hasPrefix(harnessWidgetPrefix)
     }
 
-    /// A message as the view shows it, with the latest summary of each
-    /// thinking block's reasoning. A reply thinks only in its last block:
+    /// A message as the view shows it. A reply thinks only in its last block:
     /// reasoning ends once the reply goes on to text or a tool call.
     /// shownAs is the id the message's row was first shown with, when a turn
     /// replaced the message's own.
-    static func message(_ wire: HarnessMessage, streaming: Bool = false, summaries: [String: String] = [:], shownAs id: String? = nil) -> Message {
+    static func message(_ wire: HarnessMessage, streaming: Bool = false, shownAs id: String? = nil) -> Message {
         let role: MessageRole = wire.role.value1 == .user ? .user : .assistant
         var message = Message(id: id ?? wire.id, role: role, content: wire.content ?? "", timestamp: ChatAccessCache.date(of: wire.createdAt) ?? .distantPast)
         message.modelDisplayName = wire.modelDisplayName
@@ -38,7 +37,6 @@ enum ChatViewMapping {
         var toolCalls: [GenUIToolCall] = []
         // The sources of every search and page read, in the order found.
         var found: [WebSearchSource] = []
-        var timeline: [JSONValue] = []
         var thoughts = ""
         var text = ""
         var thinkingSeconds = 0.0
@@ -56,12 +54,10 @@ enum ChatViewMapping {
                 if let duration = block.duration { thinkingSeconds += duration }
                 thinking = thinking || isThinking
                 segments.append(.thinking(content: content, isThinking: isThinking, duration: block.duration, startedAt: block.startedAt))
-                timeline.append(timelineBlock(block, summary: summaries[block.id]))
             case .content:
                 let content = block.content ?? ""
                 text += content
                 segments.append(.text(content))
-                timeline.append(timelineBlock(block))
             case .toolCall:
                 guard isShownTool(block.name) else { continue }
                 if block.name == searchTool || block.name == fetchTool { found += block.display?.sources.map(source) ?? [] }
@@ -87,7 +83,6 @@ enum ChatViewMapping {
                     toolCalls.append(GenUIToolCall(id: toolCallId, name: block.name ?? "", arguments: block.arguments ?? "", answers: block.answers?.additionalProperties ?? [:]))
                     segments.append(.toolCall(toolCallId: toolCallId))
                 }
-                timeline.append(timelineBlock(block))
             }
         }
         message.content = text
@@ -102,7 +97,6 @@ enum ChatViewMapping {
         message.webSearchState = searches.last.map { WebSearchState(query: $0.query, status: $0.status, sources: $0.sources ?? [], reason: nil) }
         message.urlFetches = fetches
         message.toolCalls = toolCalls
-        message.timeline = timeline
         if wire.research != nil {
             // A research lists every source it searched and read, and those
             // its report cites, once each.
@@ -165,15 +159,6 @@ enum ChatViewMapping {
     private static func unreadUrls(_ result: Components.Schemas.Json?) -> Set<String> {
         guard let object = result?.value as? [String: Any], let failed = object["failed"] as? [Any] else { return [] }
         return Set(failed.compactMap { ($0 as? [String: Any])?["url"] as? String })
-    }
-
-    private static func timelineBlock(_ block: TimelineBlock, summary: String? = nil) -> JSONValue {
-        var value = JSONValue(any: (try? block.jsonObject()) ?? [:])
-        if let summary, var object = value.objectValue {
-            object["summary"] = .string(summary)
-            value = .object(object)
-        }
-        return value
     }
 
     static func attachment(_ view: Components.Schemas.AttachmentView) -> Attachment {

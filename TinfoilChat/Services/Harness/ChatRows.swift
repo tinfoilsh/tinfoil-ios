@@ -21,7 +21,6 @@ final class ChatRows {
     private struct Mapped {
         let wire: HarnessMessage
         let streaming: Bool
-        let summaries: [String: String]
         let view: Message
     }
 
@@ -34,7 +33,7 @@ final class ChatRows {
 
     /// The open chat's messages as rows. running says a turn of the chat is
     /// under way; replyModelName names the model on the row a reply waits in.
-    func rows(chatId: String?, messages: [HarnessMessage], running: Bool, summaries: [String: String], replyModelName: String?) -> [Message] {
+    func rows(chatId: String?, messages: [HarnessMessage], running: Bool, replyModelName: String?) -> [Message] {
         if chatId != self.chatId {
             // A chat that keeps its messages under another id is the same
             // conversation on screen; another chat starts its rows afresh.
@@ -57,14 +56,12 @@ final class ChatRows {
         var rows = messages.enumerated().map { index, wire -> Message in
             let streaming = running && index == messages.count - 1
             let shownId = shownIds[wire.id] ?? wire.id
-            let relevant = Self.summaries(of: wire, in: summaries)
-            if let previous = mapped[wire.id], previous.streaming == streaming, previous.view.id == shownId,
-               previous.summaries == relevant, previous.wire == wire {
+            if let previous = mapped[wire.id], previous.streaming == streaming, previous.view.id == shownId, previous.wire == wire {
                 kept[wire.id] = previous
                 return previous.view
             }
-            let view = ChatViewMapping.message(wire, streaming: streaming, summaries: relevant, shownAs: shownId)
-            kept[wire.id] = Mapped(wire: wire, streaming: streaming, summaries: relevant, view: view)
+            let view = ChatViewMapping.message(wire, streaming: streaming, shownAs: shownId)
+            kept[wire.id] = Mapped(wire: wire, streaming: streaming, view: view)
             return view
         }
         mapped = kept
@@ -109,16 +106,5 @@ final class ChatRows {
     private func awaitsReply(_ messages: [HarnessMessage]) -> Bool {
         guard let awaited, let last = messages.last, last.role.value1 == .user else { return false }
         return (shownIds[last.id] ?? last.id) == awaited.shownId
-    }
-
-    /// The reasoning summaries of a message's own blocks, so a summary of the
-    /// reply streaming does not rebuild every other message.
-    private static func summaries(of message: HarnessMessage, in summaries: [String: String]) -> [String: String] {
-        guard !summaries.isEmpty, let blocks = message.timeline else { return [:] }
-        var relevant: [String: String] = [:]
-        for block in blocks {
-            if let summary = summaries[block.id] { relevant[block.id] = summary }
-        }
-        return relevant
     }
 }
