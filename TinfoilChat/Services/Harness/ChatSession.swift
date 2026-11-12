@@ -586,12 +586,14 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     }
 
     /// The compaction markers of messages a turn changed: a message it
-    /// replaces, as an edit replaces its question, keeps the marker above it.
+    /// replaces, as an edit replaces its question, keeps the marker above it,
+    /// and a marker at the end of the chat goes with the messages it covered.
     private static func keptMarkers(_ markers: [String: HarnessMessage], of messages: [HarnessMessage], replacedBy applied: [HarnessMessage]) -> [String: HarnessMessage] {
         var kept = markers
         for (index, message) in applied.enumerated() where messages.indices.contains(index) && messages[index].id != message.id {
             if let marker = markers[messages[index].id] { kept[message.id] = marker }
         }
+        kept.removeValue(forKey: chatEndMarkerKey)
         return kept
     }
 
@@ -624,6 +626,11 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         defaults.options = leaveToPreset(defaults.options, choice)
         var fields = fields
         fields.options = fields.options.flatMap { leaveToPreset($0, choice) }
+        // Where the harness offers it, a compaction on request summarizes the
+        // latest exchange too, as the chat shows a marker at its end.
+        if compactsLatestExchange, (fields.kind ?? defaults.kind) == .compact {
+            defaults.compactLatest = true
+        }
         // Deep research asks for the next question alone. The harness then
         // researches the turns that go on with it, as the answers to what the
         // research asked first, or an edit or regeneration of the question.
@@ -637,7 +644,14 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         let before = state.messages
         let markers = state.markers
         let sent = sentMessage(fields.applied(to: defaults))
-        if let sent { controller.updateView { $0.messages.append(shownMessage(sent)) } }
+        if let sent {
+            controller.updateView {
+                $0.messages.append(shownMessage(sent))
+                // A marker that ended the chat sits before the question sent
+                // after it.
+                if let end = $0.markers.removeValue(forKey: chatEndMarkerKey) { $0.markers[sent.id] = end }
+            }
+        }
         let applied = appliedTurn(fields.applied(to: defaults))
         if let applied { controller.updateView { $0.markers = Self.keptMarkers($0.markers, of: $0.messages, replacedBy: applied); $0.messages = applied } }
         // A turn that did not start leaves the chat as the harness stores it.
@@ -803,14 +817,20 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         return await send(TurnFields(kind: failedRun && state.compactTurn ? .compact : .retry, options: options))
     }
 
-    /// Whether the open chat can be compacted now: it is stored, no reply
-    /// runs, and it holds earlier messages to summarize.
-    var canCompact: Bool {
-        guard let id = open.id, open.unsaved != id, open.failedId == nil, !running, acceptsTurn else { return false }
-        return state.compactable
+    /// The harness summarizes a chat's latest exchange too when the user
+    /// asks it to compact the chat, rather than keeping it as it is.
+    var compactsLatestExchange: Bool {
+        account.session?.features.additionalProperties["compactLatest"] == true
     }
 
-    /// Compacts the open chat on request: the harness summarizes its earlier
+    /// Whether the open chat can be compacted now: it is stored, no reply
+    /// runs, and it holds messages for the harness to summarize.
+    var canCompact: Bool {
+        guard let id = open.id, open.unsaved != id, open.failedId == nil, !running, acceptsTurn else { return false }
+        return state.compactable(includingLatest: compactsLatestExchange)
+    }
+
+    /// Compacts the open chat on request: the harness summarizes its
     /// messages without asking the model.
     @discardableResult
     func compact(options: TurnOptions? = nil) async -> Bool {

@@ -17,8 +17,9 @@ struct ChatState: Equatable, Sendable {
     var snapshot: RunSnapshot
     var messages: [HarnessMessage]
     /// The chat's compaction markers, which its messages leave out, by the
-    /// id of the message each one shows above. One whose summary is still
-    /// being written has no compaction member yet.
+    /// id of the message each one shows above, or by chatEndMarkerKey for
+    /// one after the last message. One whose summary is still being written
+    /// has no compaction member yet.
     var markers: [String: HarnessMessage] = [:]
     var hasOlder: Bool
     var runId: String?
@@ -64,25 +65,34 @@ struct ChatState: Equatable, Sendable {
     }
 
     /// Whether compacting the chat on request has anything to summarize, as
-    /// the harness decides it: a message after the latest compaction marker
-    /// that comes before the last question, which the harness keeps with its
-    /// reply.
-    var compactable: Bool {
+    /// the harness decides it. A turn that compacts the latest exchange too
+    /// needs a reply after the latest compaction marker. Any other needs a
+    /// message after that marker that comes before the last question, which
+    /// the harness keeps with its reply.
+    func compactable(includingLatest: Bool) -> Bool {
+        // A marker that ends the chat summarized every message.
+        guard markers[chatEndMarkerKey] == nil else { return false }
+        let marker = messages.lastIndex(where: { markers[$0.id] != nil }) ?? 0
+        if includingLatest {
+            guard let reply = messages.lastIndex(where: { $0.role.value1 == .assistant }) else { return false }
+            return reply >= marker
+        }
         guard let question = messages.lastIndex(where: { $0.role.value1 == .user }) else { return false }
-        return question > (messages.lastIndex(where: { markers[$0.id] != nil }) ?? 0)
+        return question > marker
     }
 
     /// The messages with each compaction marker before the message it shows
-    /// above, as the harness keeps them.
+    /// above, or after the last message, as the harness keeps them.
     var messagesWithMarkers: [HarnessMessage] {
         messages.flatMap { message -> [HarnessMessage] in
             markers[message.id].map { [$0, message] } ?? [message]
-        }
+        } + (markers[chatEndMarkerKey].map { [$0] } ?? [])
     }
 
     /// The messages before the chat's latest compaction marker whose summary
     /// was written, which the model reads that summary in place of.
     var summarizedIds: Set<String> {
+        if markers[chatEndMarkerKey]?.compaction != nil { return Set(messages.map(\.id)) }
         guard let latest = messages.lastIndex(where: { markers[$0.id]?.compaction != nil }) else { return [] }
         return Set(messages[..<latest].map(\.id))
     }

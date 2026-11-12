@@ -450,16 +450,57 @@ struct ChatReducerTests {
         #expect(again.markers == state.markers)
     }
 
-    @Test func aChatHasSomethingToCompactBeforeItsLastQuestionAfterItsLatestMarker() throws {
+    @Test func aChatHasSomethingToCompactWhenAReplyFollowsItsLatestMarker() throws {
         let snapshot: [String: Any] = ["type": "MESSAGES_SNAPSHOT", "messages": Self.compactedMessages, "hasOlder": false]
-        #expect(try Self.reduce([Self.started(), snapshot]).compactable)
+        #expect(try Self.reduce([Self.started(), snapshot]).compactable(includingLatest: true))
+        // A single exchange is compacted whole.
+        let oneExchange: [String: Any] = ["type": "MESSAGES_SNAPSHOT", "messages": Array(Self.compactedMessages.prefix(2)), "hasOlder": false]
+        #expect(try Self.reduce([Self.started(), oneExchange]).compactable(includingLatest: true))
+        // The marker above u2 leaves its reply a2 after it, which a marker
+        // above the last question does not.
+        #expect(try Self.reduce(Self.compactedTurn + [Self.compactionEnd("completed", marker: Self.marker())]).compactable(includingLatest: true))
+        let aboveQuestion = Self.compactedTurn.dropLast() + [Self.compactionStart(before: "u3"), Self.compactionEnd("completed", marker: Self.marker(), before: "u3")]
+        #expect(try !Self.reduce(Array(aboveQuestion)).compactable(includingLatest: true))
+        let atEnd = [Self.started(), oneExchange, Self.compactionStart(before: chatEndMarkerKey), Self.compactionEnd("completed", marker: Self.marker(), before: chatEndMarkerKey)]
+        #expect(try !Self.reduce(atEnd).compactable(includingLatest: true))
+        let onlyQuestion: [String: Any] = ["type": "MESSAGES_SNAPSHOT", "messages": Array(Self.compactedMessages.prefix(1)), "hasOlder": false]
+        #expect(try !Self.reduce([Self.started(), onlyQuestion]).compactable(includingLatest: true))
+    }
+
+    @Test func aChatWhoseLatestExchangeIsKeptHasSomethingToCompactBeforeItsLastQuestion() throws {
+        let snapshot: [String: Any] = ["type": "MESSAGES_SNAPSHOT", "messages": Self.compactedMessages, "hasOlder": false]
+        #expect(try Self.reduce([Self.started(), snapshot]).compactable(includingLatest: false))
+        // A single exchange is the latest, which is kept.
+        let oneExchange: [String: Any] = ["type": "MESSAGES_SNAPSHOT", "messages": Array(Self.compactedMessages.prefix(2)), "hasOlder": false]
+        #expect(try !Self.reduce([Self.started(), oneExchange]).compactable(includingLatest: false))
         // The marker above u2 leaves u2 and its reply before the last
         // question, which a marker above that question does not.
-        #expect(try Self.reduce(Self.compactedTurn + [Self.compactionEnd("completed", marker: Self.marker())]).compactable)
+        #expect(try Self.reduce(Self.compactedTurn + [Self.compactionEnd("completed", marker: Self.marker())]).compactable(includingLatest: false))
         let aboveQuestion = Self.compactedTurn.dropLast() + [Self.compactionStart(before: "u3"), Self.compactionEnd("completed", marker: Self.marker(), before: "u3")]
-        #expect(try !Self.reduce(Array(aboveQuestion)).compactable)
-        let onlyQuestion: [String: Any] = ["type": "MESSAGES_SNAPSHOT", "messages": Array(Self.compactedMessages.prefix(1)), "hasOlder": false]
-        #expect(try !Self.reduce([Self.started(), onlyQuestion]).compactable)
+        #expect(try !Self.reduce(Array(aboveQuestion)).compactable(includingLatest: false))
+        // A marker that ends the chat, as a harness that compacts the latest
+        // exchange left it, covers every message.
+        let atEnd = [Self.started(), snapshot, Self.compactionStart(before: chatEndMarkerKey), Self.compactionEnd("completed", marker: Self.marker(), before: chatEndMarkerKey)]
+        #expect(try !Self.reduce(atEnd).compactable(includingLatest: false))
+    }
+
+    @Test func aCompactionThatNamesNoMessageEndsTheChatAndSummarizesEveryMessage() throws {
+        let exchanges: [String: Any] = ["type": "MESSAGES_SNAPSHOT", "messages": Array(Self.compactedMessages.prefix(4)), "hasOlder": false]
+        let running = try Self.reduce([Self.started(), exchanges, Self.compactionStart(before: chatEndMarkerKey)])
+        #expect(running.markers[chatEndMarkerKey]?.compaction == nil)
+        #expect(running.summarizedIds.isEmpty)
+
+        let completed = try Self.reduce([Self.compactionEnd("completed", marker: Self.marker(covering: 4), before: chatEndMarkerKey)], from: 3, into: running)
+        #expect(completed.markers.mapValues(\.id) == [chatEndMarkerKey: "c"])
+        #expect(completed.summarizedIds == ["u1", "a1", "u2", "a2"])
+        #expect(completed.messagesWithMarkers.map(\.id) == ["u1", "a1", "u2", "a2", "c"])
+        #expect(completed.compacted == "c")
+
+        // The chat loaded again keeps the marker at its end.
+        var window = Self.thread
+        window.merge(["revision": "1", "presetId": NSNull(), "messages": Array(Self.compactedMessages.prefix(4)) + [Self.marker(covering: 4)], "hasOlder": false]) { $1 }
+        let loaded = ChatState(thread: try ThreadWindow(jsonObject: window))
+        #expect(loaded.markers.mapValues(\.id) == [chatEndMarkerKey: "c"])
     }
 
     @Test func aCompactionTheChatAskedForIsItsRunUntilItEndsAndOneThatFailedIsKeptToRetry() throws {

@@ -1741,6 +1741,7 @@ struct AddToSheetView: View {
                             ContextCompactionPopover(
                                 usage: contextUsage,
                                 compacts: viewModel.compactsChats,
+                                compactsLatest: viewModel.compactsLatestExchange,
                                 canCompact: viewModel.canCompactChat,
                                 compacting: viewModel.isCompacting,
                                 onCompact: {

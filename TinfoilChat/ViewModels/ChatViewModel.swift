@@ -765,6 +765,11 @@ class ChatViewModel: ObservableObject {
         account?.session?.features.additionalProperties["manualCompaction"] == true
     }
 
+    /// A compaction the user asks for summarizes the latest exchange too.
+    var compactsLatestExchange: Bool {
+        session?.compactsLatestExchange == true
+    }
+
     /// Deep research can be turned on: the chat service offers it to the
     /// account, and web search is not turned off in Settings.
     var canResearch: Bool { session?.researchAvailable == true }
@@ -1213,6 +1218,7 @@ class ChatViewModel: ObservableObject {
         let stopping = session.stopping && !compacting
         let stoppedId = stopping ? state.messages.last?.id : nil
         let summarized = state.summarizedIds
+        let lastId = state.messages.last?.id
         let researchingReply = state.researchingReply
         var messages = rows.rows(chatId: open.id, messages: state.messages, running: running && !stopping && !compacting, summaries: state.summaries, replyModelName: replyModelName).map { message -> Message in
             var view = message
@@ -1227,6 +1233,10 @@ class ChatViewModel: ObservableObject {
             // A compaction marker shows above the message after it; one whose
             // summary is still being written shows while its run goes on.
             if let marker = state.markers[id], marker.compaction != nil || running { view.compaction = ChatViewMapping.compaction(marker) }
+            // One that ends the chat shows under its last message.
+            if id == lastId, let marker = state.markers[chatEndMarkerKey], marker.compaction != nil || running {
+                view.compactionAfter = ChatViewMapping.compaction(marker)
+            }
             view.isOutOfContext = summarized.contains(id)
             // The reply a research turn streams is a research before its run
             // commits it as one.

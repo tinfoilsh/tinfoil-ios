@@ -102,6 +102,8 @@ struct ContextUsageIndicator: View {
 struct ContextCompactionPopover: View {
     let usage: ContextUsage
     let compacts: Bool
+    /// Compacting summarizes the latest exchange too.
+    let compactsLatest: Bool
     let canCompact: Bool
     let compacting: Bool
     let onCompact: () -> Void
@@ -117,7 +119,7 @@ struct ContextCompactionPopover: View {
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(ContextUsageIndicator.description(of: usage, compacts: compacts))
-            Text(Constants.Context.compactExplanation)
+            Text(compactsLatest ? Constants.Context.compactLatestExplanation : Constants.Context.compactExplanation)
                 .font(.footnote)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

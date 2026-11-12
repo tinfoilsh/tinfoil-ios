@@ -142,6 +142,10 @@ enum HarnessHeader {
 /// Every widget the harness declares is named with this prefix.
 let harnessWidgetPrefix = "render_"
 
+/// What a compaction marker at the end of a chat, after its last message,
+/// sits before: COMPACTION_START names no message for it.
+let chatEndMarkerKey = ""
+
 /// The error codes this client acts on by name. Every other code is handled
 /// by its action.
 enum HarnessErrorCode {
@@ -240,7 +244,8 @@ extension Array where Element == HarnessMessage {
 
     /// The compaction markers among the messages, by the id of the message
     /// each one sits before. One after the last of them sits before
-    /// `following`, the message they come before, when it is named.
+    /// `following`, the message they come before, when it is named, and
+    /// otherwise at the end of the chat, under chatEndMarkerKey.
     func markers(before following: String? = nil) -> [String: HarnessMessage] {
         var markers: [String: HarnessMessage] = [:]
         var open: HarnessMessage?
@@ -255,7 +260,7 @@ extension Array where Element == HarnessMessage {
                 open = nil
             }
         }
-        if let marker = open, let following { markers[following] = marker }
+        if let marker = open { markers[following ?? chatEndMarkerKey] = marker }
         return markers
     }
 }

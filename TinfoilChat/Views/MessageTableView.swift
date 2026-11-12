@@ -243,6 +243,7 @@ struct MessageTableView: UIViewRepresentable {
             for (index, message) in messages.dropLast().enumerated() {
                 guard let wrapper = context.coordinator.messageWrappers[message.id],
                       wrapper.message.compaction != message.compaction
+                        || wrapper.message.compactionAfter != message.compactionAfter
                         || wrapper.message.isOutOfContext != message.isOutOfContext
                         || wrapper.message.isResearch != message.isResearch else { continue }
                 wrapper.update(
@@ -644,6 +645,9 @@ struct MessageTableView: UIViewRepresentable {
                 height += Constants.HeightEstimation.thoughtsHeight
             }
             if message.compaction != nil {
+                height += Constants.HeightEstimation.compactionHeight
+            }
+            if message.compactionAfter != nil {
                 height += Constants.HeightEstimation.compactionHeight
             }
             height += CGFloat(message.attachments.count) * Constants.HeightEstimation.attachmentHeight
@@ -1105,6 +1109,7 @@ class ObservableMessageWrapper: ObservableObject {
                             self.message.timeline != message.timeline ||
                             self.message.annotations != message.annotations ||
                             self.message.compaction != message.compaction ||
+                            self.message.compactionAfter != message.compactionAfter ||
                             self.message.isResearch != message.isResearch ||
                             self.isDarkMode != isDarkMode
 
@@ -1187,31 +1192,40 @@ struct ObservableMessageCell: View {
                 }
 
                 VStack(alignment: .leading, spacing: 0) {
-                    if let compaction = wrapper.message.compaction {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let compaction = wrapper.message.compaction {
+                            CompactionBox(marker: compaction, isDarkMode: wrapper.isDarkMode, expansion: wrapper.stepExpansion)
+                                .padding(.horizontal, Constants.UI.Compaction.horizontalPadding)
+                        }
+
+                        MessageView(
+                            message: wrapper.message,
+                            isDarkMode: wrapper.isDarkMode,
+                            isLastMessage: wrapper.isLastMessage,
+                            isLoading: wrapper.isLoading,
+                            messageIndex: wrapper.messageIndex,
+                            stepExpansion: wrapper.stepExpansion,
+                            context: MessageRowContext(
+                                viewModel,
+                                message: wrapper.message,
+                                messageIndex: wrapper.messageIndex,
+                                isRenderingStream: wrapper.isLoading && wrapper.isLastMessage
+                            ),
+                            viewModel: viewModel
+                        )
+                        .equatable()
+                    }
+                    .opacity(wrapper.message.isOutOfContext ? Constants.UI.Compaction.summarizedOpacity : 1.0)
+
+                    // A marker that ends the chat is not part of the
+                    // message it summarized, so it does not fade with it.
+                    if let compaction = wrapper.message.compactionAfter {
                         CompactionBox(marker: compaction, isDarkMode: wrapper.isDarkMode, expansion: wrapper.stepExpansion)
                             .padding(.horizontal, Constants.UI.Compaction.horizontalPadding)
                     }
-
-                    MessageView(
-                        message: wrapper.message,
-                        isDarkMode: wrapper.isDarkMode,
-                        isLastMessage: wrapper.isLastMessage,
-                        isLoading: wrapper.isLoading,
-                        messageIndex: wrapper.messageIndex,
-                        stepExpansion: wrapper.stepExpansion,
-                        context: MessageRowContext(
-                            viewModel,
-                            message: wrapper.message,
-                            messageIndex: wrapper.messageIndex,
-                            isRenderingStream: wrapper.isLoading && wrapper.isLastMessage
-                        ),
-                        viewModel: viewModel
-                    )
-                    .equatable()
                 }
                 .environmentObject(viewModel)
                 .markdownStyleHost(isDarkMode: wrapper.isDarkMode)
-                .opacity(wrapper.message.isOutOfContext ? Constants.UI.Compaction.summarizedOpacity : 1.0)
                 .padding(.vertical, 8)
                 .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 8)
                 .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
