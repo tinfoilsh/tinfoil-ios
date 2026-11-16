@@ -3,25 +3,13 @@
 //  TinfoilChat
 //
 //  On iPhone Duo, toolbar items can move into a vertical bar along the side
-//  of the screen. These let the app's custom items join it on the releases
-//  that have it.
+//  of the screen. These adapt the app's bars to it on the releases that
+//  have it.
 //
 
 import SwiftUI
 
 extension ToolbarContent {
-    /// Lets an item whose custom view is no bigger than an icon move into a
-    /// vertical bar, as an item with a symbol does. A custom view otherwise
-    /// stays in a horizontal bar.
-    @ToolbarContentBuilder
-    func allowsVerticalBar() -> some ToolbarContent {
-        if #available(iOS 27.1, *) {
-            axisBehavior(.verticalPreferred)
-        } else {
-            self
-        }
-    }
-
     /// Keeps an item in its bar after the items around it have moved to
     /// the overflow menu for lack of room.
     @ToolbarContentBuilder
@@ -46,30 +34,17 @@ extension View {
             self
         }
     }
-
-    /// Keeps `usesVerticalBar` set to whether the bars of the navigation
-    /// container this view is in go into a vertical bar, as on a closed
-    /// iPhone Duo.
-    func readsVerticalBar(into usesVerticalBar: Binding<Bool>) -> some View {
-        background {
-            VerticalBarReader { isInVerticalBar in
-                Color.clear
-                    .onChange(of: isInVerticalBar, initial: true) { _, isVertical in
-                        usesVerticalBar.wrappedValue = isVertical
-                    }
-            }
-        }
-    }
 }
 
-/// Builds a toolbar item's view knowing whether it is in a vertical bar,
-/// which has room for an icon only.
-struct VerticalBarReader<Content: View>: View {
-    @ViewBuilder let content: (_ isInVerticalBar: Bool) -> Content
+/// Builds a toolbar's items knowing whether its buttons sit in a vertical bar
+/// along the side, as on iPhone Duo. It reads this as the toolbar is built,
+/// so the items for the bar's new axis come with the change that moves it.
+struct VerticalBarToolbar<Content: ToolbarContent>: ToolbarContent {
+    @ToolbarContentBuilder let content: (_ usesVerticalBar: Bool) -> Content
 
-    var body: some View {
+    var body: some ToolbarContent {
         if #available(iOS 27.1, *) {
-            VerticalBarEdgeReader(content: content)
+            VerticalBarEdgeToolbar(content: content)
         } else {
             content(false)
         }
@@ -77,11 +52,11 @@ struct VerticalBarReader<Content: View>: View {
 }
 
 @available(iOS 27.1, *)
-private struct VerticalBarEdgeReader<Content: View>: View {
+private struct VerticalBarEdgeToolbar<Content: ToolbarContent>: ToolbarContent {
     @Environment(\.toolbarVerticalEdge) private var verticalEdge
     let content: (Bool) -> Content
 
-    var body: some View {
+    var body: some ToolbarContent {
         content(verticalEdge != nil)
     }
 }
