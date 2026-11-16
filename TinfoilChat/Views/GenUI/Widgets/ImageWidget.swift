@@ -122,32 +122,10 @@ private struct ImageGridView: View {
         static let columnSpacing: CGFloat = 8
         static let rowSpacing: CGFloat = 8
         static let captionSpacing: CGFloat = 4
-        static let fallbackHorizontalInset: CGFloat = 32
-    }
-
-    @State private var availableWidth: CGFloat = max(
-        0,
-        UIScreen.main.bounds.width - Layout.fallbackHorizontalInset
-    )
-
-    private var measuredWidth: some View {
-        Color.clear
-            .frame(height: 0)
-            .frame(maxWidth: .infinity)
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(key: ImageGridWidthPreferenceKey.self, value: proxy.size.width)
-                }
-            )
     }
 
     private var rowCount: Int {
         (images.count + Layout.columnCount - 1) / Layout.columnCount
-    }
-
-    private var cellWidth: CGFloat {
-        let totalSpacing = CGFloat(Layout.columnCount - 1) * Layout.columnSpacing
-        return max(0, floor((availableWidth - totalSpacing) / CGFloat(Layout.columnCount)))
     }
 
     var body: some View {
@@ -156,8 +134,8 @@ private struct ImageGridView: View {
                 GenUITitle(text: title, isDarkMode: isDarkMode)
             }
 
-            measuredWidth
-
+            // Every cell, and the empty one ending an odd row, takes all the
+            // width it is offered, so the columns share the row equally.
             VStack(alignment: .leading, spacing: Layout.rowSpacing) {
                 ForEach(0..<rowCount, id: \.self) { rowIndex in
                     HStack(alignment: .top, spacing: Layout.columnSpacing) {
@@ -165,24 +143,16 @@ private struct ImageGridView: View {
                             let imageIndex = rowIndex * Layout.columnCount + columnIndex
                             if imageIndex < images.count {
                                 gridCell(index: imageIndex, image: images[imageIndex])
-                                    .frame(width: cellWidth, alignment: .leading)
                             } else {
-                                Spacer(minLength: 0)
-                                    .frame(width: cellWidth)
+                                Color.clear
+                                    .frame(maxWidth: .infinity, maxHeight: 0)
                             }
                         }
                     }
-                    .frame(width: availableWidth, alignment: .leading)
                 }
             }
-            .frame(width: availableWidth, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onPreferenceChange(ImageGridWidthPreferenceKey.self) { width in
-            if width > 0 {
-                availableWidth = width
-            }
-        }
         .fullScreenCover(isPresented: $isPreviewPresented) {
             ImagePreviewView(
                 images: images,
@@ -194,9 +164,12 @@ private struct ImageGridView: View {
 
     private func gridCell(index: Int, image: ImageWidget.Item) -> some View {
         VStack(alignment: .leading, spacing: Layout.captionSpacing) {
-            GenUIRemoteImage(url: image.url, isDarkMode: isDarkMode, contentMode: .fill)
-                .frame(width: cellWidth, height: cellWidth)
-                .clipped()
+            // A square as wide as the column, which the image fills.
+            Color.clear
+                .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    GenUIRemoteImage(url: image.url, isDarkMode: isDarkMode, contentMode: .fill)
+                }
                 .clipShape(RoundedRectangle(cornerRadius: GenUIStyle.smallCornerRadius))
                 .overlay(
                     RoundedRectangle(cornerRadius: GenUIStyle.smallCornerRadius)
@@ -216,11 +189,10 @@ private struct ImageGridView: View {
                     .foregroundColor(GenUIStyle.mutedText(isDarkMode))
                     .lineLimit(2)
                     .truncationMode(.tail)
-                    .frame(width: cellWidth, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .frame(width: cellWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .clipped()
     }
 
@@ -238,12 +210,4 @@ private func accessibilityText(for image: ImageWidget.Item) -> String {
     if let alt = image.alt, !alt.isEmpty { return alt }
     if let caption = image.caption, !caption.isEmpty { return caption }
     return "Image"
-}
-
-private struct ImageGridWidthPreferenceKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
 }
