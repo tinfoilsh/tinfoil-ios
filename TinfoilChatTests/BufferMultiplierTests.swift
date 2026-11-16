@@ -5,7 +5,7 @@ import Foundation
 @Suite("Streaming Buffer Multiplier Tests")
 struct BufferMultiplierTests {
 
-    private let screenHeight: CGFloat = 852
+    private let windowHeight: CGFloat = 852
 
     private func makeWrapper() -> ObservableMessageWrapper {
         ObservableMessageWrapper(
@@ -19,10 +19,10 @@ struct BufferMultiplierTests {
     @Test("extendBufferIfNeeded does not extend when content is below threshold")
     func noExtensionBelowThreshold() {
         let wrapper = makeWrapper()
-        let bufferHeight = screenHeight * wrapper.bufferMultiplier
+        let bufferHeight = windowHeight * wrapper.bufferMultiplier
         wrapper.actualContentHeight = bufferHeight * 0.5
 
-        let extended = wrapper.extendBufferIfNeeded(screenHeight: screenHeight)
+        let extended = wrapper.extendBufferIfNeeded(windowHeight: windowHeight)
 
         #expect(extended == false)
         #expect(wrapper.bufferMultiplier == Constants.StreamingBuffer.initialMultiplier)
@@ -31,10 +31,10 @@ struct BufferMultiplierTests {
     @Test("extendBufferIfNeeded extends when content exceeds threshold")
     func extendsAboveThreshold() {
         let wrapper = makeWrapper()
-        let bufferHeight = screenHeight * wrapper.bufferMultiplier
+        let bufferHeight = windowHeight * wrapper.bufferMultiplier
         wrapper.actualContentHeight = bufferHeight * 0.95
 
-        let extended = wrapper.extendBufferIfNeeded(screenHeight: screenHeight)
+        let extended = wrapper.extendBufferIfNeeded(windowHeight: windowHeight)
 
         #expect(extended == true)
         #expect(wrapper.bufferMultiplier == Constants.StreamingBuffer.initialMultiplier + Constants.StreamingBuffer.multiplierIncrement)
@@ -45,8 +45,8 @@ struct BufferMultiplierTests {
         let wrapper = makeWrapper()
 
         for _ in 0..<500 {
-            wrapper.actualContentHeight = screenHeight * wrapper.bufferMultiplier * 0.95
-            wrapper.extendBufferIfNeeded(screenHeight: screenHeight)
+            wrapper.actualContentHeight = windowHeight * wrapper.bufferMultiplier * 0.95
+            wrapper.extendBufferIfNeeded(windowHeight: windowHeight)
         }
 
         #expect(wrapper.bufferMultiplier == Constants.StreamingBuffer.maxMultiplier)
@@ -56,12 +56,23 @@ struct BufferMultiplierTests {
     func noExtensionAtMax() {
         let wrapper = makeWrapper()
         wrapper.bufferMultiplier = Constants.StreamingBuffer.maxMultiplier
-        wrapper.actualContentHeight = screenHeight * wrapper.bufferMultiplier * 0.95
+        wrapper.actualContentHeight = windowHeight * wrapper.bufferMultiplier * 0.95
 
-        let extended = wrapper.extendBufferIfNeeded(screenHeight: screenHeight)
+        let extended = wrapper.extendBufferIfNeeded(windowHeight: windowHeight)
 
         #expect(extended == false)
         #expect(wrapper.bufferMultiplier == Constants.StreamingBuffer.maxMultiplier)
+    }
+
+    @Test("extendBufferIfNeeded does not extend outside a window")
+    func noExtensionWithoutWindow() {
+        let wrapper = makeWrapper()
+        wrapper.actualContentHeight = windowHeight * wrapper.bufferMultiplier
+
+        let extended = wrapper.extendBufferIfNeeded(windowHeight: 0)
+
+        #expect(extended == false)
+        #expect(wrapper.bufferMultiplier == Constants.StreamingBuffer.initialMultiplier)
     }
 
     @Test("resetBuffer restores initial state")

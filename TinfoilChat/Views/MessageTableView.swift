@@ -30,6 +30,9 @@ struct MessageTableView: UIViewRepresentable {
         tableView.onMagicTap = { [weak coordinator = context.coordinator] in
             coordinator?.parent.viewModel.speechPlayer.stopIfActive() ?? false
         }
+        tableView.onWidthChange = { [weak coordinator = context.coordinator] in
+            coordinator?.discardRowHeights()
+        }
         tableView.backgroundColor = .clear
         tableView.separatorStyle = .none
         tableView.delegate = context.coordinator
@@ -137,9 +140,7 @@ struct MessageTableView: UIViewRepresentable {
                 context.coordinator.cancelReveal()
                 context.coordinator.messageWrappers.removeAll()
                 context.coordinator.shownMessageIds.removeAll()
-                context.coordinator.heightCache.removeAll()
-                context.coordinator.messageHeightCache.removeAll()
-                context.coordinator.contentEstimateCache.removeAll()
+                context.coordinator.discardRowHeights()
 
                 // Drop any streaming inset left behind by the previous chat,
                 // and reset a blank chat to the top since no scroll trigger
@@ -164,9 +165,7 @@ struct MessageTableView: UIViewRepresentable {
                 // All message IDs are different - clear stale wrappers
                 context.coordinator.messageWrappers.removeAll()
                 context.coordinator.shownMessageIds.removeAll()
-                context.coordinator.heightCache.removeAll()
-                context.coordinator.messageHeightCache.removeAll()
-                context.coordinator.contentEstimateCache.removeAll()
+                context.coordinator.discardRowHeights()
             } else {
                 // Drop any wrappers and cached heights that belong to messages
                 // that no longer exist. Without this, long sessions accumulate
@@ -264,8 +263,9 @@ struct MessageTableView: UIViewRepresentable {
                 // the update to DispatchQueue.main.async, many calls will read the
                 // stale multiplier and each queue a +10 increment, causing it to
                 // explode to thousands.
-                let screenHeight = UIScreen.main.bounds.height
-                let needsBufferExtension = wrapper.extendBufferIfNeeded(screenHeight: screenHeight)
+                let needsBufferExtension = wrapper.extendBufferIfNeeded(
+                    windowHeight: context.coordinator.windowHeight
+                )
 
                 let coordinator = context.coordinator
                 DispatchQueue.main.async {
@@ -487,6 +487,21 @@ struct MessageTableView: UIViewRepresentable {
             self.parent = parent
         }
 
+        /// The height of the window the chat shows in, which the streaming
+        /// buffer is measured in. It changes as the device folds or the app
+        /// is resized, unlike the screen's.
+        var windowHeight: CGFloat {
+            tableView?.window?.bounds.height ?? 0
+        }
+
+        /// Row heights measured or estimated for other rows, or at another
+        /// width, would make the table jump as it scrolls.
+        func discardRowHeights() {
+            heightCache.removeAll()
+            messageHeightCache.removeAll()
+            contentEstimateCache.removeAll()
+        }
+
         func getOrCreateWrapper(for message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, messageIndex: Int) -> ObservableMessageWrapper {
             if let existing = messageWrappers[message.id] {
                 existing.update(message: message, isDarkMode: isDarkMode, isLastMessage: isLastMessage, isLoading: isLoading, messageIndex: messageIndex)
@@ -562,8 +577,7 @@ struct MessageTableView: UIViewRepresentable {
                             onRequestSignIn: parent.onRequestSignIn
                         )
                         .padding(.vertical, 16)
-                        .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 0)
-                        .frame(maxWidth: 900)
+                        .frame(maxWidth: Constants.UI.messageColumnMaxWidth)
                         .frame(maxWidth: .infinity)
                     }
                 }
@@ -631,7 +645,11 @@ struct MessageTableView: UIViewRepresentable {
                 return cached
             }
 
-            let contentWidth = max(120, width - Constants.HeightEstimation.horizontalChrome)
+            let rowWidth = min(
+                width,
+                Constants.UI.messageColumnMaxWidth + 2 * Constants.UI.messageRowHorizontalPadding
+            )
+            let contentWidth = max(120, rowWidth - Constants.HeightEstimation.horizontalChrome)
             let charsPerLine = max(1, contentWidth / Constants.HeightEstimation.averageCharacterWidth)
 
             let wrappedLines = (CGFloat(message.content.count) / charsPerLine).rounded(.up)
@@ -829,8 +847,7 @@ struct MessageTableView: UIViewRepresentable {
             if parent.usesStreamingLayout, let lastMessage = parent.messages.last,
                let wrapper = messageWrappers[lastMessage.id], wrapper.actualContentHeight > 0 {
 
-                let screenHeight = UIScreen.main.bounds.height
-                let bufferHeight = screenHeight * wrapper.bufferMultiplier
+                let bufferHeight = windowHeight * wrapper.bufferMultiplier
                 let unusedBuffer = bufferHeight - wrapper.actualContentHeight
                 let streamingInset = -max(0, unusedBuffer)
 
@@ -1066,9 +1083,21 @@ struct MessageTableView: UIViewRepresentable {
 /// false when nothing is playing so Magic Tap still pauses other apps' media.
 final class MessageListTableView: UITableView {
     var onMagicTap: (@MainActor () -> Bool)?
+    /// Called before the rows lay out at a new width, as when the device
+    /// folds or the app is resized, which wraps every message again.
+    var onWidthChange: (@MainActor () -> Void)?
+    private var laidOutWidth: CGFloat?
 
     override func accessibilityPerformMagicTap() -> Bool {
         onMagicTap?() ?? false
+    }
+
+    override func layoutSubviews() {
+        if let laidOutWidth, laidOutWidth != bounds.width {
+            onWidthChange?()
+        }
+        laidOutWidth = bounds.width
+        super.layoutSubviews()
     }
 }
 
@@ -1143,8 +1172,10 @@ class ObservableMessageWrapper: ObservableObject {
     /// Checks whether the streaming buffer needs to grow and extends it if so.
     /// Returns true if the buffer was extended.
     @discardableResult
-    func extendBufferIfNeeded(screenHeight: CGFloat) -> Bool {
-        let currentBufferHeight = screenHeight * bufferMultiplier
+    func extendBufferIfNeeded(windowHeight: CGFloat) -> Bool {
+        // A table outside a window has no height to measure the buffer in.
+        guard windowHeight > 0 else { return false }
+        let currentBufferHeight = windowHeight * bufferMultiplier
         let threshold = currentBufferHeight * Constants.StreamingBuffer.extensionThresholdRatio
         let needsExtension = actualContentHeight > threshold
             && bufferMultiplier < Constants.StreamingBuffer.maxMultiplier
@@ -1168,9 +1199,9 @@ struct ObservableMessageCell: View {
     @State private var hasAppeared = false
 
     private var bufferHeight: CGFloat {
-        let screenHeight = UIScreen.main.bounds.height
+        let windowHeight = coordinator?.windowHeight ?? 0
         return min(
-            screenHeight * wrapper.bufferMultiplier,
+            windowHeight * wrapper.bufferMultiplier,
             Constants.StreamingBuffer.maxCellHeight
         )
     }
@@ -1228,11 +1259,9 @@ struct ObservableMessageCell: View {
                 .environmentObject(viewModel)
                 .markdownStyleHost(isDarkMode: wrapper.isDarkMode)
                 .padding(.vertical, 8)
-                .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 8)
-                .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
-                    view.frame(maxWidth: 900)
-                        .frame(maxWidth: .infinity)
-                }
+                .frame(maxWidth: Constants.UI.messageColumnMaxWidth, alignment: .leading)
+                .padding(.horizontal, Constants.UI.messageRowHorizontalPadding)
+                .frame(maxWidth: .infinity)
                 .if(showsStreamingBuffer) { view in
                     view.background(
                         GeometryReader { geometry in

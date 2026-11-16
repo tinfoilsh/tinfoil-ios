@@ -32,6 +32,8 @@ class QRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsD
     var previewLayer: AVCaptureVideoPreviewLayer!
     var onScanned: ((String) -> Void)?
     var onCancel: (() -> Void)?
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+    private var rotationObservation: NSKeyValueObservation?
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -71,6 +73,7 @@ class QRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsD
         previewLayer.frame = view.layer.bounds
         previewLayer.videoGravity = .resizeAspectFill
         view.layer.addSublayer(previewLayer)
+        keepPreviewLevel(with: videoCaptureDevice)
         
         // Add scan frame overlay first so controls can sit above it
         addScannerOverlay()
@@ -90,7 +93,7 @@ class QRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsD
 
         NSLayoutConstraint.activate([
             cancelButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
-            cancelButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            cancelButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
             cancelButton.widthAnchor.constraint(equalToConstant: 80),
             cancelButton.heightAnchor.constraint(equalToConstant: 40)
         ])
@@ -100,6 +103,36 @@ class QRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsD
         }
     }
     
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // The scanner resizes with its window, as when iPhone Duo opens or
+        // closes, and the preview has to follow.
+        previewLayer?.frame = view.layer.bounds
+    }
+
+    /// Turns the preview with the screen, including as iPhone Duo moves the
+    /// app between its displays, so the camera's picture stays level.
+    private func keepPreviewLevel(with device: AVCaptureDevice) {
+        let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
+        applyPreviewRotation(coordinator.videoRotationAngleForHorizonLevelPreview)
+        rotationObservation = coordinator.observe(
+            \.videoRotationAngleForHorizonLevelPreview,
+            options: .new
+        ) { [weak self] _, change in
+            guard let angle = change.newValue else { return }
+            DispatchQueue.main.async {
+                self?.applyPreviewRotation(angle)
+            }
+        }
+        rotationCoordinator = coordinator
+    }
+
+    private func applyPreviewRotation(_ angle: CGFloat) {
+        guard let connection = previewLayer?.connection,
+              connection.isVideoRotationAngleSupported(angle) else { return }
+        connection.videoRotationAngle = angle
+    }
+
     func addScannerOverlay() {
         let overlayView = UIView()
         overlayView.translatesAutoresizingMaskIntoConstraints = false
@@ -203,9 +236,5 @@ class QRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsD
     
     override var prefersStatusBarHidden: Bool {
         return true
-    }
-    
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        return .portrait
     }
 }

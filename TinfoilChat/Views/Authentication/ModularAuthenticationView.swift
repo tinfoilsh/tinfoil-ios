@@ -16,6 +16,7 @@ struct ModularAuthenticationView: View {
   @Environment(\.dismiss) private var dismiss
   @EnvironmentObject private var authManager: AuthManager
   @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.verticalSizeClass) private var verticalSizeClass
   
   @State private var errorMessage: String? = nil
   @State private var isLoading = false
@@ -28,7 +29,7 @@ struct ModularAuthenticationView: View {
   @StateObject private var legalConsent = SignUpLegalConsent()
   
   var body: some View {
-    NavigationView {
+    NavigationStack {
       GeometryReader { _ in
         ZStack {
           // Background
@@ -42,48 +43,20 @@ struct ModularAuthenticationView: View {
                 VStack {
                   authenticationContent
                     .padding(.horizontal)
+
+                  // A short window, as an iPhone's in landscape, has no room
+                  // to pin these below the form, so they scroll with it.
+                  if isShortWindow && shouldShowThirdPartyAuth && !isKeyboardVisible {
+                    thirdPartyAuthOptions
+                  }
                 }
               }
 
               // Third-party authentication options at the bottom
-              if shouldShowThirdPartyAuth && !isKeyboardVisible {
+              if !isShortWindow && shouldShowThirdPartyAuth && !isKeyboardVisible {
                 Spacer(minLength: 0)
 
-                // Divider with text
-                HStack {
-                  Rectangle()
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(height: 1)
-
-                  Text("or")
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 8)
-
-                  Rectangle()
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(height: 1)
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 20)
-                .transition(.opacity)
-
-                authButton(
-                  icon: "google-icon",
-                  text: "Continue with Google",
-                  action: { Task { await signInWithOAuth(provider: .google) } }
-                )
-                .padding(.horizontal)
-                .padding(.bottom, 8)
-                .transition(.opacity)
-
-                authButton(
-                  systemIcon: "apple.logo",
-                  text: "Continue with Apple",
-                  action: { Task { await signInWithApple() } }
-                )
-                .padding(.horizontal)
-                .padding(.bottom)
-                .transition(.opacity)
+                thirdPartyAuthOptions
               }
             }
             .frame(maxHeight: .infinity, alignment: .top)
@@ -93,7 +66,9 @@ struct ModularAuthenticationView: View {
             dismissKeyboard()
           }
         }
-        .ignoresSafeArea(.keyboard)
+        // In a short window the keyboard would cover the field being typed
+        // in unless the form makes room for it.
+        .ignoresSafeArea(isShortWindow ? [] : .keyboard)
       }
       .background(Color.settingsBackground(for: colorScheme))
       .navigationTitle("")
@@ -266,6 +241,49 @@ struct ModularAuthenticationView: View {
   
   private var shouldShowThirdPartyAuth: Bool {
     clerk.user == nil && !isInVerificationMode && legalConsent.pendingSignUp == nil
+  }
+
+  private var isShortWindow: Bool {
+    verticalSizeClass == .compact
+  }
+
+  @ViewBuilder
+  private var thirdPartyAuthOptions: some View {
+    // Divider with text
+    HStack {
+      Rectangle()
+        .fill(Color.gray.opacity(0.3))
+        .frame(height: 1)
+
+      Text("or")
+        .foregroundColor(.secondary)
+        .padding(.horizontal, 8)
+
+      Rectangle()
+        .fill(Color.gray.opacity(0.3))
+        .frame(height: 1)
+    }
+    .padding(.horizontal)
+    .padding(.vertical, 20)
+    .transition(.opacity)
+
+    authButton(
+      icon: "google-icon",
+      text: "Continue with Google",
+      action: { Task { await signInWithOAuth(provider: .google) } }
+    )
+    .padding(.horizontal)
+    .padding(.bottom, 8)
+    .transition(.opacity)
+
+    authButton(
+      systemIcon: "apple.logo",
+      text: "Continue with Apple",
+      action: { Task { await signInWithApple() } }
+    )
+    .padding(.horizontal)
+    .padding(.bottom)
+    .transition(.opacity)
   }
 
   // MARK: - Authentication Components

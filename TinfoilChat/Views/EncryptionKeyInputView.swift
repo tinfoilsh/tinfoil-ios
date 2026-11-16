@@ -24,7 +24,7 @@ struct EncryptionKeyInputView: View {
     @Environment(\.dismiss) var dismiss
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack(spacing: 0) {
                 // Header explanation
                 VStack(spacing: 20) {
@@ -191,6 +191,7 @@ struct EncryptionKeyInputView: View {
                         .padding(.bottom, 20)
                 }
             }
+            .scrollsWhenShort()
             .background(Color(UIColor.systemBackground))
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
