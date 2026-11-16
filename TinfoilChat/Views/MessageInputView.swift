@@ -1776,6 +1776,7 @@ struct AddToSheetView: View {
                     .accessibilityLabel("Close")
                 }
             }
+            .keepsBarHorizontal()
         }
     }
 

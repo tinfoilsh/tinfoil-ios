@@ -269,6 +269,7 @@ struct ChatContainer: View {
                     .accessibleHitTarget()
                 }
             }
+            .allowsVerticalBar()
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 1) {
                 ZStack {
@@ -339,12 +340,16 @@ struct ChatContainer: View {
             }
             if viewModel.activeProject == nil && showsChatToolbarActions {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    VerificationStatusIndicator(
-                        viewModel: viewModel,
-                        isBadgeExpanded: $isVerificationBadgeExpanded,
-                        isCollapsed: $isVerificationBadgeCollapsed
-                    )
+                    VerticalBarReader { isInVerticalBar in
+                        VerificationStatusIndicator(
+                            viewModel: viewModel,
+                            isBadgeExpanded: $isVerificationBadgeExpanded,
+                            isCollapsed: $isVerificationBadgeCollapsed,
+                            showsStatusText: !isInVerticalBar
+                        )
+                    }
                 }
+                .allowsVerticalBar()
             }
             // Temporary (incognito) chat toggle, shown on a new chat and on a
             // temporary one: a temporary chat with messages is saved by it.
@@ -366,6 +371,7 @@ struct ChatContainer: View {
                     .disabled(!viewModel.canUseCurrentChatActions || viewModel.isSavingTemporaryChat)
                     .accessibleHitTarget()
                 }
+                .allowsVerticalBar()
             }
             // Only show new chat button when chat has messages (not a new/blank chat)
             if authManager.isAuthenticated && viewModel.activeProject == nil && showsChatToolbarActions && !(viewModel.currentChat?.isBlankChat ?? true) {
@@ -379,6 +385,9 @@ struct ChatContainer: View {
                     .disabled(!viewModel.canUseCurrentChatActions)
                     .accessibleHitTarget()
                 }
+                .allowsVerticalBar()
+                // Starting a chat is the action people reach for most.
+                .staysVisibleLonger()
             }
             if !authManager.isAuthenticated {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -822,6 +831,7 @@ struct PrivacyExplainerSheet: View {
                     .accessibilityLabel("Close")
                 }
             }
+            .keepsBarHorizontal()
         }
         .presentationDetents([.medium])
     }
@@ -922,6 +932,9 @@ struct VerificationStatusIndicator: View {
     /// Owned by the parent so the badge stays collapsed when the toolbar
     /// removes and re-adds the indicator.
     @Binding var isCollapsed: Bool
+    /// In a vertical bar the badge has room for its icon only, whose color
+    /// still tells the status.
+    let showsStatusText: Bool
     @State private var collapseTask: Task<Void, Never>?
 
     private var iconName: String {
@@ -972,7 +985,7 @@ struct VerificationStatusIndicator: View {
                     .foregroundStyle(iconColor)
                     .font(.system(size: 14))
 
-                if !statusText.isEmpty {
+                if showsStatusText && !statusText.isEmpty {
                     // Use the longest possible text as a hidden sizing
                     // reference so the badge width stays stable when the
                     // label changes from "Verifying..." to "Privacy verified".
@@ -1000,7 +1013,7 @@ struct VerificationStatusIndicator: View {
         .onAppear {
             if viewModel.isVerified && viewModel.verificationError == nil {
                 guard !isCollapsed else { return }
-                isBadgeExpanded = true
+                isBadgeExpanded = showsStatusText
                 collapseTask?.cancel()
                 collapseTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: UInt64(Constants.Verification.collapseDelaySeconds * 1_000_000_000))
@@ -1009,7 +1022,7 @@ struct VerificationStatusIndicator: View {
                     isBadgeExpanded = false
                 }
             } else if viewModel.isVerifying {
-                isBadgeExpanded = true
+                isBadgeExpanded = showsStatusText
                 isCollapsed = false
             } else {
                 isBadgeExpanded = false
@@ -1017,7 +1030,7 @@ struct VerificationStatusIndicator: View {
         }
         .onChange(of: viewModel.isVerified) { _, isVerified in
             if isVerified && viewModel.verificationError == nil {
-                isBadgeExpanded = true
+                isBadgeExpanded = showsStatusText
                 collapseTask?.cancel()
                 collapseTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: UInt64(Constants.Verification.collapseDelaySeconds * 1_000_000_000))
@@ -1029,11 +1042,18 @@ struct VerificationStatusIndicator: View {
         }
         .onChange(of: viewModel.isVerifying) { _, isVerifying in
             if isVerifying {
-                isBadgeExpanded = true
+                isBadgeExpanded = showsStatusText
                 collapseTask?.cancel()
                 collapseTask = nil
                 isCollapsed = false
             } else if !viewModel.isVerified {
+                isBadgeExpanded = false
+            }
+        }
+        // The badge leaves a horizontal bar for a vertical one, as when
+        // iPhone Duo closes, without its text.
+        .onChange(of: showsStatusText) { _, showsText in
+            if !showsText {
                 isBadgeExpanded = false
             }
         }
