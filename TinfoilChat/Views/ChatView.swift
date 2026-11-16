@@ -34,6 +34,9 @@ struct ChatContainer: View {
     @State private var isVerificationBadgeExpanded = false
     @State private var isVerificationBadgeCollapsed = false
     @State private var sidebarNavigationRequest: ChatNavigationRequest?
+    /// The fold while it runs down the middle of the chat area, as when
+    /// iPhone Duo is partly folded like a book.
+    @State private var verticalFold: CGRect?
 
     private var isAnySheetPresented: Bool {
         viewModel.showVerifierSheet || viewModel.showAddSheet || viewModel.showModelSelectorSheet || viewModel.showRateLimitPaywall || viewModel.showDocumentPicker || viewModel.showPhotoPicker || viewModel.showCamera || viewModel.showDocumentScanner || viewModel.showMessageSheet || viewModel.showImageViewer || viewModel.showSidebarSettings || showAuthView || showPremiumModal
@@ -209,7 +212,7 @@ struct ChatContainer: View {
                 }
 
                 activeSidebar
-                    .frame(width: sidebarWidth)
+                    .frame(width: shownSidebarWidth)
                     .overlay(alignment: .trailing) {
                         Rectangle()
                             .fill(Color.primary.opacity(0.15))
@@ -220,6 +223,13 @@ struct ChatContainer: View {
                     // from VoiceOver, which would otherwise read its sections
                     // in the middle of the chat.
                     .accessibilityHidden(!isSidebarOpen)
+            }
+        }
+        .onGeometryChange(for: CGRect?.self) { proxy in
+            Self.verticalFold(in: proxy)
+        } action: { fold in
+            withAnimation(.easeInOut(duration: 0.3)) {
+                verticalFold = fold
             }
         }
         .animation(sidebarOverlaysChat ? .easeInOut : .easeInOut(duration: 0.3), value: isSidebarOpen)
@@ -449,9 +459,34 @@ struct ChatContainer: View {
         .ignoresSafeArea(edges: .top)
     }
     
-    /// Where the chat starts: past the sidebar while it sits open beside it.
+    /// The fold the sidebar and the chat sit either side of, while the
+    /// sidebar sits beside the chat.
+    private var chatFold: CGRect? {
+        sidebarOverlaysChat ? nil : verticalFold
+    }
+
+    /// Beside a fold, the sidebar fills the page before it.
+    private var shownSidebarWidth: CGFloat {
+        chatFold?.minX ?? sidebarWidth
+    }
+
+    /// Where the chat starts: past the sidebar while it sits open beside it,
+    /// and past the fold whether or not the sidebar is open, so the chat is
+    /// never split by it and stays put as the sidebar opens and closes.
     private var chatLeadingEdge: CGFloat {
-        isSidebarOpen && !sidebarOverlaysChat ? sidebarWidth : 0
+        if let chatFold {
+            return chatFold.maxX
+        }
+        return isSidebarOpen && !sidebarOverlaysChat ? sidebarWidth : 0
+    }
+
+    /// A fold running down the middle of the area `proxy` measures, which
+    /// it divides into two pages.
+    nonisolated private static func verticalFold(in proxy: GeometryProxy) -> CGRect? {
+        guard #available(iOS 27.1, *) else { return nil }
+        return proxy.reservedRegions(kind: .division)
+            .map(\.frame)
+            .first { $0.height > $0.width && $0.minX > 0 && $0.maxX < proxy.size.width }
     }
 
     /// The sidebar's horizontal offset. A closed one moves past the leading
@@ -463,7 +498,7 @@ struct ChatContainer: View {
             return dragOffset
         }
         // When closed, hide completely (extra 1pt for border)
-        return -(sidebarWidth + 1 + leadingInset) + dragOffset
+        return -(shownSidebarWidth + 1 + leadingInset) + dragOffset
     }
 
     /// Dims the chat under the sidebar while it slides over it.
