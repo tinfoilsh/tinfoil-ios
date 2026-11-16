@@ -57,10 +57,25 @@ enum Constants {
         static let initFailedContentSpacing: CGFloat = 24
         static let initFailedIconSize: CGFloat = 72
         static let actionButtonCornerRadius: CGFloat = 6
-        static let iPadInputBottomPadding: CGFloat = 16
+        static let regularWidthInputBottomPadding: CGFloat = 16
+        /// The widest the message input grows; on a wider chat it is centered.
+        static let composerMaxWidth: CGFloat = 600
+        /// The widest a chat's messages grow; on a wider chat they are
+        /// centered, so lines stay short enough to read.
+        static let messageColumnMaxWidth: CGFloat = 700
+        /// The space between a chat's messages and the sides of a narrower chat.
+        static let messageRowHorizontalPadding: CGFloat = 8
         static let composerActionSpacing: CGFloat = 4
         static let modelSelectorLayoutPriority: Double = 1
         static let chatTitleActionHitTargetSize: CGFloat = 44
+
+        /// A user's message bubble, which hugs its text against the
+        /// trailing edge of its row.
+        enum UserBubble {
+            static let minimumWidth: CGFloat = 60
+            /// The widest a bubble grows, as a share of the row it sits in.
+            static let maximumWidthFraction: CGFloat = 0.92
+        }
 
         enum TextureGrid {
             static let spacing: CGFloat = 16
@@ -204,7 +219,7 @@ enum Constants {
         static let faviconOverlap: CGFloat = 6
         static let labelSpacing: CGFloat = 4
         static let horizontalPadding: CGFloat = 12
-        /// The pill never grows past this share of the screen width; favicons
+        /// The pill never grows past this share of the chat's width; favicons
         /// that would push it wider are dropped.
         static let maxWidthFraction: CGFloat = 0.6
     }
@@ -470,6 +485,9 @@ enum Constants {
         static let maxFavorites = 3
         /// Number of prompt suggestions shown on the welcome screen.
         static let homeSuggestionCount = 3
+        /// The suggestions and "More" sit in this many columns where the
+        /// window is tall enough for more than one row of them.
+        static let homeSuggestionColumnCount = 2
         /// Label for an unset per-preset model or web search override, shown
         /// in the editor pickers and the detail view.
         static let noOverrideLabel = "No override set"

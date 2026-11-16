@@ -132,6 +132,7 @@ struct MessageInputView: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.accessibilityReduceMotion) var reduceMotion
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @EnvironmentObject private var authManager: AuthManager
     @ObservedObject private var profileManager = ProfileManager.shared
     @State private var textHeight: CGFloat = Layout.defaultHeight
@@ -798,8 +799,8 @@ struct MessageInputView: View {
         if isKeyboardVisible {
             return 12
         }
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            return Constants.UI.iPadInputBottomPadding
+        if horizontalSizeClass == .regular {
+            return Constants.UI.regularWidthInputBottomPadding
         }
         return 0
     }
@@ -1761,7 +1762,7 @@ struct AddToSheetView: View {
                 }
             }
             .padding(.top, 8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .scrollsWhenShort(alignment: .top)
             .background(Color.sheetBackground(isDarkMode: isDarkMode).ignoresSafeArea())
             .navigationTitle("Add to Chat")
             .navigationBarTitleDisplayMode(.inline)
@@ -1776,6 +1777,7 @@ struct AddToSheetView: View {
                     .accessibilityLabel("Close")
                 }
             }
+            .keepsBarHorizontal()
         }
     }
 
@@ -2041,6 +2043,12 @@ struct CustomTextEditor: UIViewRepresentable {
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
         guard let width = proposal.width, width.isFinite, width > .zero else { return nil }
+        // A short window, as an iPhone's in landscape, keeps the editor at
+        // its smallest so the conversation stays in view; a longer draft
+        // scrolls inside it.
+        if context.environment.verticalSizeClass == .compact {
+            return CGSize(width: width, height: MessageInputView.Layout.minimumHeight)
+        }
         return CGSize(
             width: width,
             height: context.coordinator.measuredHeight(for: uiView, width: width)

@@ -62,6 +62,7 @@ struct InitializationFailedView: View {
                     .frame(height: 80)
             }
             .padding()
+            .scrollsWhenShort()
         }
     }
 }

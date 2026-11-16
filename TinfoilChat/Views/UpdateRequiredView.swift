@@ -73,6 +73,7 @@ struct UpdateRequiredView: View {
                 
                 Spacer()
             }
+            .scrollsWhenShort()
         }
     }
     

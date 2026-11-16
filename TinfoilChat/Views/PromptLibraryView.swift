@@ -37,6 +37,7 @@ func ensureSystemTags(_ prompt: String) -> String {
 struct PromptSuggestionsBar: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @ObservedObject private var profileManager = ProfileManager.shared
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     var onOpenLibrary: () -> Void
 
     private var activePresetId: String? {
@@ -59,10 +60,12 @@ struct PromptSuggestionsBar: View {
 
     var body: some View {
         let suggested = suggestions
-        let columns = [
-            GridItem(.flexible(), spacing: 8),
-            GridItem(.flexible(), spacing: 8)
-        ]
+        // A short window, as an iPhone's in landscape, keeps the suggestions
+        // and "More" to one row, leaving room for the conversation.
+        let columnCount = verticalSizeClass == .compact
+            ? suggested.count + 1
+            : Constants.PromptLibrary.homeSuggestionColumnCount
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: columnCount)
         LazyVGrid(columns: columns, spacing: 8) {
             ForEach(suggested) { preset in
                 let isActive = activePresetId == preset.id

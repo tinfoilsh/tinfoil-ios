@@ -19,6 +19,8 @@ import TinfoilIcons
 /// The primary SwiftUI container that holds the main chat interface and sidebar navigation.
 struct ChatContainer: View {
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
     @StateObject private var settings = SettingsManager.shared
@@ -34,6 +36,9 @@ struct ChatContainer: View {
     @State private var isVerificationBadgeExpanded = false
     @State private var isVerificationBadgeCollapsed = false
     @State private var sidebarNavigationRequest: ChatNavigationRequest?
+    /// The fold while it runs down the middle of the chat area, as when
+    /// iPhone Duo is partly folded like a book.
+    @State private var verticalFold: CGRect?
 
     private var isAnySheetPresented: Bool {
         viewModel.showVerifierSheet || viewModel.showAddSheet || viewModel.showModelSelectorSheet || viewModel.showRateLimitPaywall || viewModel.showDocumentPicker || viewModel.showPhotoPicker || viewModel.showCamera || viewModel.showDocumentScanner || viewModel.showMessageSheet || viewModel.showImageViewer || viewModel.showSidebarSettings || showAuthView || showPremiumModal
@@ -63,6 +68,12 @@ struct ChatContainer: View {
             && viewModel.activeStorageTab == .local
     }
 
+    /// The shorter bar of a short window, as an iPhone's in landscape, has
+    /// room for the chat's label or its prompt's, not both.
+    private var isBarTooShortForTwoLabels: Bool {
+        verticalSizeClass == .compact && showsPrimaryToolbarLabel
+    }
+
     /// The sidebar is on screen while open and while dragged open.
     private var isSidebarShown: Bool {
         isSidebarOpen || dragOffset != 0
@@ -72,14 +83,20 @@ struct ChatContainer: View {
         isSidebarOpen && viewModel.activeProject == nil
     }
 
-    /// On iPhone the open sidebar covers the chat, so the chat's own
-    /// toolbar actions are hidden until it closes.
+    /// With room for both, as on iPad or an open iPhone Duo, the sidebar sits
+    /// beside the chat; otherwise it slides over it.
+    private var sidebarOverlaysChat: Bool {
+        horizontalSizeClass != .regular
+    }
+
+    /// The open sidebar covers the chat when it slides over it, so the
+    /// chat's own toolbar actions are hidden until it closes.
     private var showsChatToolbarActions: Bool {
-        !(isSidebarOpen && UIDevice.current.userInterfaceIdiom == .phone)
+        !(isSidebarOpen && sidebarOverlaysChat)
     }
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             mainContent
                 .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
         }
@@ -91,11 +108,17 @@ struct ChatContainer: View {
                 }
             }
         }
-        .navigationViewStyle(.stack)
         .environmentObject(viewModel)
         .onAppear {
             dragOffset = 0
             handleNavigationRequest(viewModel.navigationRequest)
+        }
+        // A sidebar open beside the chat would cover it once the chat narrows,
+        // as when iPhone Duo closes, so it closes to keep the chat in view.
+        .onChange(of: sidebarOverlaysChat) { _, overlaysChat in
+            guard overlaysChat else { return }
+            isSidebarOpen = false
+            dragOffset = 0
         }
         .onChange(of: viewModel.navigationRequest) { _, request in
             handleNavigationRequest(request)
@@ -177,40 +200,47 @@ struct ChatContainer: View {
         }
     }
     
-    /// The main content layout including chat area and sidebar
+    /// The main content layout including chat area and sidebar. The chat and
+    /// the sidebar keep their place in it whether the sidebar sits beside the
+    /// chat or slides over it, so folding or resizing the app moves them
+    /// without rebuilding them.
     private var mainContent: some View {
-        Group {
-            if UIDevice.current.userInterfaceIdiom == .pad {
-                // iPad/Mac: Side-by-side layout
-                GeometryReader { geometry in
-                    HStack(spacing: 0) {
-                        if isSidebarOpen {
-                            activeSidebar
-                                .frame(width: sidebarWidth)
-                                .overlay(alignment: .trailing) {
-                                    Rectangle()
-                                        .fill(Color.primary.opacity(0.15))
-                                        .frame(width: 1)
-                                }
-                                .transition(.move(edge: .leading))
-                        }
-                        
-                        mainSurface
-                            .frame(width: isSidebarOpen ? geometry.size.width - sidebarWidth : geometry.size.width)
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                mainSurface
+                    .frame(width: geometry.size.width - chatLeadingEdge)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    // The open sidebar covers the chat when it slides over it,
+                    // so VoiceOver should only reach the sidebar and the
+                    // navigation bar.
+                    .accessibilityHidden(isSidebarOpen && sidebarOverlaysChat)
+
+                if sidebarOverlaysChat {
+                    sidebarDimming
+                }
+
+                activeSidebar
+                    .frame(width: shownSidebarWidth)
+                    .overlay(alignment: .trailing) {
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.15))
+                            .frame(width: 1)
                     }
-                }
-                .animation(.easeInOut(duration: 0.3), value: isSidebarOpen)
-            } else {
-                // iPhone: Overlay layout
-                ZStack {
-                    mainSurface
-                        // The open sidebar covers the chat, so VoiceOver should
-                        // only reach the sidebar and the navigation bar.
-                        .accessibilityHidden(isSidebarOpen)
-                    sidebarLayer
-                }
+                    .offset(x: sidebarOffset(leadingInset: geometry.safeAreaInsets.leading))
+                    // Moving the closed sidebar off screen does not remove it
+                    // from VoiceOver, which would otherwise read its sections
+                    // in the middle of the chat.
+                    .accessibilityHidden(!isSidebarOpen)
             }
         }
+        .onGeometryChange(for: CGRect?.self) { proxy in
+            Self.verticalFold(in: proxy)
+        } action: { fold in
+            withAnimation(.easeInOut(duration: 0.3)) {
+                verticalFold = fold
+            }
+        }
+        .animation(sidebarOverlaysChat ? .easeInOut : .easeInOut(duration: 0.3), value: isSidebarOpen)
         .navigationBarTitleDisplayMode(.inline)
         .adaptiveNavigationBarAppearance(
             for: colorScheme,
@@ -247,6 +277,7 @@ struct ChatContainer: View {
                     .accessibleHitTarget()
                 }
             }
+            .allowsVerticalBar()
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 1) {
                 ZStack {
@@ -297,7 +328,7 @@ struct ChatContainer: View {
 
                     if let presetId = viewModel.currentChat?.promptPresetId,
                        let preset = profileManager.promptPreset(for: presetId),
-                       !isSidebarOpen && !isVerificationBadgeExpanded {
+                       !isSidebarOpen && !isVerificationBadgeExpanded && !isBarTooShortForTwoLabels {
                         HStack(spacing: 4) {
                             Image(tinfoil: preset.icon)
                                 .font(.system(size: 9, weight: .semibold))
@@ -310,18 +341,23 @@ struct ChatContainer: View {
                         .accessibilityLabel("Prompt: \(preset.name)")
                     }
                 }
-                .offset(x: (isSidebarOpen && UIDevice.current.userInterfaceIdiom == .pad) ? sidebarWidth / 2 : 0)
+                // Centered over the chat rather than the whole screen.
+                .offset(x: chatLeadingEdge / 2)
                 .animation(.easeInOut(duration: 0.2), value: isSidebarOpen)
                 .animation(.easeInOut(duration: 0.35), value: isVerificationBadgeExpanded)
             }
             if viewModel.activeProject == nil && showsChatToolbarActions {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    VerificationStatusIndicator(
-                        viewModel: viewModel,
-                        isBadgeExpanded: $isVerificationBadgeExpanded,
-                        isCollapsed: $isVerificationBadgeCollapsed
-                    )
+                    VerticalBarReader { isInVerticalBar in
+                        VerificationStatusIndicator(
+                            viewModel: viewModel,
+                            isBadgeExpanded: $isVerificationBadgeExpanded,
+                            isCollapsed: $isVerificationBadgeCollapsed,
+                            showsStatusText: !isInVerticalBar
+                        )
+                    }
                 }
+                .allowsVerticalBar()
             }
             // Temporary (incognito) chat toggle, shown on a new chat and on a
             // temporary one: a temporary chat with messages is saved by it.
@@ -343,6 +379,7 @@ struct ChatContainer: View {
                     .disabled(!viewModel.canUseCurrentChatActions || viewModel.isSavingTemporaryChat)
                     .accessibleHitTarget()
                 }
+                .allowsVerticalBar()
             }
             // Only show new chat button when chat has messages (not a new/blank chat)
             if authManager.isAuthenticated && viewModel.activeProject == nil && showsChatToolbarActions && !(viewModel.currentChat?.isBlankChat ?? true) {
@@ -356,6 +393,9 @@ struct ChatContainer: View {
                     .disabled(!viewModel.canUseCurrentChatActions)
                     .accessibleHitTarget()
                 }
+                .allowsVerticalBar()
+                // Starting a chat is the action people reach for most.
+                .staysVisibleLonger()
             }
             if !authManager.isAuthenticated {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -366,7 +406,7 @@ struct ChatContainer: View {
             }
         }
         .gesture(
-            UIDevice.current.userInterfaceIdiom == .phone ? 
+            sidebarOverlaysChat ?
             DragGesture()
                 .onChanged { gesture in
                     if isSidebarOpen {
@@ -404,7 +444,7 @@ struct ChatContainer: View {
                 // Snap any stray offset back to zero when we finish closing
                 dragOffset = 0
             }
-            if UIDevice.current.userInterfaceIdiom == .phone {
+            if sidebarOverlaysChat {
                 // The overlay swaps which content VoiceOver can reach. After
                 // closing, focus starts over at the menu button instead of
                 // staying on a sidebar row that is now hidden.
@@ -436,47 +476,66 @@ struct ChatContainer: View {
         .ignoresSafeArea(edges: .top)
     }
     
-    /// The sliding sidebar and dimming overlay
-    private var sidebarLayer: some View {
-        ZStack {
-            // Dim overlay
-            Color.black
-                .opacity({
-                    // Compute overlay opacity only when the sidebar is active or being dragged
-                    let base = 0.4
-                    let fraction = (dragOffset / sidebarWidth * 0.4)
-                    return isSidebarOpen ? (base + fraction) : max(0, fraction)
-                }())
-                .ignoresSafeArea()
-                // Prevent a transparent overlay from blocking taps when closed
-                .allowsHitTesting(isSidebarOpen || abs(dragOffset) > 0.1)
-                .onTapGesture {
-                    withAnimation {
-                        isSidebarOpen = false
-                    }
-                }
-                .accessibilityHidden(true)
-            
-            // Sidebar with slide transition
-            HStack(spacing: 0) {
-                activeSidebar
-                    .frame(width: sidebarWidth)
-                    .overlay(alignment: .trailing) {
-                        Rectangle()
-                            .fill(Color.primary.opacity(0.15))
-                            .frame(width: 1)
-                    }
-                    .offset(x: isSidebarOpen ?
-                            (0 + dragOffset) : // When open, allow dragging left
-                            (-(sidebarWidth + 1) + dragOffset)) // When closed, hide completely (extra 1pt for border)
-                    // Moving the closed sidebar off screen does not remove it
-                    // from VoiceOver, which would otherwise read its sections
-                    // in the middle of the chat.
-                    .accessibilityHidden(!isSidebarOpen)
-                Spacer()
-            }
+    /// The fold the sidebar and the chat sit either side of, while the
+    /// sidebar sits beside the chat.
+    private var chatFold: CGRect? {
+        sidebarOverlaysChat ? nil : verticalFold
+    }
+
+    /// Beside a fold, the sidebar fills the page before it.
+    private var shownSidebarWidth: CGFloat {
+        chatFold?.minX ?? sidebarWidth
+    }
+
+    /// Where the chat starts: past the sidebar while it sits open beside it,
+    /// and past the fold whether or not the sidebar is open, so the chat is
+    /// never split by it and stays put as the sidebar opens and closes.
+    private var chatLeadingEdge: CGFloat {
+        if let chatFold {
+            return chatFold.maxX
         }
-        .animation(.easeInOut, value: isSidebarOpen)
+        return isSidebarOpen && !sidebarOverlaysChat ? sidebarWidth : 0
+    }
+
+    /// A fold running down the middle of the area `proxy` measures, which
+    /// it divides into two pages.
+    nonisolated private static func verticalFold(in proxy: GeometryProxy) -> CGRect? {
+        guard #available(iOS 27.1, *) else { return nil }
+        return proxy.reservedRegions(kind: .division)
+            .map(\.frame)
+            .first { $0.height > $0.width && $0.minX > 0 && $0.maxX < proxy.size.width }
+    }
+
+    /// The sidebar's horizontal offset. A closed one moves past the leading
+    /// safe area too, such as a bar or the camera along that edge, so no
+    /// sliver of it shows there.
+    private func sidebarOffset(leadingInset: CGFloat) -> CGFloat {
+        if isSidebarOpen {
+            // When open, allow dragging left
+            return dragOffset
+        }
+        // When closed, hide completely (extra 1pt for border)
+        return -(shownSidebarWidth + 1 + leadingInset) + dragOffset
+    }
+
+    /// Dims the chat under the sidebar while it slides over it.
+    private var sidebarDimming: some View {
+        Color.black
+            .opacity({
+                // Compute overlay opacity only when the sidebar is active or being dragged
+                let base = 0.4
+                let fraction = (dragOffset / sidebarWidth * 0.4)
+                return isSidebarOpen ? (base + fraction) : max(0, fraction)
+            }())
+            .ignoresSafeArea()
+            // Prevent a transparent overlay from blocking taps when closed
+            .allowsHitTesting(isSidebarOpen || abs(dragOffset) > 0.1)
+            .onTapGesture {
+                withAnimation {
+                    isSidebarOpen = false
+                }
+            }
+            .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -484,6 +543,7 @@ struct ChatContainer: View {
         ChatSidebar(
             isOpen: $isSidebarOpen,
             navigationRequest: $sidebarNavigationRequest,
+            overlaysChat: sidebarOverlaysChat,
             viewModel: viewModel,
             changes: viewModel.sidebarChanges,
             authManager: authManager,
@@ -791,6 +851,7 @@ struct PrivacyExplainerSheet: View {
                     .accessibilityLabel("Close")
                 }
             }
+            .keepsBarHorizontal()
         }
         .presentationDetents([.medium])
     }
@@ -872,9 +933,11 @@ extension View {
         }
     }
 
+    /// Opens a sheet at page size when the screen presenting it is wide,
+    /// as an iPad or an open iPhone Duo is.
     @ViewBuilder
-    func iPadSheetSizing() -> some View {
-        if UIDevice.current.userInterfaceIdiom == .pad {
+    func pageSheetSizing(in horizontalSizeClass: UserInterfaceSizeClass?) -> some View {
+        if horizontalSizeClass == .regular {
             self.presentationSizing(.page)
         } else {
             self
@@ -889,6 +952,9 @@ struct VerificationStatusIndicator: View {
     /// Owned by the parent so the badge stays collapsed when the toolbar
     /// removes and re-adds the indicator.
     @Binding var isCollapsed: Bool
+    /// In a vertical bar the badge has room for its icon only, whose color
+    /// still tells the status.
+    let showsStatusText: Bool
     @State private var collapseTask: Task<Void, Never>?
 
     private var icon: TinfoilIcon {
@@ -939,7 +1005,7 @@ struct VerificationStatusIndicator: View {
                     .foregroundStyle(iconColor)
                     .font(.system(size: 14))
 
-                if !statusText.isEmpty {
+                if showsStatusText && !statusText.isEmpty {
                     // Use the longest possible text as a hidden sizing
                     // reference so the badge width stays stable when the
                     // label changes from "Verifying..." to "Privacy verified".
@@ -967,7 +1033,7 @@ struct VerificationStatusIndicator: View {
         .onAppear {
             if viewModel.isVerified && viewModel.verificationError == nil {
                 guard !isCollapsed else { return }
-                isBadgeExpanded = true
+                isBadgeExpanded = showsStatusText
                 collapseTask?.cancel()
                 collapseTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: UInt64(Constants.Verification.collapseDelaySeconds * 1_000_000_000))
@@ -976,7 +1042,7 @@ struct VerificationStatusIndicator: View {
                     isBadgeExpanded = false
                 }
             } else if viewModel.isVerifying {
-                isBadgeExpanded = true
+                isBadgeExpanded = showsStatusText
                 isCollapsed = false
             } else {
                 isBadgeExpanded = false
@@ -984,7 +1050,7 @@ struct VerificationStatusIndicator: View {
         }
         .onChange(of: viewModel.isVerified) { _, isVerified in
             if isVerified && viewModel.verificationError == nil {
-                isBadgeExpanded = true
+                isBadgeExpanded = showsStatusText
                 collapseTask?.cancel()
                 collapseTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: UInt64(Constants.Verification.collapseDelaySeconds * 1_000_000_000))
@@ -996,11 +1062,18 @@ struct VerificationStatusIndicator: View {
         }
         .onChange(of: viewModel.isVerifying) { _, isVerifying in
             if isVerifying {
-                isBadgeExpanded = true
+                isBadgeExpanded = showsStatusText
                 collapseTask?.cancel()
                 collapseTask = nil
                 isCollapsed = false
             } else if !viewModel.isVerified {
+                isBadgeExpanded = false
+            }
+        }
+        // The badge leaves a horizontal bar for a vertical one, as when
+        // iPhone Duo closes, without its text.
+        .onChange(of: showsStatusText) { _, showsText in
+            if !showsText {
                 isBadgeExpanded = false
             }
         }

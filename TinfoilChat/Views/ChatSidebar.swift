@@ -46,6 +46,8 @@ struct ChatSidebar: View, Equatable {
     @Environment(Clerk.self) private var clerk
     @Binding var isOpen: Bool
     @Binding var navigationRequest: ChatNavigationRequest?
+    /// Whether the sidebar slides over the chat rather than sitting beside it.
+    let overlaysChat: Bool
     /// Read as the sidebar draws, which it does as the chat changes while
     /// the sidebar is open.
     let viewModel: TinfoilChat.ChatViewModel
@@ -72,6 +74,7 @@ struct ChatSidebar: View, Equatable {
     static func == (lhs: ChatSidebar, rhs: ChatSidebar) -> Bool {
         lhs.viewModel === rhs.viewModel && lhs.changes === rhs.changes && lhs.authManager === rhs.authManager
             && lhs.navigationRequest == rhs.navigationRequest
+            && lhs.overlaysChat == rhs.overlaysChat
     }
 
     private var activeTab: ChatStorageTab {
@@ -183,7 +186,6 @@ struct ChatSidebar: View, Equatable {
     
     var body: some View {
         sidebarContent
-            .frame(width: 300)
             .background(colorScheme == .dark ? Color.sidebarBackground(for: colorScheme) : Color.white)
             .ignoresSafeArea(edges: .bottom)
             .onReceive(timeUpdateTimer) { _ in
@@ -1185,11 +1187,11 @@ struct ChatSidebar: View, Equatable {
         }
     }
 
-    /// On iPhone the sidebar covers the conversation, so opening a chat
-    /// closes it, as opening a project already does. The iPad sidebar sits
-    /// beside the conversation and stays open.
+    /// A sidebar that slides over the conversation covers it, so opening a
+    /// chat closes it, as opening a project already does. One that sits
+    /// beside the conversation stays open.
     private func closeAfterOpeningChat() {
-        guard UIDevice.current.userInterfaceIdiom == .phone else { return }
+        guard overlaysChat else { return }
         withAnimation { isOpen = false }
     }
 
