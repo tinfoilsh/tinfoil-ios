@@ -56,6 +56,9 @@ enum Constants {
         static let streamingIndicatorIconColumnWidth: CGFloat = 16
         static let initFailedContentSpacing: CGFloat = 24
         static let initFailedIconSize: CGFloat = 72
+        /// The space between the loading screen's logo and the spinner below it.
+        static let loadingSpinnerSpacing: CGFloat = 24
+        static let loadingSpinnerScale: CGFloat = 1.2
         static let actionButtonCornerRadius: CGFloat = 6
         static let regularWidthInputBottomPadding: CGFloat = 16
         /// The widest the message input grows; on a wider chat it is centered.

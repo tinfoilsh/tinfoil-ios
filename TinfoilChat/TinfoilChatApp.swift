@@ -206,23 +206,26 @@ struct AdaptiveTintContainer<Content: View>: View {
 }
 
 // MARK: - Loading Screen
+/// The launch screen's logo, drawn where the launch screen draws it, with a
+/// spinner below. The logo stays put as the launch screen gives way to this
+/// and as the spinner appears.
 struct LoadingScreen: View {
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         ZStack {
-            (colorScheme == .dark ? Color.backgroundPrimary : Color.white)
-                .ignoresSafeArea()
-            VStack(spacing: 24) {
-                Image(colorScheme == .dark ? "logo-white" : "logo-dark")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 48)
-
-                ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle(tint: colorScheme == .dark ? .white : .gray))
-                    .scaleEffect(1.2)
-            }
+            Color("LaunchColor")
+            // At its own size, centered in the whole window, as the launch
+            // screen shows it.
+            Image("LaunchLogo")
+                .accessibilityLabel("Tinfoil")
+                .overlay(alignment: .bottom) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: colorScheme == .dark ? .white : .gray))
+                        .scaleEffect(Constants.UI.loadingSpinnerScale)
+                        .alignmentGuide(.bottom) { $0[.top] - Constants.UI.loadingSpinnerSpacing }
+                }
         }
+        .ignoresSafeArea()
     }
 }

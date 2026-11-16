@@ -17,7 +17,6 @@ struct ContentView: View {
     @StateObject private var chatViewModel = TinfoilChat.ChatViewModel()
     @ObservedObject private var passkeyManager = PasskeyManager.shared
     @ObservedObject private var intentCoordinator = AppIntentCoordinator.shared
-    @Environment(\.colorScheme) var colorScheme
     @Environment(\.scenePhase) var scenePhase
     @Environment(\.requestReview) private var requestReview
     @State private var showKeyInputModal = false
@@ -42,16 +41,7 @@ struct ContentView: View {
                 OnboardingView(onComplete: authManager.completeOnboarding)
                     .id(clerk.user?.id)
             } else if authManager.isLoading {
-                ZStack {
-                    splashBackground
-                    VStack(spacing: 24) {
-                        splashLogo
-
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: colorScheme == .dark ? .white : .gray))
-                            .scaleEffect(1.2)
-                    }
-                }
+                LoadingScreen()
             } else {
                 // Use the ChatContainer from ChatView.swift
                 ChatContainer()
@@ -244,18 +234,6 @@ struct ContentView: View {
                 hasActiveSubscription: hasSubscription
             )
         }
-    }
-
-    private var splashBackground: some View {
-        (colorScheme == .dark ? Color.backgroundPrimary : Color.white)
-            .ignoresSafeArea()
-    }
-
-    private var splashLogo: some View {
-        Image(colorScheme == .dark ? "logo-white" : "logo-dark")
-            .resizable()
-            .scaledToFit()
-            .frame(height: 48)
     }
 
     private func requestAppReviewIfEligible() {
