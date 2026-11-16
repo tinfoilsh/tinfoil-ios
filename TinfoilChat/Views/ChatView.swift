@@ -387,7 +387,8 @@ struct ChatContainer: View {
         }
         if showsToolbarLabel(usesVerticalBar: usesVerticalBar) {
             ToolbarItem(placement: .principal) {
-                toolbarLabel
+                // Only the badge in a horizontal bar expands over the label.
+                toolbarLabel(isBadgeExpanded: !usesVerticalBar && isVerificationBadgeExpanded)
             }
         }
         if viewModel.activeProject == nil && showsChatToolbarActions {
@@ -511,7 +512,7 @@ struct ChatContainer: View {
     /// The chat's label in the middle of the top bar: the logo beside the
     /// open sidebar, or the project, temporary chat, storage and prompt the
     /// chat is in.
-    private var toolbarLabel: some View {
+    private func toolbarLabel(isBadgeExpanded: Bool) -> some View {
         VStack(spacing: 1) {
             ZStack {
                 Image(colorScheme == .dark ? "logo-white" : "logo-dark")
@@ -524,8 +525,8 @@ struct ChatContainer: View {
 
                 if showsStorageLabel {
                     chatStorageLabel
-                        .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
-                        .accessibilityHidden(isSidebarOpen || isVerificationBadgeExpanded)
+                        .opacity(isSidebarOpen || isBadgeExpanded ? 0 : 1)
+                        .accessibilityHidden(isSidebarOpen || isBadgeExpanded)
                 }
 
                 if let activeProject = viewModel.activeProject {
@@ -537,10 +538,10 @@ struct ChatContainer: View {
                             .lineLimit(1)
                             .foregroundColor(toolbarContentColor)
                     }
-                    .opacity(isVerificationBadgeExpanded ? 0 : 1)
+                    .opacity(isBadgeExpanded ? 0 : 1)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("Project: \(activeProject.name)")
-                    .accessibilityHidden(isVerificationBadgeExpanded)
+                    .accessibilityHidden(isBadgeExpanded)
                 }
 
                 if viewModel.isTemporaryMode && viewModel.activeProject == nil {
@@ -551,16 +552,16 @@ struct ChatContainer: View {
                             .fontWeight(.semibold)
                             .foregroundColor(toolbarContentColor)
                     }
-                    .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
+                    .opacity(isSidebarOpen || isBadgeExpanded ? 0 : 1)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("Temporary chat")
-                    .accessibilityHidden(isSidebarOpen || isVerificationBadgeExpanded)
+                    .accessibilityHidden(isSidebarOpen || isBadgeExpanded)
                 }
             }
             .frame(height: showsPrimaryToolbarLabel ? (showsSidebarLogo ? sidebarLogoHeight : toolbarPrimaryLabelHeight) : 0)
 
             if let preset = activePromptPreset,
-               !isSidebarOpen && !isVerificationBadgeExpanded && !isBarTooShortForTwoLabels {
+               !isSidebarOpen && !isBadgeExpanded && !isBarTooShortForTwoLabels {
                 HStack(spacing: 4) {
                     Image(tinfoil: preset.icon)
                         .font(.system(size: 9, weight: .semibold))
@@ -576,7 +577,7 @@ struct ChatContainer: View {
         // Centered over the chat rather than the whole screen.
         .offset(x: chatLeadingEdge / 2)
         .animation(.easeInOut(duration: 0.2), value: isSidebarOpen)
-        .animation(.easeInOut(duration: 0.35), value: isVerificationBadgeExpanded)
+        .animation(.easeInOut(duration: 0.35), value: isBadgeExpanded)
     }
 
     /// Where the chat starts: past the sidebar while it sits open beside it,
