@@ -56,6 +56,7 @@ struct NoInternetView: View {
                     .frame(height: 80)
             }
             .padding()
+            .scrollsWhenShort()
         }
     }
 }

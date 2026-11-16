@@ -150,6 +150,7 @@ struct PasskeyRecoveryChoiceView: View {
 
             Spacer().frame(height: 24)
         }
+        .scrollsWhenShort()
         .presentationDetents([
             .height(failurePresentation == nil ? Layout.sheetHeight : Layout.failureSheetHeight)
         ])

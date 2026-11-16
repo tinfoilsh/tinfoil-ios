@@ -1761,7 +1761,7 @@ struct AddToSheetView: View {
                 }
             }
             .padding(.top, 8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .scrollsWhenShort(alignment: .top)
             .background(Color.sheetBackground(isDarkMode: isDarkMode).ignoresSafeArea())
             .navigationTitle("Add to Chat")
             .navigationBarTitleDisplayMode(.inline)

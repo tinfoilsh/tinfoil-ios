@@ -581,6 +581,7 @@ private struct MFAReverificationView: View {
                 Spacer()
             }
             .padding()
+            .scrollsWhenShort()
             .navigationTitle("Confirm It’s You")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

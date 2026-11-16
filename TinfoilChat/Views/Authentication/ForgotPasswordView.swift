@@ -77,6 +77,7 @@ struct ForgotPasswordView: View {
                 Spacer()
             }
             .padding(.top, 20)
+            .scrollsWhenShort()
         }
         .onDisappear {
             // Clean up when view is dismissed

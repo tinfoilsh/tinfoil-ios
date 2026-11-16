@@ -714,6 +714,7 @@ private struct BackupEncryptionKeySheet: View {
 
                 Spacer()
             }
+            .scrollsWhenShort()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

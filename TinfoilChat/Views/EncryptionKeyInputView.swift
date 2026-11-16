@@ -191,6 +191,7 @@ struct EncryptionKeyInputView: View {
                         .padding(.bottom, 20)
                 }
             }
+            .scrollsWhenShort()
             .background(Color(UIColor.systemBackground))
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
