@@ -141,8 +141,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/tinfoil-icons",
       "state" : {
-        "revision" : "94ec35209a966fb301e501856c5157bab55495c7",
-        "version" : "2.8.0"
+        "revision" : "ff028d24f9f3b1d2364d1afc62f351c048daf1e7",
+        "version" : "2.9.0"
       }
     },
     {
