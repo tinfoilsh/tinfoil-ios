@@ -625,7 +625,7 @@ struct CloudSyncOnboardingView: View {
                     }
                 }) {
                     HStack {
-                        Image(tinfoil: .qrCode)
+                        Image(tinfoil: .qrCodeScan)
                             .font(.title3)
                         Text("Scan QR Code")
                             .fontWeight(.semibold)
