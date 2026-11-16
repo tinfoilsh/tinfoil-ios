@@ -264,8 +264,9 @@ struct MessageTableView: UIViewRepresentable {
                 // the update to DispatchQueue.main.async, many calls will read the
                 // stale multiplier and each queue a +10 increment, causing it to
                 // explode to thousands.
-                let screenHeight = UIScreen.main.bounds.height
-                let needsBufferExtension = wrapper.extendBufferIfNeeded(screenHeight: screenHeight)
+                let needsBufferExtension = wrapper.extendBufferIfNeeded(
+                    windowHeight: context.coordinator.windowHeight
+                )
 
                 let coordinator = context.coordinator
                 DispatchQueue.main.async {
@@ -485,6 +486,13 @@ struct MessageTableView: UIViewRepresentable {
 
         init(_ parent: MessageTableView) {
             self.parent = parent
+        }
+
+        /// The height of the window the chat shows in, which the streaming
+        /// buffer is measured in. It changes as the device folds or the app
+        /// is resized, unlike the screen's.
+        var windowHeight: CGFloat {
+            tableView?.window?.bounds.height ?? 0
         }
 
         func getOrCreateWrapper(for message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, messageIndex: Int) -> ObservableMessageWrapper {
@@ -829,8 +837,7 @@ struct MessageTableView: UIViewRepresentable {
             if parent.usesStreamingLayout, let lastMessage = parent.messages.last,
                let wrapper = messageWrappers[lastMessage.id], wrapper.actualContentHeight > 0 {
 
-                let screenHeight = UIScreen.main.bounds.height
-                let bufferHeight = screenHeight * wrapper.bufferMultiplier
+                let bufferHeight = windowHeight * wrapper.bufferMultiplier
                 let unusedBuffer = bufferHeight - wrapper.actualContentHeight
                 let streamingInset = -max(0, unusedBuffer)
 
@@ -1143,8 +1150,10 @@ class ObservableMessageWrapper: ObservableObject {
     /// Checks whether the streaming buffer needs to grow and extends it if so.
     /// Returns true if the buffer was extended.
     @discardableResult
-    func extendBufferIfNeeded(screenHeight: CGFloat) -> Bool {
-        let currentBufferHeight = screenHeight * bufferMultiplier
+    func extendBufferIfNeeded(windowHeight: CGFloat) -> Bool {
+        // A table outside a window has no height to measure the buffer in.
+        guard windowHeight > 0 else { return false }
+        let currentBufferHeight = windowHeight * bufferMultiplier
         let threshold = currentBufferHeight * Constants.StreamingBuffer.extensionThresholdRatio
         let needsExtension = actualContentHeight > threshold
             && bufferMultiplier < Constants.StreamingBuffer.maxMultiplier
@@ -1168,9 +1177,9 @@ struct ObservableMessageCell: View {
     @State private var hasAppeared = false
 
     private var bufferHeight: CGFloat {
-        let screenHeight = UIScreen.main.bounds.height
+        let windowHeight = coordinator?.windowHeight ?? 0
         return min(
-            screenHeight * wrapper.bufferMultiplier,
+            windowHeight * wrapper.bufferMultiplier,
             Constants.StreamingBuffer.maxCellHeight
         )
     }
