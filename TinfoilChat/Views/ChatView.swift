@@ -85,7 +85,7 @@ struct ChatContainer: View {
     }
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             mainContent
                 .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
         }
@@ -97,7 +97,6 @@ struct ChatContainer: View {
                 }
             }
         }
-        .navigationViewStyle(.stack)
         .environmentObject(viewModel)
         .onAppear {
             dragOffset = 0
