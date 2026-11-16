@@ -46,6 +46,20 @@ extension View {
             self
         }
     }
+
+    /// Keeps `usesVerticalBar` set to whether the bars of the navigation
+    /// container this view is in go into a vertical bar, as on a closed
+    /// iPhone Duo.
+    func readsVerticalBar(into usesVerticalBar: Binding<Bool>) -> some View {
+        background {
+            VerticalBarReader { isInVerticalBar in
+                Color.clear
+                    .onChange(of: isInVerticalBar, initial: true) { _, isVertical in
+                        usesVerticalBar.wrappedValue = isVertical
+                    }
+            }
+        }
+    }
 }
 
 /// Builds a toolbar item's view knowing whether it is in a vertical bar,

@@ -39,6 +39,9 @@ struct ChatContainer: View {
     /// The fold while it runs down the middle of the chat area, as when
     /// iPhone Duo is partly folded like a book.
     @State private var verticalFold: CGRect?
+    /// Whether the toolbar buttons sit in a vertical bar along the side, as
+    /// on a closed iPhone Duo.
+    @State private var usesVerticalBar = false
 
     private var isAnySheetPresented: Bool {
         viewModel.showVerifierSheet || viewModel.showAddSheet || viewModel.showModelSelectorSheet || viewModel.showRateLimitPaywall || viewModel.showDocumentPicker || viewModel.showPhotoPicker || viewModel.showCamera || viewModel.showDocumentScanner || viewModel.showMessageSheet || viewModel.showImageViewer || viewModel.showSidebarSettings || showAuthView || showPremiumModal
@@ -66,6 +69,27 @@ struct ChatContainer: View {
             && settings.isCloudSyncEnabled
             && settings.isLocalOnlyModeEnabled
             && viewModel.activeStorageTab == .local
+    }
+
+    private var showsStorageLabel: Bool {
+        !viewModel.isTemporaryMode && viewModel.activeProject == nil && authManager.isAuthenticated
+            && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled
+            && viewModel.activeStorageTab == .local
+    }
+
+    private var activePromptPreset: PromptPreset? {
+        profileManager.promptPreset(for: viewModel.currentChat?.promptPresetId)
+    }
+
+    /// With its buttons in a vertical bar, the chat keeps a bar along the top
+    /// only for its label, which cannot move into it. The label is left out
+    /// when it has nothing to show, as is the logo beside the open sidebar,
+    /// so that bar does not take room from the chat.
+    private var showsToolbarLabel: Bool {
+        guard usesVerticalBar else { return true }
+        if viewModel.activeProject != nil { return true }
+        if isSidebarOpen { return false }
+        return viewModel.isTemporaryMode || showsStorageLabel || activePromptPreset != nil
     }
 
     /// The shorter bar of a short window, as an iPhone's in landscape, has
@@ -99,6 +123,7 @@ struct ChatContainer: View {
         NavigationStack {
             mainContent
                 .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
+                .readsVerticalBar(into: $usesVerticalBar)
         }
         .onChange(of: isAnySheetPresented) { _, presented in
             if presented && isSidebarOpen {
@@ -278,73 +303,10 @@ struct ChatContainer: View {
                 }
             }
             .allowsVerticalBar()
-            ToolbarItem(placement: .principal) {
-                VStack(spacing: 1) {
-                ZStack {
-                    Image(colorScheme == .dark ? "logo-white" : "logo-dark")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: sidebarLogoHeight)
-                        .opacity(showsSidebarLogo ? 1 : 0)
-                        .accessibilityLabel("Tinfoil")
-                        .accessibilityHidden(!showsSidebarLogo)
-
-                    if !viewModel.isTemporaryMode && viewModel.activeProject == nil && authManager.isAuthenticated && settings.isCloudSyncEnabled && settings.isLocalOnlyModeEnabled && viewModel.activeStorageTab == .local {
-                        chatStorageLabel
-                            .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
-                            .accessibilityHidden(isSidebarOpen || isVerificationBadgeExpanded)
-                    }
-
-                    if let activeProject = viewModel.activeProject {
-                        HStack(spacing: 6) {
-                            ProjectFolderIcon(color: activeProject.color, size: 20)
-                            Text(activeProject.name)
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .lineLimit(1)
-                                .foregroundColor(toolbarContentColor)
-                        }
-                        .opacity(isVerificationBadgeExpanded ? 0 : 1)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("Project: \(activeProject.name)")
-                        .accessibilityHidden(isVerificationBadgeExpanded)
-                    }
-
-                    if viewModel.isTemporaryMode && viewModel.activeProject == nil {
-                        HStack(spacing: 6) {
-                            GhostIcon(size: 14, color: toolbarContentColor, style: .filled)
-                            Text("Temporary")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundColor(toolbarContentColor)
-                        }
-                        .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("Temporary chat")
-                        .accessibilityHidden(isSidebarOpen || isVerificationBadgeExpanded)
-                    }
+            if showsToolbarLabel {
+                ToolbarItem(placement: .principal) {
+                    toolbarLabel
                 }
-                .frame(height: showsPrimaryToolbarLabel ? (showsSidebarLogo ? sidebarLogoHeight : toolbarPrimaryLabelHeight) : 0)
-
-                    if let presetId = viewModel.currentChat?.promptPresetId,
-                       let preset = profileManager.promptPreset(for: presetId),
-                       !isSidebarOpen && !isVerificationBadgeExpanded && !isBarTooShortForTwoLabels {
-                        HStack(spacing: 4) {
-                            Image(tinfoil: preset.icon)
-                                .font(.system(size: 9, weight: .semibold))
-                            Text(preset.name)
-                                .font(.system(.caption2, weight: .medium))
-                                .lineLimit(1)
-                        }
-                        .foregroundColor(toolbarContentColor.opacity(0.7))
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("Prompt: \(preset.name)")
-                    }
-                }
-                // Centered over the chat rather than the whole screen.
-                .offset(x: chatLeadingEdge / 2)
-                .animation(.easeInOut(duration: 0.2), value: isSidebarOpen)
-                .animation(.easeInOut(duration: 0.35), value: isVerificationBadgeExpanded)
             }
             if viewModel.activeProject == nil && showsChatToolbarActions {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -485,6 +447,77 @@ struct ChatContainer: View {
     /// Beside a fold, the sidebar fills the page before it.
     private var shownSidebarWidth: CGFloat {
         chatFold?.minX ?? sidebarWidth
+    }
+
+    /// The chat's label in the middle of the top bar: the logo beside the
+    /// open sidebar, or the project, temporary chat, storage and prompt the
+    /// chat is in.
+    private var toolbarLabel: some View {
+        VStack(spacing: 1) {
+            ZStack {
+                Image(colorScheme == .dark ? "logo-white" : "logo-dark")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: sidebarLogoHeight)
+                    .opacity(showsSidebarLogo ? 1 : 0)
+                    .accessibilityLabel("Tinfoil")
+                    .accessibilityHidden(!showsSidebarLogo)
+
+                if showsStorageLabel {
+                    chatStorageLabel
+                        .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
+                        .accessibilityHidden(isSidebarOpen || isVerificationBadgeExpanded)
+                }
+
+                if let activeProject = viewModel.activeProject {
+                    HStack(spacing: 6) {
+                        ProjectFolderIcon(color: activeProject.color, size: 20)
+                        Text(activeProject.name)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .lineLimit(1)
+                            .foregroundColor(toolbarContentColor)
+                    }
+                    .opacity(isVerificationBadgeExpanded ? 0 : 1)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Project: \(activeProject.name)")
+                    .accessibilityHidden(isVerificationBadgeExpanded)
+                }
+
+                if viewModel.isTemporaryMode && viewModel.activeProject == nil {
+                    HStack(spacing: 6) {
+                        GhostIcon(size: 14, color: toolbarContentColor, style: .filled)
+                        Text("Temporary")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(toolbarContentColor)
+                    }
+                    .opacity(isSidebarOpen || isVerificationBadgeExpanded ? 0 : 1)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Temporary chat")
+                    .accessibilityHidden(isSidebarOpen || isVerificationBadgeExpanded)
+                }
+            }
+            .frame(height: showsPrimaryToolbarLabel ? (showsSidebarLogo ? sidebarLogoHeight : toolbarPrimaryLabelHeight) : 0)
+
+            if let preset = activePromptPreset,
+               !isSidebarOpen && !isVerificationBadgeExpanded && !isBarTooShortForTwoLabels {
+                HStack(spacing: 4) {
+                    Image(tinfoil: preset.icon)
+                        .font(.system(size: 9, weight: .semibold))
+                    Text(preset.name)
+                        .font(.system(.caption2, weight: .medium))
+                        .lineLimit(1)
+                }
+                .foregroundColor(toolbarContentColor.opacity(0.7))
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Prompt: \(preset.name)")
+            }
+        }
+        // Centered over the chat rather than the whole screen.
+        .offset(x: chatLeadingEdge / 2)
+        .animation(.easeInOut(duration: 0.2), value: isSidebarOpen)
+        .animation(.easeInOut(duration: 0.35), value: isVerificationBadgeExpanded)
     }
 
     /// Where the chat starts: past the sidebar while it sits open beside it,
