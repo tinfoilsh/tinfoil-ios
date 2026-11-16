@@ -1496,16 +1496,54 @@ struct MessageBubbleModifier: ViewModifier {
     func body(content: Content) -> some View {
         Group {
             if isUserMessage {
-                content
-                    // User messages get adaptive width based on content with minimum width
-                    .frame(minWidth: 60, idealWidth: nil, maxWidth: max(60, UIScreen.main.bounds.width * 0.85), alignment: .trailing)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                // User messages get adaptive width based on content with minimum width
+                RowShareLayout(
+                    edge: .trailing,
+                    maximumWidthFraction: Constants.UI.UserBubble.maximumWidthFraction,
+                    minimumWidth: Constants.UI.UserBubble.minimumWidth
+                ) {
+                    content
+                        .frame(minWidth: Constants.UI.UserBubble.minimumWidth, alignment: .trailing)
+                }
             } else {
                 content
                     // Assistant messages get nearly full width
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+}
+
+/// Places its content against one edge of the row it is offered, no wider
+/// than a share of that row, so it narrows and widens with the chat rather
+/// than with the screen.
+private struct RowShareLayout: Layout {
+    let edge: HorizontalEdge
+    let maximumWidthFraction: CGFloat
+    var minimumWidth: CGFloat = 0
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let content = subviews.first else { return .zero }
+        let size = content.sizeThatFits(contentProposal(in: proposal))
+        return CGSize(width: max(size.width, proposal.width ?? size.width), height: size.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let content = subviews.first else { return }
+        let size = content.sizeThatFits(contentProposal(in: ProposedViewSize(bounds.size)))
+        content.place(
+            at: CGPoint(x: edge == .leading ? bounds.minX : bounds.maxX, y: bounds.minY),
+            anchor: edge == .leading ? .topLeading : .topTrailing,
+            proposal: ProposedViewSize(size)
+        )
+    }
+
+    private func contentProposal(in proposal: ProposedViewSize) -> ProposedViewSize {
+        guard let rowWidth = proposal.width else { return proposal }
+        return ProposedViewSize(
+            width: max(minimumWidth, rowWidth * maximumWidthFraction),
+            height: proposal.height
+        )
     }
 }
 
@@ -1601,7 +1639,9 @@ private struct InlineSelectableUserText: UIViewRepresentable {
         uiView textView: UITextView,
         context: Context
     ) -> CGSize? {
-        let maximumWidth = proposal.width ?? UIScreen.main.bounds.width * 0.85
+        // With no width offered, the text's ideal size is its unwrapped
+        // width, which the bubble around it then caps.
+        let maximumWidth = proposal.width ?? .greatestFiniteMagnitude
         textView.textContainer.size = CGSize(width: maximumWidth, height: .greatestFiniteMagnitude)
         textView.layoutManager.ensureLayout(for: textView.textContainer)
 
@@ -1986,37 +2026,15 @@ private struct SourcesButton: View {
 
     private static let label = "Sources"
 
-    private var labelWidth: CGFloat {
-        let descriptor = UIFontDescriptor
-            .preferredFontDescriptor(withTextStyle: .footnote)
-            .addingAttributes([.traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.medium]])
-        let font = UIFont(descriptor: descriptor, size: 0)
-        return (Self.label as NSString).size(withAttributes: [.font: font]).width
-    }
-
-    /// How many overlapping favicons fit beside the label without the pill
-    /// exceeding its share of the screen. Each favicon after the first only
-    /// adds its non-overlapped portion.
-    private var maxFaviconCount: Int {
-        let layout = Constants.SourcesButton.self
-        let maxWidth = UIScreen.main.bounds.width * layout.maxWidthFraction
-        let fixedWidth = layout.horizontalPadding * 2 + labelWidth + layout.labelSpacing
-        let faviconStride = layout.faviconSize - layout.faviconOverlap
-        let available = maxWidth - fixedWidth - layout.faviconOverlap
-        return max(1, Int(available / faviconStride))
-    }
-
     private var uniqueDomainSources: [(domain: String, url: String)] {
         var seen = Set<String>()
         var entries: [(domain: String, url: String)] = []
-        let limit = maxFaviconCount
         for source in sources {
             let domain = getDomain(from: source.url)
             if !seen.contains(domain) {
                 seen.insert(domain)
                 entries.append((domain: domain, url: source.url))
             }
-            if entries.count >= limit { break }
         }
         return entries
     }
@@ -2048,8 +2066,20 @@ private struct SourcesButton: View {
     }
 
     var body: some View {
-        let displayedSources = uniqueDomainSources
+        let domainSources = uniqueDomainSources
 
+        // The pill shows as many favicons as fit within its share of the
+        // chat's width, dropping those that would push it wider.
+        RowShareLayout(edge: .leading, maximumWidthFraction: Constants.SourcesButton.maxWidthFraction) {
+            ViewThatFits(in: .horizontal) {
+                ForEach(Array((1...max(1, domainSources.count)).reversed()), id: \.self) { count in
+                    pill(showing: Array(domainSources.prefix(count)))
+                }
+            }
+        }
+    }
+
+    private func pill(showing displayedSources: [(domain: String, url: String)]) -> some View {
         Button(action: action) {
             HStack(spacing: Constants.SourcesButton.labelSpacing) {
                 Text(Self.label)

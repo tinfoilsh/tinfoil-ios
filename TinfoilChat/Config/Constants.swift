@@ -61,6 +61,14 @@ enum Constants {
         static let modelSelectorLayoutPriority: Double = 1
         static let chatTitleActionHitTargetSize: CGFloat = 44
 
+        /// A user's message bubble, which hugs its text against the
+        /// trailing edge of its row.
+        enum UserBubble {
+            static let minimumWidth: CGFloat = 60
+            /// The widest a bubble grows, as a share of the row it sits in.
+            static let maximumWidthFraction: CGFloat = 0.92
+        }
+
         enum TextureGrid {
             static let spacing: CGFloat = 16
             static let lineWidth: CGFloat = 1
@@ -203,7 +211,7 @@ enum Constants {
         static let faviconOverlap: CGFloat = 6
         static let labelSpacing: CGFloat = 4
         static let horizontalPadding: CGFloat = 12
-        /// The pill never grows past this share of the screen width; favicons
+        /// The pill never grows past this share of the chat's width; favicons
         /// that would push it wider are dropped.
         static let maxWidthFraction: CGFloat = 0.6
     }
