@@ -24,7 +24,7 @@ struct EncryptionKeyInputView: View {
     @Environment(\.dismiss) var dismiss
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack(spacing: 0) {
                 // Header explanation
                 VStack(spacing: 20) {

@@ -28,7 +28,7 @@ struct ModularAuthenticationView: View {
   @StateObject private var legalConsent = SignUpLegalConsent()
   
   var body: some View {
-    NavigationView {
+    NavigationStack {
       GeometryReader { _ in
         ZStack {
           // Background
