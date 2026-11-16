@@ -30,6 +30,9 @@ struct MessageTableView: UIViewRepresentable {
         tableView.onMagicTap = { [weak coordinator = context.coordinator] in
             coordinator?.parent.viewModel.speechPlayer.stopIfActive() ?? false
         }
+        tableView.onWidthChange = { [weak coordinator = context.coordinator] in
+            coordinator?.discardRowHeights()
+        }
         tableView.backgroundColor = .clear
         tableView.separatorStyle = .none
         tableView.delegate = context.coordinator
@@ -493,6 +496,14 @@ struct MessageTableView: UIViewRepresentable {
         /// is resized, unlike the screen's.
         var windowHeight: CGFloat {
             tableView?.window?.bounds.height ?? 0
+        }
+
+        /// Row heights measured or estimated at one width are wrong at
+        /// another, and would make the table jump as it scrolls.
+        func discardRowHeights() {
+            heightCache.removeAll()
+            messageHeightCache.removeAll()
+            contentEstimateCache.removeAll()
         }
 
         func getOrCreateWrapper(for message: Message, isDarkMode: Bool, isLastMessage: Bool, isLoading: Bool, messageIndex: Int) -> ObservableMessageWrapper {
@@ -1073,9 +1084,21 @@ struct MessageTableView: UIViewRepresentable {
 /// false when nothing is playing so Magic Tap still pauses other apps' media.
 final class MessageListTableView: UITableView {
     var onMagicTap: (@MainActor () -> Bool)?
+    /// Called before the rows lay out at a new width, as when the device
+    /// folds or the app is resized, which wraps every message again.
+    var onWidthChange: (@MainActor () -> Void)?
+    private var laidOutWidth: CGFloat?
 
     override func accessibilityPerformMagicTap() -> Bool {
         onMagicTap?() ?? false
+    }
+
+    override func layoutSubviews() {
+        if let laidOutWidth, laidOutWidth != bounds.width {
+            onWidthChange?()
+        }
+        laidOutWidth = bounds.width
+        super.layoutSubviews()
     }
 }
 
