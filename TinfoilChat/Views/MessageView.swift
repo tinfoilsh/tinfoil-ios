@@ -1640,8 +1640,8 @@ private struct InlineSelectableUserText: UIViewRepresentable {
         uiView textView: UITextView,
         context: Context
     ) -> CGSize? {
-        // With no width offered, the text's ideal size is its unwrapped
-        // width, which the bubble around it then caps.
+        // With no width offered, the text reports its unwrapped width as
+        // its ideal size, as SwiftUI's Text does.
         let maximumWidth = proposal.width ?? .greatestFiniteMagnitude
         textView.textContainer.size = CGSize(width: maximumWidth, height: .greatestFiniteMagnitude)
         textView.layoutManager.ensureLayout(for: textView.textContainer)
