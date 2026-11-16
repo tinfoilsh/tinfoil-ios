@@ -140,9 +140,7 @@ struct MessageTableView: UIViewRepresentable {
                 context.coordinator.cancelReveal()
                 context.coordinator.messageWrappers.removeAll()
                 context.coordinator.shownMessageIds.removeAll()
-                context.coordinator.heightCache.removeAll()
-                context.coordinator.messageHeightCache.removeAll()
-                context.coordinator.contentEstimateCache.removeAll()
+                context.coordinator.discardRowHeights()
 
                 // Drop any streaming inset left behind by the previous chat,
                 // and reset a blank chat to the top since no scroll trigger
@@ -167,9 +165,7 @@ struct MessageTableView: UIViewRepresentable {
                 // All message IDs are different - clear stale wrappers
                 context.coordinator.messageWrappers.removeAll()
                 context.coordinator.shownMessageIds.removeAll()
-                context.coordinator.heightCache.removeAll()
-                context.coordinator.messageHeightCache.removeAll()
-                context.coordinator.contentEstimateCache.removeAll()
+                context.coordinator.discardRowHeights()
             } else {
                 // Drop any wrappers and cached heights that belong to messages
                 // that no longer exist. Without this, long sessions accumulate
@@ -498,8 +494,8 @@ struct MessageTableView: UIViewRepresentable {
             tableView?.window?.bounds.height ?? 0
         }
 
-        /// Row heights measured or estimated at one width are wrong at
-        /// another, and would make the table jump as it scrolls.
+        /// Row heights measured or estimated for other rows, or at another
+        /// width, would make the table jump as it scrolls.
         func discardRowHeights() {
             heightCache.removeAll()
             messageHeightCache.removeAll()
