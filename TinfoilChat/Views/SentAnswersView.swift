@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 private enum SentAnswersLayout {
     static let cornerRadius: CGFloat = 16
@@ -17,8 +18,8 @@ private enum SentAnswersLayout {
 }
 
 private enum SentAnswersSymbol {
-    static let answers = "checklist"
-    static let chevron = "chevron.down"
+    static let answers: TinfoilIcon = .list
+    static let chevron: TinfoilIcon = .chevronDown
 }
 
 /// The answers a message sent to questions widgets: a card that counts the
@@ -53,11 +54,11 @@ struct SentAnswersView: View {
                 withAnimation(.easeInOut(duration: SentAnswersLayout.animationDuration)) { isExpanded.toggle() }
             } label: {
                 HStack(spacing: SentAnswersLayout.headerSpacing) {
-                    Image(systemName: SentAnswersSymbol.answers)
+                    Image(tinfoil: SentAnswersSymbol.answers)
                         .accessibilityHidden(true)
                     Text(summary)
                         .font(.subheadline.weight(.medium))
-                    Image(systemName: SentAnswersSymbol.chevron)
+                    Image(tinfoil: SentAnswersSymbol.chevron)
                         .font(.caption)
                         .rotationEffect(.degrees(isExpanded ? SentAnswersLayout.chevronExpandedRotation : 0))
                         .accessibilityHidden(true)

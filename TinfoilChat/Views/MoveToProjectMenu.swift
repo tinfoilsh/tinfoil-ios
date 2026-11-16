@@ -1,4 +1,5 @@
 import SwiftUI
+import TinfoilIcons
 
 /// Context-menu submenu listing the projects a chat can be filed under, so
 /// a long project list doesn't crowd the parent menu.
@@ -22,7 +23,7 @@ struct MoveToProjectMenu: View {
                     }
                 }
             } label: {
-                Label(title, systemImage: "folder")
+                Label(title, tinfoil: .folder)
             }
         }
     }

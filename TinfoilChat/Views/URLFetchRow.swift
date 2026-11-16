@@ -6,6 +6,7 @@
 //  Copyright © 2026 Tinfoil. All rights reserved.
 
 import SwiftUI
+import TinfoilIcons
 
 /// A single link read inside an open link-read step
 struct URLFetchRow: View {
@@ -38,7 +39,7 @@ struct URLFetchRow: View {
                 Spacer()
 
                 if fetch.status == .completed {
-                    Image(systemName: "arrow.up.right")
+                    Image(tinfoil: .arrowUpRight)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundColor(isDarkMode ? .white.opacity(0.4) : .black.opacity(0.4))
                 }

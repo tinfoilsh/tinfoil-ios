@@ -6,6 +6,7 @@
 //  rendered components feel like a coherent set.
 
 import SwiftUI
+import TinfoilIcons
 
 enum GenUIStyle {
     static let cornerRadius: CGFloat = 12
@@ -111,7 +112,7 @@ struct GenUIRemoteImage: View {
                     Rectangle()
                         .fill(GenUIStyle.subtleBackground(isDarkMode))
                         .overlay(
-                            Image(systemName: "photo")
+                            Image(tinfoil: .image)
                                 .foregroundColor(GenUIStyle.mutedText(isDarkMode))
                         )
                 @unknown default:
@@ -122,7 +123,7 @@ struct GenUIRemoteImage: View {
             Rectangle()
                 .fill(GenUIStyle.subtleBackground(isDarkMode))
                 .overlay(
-                    Image(systemName: "photo")
+                    Image(tinfoil: .image)
                         .foregroundColor(GenUIStyle.mutedText(isDarkMode))
                 )
         }

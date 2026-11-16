@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import TinfoilIcons
 @testable import TinfoilChat
 
 struct FilePreviewClassifierTests {
@@ -34,10 +35,10 @@ struct FilePreviewClassifierTests {
         #expect(FilePreviewClassifier.excerpt(longLine).count == Constants.FilePreview.textMaxCharacters)
     }
 
-    @Test func iconNameMatchesFileType() {
-        #expect(FilePreviewClassifier.iconName(for: "a.pdf") == "doc.richtext")
-        #expect(FilePreviewClassifier.iconName(for: "a.CSV") == "tablecells")
-        #expect(FilePreviewClassifier.iconName(for: "a.heic") == "photo")
-        #expect(FilePreviewClassifier.iconName(for: "a.bin") == "doc.text")
+    @Test func iconMatchesFileType() {
+        #expect(FilePreviewClassifier.icon(for: "a.pdf") == .document)
+        #expect(FilePreviewClassifier.icon(for: "a.CSV") == .tools)
+        #expect(FilePreviewClassifier.icon(for: "a.heic") == .image)
+        #expect(FilePreviewClassifier.icon(for: "a.html") == .globe)
     }
 }

@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 struct ChatListView: View {
     @EnvironmentObject private var authManager: AuthManager
@@ -75,7 +76,7 @@ struct ChatListView: View {
                         Button(action: {
                             scrollTrigger = UUID()
                         }) {
-                            Image(systemName: "arrow.down")
+                            Image(tinfoil: .arrowDown)
                                 .font(.system(size: 12, weight: .semibold))
                                 .frame(width: Constants.UI.scrollToBottomButtonSize, height: Constants.UI.scrollToBottomButtonSize)
                         }
@@ -86,7 +87,7 @@ struct ChatListView: View {
                         Button(action: {
                             scrollTrigger = UUID()
                         }) {
-                            Image(systemName: "arrow.down.circle.fill")
+                            Image(tinfoil: .arrowDownCircle)
                                 .font(.system(size: 24))
                                 .foregroundColor(.white)
                                 .padding(8)

@@ -8,6 +8,7 @@
 import SwiftUI
 import ClerkKit
 import UIKit
+import TinfoilIcons
 
 struct ModularAuthenticationView: View {
   var onAuthenticated: (() -> Void)? = nil
@@ -90,7 +91,7 @@ struct ModularAuthenticationView: View {
           Button(action: {
             dismiss()
           }) {
-            Image(systemName: "xmark")
+            Image(tinfoil: .xmark)
               .font(.system(size: 18, weight: .medium))
           }
           .accessibilityLabel("Close authentication screen")

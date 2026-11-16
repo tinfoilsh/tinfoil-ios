@@ -1,6 +1,7 @@
 import ClerkKit
 import CoreImage.CIFilterBuiltins
 import SwiftUI
+import TinfoilIcons
 import UIKit
 
 struct AuthenticatorMFASettingsView: View {
@@ -233,7 +234,7 @@ private struct AuthenticatorMFASetupView: View {
                             Button {
                                 copySetupKey()
                             } label: {
-                                Image(systemName: setupKeyCopied ? "checkmark" : "doc.on.doc")
+                                Image(tinfoil: setupKeyCopied ? .checkmark : .copy)
                             }
                             .accessibilityLabel(setupKeyCopied ? "Setup key copied" : "Copy setup key")
                         }
@@ -382,7 +383,7 @@ private struct BackupCodesView: View {
                     } label: {
                         Label(
                             codesCopied ? "Copied" : "Copy Codes",
-                            systemImage: codesCopied ? "checkmark" : "doc.on.doc"
+                            tinfoil: codesCopied ? .checkmark : .copy
                         )
                         .frame(maxWidth: .infinity)
                     }
@@ -391,7 +392,7 @@ private struct BackupCodesView: View {
                     Button {
                         shareCodes()
                     } label: {
-                        Label("Save or Share Text File", systemImage: "square.and.arrow.up")
+                        Label("Save or Share Text File", tinfoil: .share)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)

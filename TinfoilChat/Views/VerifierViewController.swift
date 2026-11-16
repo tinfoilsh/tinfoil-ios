@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Tinfoil
+import TinfoilIcons
 
 // MARK: - Verification Section
 
@@ -25,11 +26,11 @@ private enum VerificationSection: String, CaseIterable, Identifiable {
         }
     }
 
-    var iconName: String {
+    var icon: TinfoilIcon {
         switch self {
-        case .encryption: return "lock"
-        case .code: return "terminal"
-        case .runtime: return "cpu"
+        case .encryption: return .lock
+        case .code: return .terminal
+        case .runtime: return .cpuCheck
         }
     }
 }
@@ -76,7 +77,7 @@ struct VerifierView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { chatViewModel.dismissVerifier() }) {
-                        Image(systemName: "xmark")
+                        Image(tinfoil: .xmark)
                             .font(.system(size: 18, weight: .medium))
                     }
                     .accessibilityLabel("Close verification screen")
@@ -271,7 +272,7 @@ struct VerifierView: View {
     ) -> some View {
         Button(action: action) {
             HStack(spacing: Constants.UI.VerificationCenter.drawerHeaderSpacing) {
-                Image(systemName: section.iconName)
+                Image(tinfoil: section.icon)
                     .font(.system(size: Constants.UI.VerificationCenter.drawerIconSize, weight: .medium))
                     .foregroundColor(verificationAccent)
                     .frame(width: Constants.UI.VerificationCenter.drawerIconWidth)
@@ -284,7 +285,7 @@ struct VerifierView: View {
 
                 statusBadge(status)
 
-                Image(systemName: "chevron.down")
+                Image(tinfoil: .chevronDown)
                     .font(.system(size: Constants.UI.VerificationCenter.drawerChevronSize, weight: .semibold))
                     .foregroundColor(.secondary)
                     .frame(width: Constants.UI.VerificationCenter.drawerChevronWidth)
@@ -331,12 +332,12 @@ struct VerifierView: View {
     private func statusBadge(_ status: VerifierStatus) -> some View {
         switch status {
         case .success:
-            Image(systemName: "checkmark.circle.fill")
+            Image(tinfoil: .checkmarkCircle)
                 .font(.system(size: 18))
                 .foregroundColor(verificationAccent)
                 .background(Circle().fill(isDarkMode ? Color.backgroundPrimary : .white).padding(2))
         case .error:
-            Image(systemName: "xmark.circle.fill")
+            Image(tinfoil: .xmarkCircle)
                 .font(.system(size: 18))
                 .foregroundColor(.red)
                 .background(Circle().fill(isDarkMode ? Color.backgroundPrimary : .white).padding(2))
@@ -435,7 +436,7 @@ private struct EncryptionSectionCards: View {
     var body: some View {
         VStack(spacing: 16) {
             FingerprintCard(
-                icon: "key.fill",
+                icon: .key,
                 label: "Your unique encryption key",
                 value: verification.hpkePublicKey ?? "",
                 successBadgeText: "Attested",
@@ -480,7 +481,7 @@ private struct CodeSectionCards: View {
     var body: some View {
         VStack(spacing: 16) {
             FingerprintCard(
-                icon: "touchid",
+                icon: .fingerprint,
                 label: "Release digest",
                 value: verification.codeDigest,
                 successBadgeText: "Verified",
@@ -561,7 +562,7 @@ private struct RuntimeSectionCards: View {
     var body: some View {
         VStack(spacing: 16) {
             FingerprintCard(
-                icon: "touchid",
+                icon: .fingerprint,
                 label: "Enclave TLS key fingerprint",
                 value: verification.tlsPublicKeyFingerprint,
                 successBadgeText: "Attested",
@@ -616,7 +617,7 @@ private extension Verification {
 // MARK: - Shared Components
 
 private struct FingerprintCard: View {
-    let icon: String
+    let icon: TinfoilIcon
     let label: String
     let value: String
     let successBadgeText: String
@@ -626,7 +627,7 @@ private struct FingerprintCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Image(systemName: icon)
+                Image(tinfoil: icon)
                     .font(.system(size: 16))
                     .foregroundColor(.secondary)
                 Text(label)
@@ -658,7 +659,7 @@ private struct FingerprintCard: View {
             HStack(spacing: 4) {
                 Text(successBadgeText)
                     .font(.system(size: 13, weight: .medium))
-                Image(systemName: "checkmark")
+                Image(tinfoil: .checkmark)
                     .font(.system(size: 11, weight: .bold))
             }
             .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
@@ -666,7 +667,7 @@ private struct FingerprintCard: View {
             HStack(spacing: 4) {
                 Text("Failed")
                     .font(.system(size: 13, weight: .medium))
-                Image(systemName: "xmark")
+                Image(tinfoil: .xmark)
                     .font(.system(size: 11, weight: .bold))
             }
             .foregroundColor(.red)
@@ -674,7 +675,7 @@ private struct FingerprintCard: View {
             HStack(spacing: 4) {
                 Text("Pending")
                     .font(.system(size: 13, weight: .medium))
-                Image(systemName: "clock")
+                Image(tinfoil: .clock)
                     .font(.system(size: 11, weight: .bold))
             }
             .foregroundColor(.secondary)
@@ -708,7 +709,7 @@ private struct ExternalLink: View {
                 HStack(spacing: 4) {
                     Text(text)
                         .font(.system(size: 13, weight: .medium))
-                    Image(systemName: "arrow.up.right")
+                    Image(tinfoil: .arrowUpRight)
                         .font(.system(size: 10, weight: .semibold))
                 }
                 .foregroundColor(Color.verificationAccent(isDarkMode: colorScheme == .dark))

@@ -8,6 +8,7 @@
 //  input area. Mirrors the webapp's MessageQueue component.
 
 import SwiftUI
+import TinfoilIcons
 
 struct MessageQueueView: View {
     let queue: [QueuedMessage]
@@ -75,7 +76,7 @@ private struct QueuedMessageRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "list.bullet")
+            Image(tinfoil: .list)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.secondary)
                 .padding(.top, 3)
@@ -92,7 +93,7 @@ private struct QueuedMessageRow: View {
                 }
                 ForEach(namedAttachments) { attachment in
                     HStack(spacing: 4) {
-                        Image(systemName: "doc.text")
+                        Image(tinfoil: .document)
                             .font(.system(size: 11))
                         Text(attachment.fileName)
                             .font(.system(size: 12))
@@ -112,7 +113,7 @@ private struct QueuedMessageRow: View {
             Button {
                 onRemove(item.id)
             } label: {
-                Image(systemName: "trash")
+                Image(tinfoil: .trash)
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
                     // Lays out at one text line's height so the compact row

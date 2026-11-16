@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 private enum ResearchLipLayout {
     /// How far the lip sits from the bubble's trailing edge, clear of its
@@ -21,7 +22,7 @@ private enum ResearchLipLayout {
 private struct ResearchLipLabel: View {
     var body: some View {
         HStack(spacing: ResearchLipLayout.labelSpacing) {
-            Image(systemName: Constants.Research.systemImage)
+            Image(tinfoil: Constants.Research.icon)
             Text(Constants.Research.label)
                 .lineLimit(1)
         }

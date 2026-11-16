@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 struct MessageComposeWidget: GenUIWidget {
     struct Variant: Decodable {
@@ -118,7 +119,7 @@ private struct MessageComposeView: View {
             if let variant {
                 Button(action: { openMail(variant: variant) }) {
                     HStack(spacing: 4) {
-                        Image(systemName: "paperplane.fill").font(.caption2)
+                        Image(tinfoil: .arrowUpRight).font(.caption2)
                         Text("Open in mail").font(.caption2.weight(.semibold))
                     }
                     .padding(.horizontal, 8)
@@ -204,7 +205,7 @@ private struct MessageComposeView: View {
     private var copyButton: some View {
         Button(action: copy) {
             HStack(spacing: 4) {
-                Image(systemName: "doc.on.doc").font(.caption2)
+                Image(tinfoil: .copy).font(.caption2)
                 Text(copied ? "Copied" : "Copy").font(.caption2.weight(.medium))
             }
             .padding(.horizontal, 8)

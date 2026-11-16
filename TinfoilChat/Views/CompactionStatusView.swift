@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 /// Says the open chat is being compacted, above the composer and the
 /// message queued behind the compaction, which sends once it ends. Mirrors
@@ -53,7 +54,7 @@ struct CompactedNoticeView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "checkmark.circle")
+            Image(tinfoil: .checkmarkCircle)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.secondary)
                 .padding(.top, 1)
@@ -67,7 +68,7 @@ struct CompactedNoticeView: View {
             }
             Spacer(minLength: 0)
             Button(action: onDismiss) {
-                Image(systemName: "xmark")
+                Image(tinfoil: .xmark)
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
                     .frame(width: 20, height: 20)

@@ -8,6 +8,7 @@
 //  the full image set, a close button, and an optional caption.
 
 import SwiftUI
+import TinfoilIcons
 
 private let previewCloseButtonInset: CGFloat = 16
 private let previewMinScale: CGFloat = 1.0
@@ -60,7 +61,7 @@ struct ImagePreviewView: View {
             .simultaneousGesture(dismissGesture)
 
             Button(action: { isPresented = false }) {
-                Image(systemName: "xmark")
+                Image(tinfoil: .xmark)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.white)
                     .frame(width: 36, height: 36)
@@ -153,7 +154,7 @@ private struct ZoomableImage: View {
                         .scaleEffect(scale)
                         .offset(offset)
                 case .failure:
-                    Image(systemName: "photo")
+                    Image(tinfoil: .image)
                         .font(.largeTitle)
                         .foregroundColor(.white.opacity(0.6))
                 @unknown default:
@@ -162,7 +163,7 @@ private struct ZoomableImage: View {
             }
             .accessibilityLabel(altText)
         } else {
-            Image(systemName: "photo")
+            Image(tinfoil: .image)
                 .font(.largeTitle)
                 .foregroundColor(.white.opacity(0.6))
         }

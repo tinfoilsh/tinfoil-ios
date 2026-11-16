@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 import UIKit
 
 /// Covers each window scene, sheets included, while it is not active.
@@ -92,7 +93,7 @@ private struct ConcealedWhileCaptured: ViewModifier {
             .accessibilityHidden(captured)
             .overlay {
                 if captured {
-                    Label(Constants.Privacy.concealedLabel, systemImage: "eye.slash")
+                    Label(Constants.Privacy.concealedLabel, tinfoil: .eyeSlash)
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(1)

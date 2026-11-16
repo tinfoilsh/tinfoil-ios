@@ -5,6 +5,7 @@
 //  Copyright © 2025 Tinfoil. All rights reserved.
 
 import SwiftUI
+import TinfoilIcons
 
 private enum Base64ImageDecoder {
     static let cache = NSCache<NSString, UIImage>()
@@ -157,7 +158,7 @@ private struct AttachmentChip: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: iconName)
+            Image(tinfoil: icon)
                 .font(.system(size: 14))
                 .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
 
@@ -176,8 +177,8 @@ private struct AttachmentChip: View {
         .accessibilityLabel("Attachment, \(attachment.fileName)")
     }
 
-    private var iconName: String {
-        FilePreviewClassifier.iconName(for: attachment.fileName)
+    private var icon: TinfoilIcon {
+        FilePreviewClassifier.icon(for: attachment.fileName)
     }
 }
 
@@ -198,7 +199,7 @@ private struct ImageThumbnail: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color.gray.opacity(0.3))
                 .overlay {
-                    Image(systemName: "photo")
+                    Image(tinfoil: .image)
                         .foregroundColor(.gray)
                 }
         }
@@ -292,7 +293,7 @@ struct ImageViewerOverlay: View {
                     Button {
                         onDismiss()
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
+                        Image(tinfoil: .xmarkCircle)
                             .font(.system(size: 30))
                             .foregroundStyle(.white.opacity(0.8))
                     }
@@ -310,7 +311,7 @@ struct ImageViewerOverlay: View {
                                 currentIndex = max(0, currentIndex - 1)
                             }
                         } label: {
-                            Image(systemName: "chevron.left.circle.fill")
+                            Image(tinfoil: .chevronLeftCircle)
                                 .font(.system(size: 36))
                                 .foregroundStyle(.white.opacity(currentIndex > 0 ? 0.7 : 0.2))
                         }
@@ -324,7 +325,7 @@ struct ImageViewerOverlay: View {
                                 currentIndex = min(images.count - 1, currentIndex + 1)
                             }
                         } label: {
-                            Image(systemName: "chevron.right.circle.fill")
+                            Image(tinfoil: .chevronRightCircle)
                                 .font(.system(size: 36))
                                 .foregroundStyle(.white.opacity(currentIndex < images.count - 1 ? 0.7 : 0.2))
                         }
@@ -406,7 +407,7 @@ struct ZoomableImagePage: View {
                     }
             } else if failed {
                 VStack(spacing: 12) {
-                    Image(systemName: "photo")
+                    Image(tinfoil: .image)
                         .font(.system(size: 40))
                         .foregroundStyle(.white.opacity(0.5))
                     Text("Unable to load image")

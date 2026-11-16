@@ -11,6 +11,7 @@
 import CoreLocation
 import MapKit
 import SwiftUI
+import TinfoilIcons
 import UIKit
 
 struct MapWidget: GenUIWidget {
@@ -318,7 +319,7 @@ private struct MapWidgetView: View {
             if args.locations.count == 1, let primary, primary.address != nil {
                 Button(action: copyAddress) {
                     HStack(spacing: 6) {
-                        Image(systemName: copyConfirmation ? "checkmark" : "doc.on.doc")
+                        Image(tinfoil: copyConfirmation ? .checkmark : .copy)
                         Text(copyConfirmation ? "Copied" : "Copy address")
                     }
                     .font(.caption.weight(.medium))
@@ -334,7 +335,7 @@ private struct MapWidgetView: View {
             }
             Button(action: openInMaps) {
                 HStack(spacing: 6) {
-                    Image(systemName: isDirections ? "arrow.triangle.turn.up.right.circle" : "mappin.and.ellipse")
+                    Image(tinfoil: isDirections ? .arrowUpRight : .externalLink)
                     Text(isDirections ? "Open directions" : "Open in Apple Maps")
                 }
                 .font(.caption.weight(.semibold))

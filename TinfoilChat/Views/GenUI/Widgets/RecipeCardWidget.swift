@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 private let recipeScaleOptions: [Double] = [1, 2, 3]
 private let defaultRecipeScale: Double = 1
@@ -103,7 +104,7 @@ private struct RecipeCardView: View {
 
     private struct MetaItem: Identifiable {
         let id = UUID()
-        let icon: String
+        let icon: TinfoilIcon
         let label: String
         let value: String
         let scaled: Bool
@@ -112,18 +113,18 @@ private struct RecipeCardView: View {
     private var metaItems: [MetaItem] {
         var items: [MetaItem] = []
         if let prep = args.prepTime, !prep.isEmpty {
-            items.append(.init(icon: "clock", label: "PREP", value: prep, scaled: false))
+            items.append(.init(icon: .clock, label: "PREP", value: prep, scaled: false))
         }
         if let cook = args.cookTime, !cook.isEmpty {
-            items.append(.init(icon: "flame", label: "COOK", value: cook, scaled: false))
+            items.append(.init(icon: .clock, label: "COOK", value: cook, scaled: false))
         }
         if items.isEmpty, let total = args.totalTime, !total.isEmpty {
-            items.append(.init(icon: "clock", label: "TOTAL", value: total, scaled: false))
+            items.append(.init(icon: .clock, label: "TOTAL", value: total, scaled: false))
         }
         if let servings = args.servings?.stringValue, !servings.isEmpty {
             let scaledServings = scaleQuantityText(servings, scale: recipeScale)
             items.append(.init(
-                icon: "person.2",
+                icon: .person,
                 label: "SERVES",
                 value: scaledServings,
                 scaled: recipeScale != defaultRecipeScale && scaledServings != servings
@@ -207,7 +208,7 @@ private struct RecipeCardView: View {
         RecipeTagFlowLayout(spacing: 8) {
             ForEach(metaItems) { item in
                 HStack(spacing: 8) {
-                    Image(systemName: item.icon)
+                    Image(tinfoil: item.icon)
                         .font(.caption.weight(.medium))
                         .foregroundColor(GenUIStyle.mutedText(isDarkMode))
                     VStack(alignment: .leading, spacing: 1) {
@@ -281,7 +282,7 @@ private struct RecipeCardView: View {
             if checked { checkedIngredients.remove(index) } else { checkedIngredients.insert(index) }
         }) {
             HStack(alignment: .top, spacing: 8) {
-                Image(systemName: checked ? "checkmark.square.fill" : "square")
+                Image(tinfoil: checked ? .boxCheck : .square)
                     .foregroundColor(checked ? recipeAccent : GenUIStyle.mutedText(isDarkMode))
                     .font(.subheadline)
                 VStack(alignment: .leading, spacing: 2) {
@@ -347,7 +348,7 @@ private struct RecipeCardView: View {
                     if done {
                         Circle().fill(recipeAccent)
                             .frame(width: 24, height: 24)
-                        Image(systemName: "checkmark")
+                        Image(tinfoil: .checkmark)
                             .font(.caption.weight(.bold))
                             .foregroundColor(.white)
                     } else {

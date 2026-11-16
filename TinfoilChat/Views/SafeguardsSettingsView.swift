@@ -1,4 +1,5 @@
 import SwiftUI
+import TinfoilIcons
 
 struct SafeguardsSettingsView: View {
     @EnvironmentObject private var authManager: AuthManager
@@ -70,7 +71,7 @@ struct SafeguardsSettingsView: View {
                             ProgressView()
                                 .progressViewStyle(.circular)
                         } else {
-                            Image(systemName: "arrow.clockwise")
+                            Image(tinfoil: .refreshTwoArrows)
                         }
                     }
                     .disabled(store.isLoading)
@@ -108,7 +109,7 @@ struct SafeguardsSettingsView: View {
                 text: "Only a flag linked to your account and chat ID leaves the enclaves—not the conversation or flagged category. Encrypted stored backups are not scanned; checks happen only at inference time."
             )
             Link(destination: Constants.Safeguards.infoURL) {
-                Label("Learn how safeguards work", systemImage: "arrow.up.right.square")
+                Label("Learn how safeguards work", tinfoil: .externalLink)
             }
         } header: {
             Text("How it works")
@@ -207,7 +208,7 @@ struct SafeguardsSettingsView: View {
             }
         } label: {
             HStack(spacing: Constants.Safeguards.contentSpacing) {
-                Image(systemName: "flag.fill")
+                Image(tinfoil: .flagFilled)
                     .foregroundStyle(isInWindow ? Color.red : Color.secondary)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading) {
@@ -230,7 +231,7 @@ struct SafeguardsSettingsView: View {
                 }
                 Spacer()
                 if !store.usesExamples && flag.chatURL != nil {
-                    Image(systemName: summary == nil ? "arrow.up.right.square" : "chevron.right")
+                    Image(tinfoil: summary == nil ? .externalLink : .chevronRight)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .accessibilityHidden(true)

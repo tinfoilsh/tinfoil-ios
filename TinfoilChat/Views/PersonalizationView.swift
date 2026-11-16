@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 import UIKit
 
 // Trait selection view for personality traits
@@ -21,7 +22,7 @@ struct TraitSelectionView: View {
                     toggleTrait(trait)
                 }) {
                     HStack(spacing: 6) {
-                        Image(systemName: selectedTraits.contains(trait) ? "checkmark" : "plus")
+                        Image(tinfoil: selectedTraits.contains(trait) ? .checkmark : .plus)
                             .font(.subheadline)
                         Text(trait)
                             .font(.subheadline)

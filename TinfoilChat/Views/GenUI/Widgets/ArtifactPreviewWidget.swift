@@ -9,6 +9,7 @@
 //  with its source one tap away, markdown rendered like a chat message).
 
 import SwiftUI
+import TinfoilIcons
 
 struct ArtifactPreviewWidget: GenUIWidget {
     enum SourceKind: String, Decodable { case url, html, markdown }
@@ -78,7 +79,7 @@ private struct ArtifactPreviewView: View {
     var body: some View {
         Button(action: openArtifact) {
             HStack(spacing: 12) {
-                Image(systemName: "doc.text")
+                Image(tinfoil: .document)
                     .font(.system(size: 22, weight: .regular))
                     .foregroundColor(GenUIStyle.mutedText(isDarkMode))
                     .frame(width: 28)
@@ -95,7 +96,7 @@ private struct ArtifactPreviewView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                Image(systemName: "chevron.right")
+                Image(tinfoil: .chevronRight)
                     .font(.caption.weight(.semibold))
                     .foregroundColor(GenUIStyle.mutedText(isDarkMode))
             }

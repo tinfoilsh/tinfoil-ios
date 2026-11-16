@@ -8,6 +8,7 @@
 import SwiftUI
 import ClerkKit
 import SafariServices
+import TinfoilIcons
 
 /// Search results, unlike the root list, surface project chats for Premium
 /// users; temporary chats are always excluded.
@@ -276,7 +277,7 @@ struct ChatSidebar: View, Equatable {
                 Task { await viewModel.reattemptPasskeyRecovery() }
             } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: "key.slash")
+                    Image(tinfoil: .keySlash)
                         .font(.subheadline)
                         .foregroundColor(.orange)
                     VStack(alignment: .leading, spacing: 2) {
@@ -289,7 +290,7 @@ struct ChatSidebar: View, Equatable {
                             .foregroundColor(.secondary)
                     }
                     Spacer()
-                    Image(systemName: "chevron.right")
+                    Image(tinfoil: .chevronRight)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -399,7 +400,7 @@ struct ChatSidebar: View, Equatable {
 
     private var chatSearchField: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
+            Image(tinfoil: .magnifyingGlass)
                 .font(.caption)
                 .foregroundColor(.secondary)
             TextField("Search chats...", text: $chatSearchTerm)
@@ -412,7 +413,7 @@ struct ChatSidebar: View, Equatable {
                 Button {
                     chatSearchTerm = ""
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
+                    Image(tinfoil: .xmarkCircle)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -529,7 +530,7 @@ struct ChatSidebar: View, Equatable {
                     } label: {
                         Label(
                             viewModel.isChatPinned(chat.id) ? "Unpin" : "Pin",
-                            systemImage: viewModel.isChatPinned(chat.id) ? "pin.slash" : "pin"
+                            tinfoil: viewModel.isChatPinned(chat.id) ? .thumbtackSlash : .thumbtack
                         )
                     }
                     .tint(.blue)
@@ -540,13 +541,13 @@ struct ChatSidebar: View, Equatable {
                     Button(role: .destructive) {
                         confirmDelete(chat)
                     } label: {
-                        Label("Delete", systemImage: "trash")
+                        Label("Delete", tinfoil: .trash)
                     }
                     .tint(.red)
                     Button {
                         startEditing(chat)
                     } label: {
-                        Label("Rename", systemImage: "square.and.pencil")
+                        Label("Rename", tinfoil: .writing)
                     }
                     .tint(.gray)
                 }
@@ -615,7 +616,7 @@ struct ChatSidebar: View, Equatable {
                     } label: {
                         Label(
                             viewModel.isChatPinned(chat.id) ? "Unpin" : "Pin",
-                            systemImage: viewModel.isChatPinned(chat.id) ? "pin.slash" : "pin"
+                            tinfoil: viewModel.isChatPinned(chat.id) ? .thumbtackSlash : .thumbtack
                         )
                     }
                 }
@@ -636,12 +637,12 @@ struct ChatSidebar: View, Equatable {
                     Button {
                         startEditing(chat)
                     } label: {
-                        Label("Rename", systemImage: "square.and.pencil")
+                        Label("Rename", tinfoil: .writing)
                     }
                     Button(role: .destructive) {
                         confirmDelete(chat)
                     } label: {
-                        Label("Delete", systemImage: "trash")
+                        Label("Delete", tinfoil: .trash)
                     }
                 }
             })
@@ -681,11 +682,11 @@ struct ChatSidebar: View, Equatable {
             }
         } label: {
             HStack {
-                Label("Favorites", systemImage: "pin")
+                Label("Favorites", tinfoil: .thumbtack)
                     .font(.subheadline)
                     .fontWeight(.medium)
                 Spacer()
-                Image(systemName: "chevron.down")
+                Image(tinfoil: .chevronDown)
                     .font(.caption)
                     .rotationEffect(.degrees(isFavoritesExpanded ? 0 : -90))
                     .foregroundColor(.secondary)
@@ -767,7 +768,7 @@ struct ChatSidebar: View, Equatable {
             Button {
                 viewModel.toggleChatPin(chat)
             } label: {
-                Label("Unpin", systemImage: "pin.slash")
+                Label("Unpin", tinfoil: .thumbtackSlash)
             }
 
             if viewModel.hasPremiumAccess && chat.projectId != nil {
@@ -776,7 +777,7 @@ struct ChatSidebar: View, Equatable {
                         await viewModel.removeChatFromProject(chatId: chat.id)
                     }
                 } label: {
-                    Label("Remove from Project", systemImage: "arrow.uturn.left")
+                    Label("Remove from Project", tinfoil: .detach)
                 }
             }
 
@@ -797,12 +798,12 @@ struct ChatSidebar: View, Equatable {
             Button {
                 startEditing(summary)
             } label: {
-                Label("Rename", systemImage: "square.and.pencil")
+                Label("Rename", tinfoil: .writing)
             }
             Button(role: .destructive) {
                 confirmDelete(summary)
             } label: {
-                Label("Delete", systemImage: "trash")
+                Label("Delete", tinfoil: .trash)
             }
         })
     }
@@ -843,7 +844,7 @@ struct ChatSidebar: View, Equatable {
     }
 
     private var settingsGearIcon: some View {
-        Image(systemName: "gear")
+        Image(tinfoil: .setting)
             .overlay(alignment: .topTrailing) {
                 if authManager.isAuthenticated && settings.isCloudSyncEnabled && viewModel.account?.keyLocked == true {
                     Circle()
@@ -872,7 +873,7 @@ struct ChatSidebar: View, Equatable {
     }
 
     private struct UpsellFeature: Identifiable {
-        let systemImage: String
+        let icon: TinfoilIcon
         let text: String
         var id: String { text }
     }
@@ -881,15 +882,15 @@ struct ChatSidebar: View, Equatable {
         switch variant {
         case .premium:
             return [
-                UpsellFeature(systemImage: "mic", text: "Speech-to-text voice input"),
-                UpsellFeature(systemImage: "sparkles", text: "No daily request limits"),
-                UpsellFeature(systemImage: "folder", text: "Create projects to chat with files"),
+                UpsellFeature(icon: .microphone, text: "Speech-to-text voice input"),
+                UpsellFeature(icon: .sparkle, text: "No daily request limits"),
+                UpsellFeature(icon: .folder, text: "Create projects to chat with files"),
             ]
         case .account:
             return [
-                UpsellFeature(systemImage: "bubble.left.and.bubble.right", text: "Keep your chat history"),
-                UpsellFeature(systemImage: "icloud", text: "Encrypted sync across devices"),
-                UpsellFeature(systemImage: "pin", text: "Save your favorite chats"),
+                UpsellFeature(icon: .chat2, text: "Keep your chat history"),
+                UpsellFeature(icon: .cloudPlain, text: "Encrypted sync across devices"),
+                UpsellFeature(icon: .thumbtack, text: "Save your favorite chats"),
             ]
         }
     }
@@ -903,7 +904,7 @@ struct ChatSidebar: View, Equatable {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(upsellFeatures(for: variant)) { feature in
                     HStack(spacing: 12) {
-                        Image(systemName: feature.systemImage)
+                        Image(tinfoil: feature.icon)
                             .font(.caption)
                             .foregroundColor(Color(UIColor.tertiaryLabel))
                             .frame(width: 16)
@@ -998,7 +999,7 @@ struct ChatSidebar: View, Equatable {
             }
         } label: {
             HStack {
-                Label("Projects", systemImage: "folder")
+                Label("Projects", tinfoil: .folder)
                     .font(.subheadline)
                     .fontWeight(.medium)
                 Spacer()
@@ -1006,7 +1007,7 @@ struct ChatSidebar: View, Equatable {
                     ProgressView()
                         .scaleEffect(0.7)
                 }
-                Image(systemName: "chevron.down")
+                Image(tinfoil: .chevronDown)
                     .font(.caption)
                     .rotationEffect(.degrees(isProjectsExpanded ? 0 : -90))
                     .foregroundColor(.secondary)
@@ -1034,7 +1035,7 @@ struct ChatSidebar: View, Equatable {
                     }
                 }
             } label: {
-                Label("New project", systemImage: "folder.badge.plus")
+                Label("New project", tinfoil: .folderPlus)
                     .font(.subheadline)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14)
@@ -1099,11 +1100,11 @@ struct ChatSidebar: View, Equatable {
             }
         } label: {
             HStack {
-                Label("Chats", systemImage: "bubble.left.and.bubble.right")
+                Label("Chats", tinfoil: .chat2)
                     .font(.subheadline)
                     .fontWeight(.medium)
                 Spacer()
-                Image(systemName: "chevron.down")
+                Image(tinfoil: .chevronDown)
                     .font(.caption)
                     .rotationEffect(.degrees(isChatsExpanded ? 0 : -90))
                     .foregroundColor(.secondary)
@@ -1123,7 +1124,7 @@ struct ChatSidebar: View, Equatable {
         HStack(spacing: 0) {
             Button(action: { switchTab(to: .cloud) }) {
                 HStack(spacing: 4) {
-                    Image(systemName: "icloud")
+                    Image(tinfoil: .cloudPlain)
                         .font(.caption)
                     Text("Cloud")
                         .font(.caption)
@@ -1146,7 +1147,7 @@ struct ChatSidebar: View, Equatable {
 
             Button(action: { switchTab(to: .local) }) {
                 HStack(spacing: 4) {
-                    Image(systemName: "internaldrive")
+                    Image(tinfoil: .hardDrive)
                         .font(.caption)
                     Text("Local")
                         .font(.caption)
@@ -1267,7 +1268,7 @@ struct ChatListItem: View {
                         // Save and Cancel buttons for editing mode
                         HStack(spacing: 12) {
                             Button(action: onEdit) {
-                                Image(systemName: "checkmark")
+                                Image(tinfoil: .checkmark)
                                     .foregroundColor(.primary)
                                     .frame(
                                         width: Constants.UI.chatTitleActionHitTargetSize,
@@ -1277,7 +1278,7 @@ struct ChatListItem: View {
                             }
                             .accessibilityLabel("Save title")
                             Button(action: onCancel) {
-                                Image(systemName: "xmark")
+                                Image(tinfoil: .xmark)
                                     .foregroundColor(.primary)
                                     .frame(
                                         width: Constants.UI.chatTitleActionHitTargetSize,
@@ -1294,7 +1295,7 @@ struct ChatListItem: View {
                                     .accessibilityHidden(true)
                             }
                             if isPinned && showPinnedIndicator {
-                                Image(systemName: "pin.fill")
+                                Image(tinfoil: .thumbtack)
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                     .accessibilityHidden(true)
@@ -1304,7 +1305,7 @@ struct ChatListItem: View {
                                 .lineLimit(1)
 
                             if safeguards.isFlagged(chat.id) {
-                                Image(systemName: "flag.fill")
+                                Image(tinfoil: .flagFilled)
                                     .font(.caption)
                                     .foregroundColor(.red)
                                     .accessibilityHidden(true)

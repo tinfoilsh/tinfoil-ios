@@ -1,4 +1,5 @@
 import SwiftUI
+import TinfoilIcons
 
 /// Fallback screen shown when the app fails to fetch its bootstrap
 /// configuration (e.g. TLS handshake failure, verifier mismatch). Mirrors
@@ -18,7 +19,7 @@ struct InitializationFailedView: View {
             VStack(spacing: Constants.UI.initFailedContentSpacing) {
                 Spacer()
 
-                Image(systemName: "exclamationmark.triangle")
+                Image(tinfoil: .warning)
                     .font(.system(size: Constants.UI.initFailedIconSize))
                     .foregroundColor(.primary)
                     .accessibilityHidden(true)
@@ -41,7 +42,7 @@ struct InitializationFailedView: View {
 
                 Button(action: retryAction) {
                     HStack(spacing: 8) {
-                        Image(systemName: "arrow.clockwise")
+                        Image(tinfoil: .refreshTwoArrows)
                             .font(.system(.callout, weight: .medium))
                         Text("Try Again")
                             .font(.system(.body, weight: .semibold))

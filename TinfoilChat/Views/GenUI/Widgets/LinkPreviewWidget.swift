@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 private let linkPreviewImageSize: CGFloat = 112
 private let linkPreviewCornerRadius: CGFloat = 12
@@ -80,7 +81,7 @@ private struct LinkPreviewView: View {
                             .font(.caption)
                             .foregroundColor(GenUIStyle.mutedText(isDarkMode))
                             .lineLimit(1)
-                        Image(systemName: "arrow.up.right")
+                        Image(tinfoil: .arrowUpRight)
                             .font(.caption2)
                             .foregroundColor(GenUIStyle.mutedText(isDarkMode))
                     }

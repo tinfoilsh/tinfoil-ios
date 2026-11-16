@@ -9,6 +9,7 @@
 //
 
 import SwiftUI
+import TinfoilIcons
 
 struct AutoIntelligenceSelector: View {
     @Binding var intelligence: AutoIntelligence
@@ -31,7 +32,7 @@ struct AutoIntelligenceSelector: View {
 
     @ViewBuilder
     private var iconLabel: some View {
-        let pill = Image(systemName: "slider.horizontal.3")
+        let pill = Image(tinfoil: .adjustmentToggle)
             .font(.system(size: 12, weight: .semibold))
             .foregroundColor(.primary)
             .padding(.horizontal, 10)

@@ -5,6 +5,7 @@
 //  Copyright © 2026 Tinfoil. All rights reserved.
 
 import SwiftUI
+import TinfoilIcons
 
 enum FilePreviewKind: Equatable {
     case image
@@ -45,15 +46,13 @@ enum FilePreviewClassifier {
         return String(joined.prefix(Constants.FilePreview.textMaxCharacters))
     }
 
-    static func iconName(for filename: String) -> String {
+    static func icon(for filename: String) -> TinfoilIcon {
         let ext = (filename as NSString).pathExtension.lowercased()
         switch ext {
-        case "pdf": return "doc.richtext"
-        case "html": return "globe"
-        case "csv": return "tablecells"
-        case "md": return "text.document"
-        case "jpg", "jpeg", "png", "gif", "webp", "heic", "avif": return "photo"
-        default: return "doc.text"
+        case "html": return .globe
+        case "csv": return .tools
+        case "jpg", "jpeg", "png", "gif", "webp", "heic", "avif": return .image
+        default: return .document
         }
     }
 }
@@ -109,7 +108,7 @@ struct FilePreviewView: View {
         ZStack {
             Rectangle()
                 .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06))
-            Image(systemName: FilePreviewClassifier.iconName(for: filename))
+            Image(tinfoil: FilePreviewClassifier.icon(for: filename))
                 .font(.system(size: size * 0.45))
                 .foregroundColor(.secondary)
         }
