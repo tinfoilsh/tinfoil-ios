@@ -183,13 +183,8 @@ struct ChatListView: View {
                     .environmentObject(viewModel.authManager ?? AuthManager())
                 }
             }
-            .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
-                HStack {
-                    Spacer()
-                    view.frame(maxWidth: 600)
-                    Spacer()
-                }
-            }
+            .frame(maxWidth: Constants.UI.composerMaxWidth)
+            .frame(maxWidth: .infinity)
         }
         .sheet(isPresented: $showPromptLibrary) {
             NavigationStack {

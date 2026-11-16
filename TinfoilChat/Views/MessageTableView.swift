@@ -581,8 +581,7 @@ struct MessageTableView: UIViewRepresentable {
                             onRequestSignIn: parent.onRequestSignIn
                         )
                         .padding(.vertical, 16)
-                        .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 0)
-                        .frame(maxWidth: 900)
+                        .frame(maxWidth: Constants.UI.messageColumnMaxWidth)
                         .frame(maxWidth: .infinity)
                     }
                 }
@@ -650,7 +649,11 @@ struct MessageTableView: UIViewRepresentable {
                 return cached
             }
 
-            let contentWidth = max(120, width - Constants.HeightEstimation.horizontalChrome)
+            let rowWidth = min(
+                width,
+                Constants.UI.messageColumnMaxWidth + 2 * Constants.UI.messageRowHorizontalPadding
+            )
+            let contentWidth = max(120, rowWidth - Constants.HeightEstimation.horizontalChrome)
             let charsPerLine = max(1, contentWidth / Constants.HeightEstimation.averageCharacterWidth)
 
             let wrappedLines = (CGFloat(message.content.count) / charsPerLine).rounded(.up)
@@ -1260,11 +1263,9 @@ struct ObservableMessageCell: View {
                 .environmentObject(viewModel)
                 .markdownStyleHost(isDarkMode: wrapper.isDarkMode)
                 .padding(.vertical, 8)
-                .padding(.horizontal, UIDevice.current.userInterfaceIdiom == .pad ? 100 : 8)
-                .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
-                    view.frame(maxWidth: 900)
-                        .frame(maxWidth: .infinity)
-                }
+                .frame(maxWidth: Constants.UI.messageColumnMaxWidth, alignment: .leading)
+                .padding(.horizontal, Constants.UI.messageRowHorizontalPadding)
+                .frame(maxWidth: .infinity)
                 .if(showsStreamingBuffer) { view in
                     view.background(
                         GeometryReader { geometry in

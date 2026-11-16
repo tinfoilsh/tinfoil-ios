@@ -56,7 +56,14 @@ enum Constants {
         static let initFailedContentSpacing: CGFloat = 24
         static let initFailedIconSize: CGFloat = 72
         static let actionButtonCornerRadius: CGFloat = 6
-        static let iPadInputBottomPadding: CGFloat = 16
+        static let regularWidthInputBottomPadding: CGFloat = 16
+        /// The widest the message input grows; on a wider chat it is centered.
+        static let composerMaxWidth: CGFloat = 600
+        /// The widest a chat's messages grow; on a wider chat they are
+        /// centered, so lines stay short enough to read.
+        static let messageColumnMaxWidth: CGFloat = 700
+        /// The space between a chat's messages and the sides of a narrower chat.
+        static let messageRowHorizontalPadding: CGFloat = 8
         static let composerActionSpacing: CGFloat = 4
         static let modelSelectorLayoutPriority: Double = 1
         static let chatTitleActionHitTargetSize: CGFloat = 44

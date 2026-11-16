@@ -131,6 +131,7 @@ struct MessageInputView: View {
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.accessibilityReduceMotion) var reduceMotion
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @EnvironmentObject private var authManager: AuthManager
     @ObservedObject private var profileManager = ProfileManager.shared
     @State private var textHeight: CGFloat = Layout.defaultHeight
@@ -797,8 +798,8 @@ struct MessageInputView: View {
         if isKeyboardVisible {
             return 12
         }
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            return Constants.UI.iPadInputBottomPadding
+        if horizontalSizeClass == .regular {
+            return Constants.UI.regularWidthInputBottomPadding
         }
         return 0
     }

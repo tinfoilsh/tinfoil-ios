@@ -133,6 +133,7 @@ struct MessageView: View, Equatable {
     /// Carries out the row's actions. The row does not observe it: what it
     /// shows of the chat comes in its context.
     let viewModel: TinfoilChat.ChatViewModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showLongMessageSheet = false
     @State private var selectLongMessageOnPresentation = false
     @State private var userTextSelectionRequest = 0
@@ -1024,19 +1025,19 @@ struct MessageView: View, Equatable {
                 activateSelection: selectLongMessageOnPresentation
             )
             .presentationDetents([.medium, .large])
-            .iPadSheetSizing()
+            .pageSheetSizing(in: horizontalSizeClass)
         }
         .sheet(isPresented: $showRawContentModal) {
             RawContentModalView(message: message)
                 .presentationDetents([.medium, .large])
-                .iPadSheetSizing()
+                .pageSheetSizing(in: horizontalSizeClass)
                 .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
         }
         .sheet(isPresented: $showSourcesSheet) {
             if let sources = message.webSearchState?.sources {
                 SourcesSheetView(sources: sources, isDarkMode: isDarkMode)
                     .presentationDetents([.medium, .large])
-                    .iPadSheetSizing()
+                    .pageSheetSizing(in: horizontalSizeClass)
             }
         }
         .sheet(isPresented: $showShareSheet) {
@@ -1047,7 +1048,7 @@ struct MessageView: View, Equatable {
                 )
                 .id(currentChat.id)
                 .presentationDetents([.medium, .large])
-                .iPadSheetSizing()
+                .pageSheetSizing(in: horizontalSizeClass)
             }
         }
         .onChange(of: isAnyMessageSheetPresented) { _, value in

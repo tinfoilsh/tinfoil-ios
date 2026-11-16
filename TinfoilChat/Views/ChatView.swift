@@ -869,9 +869,11 @@ extension View {
         }
     }
 
+    /// Opens a sheet at page size when the screen presenting it is wide,
+    /// as an iPad or an open iPhone Duo is.
     @ViewBuilder
-    func iPadSheetSizing() -> some View {
-        if UIDevice.current.userInterfaceIdiom == .pad {
+    func pageSheetSizing(in horizontalSizeClass: UserInterfaceSizeClass?) -> some View {
+        if horizontalSizeClass == .regular {
             self.presentationSizing(.page)
         } else {
             self
