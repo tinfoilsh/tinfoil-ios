@@ -484,6 +484,9 @@ enum Constants {
         static let maxFavorites = 3
         /// Number of prompt suggestions shown on the welcome screen.
         static let homeSuggestionCount = 3
+        /// The suggestions and "More" sit in this many columns where the
+        /// window is tall enough for more than one row of them.
+        static let homeSuggestionColumnCount = 2
         /// Label for an unset per-preset model or web search override, shown
         /// in the editor pickers and the detail view.
         static let noOverrideLabel = "No override set"

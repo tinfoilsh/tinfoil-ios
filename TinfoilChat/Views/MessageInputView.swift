@@ -2042,6 +2042,12 @@ struct CustomTextEditor: UIViewRepresentable {
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
         guard let width = proposal.width, width.isFinite, width > .zero else { return nil }
+        // A short window, as an iPhone's in landscape, keeps the editor at
+        // its smallest so the conversation stays in view; a longer draft
+        // scrolls inside it.
+        if context.environment.verticalSizeClass == .compact {
+            return CGSize(width: width, height: MessageInputView.Layout.minimumHeight)
+        }
         return CGSize(
             width: width,
             height: context.coordinator.measuredHeight(for: uiView, width: width)

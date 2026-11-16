@@ -19,6 +19,7 @@ import RevenueCatUI
 struct ChatContainer: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var viewModel: TinfoilChat.ChatViewModel
     @StateObject private var settings = SettingsManager.shared
@@ -64,6 +65,12 @@ struct ChatContainer: View {
             && settings.isCloudSyncEnabled
             && settings.isLocalOnlyModeEnabled
             && viewModel.activeStorageTab == .local
+    }
+
+    /// The shorter bar of a short window, as an iPhone's in landscape, has
+    /// room for the chat's label or its prompt's, not both.
+    private var isBarTooShortForTwoLabels: Bool {
+        verticalSizeClass == .compact && showsPrimaryToolbarLabel
     }
 
     /// The sidebar is on screen while open and while dragged open.
@@ -320,7 +327,7 @@ struct ChatContainer: View {
 
                     if let presetId = viewModel.currentChat?.promptPresetId,
                        let preset = profileManager.promptPreset(for: presetId),
-                       !isSidebarOpen && !isVerificationBadgeExpanded {
+                       !isSidebarOpen && !isVerificationBadgeExpanded && !isBarTooShortForTwoLabels {
                         HStack(spacing: 4) {
                             Image(systemName: preset.iconName)
                                 .font(.system(size: 9, weight: .semibold))
