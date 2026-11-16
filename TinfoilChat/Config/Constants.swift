@@ -594,7 +594,7 @@ enum Constants {
         static let deleteConfirmationMessage = "This message will be removed from the conversation. This cannot be undone."
         static let continueLabel = "Continue"
         static let continueAccessibilityLabel = "Continue response"
-        static let continueIcon: TinfoilIcon = .fastForward
+        static let continueIcon: TinfoilIcon = .continuation
         static let tryAgainLabel = "Try again"
         static let resendLabel = "Resend message"
         static let tryAgainIcon: TinfoilIcon = .refreshTwoArrows
