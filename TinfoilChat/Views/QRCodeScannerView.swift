@@ -237,8 +237,4 @@ class QRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsD
     override var prefersStatusBarHidden: Bool {
         return true
     }
-    
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        return .portrait
-    }
 }
