@@ -55,8 +55,18 @@ struct ChatContainer: View {
         colorScheme == .dark ? Color.white : Color.black
     }
 
-    private var showsPrimaryToolbarLabel: Bool {
-        if viewModel.activeProject != nil || viewModel.isTemporaryMode {
+    /// Whether the label's first line shows the logo, the project, the
+    /// temporary chat or the storage. In a vertical bar the ghost button
+    /// shows a temporary chat, and beside the open sidebar the line shows
+    /// only a project.
+    private func showsPrimaryToolbarLabel(usesVerticalBar: Bool) -> Bool {
+        if viewModel.activeProject != nil {
+            return true
+        }
+        if usesVerticalBar {
+            return showsStorageLabel && !isSidebarOpen
+        }
+        if viewModel.isTemporaryMode {
             return true
         }
         if isSidebarOpen {
@@ -78,21 +88,22 @@ struct ChatContainer: View {
         profileManager.promptPreset(for: viewModel.currentChat?.promptPresetId)
     }
 
-    /// With its buttons in a vertical bar, the chat keeps a bar along the top
-    /// only for its label, which cannot move into it. The label is left out
-    /// when it has nothing to show, as is the logo beside the open sidebar,
-    /// so that bar does not take room from the chat.
-    private func showsToolbarLabel(usesVerticalBar: Bool) -> Bool {
-        guard usesVerticalBar else { return true }
-        if viewModel.activeProject != nil { return true }
-        if isSidebarOpen { return false }
-        return viewModel.isTemporaryMode || showsStorageLabel || activePromptPreset != nil
+    /// Whether the label's second line shows the chat's prompt. The shorter
+    /// bar of a short window, as an iPhone's in landscape, has room for the
+    /// chat's label or its prompt's, not both.
+    private func showsPromptToolbarLabel(usesVerticalBar: Bool, isBadgeExpanded: Bool) -> Bool {
+        activePromptPreset != nil && !isSidebarOpen && !isBadgeExpanded
+            && !(verticalSizeClass == .compact && showsPrimaryToolbarLabel(usesVerticalBar: usesVerticalBar))
     }
 
-    /// The shorter bar of a short window, as an iPhone's in landscape, has
-    /// room for the chat's label or its prompt's, not both.
-    private var isBarTooShortForTwoLabels: Bool {
-        verticalSizeClass == .compact && showsPrimaryToolbarLabel
+    /// With its buttons in a vertical bar, the chat keeps a bar along the top
+    /// only for its label, which cannot move into it. The label is left out
+    /// when it has nothing to show, so that bar does not take room from the
+    /// chat.
+    private func showsToolbarLabel(usesVerticalBar: Bool) -> Bool {
+        guard usesVerticalBar else { return true }
+        return showsPrimaryToolbarLabel(usesVerticalBar: true)
+            || showsPromptToolbarLabel(usesVerticalBar: true, isBadgeExpanded: false)
     }
 
     /// The sidebar is on screen while open and while dragged open.
@@ -388,7 +399,10 @@ struct ChatContainer: View {
         if showsToolbarLabel(usesVerticalBar: usesVerticalBar) {
             ToolbarItem(placement: .principal) {
                 // Only the badge in a horizontal bar expands over the label.
-                toolbarLabel(isBadgeExpanded: !usesVerticalBar && isVerificationBadgeExpanded)
+                toolbarLabel(
+                    usesVerticalBar: usesVerticalBar,
+                    isBadgeExpanded: !usesVerticalBar && isVerificationBadgeExpanded
+                )
             }
         }
         if viewModel.activeProject == nil && showsChatToolbarActions {
@@ -422,7 +436,7 @@ struct ChatContainer: View {
                         Label {
                             Text(temporaryToggleLabel)
                         } icon: {
-                            Image(tinfoil: .ghost)
+                            Image(tinfoil: viewModel.isTemporaryMode ? .ghostFilled : .ghost)
                         }
                     }
                     .disabled(!viewModel.canUseCurrentChatActions || viewModel.isSavingTemporaryChat)
@@ -512,7 +526,7 @@ struct ChatContainer: View {
     /// The chat's label in the middle of the top bar: the logo beside the
     /// open sidebar, or the project, temporary chat, storage and prompt the
     /// chat is in.
-    private func toolbarLabel(isBadgeExpanded: Bool) -> some View {
+    private func toolbarLabel(usesVerticalBar: Bool, isBadgeExpanded: Bool) -> some View {
         VStack(spacing: 1) {
             ZStack {
                 Image(colorScheme == .dark ? "logo-white" : "logo-dark")
@@ -544,7 +558,7 @@ struct ChatContainer: View {
                     .accessibilityHidden(isBadgeExpanded)
                 }
 
-                if viewModel.isTemporaryMode && viewModel.activeProject == nil {
+                if viewModel.isTemporaryMode && viewModel.activeProject == nil && !usesVerticalBar {
                     HStack(spacing: 6) {
                         GhostIcon(size: 14, color: toolbarContentColor, style: .filled)
                         Text("Temporary")
@@ -558,10 +572,10 @@ struct ChatContainer: View {
                     .accessibilityHidden(isSidebarOpen || isBadgeExpanded)
                 }
             }
-            .frame(height: showsPrimaryToolbarLabel ? (showsSidebarLogo ? sidebarLogoHeight : toolbarPrimaryLabelHeight) : 0)
+            .frame(height: showsPrimaryToolbarLabel(usesVerticalBar: usesVerticalBar) ? (showsSidebarLogo ? sidebarLogoHeight : toolbarPrimaryLabelHeight) : 0)
 
             if let preset = activePromptPreset,
-               !isSidebarOpen && !isBadgeExpanded && !isBarTooShortForTwoLabels {
+               showsPromptToolbarLabel(usesVerticalBar: usesVerticalBar, isBadgeExpanded: isBadgeExpanded) {
                 HStack(spacing: 4) {
                     Image(tinfoil: preset.icon)
                         .font(.system(size: 9, weight: .semibold))
