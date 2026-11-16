@@ -39,9 +39,6 @@ struct ChatContainer: View {
     /// The fold while it runs down the middle of the chat area, as when
     /// iPhone Duo is partly folded like a book.
     @State private var verticalFold: CGRect?
-    /// Whether the toolbar buttons sit in a vertical bar along the side, as
-    /// on a closed iPhone Duo.
-    @State private var usesVerticalBar = false
 
     private var isAnySheetPresented: Bool {
         viewModel.showVerifierSheet || viewModel.showAddSheet || viewModel.showModelSelectorSheet || viewModel.showRateLimitPaywall || viewModel.showDocumentPicker || viewModel.showPhotoPicker || viewModel.showCamera || viewModel.showDocumentScanner || viewModel.showMessageSheet || viewModel.showImageViewer || viewModel.showSidebarSettings || showAuthView || showPremiumModal
@@ -85,7 +82,7 @@ struct ChatContainer: View {
     /// only for its label, which cannot move into it. The label is left out
     /// when it has nothing to show, as is the logo beside the open sidebar,
     /// so that bar does not take room from the chat.
-    private var showsToolbarLabel: Bool {
+    private func showsToolbarLabel(usesVerticalBar: Bool) -> Bool {
         guard usesVerticalBar else { return true }
         if viewModel.activeProject != nil { return true }
         if isSidebarOpen { return false }
@@ -123,7 +120,6 @@ struct ChatContainer: View {
         NavigationStack {
             mainContent
                 .background(Color.chatBackground(isDarkMode: colorScheme == .dark))
-                .readsVerticalBar(into: $usesVerticalBar)
         }
         .onChange(of: isAnySheetPresented) { _, presented in
             if presented && isSidebarOpen {
@@ -272,99 +268,8 @@ struct ChatContainer: View {
             background: .chatBackground(isDarkMode: colorScheme == .dark)
         )
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                if viewModel.activeProject != nil && !isSidebarOpen {
-                    Button {
-                        if isInProjectChat {
-                            viewModel.returnToProjectLanding()
-                        } else {
-                            viewModel.exitProject()
-                            withAnimation {
-                                isSidebarOpen = true
-                            }
-                        }
-                    } label: {
-                        Image(tinfoil: .chevronLeft)
-                            .font(.system(size: 18, weight: .semibold))
-                            .frame(width: 24, height: 24)
-                            .foregroundColor(toolbarContentColor)
-                    }
-                    .accessibilityLabel("Back")
-                    .accessibleHitTarget()
-                } else {
-                    Button(action: toggleSidebar) {
-                        MenuToXButton(isX: isSidebarOpen)
-                            .frame(width: 24, height: 24)
-                            .foregroundColor(toolbarContentColor)
-                    }
-                    .accessibilityLabel(isSidebarOpen ? "Close menu" : "Open menu")
-                    .accessibilityHint(isSidebarOpen ? "" : "Shows chats, projects and settings")
-                    .accessibleHitTarget()
-                }
-            }
-            .allowsVerticalBar()
-            if showsToolbarLabel {
-                ToolbarItem(placement: .principal) {
-                    toolbarLabel
-                }
-            }
-            if viewModel.activeProject == nil && showsChatToolbarActions {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    VerticalBarReader { isInVerticalBar in
-                        VerificationStatusIndicator(
-                            viewModel: viewModel,
-                            isBadgeExpanded: $isVerificationBadgeExpanded,
-                            isCollapsed: $isVerificationBadgeCollapsed,
-                            showsStatusText: !isInVerticalBar
-                        )
-                    }
-                }
-                .allowsVerticalBar()
-            }
-            // Temporary (incognito) chat toggle, shown on a new chat and on a
-            // temporary one: a temporary chat with messages is saved by it.
-            if authManager.isAuthenticated && viewModel.activeProject == nil && showsChatToolbarActions && ((viewModel.currentChat?.isBlankChat ?? true) || viewModel.isTemporaryMode) {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: toggleTemporaryMode) {
-                        if viewModel.isSavingTemporaryChat {
-                            ProgressView()
-                                .tint(toolbarContentColor)
-                        } else {
-                            GhostIcon(
-                                size: 17,
-                                color: toolbarContentColor,
-                                style: viewModel.isTemporaryMode ? .filled : .outline
-                            )
-                        }
-                    }
-                    .accessibilityLabel(temporaryToggleLabel)
-                    .disabled(!viewModel.canUseCurrentChatActions || viewModel.isSavingTemporaryChat)
-                    .accessibleHitTarget()
-                }
-                .allowsVerticalBar()
-            }
-            // Only show new chat button when chat has messages (not a new/blank chat)
-            if authManager.isAuthenticated && viewModel.activeProject == nil && showsChatToolbarActions && !(viewModel.currentChat?.isBlankChat ?? true) {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: createNewChat) {
-                        Image(tinfoil: .plus)
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundColor(toolbarContentColor)
-                    }
-                    .accessibilityLabel("New chat")
-                    .disabled(!viewModel.canUseCurrentChatActions)
-                    .accessibleHitTarget()
-                }
-                .allowsVerticalBar()
-                // Starting a chat is the action people reach for most.
-                .staysVisibleLonger()
-            }
-            if !authManager.isAuthenticated {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: showAuthenticationView) {
-                        Text("Sign in")
-                    }
-                }
+            VerticalBarToolbar { usesVerticalBar in
+                chatToolbar(usesVerticalBar: usesVerticalBar)
             }
         }
         .gesture(
@@ -420,6 +325,160 @@ struct ChatContainer: View {
         }
     }
     
+    private var showsProjectBackButton: Bool {
+        viewModel.activeProject != nil && !isSidebarOpen
+    }
+
+    private var showsTemporaryToggle: Bool {
+        authManager.isAuthenticated && viewModel.activeProject == nil && showsChatToolbarActions
+            && ((viewModel.currentChat?.isBlankChat ?? true) || viewModel.isTemporaryMode)
+    }
+
+    private var showsNewChatButton: Bool {
+        authManager.isAuthenticated && viewModel.activeProject == nil && showsChatToolbarActions
+            && !(viewModel.currentChat?.isBlankChat ?? true)
+    }
+
+    /// The chat's toolbar. In a vertical bar along the side, as on iPhone
+    /// Duo, its buttons are plain symbol buttons, which the system draws and
+    /// moves with the bar as the device folds and turns; its custom buttons
+    /// stay in horizontal bars.
+    @ToolbarContentBuilder
+    private func chatToolbar(usesVerticalBar: Bool) -> some ToolbarContent {
+        if usesVerticalBar && showsProjectBackButton {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button(action: leaveProjectView) {
+                    Label("Back", tinfoil: .chevronLeft)
+                }
+            }
+        } else if usesVerticalBar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button(action: toggleSidebar) {
+                    Label {
+                        Text(isSidebarOpen ? "Close menu" : "Open menu")
+                    } icon: {
+                        Image(tinfoil: isSidebarOpen ? .xmark : .hamburgerMenu)
+                    }
+                }
+                .accessibilityHint(isSidebarOpen ? "" : "Shows chats, projects and settings")
+            }
+        } else {
+            ToolbarItem(placement: .navigationBarLeading) {
+                if showsProjectBackButton {
+                    Button(action: leaveProjectView) {
+                        Image(tinfoil: .chevronLeft)
+                            .font(.system(size: 18, weight: .semibold))
+                            .frame(width: 24, height: 24)
+                            .foregroundColor(toolbarContentColor)
+                    }
+                    .accessibilityLabel("Back")
+                    .accessibleHitTarget()
+                } else {
+                    Button(action: toggleSidebar) {
+                        MenuToXButton(isX: isSidebarOpen)
+                            .frame(width: 24, height: 24)
+                            .foregroundColor(toolbarContentColor)
+                    }
+                    .accessibilityLabel(isSidebarOpen ? "Close menu" : "Open menu")
+                    .accessibilityHint(isSidebarOpen ? "" : "Shows chats, projects and settings")
+                    .accessibleHitTarget()
+                }
+            }
+        }
+        if showsToolbarLabel(usesVerticalBar: usesVerticalBar) {
+            ToolbarItem(placement: .principal) {
+                toolbarLabel
+            }
+        }
+        if viewModel.activeProject == nil && showsChatToolbarActions {
+            if usesVerticalBar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: { viewModel.showVerifier() }) {
+                        Label {
+                            Text(viewModel.verificationLabel)
+                        } icon: {
+                            Image(tinfoil: viewModel.verificationIcon)
+                        }
+                    }
+                    .accessibilityHint("Shows verification details")
+                }
+            } else {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    VerificationStatusIndicator(
+                        viewModel: viewModel,
+                        isBadgeExpanded: $isVerificationBadgeExpanded,
+                        isCollapsed: $isVerificationBadgeCollapsed
+                    )
+                }
+            }
+        }
+        // Temporary (incognito) chat toggle, shown on a new chat and on a
+        // temporary one: a temporary chat with messages is saved by it.
+        if showsTemporaryToggle {
+            if usesVerticalBar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: toggleTemporaryMode) {
+                        Label {
+                            Text(temporaryToggleLabel)
+                        } icon: {
+                            Image(tinfoil: .ghost)
+                        }
+                    }
+                    .disabled(!viewModel.canUseCurrentChatActions || viewModel.isSavingTemporaryChat)
+                }
+            } else {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: toggleTemporaryMode) {
+                        if viewModel.isSavingTemporaryChat {
+                            ProgressView()
+                                .tint(toolbarContentColor)
+                        } else {
+                            GhostIcon(
+                                size: 17,
+                                color: toolbarContentColor,
+                                style: viewModel.isTemporaryMode ? .filled : .outline
+                            )
+                        }
+                    }
+                    .accessibilityLabel(temporaryToggleLabel)
+                    .disabled(!viewModel.canUseCurrentChatActions || viewModel.isSavingTemporaryChat)
+                    .accessibleHitTarget()
+                }
+            }
+        }
+        // Only show new chat button when chat has messages (not a new/blank chat)
+        if showsNewChatButton {
+            if usesVerticalBar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: createNewChat) {
+                        Label("New chat", tinfoil: .plus)
+                    }
+                    .disabled(!viewModel.canUseCurrentChatActions)
+                }
+                // Starting a chat is the action people reach for most.
+                .staysVisibleLonger()
+            } else {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: createNewChat) {
+                        Image(tinfoil: .plus)
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(toolbarContentColor)
+                    }
+                    .accessibilityLabel("New chat")
+                    .disabled(!viewModel.canUseCurrentChatActions)
+                    .accessibleHitTarget()
+                }
+            }
+        }
+        if !authManager.isAuthenticated {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: showAuthenticationView) {
+                    Text("Sign in")
+                }
+            }
+        }
+    }
+
     /// The scrollable chat message area
     private var chatArea: some View {
         ChatListView(
@@ -667,6 +726,18 @@ struct ChatContainer: View {
     
     // MARK: - Actions
     
+    /// Leaves a project's chat for its page, or the page for the sidebar.
+    private func leaveProjectView() {
+        if isInProjectChat {
+            viewModel.returnToProjectLanding()
+        } else {
+            viewModel.exitProject()
+            withAnimation {
+                isSidebarOpen = true
+            }
+        }
+    }
+
     /// Toggles the sidebar open or closed
     private func toggleSidebar() {
         withAnimation {
@@ -985,20 +1056,7 @@ struct VerificationStatusIndicator: View {
     /// Owned by the parent so the badge stays collapsed when the toolbar
     /// removes and re-adds the indicator.
     @Binding var isCollapsed: Bool
-    /// In a vertical bar the badge has room for its icon only, whose color
-    /// still tells the status.
-    let showsStatusText: Bool
     @State private var collapseTask: Task<Void, Never>?
-
-    private var icon: TinfoilIcon {
-        if viewModel.isVerified && viewModel.verificationError == nil {
-            return .lock
-        } else if viewModel.isVerifying {
-            return .lockOpened
-        } else {
-            return .shieldWithExclamation
-        }
-    }
 
     private var iconColor: Color {
         if viewModel.isVerified && viewModel.verificationError == nil {
@@ -1020,25 +1078,15 @@ struct VerificationStatusIndicator: View {
         }
     }
 
-    private var verificationAccessibilityLabel: String {
-        if viewModel.isVerified && viewModel.verificationError == nil {
-            return "Privacy verified"
-        } else if viewModel.isVerifying {
-            return "Verifying privacy"
-        } else {
-            return "Verification failed"
-        }
-    }
-
 
     var body: some View {
         Button(action: { viewModel.showVerifier() }) {
             HStack(spacing: isCollapsed ? 0 : 4) {
-                Image(tinfoil: icon)
+                Image(tinfoil: viewModel.verificationIcon)
                     .foregroundStyle(iconColor)
                     .font(.system(size: 14))
 
-                if showsStatusText && !statusText.isEmpty {
+                if !statusText.isEmpty {
                     // Use the longest possible text as a hidden sizing
                     // reference so the badge width stays stable when the
                     // label changes from "Verifying..." to "Privacy verified".
@@ -1061,12 +1109,12 @@ struct VerificationStatusIndicator: View {
             }
             .animation(.easeInOut(duration: 0.35), value: isCollapsed)
         }
-        .accessibilityLabel(verificationAccessibilityLabel)
+        .accessibilityLabel(viewModel.verificationLabel)
         .accessibilityHint("Shows verification details")
         .onAppear {
             if viewModel.isVerified && viewModel.verificationError == nil {
                 guard !isCollapsed else { return }
-                isBadgeExpanded = showsStatusText
+                isBadgeExpanded = true
                 collapseTask?.cancel()
                 collapseTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: UInt64(Constants.Verification.collapseDelaySeconds * 1_000_000_000))
@@ -1075,7 +1123,7 @@ struct VerificationStatusIndicator: View {
                     isBadgeExpanded = false
                 }
             } else if viewModel.isVerifying {
-                isBadgeExpanded = showsStatusText
+                isBadgeExpanded = true
                 isCollapsed = false
             } else {
                 isBadgeExpanded = false
@@ -1083,7 +1131,7 @@ struct VerificationStatusIndicator: View {
         }
         .onChange(of: viewModel.isVerified) { _, isVerified in
             if isVerified && viewModel.verificationError == nil {
-                isBadgeExpanded = showsStatusText
+                isBadgeExpanded = true
                 collapseTask?.cancel()
                 collapseTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: UInt64(Constants.Verification.collapseDelaySeconds * 1_000_000_000))
@@ -1095,7 +1143,7 @@ struct VerificationStatusIndicator: View {
         }
         .onChange(of: viewModel.isVerifying) { _, isVerifying in
             if isVerifying {
-                isBadgeExpanded = showsStatusText
+                isBadgeExpanded = true
                 collapseTask?.cancel()
                 collapseTask = nil
                 isCollapsed = false
@@ -1103,12 +1151,28 @@ struct VerificationStatusIndicator: View {
                 isBadgeExpanded = false
             }
         }
-        // The badge leaves a horizontal bar for a vertical one, as when
-        // iPhone Duo closes, without its text.
-        .onChange(of: showsStatusText) { _, showsText in
-            if !showsText {
-                isBadgeExpanded = false
-            }
+    }
+}
+
+extension TinfoilChat.ChatViewModel {
+    /// The icon that tells whether the chat's privacy has been verified.
+    var verificationIcon: TinfoilIcon {
+        if isVerified && verificationError == nil {
+            return .lock
+        } else if isVerifying {
+            return .lockOpened
+        } else {
+            return .shieldWithExclamation
+        }
+    }
+
+    var verificationLabel: String {
+        if isVerified && verificationError == nil {
+            return "Privacy verified"
+        } else if isVerifying {
+            return "Verifying privacy"
+        } else {
+            return "Verification failed"
         }
     }
 }
