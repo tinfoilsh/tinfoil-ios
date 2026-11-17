@@ -269,6 +269,7 @@ extension ChatViewModel {
             return ProjectDocument(document)
         }
         guard self.session === session, activeProject?.id == project.id else { return }
+        if !result.successes.isEmpty { projectDocumentChanges += 1 }
         for document in result.successes {
             if let index = projectDocuments.firstIndex(where: { $0.id == document.id }) {
                 projectDocuments[index] = document
@@ -312,12 +313,30 @@ extension ChatViewModel {
 
     private static let documentWithoutFileMessage = "This document has no file or text to download."
 
+    /// Reads the open project's documents again, as when another device
+    /// added, replaced or deleted one. Documents read before this device
+    /// changed one are left out: the change is read with the next.
+    func refreshProjectDocuments() async {
+        guard let session, canUseProjects, let projectId = activeProject?.id, !isUploadingProjectDocument else { return }
+        let generation = projectLoadGeneration
+        let changes = projectDocumentChanges
+        do {
+            let loaded = try await HarnessProjects.get(session.account, id: projectId)
+            guard self.session === session, activeProject?.id == projectId, generation == projectLoadGeneration,
+                  changes == projectDocumentChanges, !isUploadingProjectDocument else { return }
+            projectDocuments = (loaded.documents ?? []).map(ProjectDocument.init)
+        } catch {
+            Self.logger.error("Failed to refresh a project's documents: \(error, privacy: .public)")
+        }
+    }
+
     func deleteProjectDocument(_ documentId: String) async {
         guard let session, canUseProjects, let project = activeProject else { return }
         projectError = nil
         do {
             try await HarnessProjects.deleteDocument(session.account, projectId: project.id, documentId: documentId)
             guard self.session === session, activeProject?.id == project.id else { return }
+            projectDocumentChanges += 1
             projectDocuments.removeAll { $0.id == documentId }
         } catch {
             projectError = error.localizedDescription

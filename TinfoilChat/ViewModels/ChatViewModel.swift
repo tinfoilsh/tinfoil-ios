@@ -316,6 +316,9 @@ class ChatViewModel: ObservableObject {
     var projectListLoadGeneration = 0
     /// A newer project load supersedes one in flight.
     var projectLoadGeneration = 0
+    /// Counts this device's changes to the open project's documents, so
+    /// documents read before one do not replace what it left.
+    var projectDocumentChanges = 0
 
     // MARK: - Account
 
@@ -516,7 +519,12 @@ class ChatViewModel: ObservableObject {
             }
         }
         account.$chatRevision.receive(on: RunLoop.main).sink { [weak self] _ in Task { await self?.refreshOpenChat() } }.store(in: &sessionCancellables)
-        account.$projectRevision.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in Task { await self?.loadProjects() } }.store(in: &sessionCancellables)
+        account.$projectRevision.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in
+            Task {
+                await self?.loadProjects()
+                await self?.refreshProjectDocuments()
+            }
+        }.store(in: &sessionCancellables)
         account.$keyReady.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] ready in
             guard ready else { return }
             self?.session?.list.reload()
