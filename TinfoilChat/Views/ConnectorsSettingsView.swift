@@ -42,6 +42,16 @@ struct ConnectorsSettingsView: View {
                 notice("Connectors work in chats saved to the cloud. Turn on Cloud Sync to use them.")
             } else if viewModel.account?.keyLocked == true {
                 notice("Unlock your encryption key in Cloud Sync to manage connectors.")
+            } else if viewModel.account?.profileFailed == true {
+                Section {
+                    VStack(alignment: .leading, spacing: ConnectorsSettingsLayout.errorSpacing) {
+                        Text("Couldn't connect to the chat service.")
+                        Button("Try Again") {
+                            viewModel.retryClientSetup()
+                        }
+                    }
+                }
+                .listRowBackground(Color.cardSurface(for: colorScheme))
             } else if viewModel.account?.keyReady != true {
                 // The account's key is still loading, and its connectors
                 // with it.
