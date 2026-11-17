@@ -778,6 +778,12 @@ class ChatViewModel: ObservableObject {
         session?.compactsLatestExchange == true
     }
 
+    /// The chat service lists and opens the artifacts of the account's
+    /// stored chats.
+    var listsArtifacts: Bool {
+        account?.session?.features.additionalProperties["artifacts"] == true
+    }
+
     /// Deep research can be turned on: the chat service offers it to the
     /// account, and web search is not turned off in Settings.
     var canResearch: Bool { session?.researchAvailable == true }

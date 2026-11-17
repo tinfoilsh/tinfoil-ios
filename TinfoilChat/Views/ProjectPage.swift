@@ -73,6 +73,14 @@ struct ProjectPage: View {
                         }
                     }
 
+                    if viewModel.listsArtifacts, let project {
+                        NavigationLink {
+                            ArtifactsListView(viewModel: viewModel, projectId: project.id)
+                        } label: {
+                            Label("Artifacts", tinfoil: .applicationWindow)
+                        }
+                    }
+
                     NavigationLink {
                         ProjectSettingsView(viewModel: viewModel)
                     } label: {

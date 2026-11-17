@@ -65,6 +65,7 @@ struct ChatSidebar: View, Equatable {
     @State private var isFavoritesExpanded: Bool = false
     @State private var isProjectsExpanded: Bool = false
     @State private var isChatsExpanded: Bool = true
+    @State private var showArtifacts: Bool = false
     @State private var chatSearchTerm: String = ""
     @StateObject private var chatSearch = ChatSearchController()
     @ObservedObject private var settings = SettingsManager.shared
@@ -243,6 +244,17 @@ struct ChatSidebar: View, Equatable {
                 isProjectsExpanded = false
             }
         }
+        .sheet(isPresented: $showArtifacts) {
+            NavigationStack {
+                ArtifactsListView(viewModel: viewModel, projectId: nil)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { showArtifacts = false }
+                        }
+                    }
+            }
+            .environmentObject(viewModel)
+        }
     }
 
     private func applyNavigationRequest(
@@ -324,6 +336,10 @@ struct ChatSidebar: View, Equatable {
 
                         if viewModel.hasPremiumAccess {
                             projectsSection
+                        }
+
+                        if viewModel.listsArtifacts {
+                            artifactsRow
                         }
                     }
 
@@ -1074,6 +1090,31 @@ struct ChatSidebar: View, Equatable {
                 .sidebarRow(top: 10)
             }
         }
+    }
+
+    /// Opens the artifacts of every stored chat. A row like the section
+    /// headers around it, which opens a list instead of expanding one.
+    private var artifactsRow: some View {
+        Button {
+            showArtifacts = true
+        } label: {
+            HStack {
+                Label("Artifacts", tinfoil: .applicationWindow)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Spacer()
+                Image(tinfoil: .chevronRight)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Artifacts")
+        .accessibilityHint("Opens the artifacts of your chats")
+        .sidebarRow(top: 8)
     }
 
     @ViewBuilder
