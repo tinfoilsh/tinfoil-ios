@@ -2059,21 +2059,27 @@ class ChatViewModel: ObservableObject {
         guard let session, let approvalId = call.pendingApprovalId(), connectorApprovals[call.id]?.sending == nil else { return }
         connectorApprovals[call.id] = ConnectorApprovalState(sending: choice)
         Task {
+            var refusal: Error?
             do {
                 try await session.approve(approvalId, approved: choice != .decline)
             } catch {
-                // A call answered already, as on another device, or no longer
-                // waiting says how it went in the reply's stream.
-                guard (error as? HarnessError)?.code == HarnessErrorCode.revisionConflict else {
-                    connectorApprovals[call.id] = ConnectorApprovalState(error: ConnectorStore.describe(error))
-                    return
-                }
+                refusal = error
+            }
+            // An answer given to another account's chat changes nothing of
+            // the one open since.
+            guard self.session === session else { return }
+            // A call answered already, as on another device, or no longer
+            // waiting says how it went in the reply's stream.
+            if let refusal, (refusal as? HarnessError)?.code != HarnessErrorCode.revisionConflict {
+                connectorApprovals[call.id] = ConnectorApprovalState(error: ConnectorStore.describe(refusal))
+                return
             }
             connectorApprovals[call.id] = ConnectorApprovalState(answered: true)
             guard choice == .always else { return }
             do {
                 try await connectors.update(call.connectorId, tools: [call.tool: .allow])
             } catch {
+                guard self.session === session else { return }
                 reportActionFailure("\(call.toolName) Will Still Ask First", error)
             }
         }
