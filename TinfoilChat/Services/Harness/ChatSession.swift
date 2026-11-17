@@ -1419,6 +1419,11 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     func image(_ attachment: Attachment) async throws -> (data: Data, mimeType: String) {
         try await openStore().image(open.id, attachmentId: attachment.id, mimeType: attachment.mimeType)
     }
+
+    /// The file an attachment of the open chat was uploaded as.
+    func originalFile(_ attachment: Attachment) async throws -> Data {
+        try await openStore().originalFile(open.id, attachmentId: attachment.id)
+    }
 }
 
 private struct Deleted: Decodable {

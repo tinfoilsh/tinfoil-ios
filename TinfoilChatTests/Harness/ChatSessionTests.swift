@@ -1450,6 +1450,30 @@ struct ChatSessionTests {
         #expect(await sending.value)
     }
 
+    @Test func theFileAnAttachmentWasUploadedAsIsReadFromAStoredChatAlone() async throws {
+        let file = Data([1, 2, 3])
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(firstQuestionWindow), { _ in
+            HarnessResponse.collected(status: 200, headers: ["content-type": "application/octet-stream"], sealed: true, body: file)
+        }])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        let attachment = Attachment(id: "att_1", type: .document, fileName: "notes.pdf")
+
+        #expect(try await session.originalFile(attachment) == file)
+
+        let request = try #require(await fixture.transport.requests.last)
+        #expect(request.route == .attachmentGet)
+        #expect(request.json["id"] as? String == "att_1")
+        #expect(request.json["threadId"] as? String == threadId)
+        #expect(request.json["original"] as? Bool == true)
+        #expect(request.json["key"] as? String == Data(repeating: 7, count: 32).base64EncodedString())
+
+        // A chat on this device keeps no such file, and asks for none.
+        session.newChat(local: true)
+        await #expect(throws: HarnessError.self) { _ = try await session.originalFile(attachment) }
+        #expect(await fixture.transport.requests.count == 2)
+    }
+
     @Test func deepResearchAsksForTheNextQuestionAlone() async throws {
         let fixture = Fixture(answers: [Answers.json(researchSession)])
         try await fixture.account.refresh()

@@ -398,6 +398,9 @@ struct AttachmentRequest: Encodable, Equatable, Sendable {
     var key: String?
     var id: String
     var threadId: String?
+    /// Asks for the file as it was uploaded, in place of the copy models
+    /// read.
+    var original: Bool?
 }
 
 /// A stored chat to move to this device, or one on this device to store.

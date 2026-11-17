@@ -292,6 +292,10 @@ class ChatViewModel: ObservableObject {
     /// The attachments the chat service converted, by the pending
     /// attachment they stand for, which the next turn sends.
     var uploadedAttachments: [String: Components.Schemas.Attachment] = [:]
+    /// The attachment of the open chat whose file, as it was uploaded, is
+    /// downloading, and the file once saved for the share sheet.
+    @Published var downloadingAttachmentId: String?
+    @Published var sharedAttachmentFile: ExportedFile?
 
     // MARK: - Safeguards
 

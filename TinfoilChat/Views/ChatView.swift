@@ -219,6 +219,7 @@ struct ChatContainer: View {
                 .environmentObject(authManager)
                 .environmentObject(viewModel)
         }
+        .shareSheet(for: $viewModel.sharedAttachmentFile)
         .sheet(isPresented: $showPremiumModal) {
             GatedPaywallView {
                 showPremiumModal = false

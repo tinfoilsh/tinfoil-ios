@@ -265,6 +265,30 @@ extension ChatViewModel {
         }
     }
 
+    /// Downloads the file an attachment of the open stored chat was
+    /// uploaded as, and offers it to the share sheet under its name.
+    func downloadOriginalFile(of attachment: Attachment) {
+        guard let session, attachment.hasOriginalFile, downloadingAttachmentId == nil else { return }
+        let chatId = session.open.id
+        downloadingAttachmentId = attachment.id
+        Task {
+            defer { if downloadingAttachmentId == attachment.id { downloadingAttachmentId = nil } }
+            do {
+                let data = try await session.originalFile(attachment)
+                let fileName = attachment.fileName
+                let file = try await Task.detached(priority: .userInitiated) { try ExportedFile.write(data, named: fileName) }.value
+                // A file that arrives after its chat was left is not shown.
+                guard self.session === session, session.open.id == chatId else {
+                    file.remove()
+                    return
+                }
+                sharedAttachmentFile = file
+            } catch {
+                reportActionFailure("Couldn't Download File", error)
+            }
+        }
+    }
+
     func removePendingAttachment(id: String) {
         attachmentProcessingStore.cancel(id: id)
         let removed = pendingAttachments.filter { $0.id == id }
