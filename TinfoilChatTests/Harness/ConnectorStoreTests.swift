@@ -211,6 +211,9 @@ struct ConnectorStoreTests {
         let fixture = try await Fixture.listing([connector("c1", tools: [["name": "create_page", "permission": "ask"]])])
         let store = fixture.store
         await fixture.transport.push(Answers.refusal(409, code: HarnessErrorCode.revisionConflict, action: "reload"))
+        // The connector no longer offers the tool, as the list read after the
+        // refusal shows.
+        await fixture.transport.push(Answers.json(["connectors": [connector("c1")]]))
         await fixture.transport.hold()
         let changing = Task { try await store.update("c1", enabled: false, tools: ["create_page": .allow]) }
         await fixture.transport.arrived()
@@ -221,9 +224,11 @@ struct ConnectorStoreTests {
         await #expect(throws: HarnessError.self) { try await changing.value }
 
         #expect(store.connectors.first?.enabled == true)
-        #expect(store.connectors.first?.tools.map(\.permission) == [.ask])
-        let update = try #require(await fixture.transport.requests.last)
-        #expect(update.route == .connectorsUpdate)
+        try await eventually { store.connectors.first?.tools.isEmpty == true }
+        #expect(store.connectors.first?.tools.isEmpty == true)
+        let requests = await fixture.transport.requests
+        #expect(requests.map(\.route) == [.session, .profileGet, .connectorsList, .connectorsUpdate, .connectorsList])
+        let update = try #require(requests.dropLast().last)
         #expect(update.json["id"] as? String == "c1")
         #expect(update.json["enabled"] as? Bool == false)
         #expect(update.json["tools"] as? [String: String] == ["create_page": "allow"])

@@ -23,6 +23,9 @@ final class ConnectorStore: ObservableObject {
     /// Only the latest listing applies, so a list read before a change
     /// cannot replace the connector the change answered with.
     private var generation = 0
+    /// A change ended a listing before it answered, or was refused: the list
+    /// is read again once the change is answered.
+    private var listsAgain = false
 
     init(presenter: ConnectorSignInPresenting = ConnectorSignInSheet()) {
         self.presenter = presenter
@@ -67,6 +70,7 @@ final class ConnectorStore: ObservableObject {
 
     private func clear() {
         generation += 1
+        listsAgain = false
         connectors = []
         isLoading = false
         listed = false
@@ -77,6 +81,7 @@ final class ConnectorStore: ObservableObject {
     func refresh() async {
         guard let account, usable else { return clear() }
         generation += 1
+        listsAgain = false
         let generation = generation
         isLoading = true
         defer { if generation == self.generation { isLoading = false } }
@@ -129,7 +134,13 @@ final class ConnectorStore: ObservableObject {
             guard self.account === account else { return }
             show(answer.connector)
         } catch {
-            if self.account === account, let before { replace(before) }
+            // A refused change goes back, and the list is read again, as the
+            // connector may no longer be as it was shown.
+            if self.account === account {
+                if let before { replace(before) }
+                listsAgain = true
+                listAgainIfAsked()
+            }
             throw error
         }
     }
@@ -154,9 +165,9 @@ final class ConnectorStore: ObservableObject {
         guard let account, usable else { return }
         try await HarnessConnectors.delete(account, id: id)
         guard self.account === account else { return }
-        generation += 1
-        isLoading = false
+        endListing()
         connectors.removeAll { $0.id == id }
+        listAgainIfAsked()
     }
 
     /// Sends the user to the page that signs them in to a connector, when
@@ -184,16 +195,30 @@ final class ConnectorStore: ObservableObject {
         if connectors.contains(where: { $0.id == shown.id }) {
             replace(shown)
         } else {
-            generation += 1
-            isLoading = false
+            endListing()
             connectors.append(shown)
         }
+        listAgainIfAsked()
     }
 
     private func replace(_ connector: Connector) {
+        endListing()
+        connectors = connectors.map { $0.id == connector.id ? connector : $0 }
+    }
+
+    /// Ends the listing under way, which would show the connectors as they
+    /// were before a change made since.
+    private func endListing() {
+        if isLoading { listsAgain = true }
         generation += 1
         isLoading = false
-        connectors = connectors.map { $0.id == connector.id ? connector : $0 }
+    }
+
+    /// Reads the list again once the change that asked for it is answered.
+    private func listAgainIfAsked() {
+        guard listsAgain else { return }
+        listsAgain = false
+        Task { await refresh() }
     }
 
     /// What to tell the user about a failed connector request: by the
