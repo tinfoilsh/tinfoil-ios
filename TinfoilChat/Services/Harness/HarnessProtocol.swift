@@ -132,6 +132,9 @@ enum HarnessEventType: String, CaseIterable, Sendable {
     case compactionEnd = "COMPACTION_END"
     case runFinished = "RUN_FINISHED"
     case runError = "RUN_ERROR"
+    /// Asks the device a turn gave browser access to act in its browser.
+    /// This client gives no turn that access, and reads past the event.
+    case browserToolRequest = "BROWSER_TOOL_REQUEST"
 }
 
 /// The headers a request says more in than who is asking.
