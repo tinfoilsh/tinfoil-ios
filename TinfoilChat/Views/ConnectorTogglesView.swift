@@ -63,6 +63,9 @@ struct ConnectorTogglesView: View {
                         ProgressView()
                         Spacer()
                     }
+                } else if let error = store.errorMessage {
+                    Text(error)
+                        .foregroundColor(.secondary)
                 } else {
                     Text("Connect apps in Settings to use them here.")
                         .foregroundColor(.secondary)

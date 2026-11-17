@@ -42,6 +42,17 @@ struct ConnectorsSettingsView: View {
                 notice("Connectors work in chats saved to the cloud. Turn on Cloud Sync to use them.")
             } else if viewModel.account?.keyLocked == true {
                 notice("Unlock your encryption key in Cloud Sync to manage connectors.")
+            } else if viewModel.account?.keyReady != true {
+                // The account's key is still loading, and its connectors
+                // with it.
+                Section {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                }
+                .listRowBackground(Color.cardSurface(for: colorScheme))
             } else {
                 connectorsSection
                 catalogSection
@@ -260,12 +271,16 @@ private struct CustomConnectorSheet: View {
         address.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var nameIsTooLong: Bool {
+        trimmedName.count > Constants.Connectors.maxNameLength
+    }
+
     private var canAdd: Bool {
         !isAdding
             && store.usable
             && !trimmedName.isEmpty
             && !trimmedAddress.isEmpty
-            && trimmedName.count <= Constants.Connectors.maxNameLength
+            && !nameIsTooLong
     }
 
     var body: some View {
@@ -279,6 +294,10 @@ private struct CustomConnectorSheet: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .disabled(isAdding)
+                } footer: {
+                    if nameIsTooLong {
+                        Text("Use a name of \(Constants.Connectors.maxNameLength) characters or fewer.")
+                    }
                 }
                 .listRowBackground(Color.cardSurface(for: colorScheme))
 
