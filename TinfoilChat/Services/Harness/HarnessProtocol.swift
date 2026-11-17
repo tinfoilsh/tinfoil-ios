@@ -51,6 +51,8 @@ enum HarnessRoute: String, CaseIterable, Sendable {
     case messageDelete = "/v1/threads/messages/delete"
     case messageUpdate = "/v1/threads/messages/update"
     case messageAnswer = "/v1/threads/messages/answer"
+    case approve = "/v1/threads/approve"
+    case browserResult = "/v1/threads/browser/result"
     case share = "/v1/threads/share"
     case shareStatus = "/v1/threads/share/status"
     case shareRevoke = "/v1/threads/share/revoke"
@@ -69,6 +71,13 @@ enum HarnessRoute: String, CaseIterable, Sendable {
     case projectsDeleteAll = "/v1/projects/delete-all"
     case projectDocumentUpload = "/v1/projects/documents/upload"
     case projectDocumentDelete = "/v1/projects/documents/delete"
+    case connectorsList = "/v1/connectors/list"
+    case connectorsAdd = "/v1/connectors/add"
+    case connectorsAuthorize = "/v1/connectors/authorize"
+    case connectorsComplete = "/v1/connectors/complete"
+    case connectorsUpdate = "/v1/connectors/update"
+    case connectorsRefresh = "/v1/connectors/refresh"
+    case connectorsDelete = "/v1/connectors/delete"
     case favicon = "/v1/metadata/favicon"
     case remoteImage = "/v1/metadata/image"
     case linkMetadata = "/v1/metadata/link"
@@ -84,7 +93,7 @@ enum HarnessRoute: String, CaseIterable, Sendable {
     /// The routes about a chat's run, which go to the instance holding it.
     var aboutRun: Bool {
         switch self {
-        case .follow, .cancel, .queueSend, .queueRemove: return true
+        case .follow, .cancel, .queueSend, .queueRemove, .approve, .browserResult: return true
         default: return false
         }
     }
@@ -95,8 +104,8 @@ enum HarnessRoute: String, CaseIterable, Sendable {
     var onlyReads: Bool {
         switch self {
         case .session, .changes, .profileGet, .keysCurrent, .list, .search, .get, .shareStatus, .shareOpen,
-             .transcript, .attachmentGet, .attachmentGetPublic, .projectsList, .projectsGet, .favicon,
-             .linkMetadata, .remoteImage, .importStatus:
+             .transcript, .attachmentGet, .attachmentGetPublic, .projectsList, .projectsGet, .connectorsList,
+             .favicon, .linkMetadata, .remoteImage, .importStatus:
             return true
         default:
             return false
@@ -122,6 +131,9 @@ enum HarnessEventType: String, CaseIterable, Sendable {
     case activityDelta = "ACTIVITY_DELTA"
     case compactionStart = "COMPACTION_START"
     case compactionEnd = "COMPACTION_END"
+    /// Asks the device that operates a browser for the chat to act in it.
+    /// This client operates none, and asks the harness for no browser tools.
+    case browserToolRequest = "BROWSER_TOOL_REQUEST"
     case runFinished = "RUN_FINISHED"
     case runError = "RUN_ERROR"
 }

@@ -35,6 +35,9 @@ struct TurnOptions: Encodable, Equatable, Sendable {
     var piiCheck: Bool?
     var genUI: Bool?
     var research: Bool?
+    /// The reply may call the tools of the apps the account connected. Sent
+    /// only by a client that shows their calls and answers their approvals.
+    var connectors: Bool?
     var cacheSecret: String?
 }
 
