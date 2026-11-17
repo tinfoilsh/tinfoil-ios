@@ -1389,11 +1389,13 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
 
     /// Converts a file into the attachment the turn that uses it sends. An
     /// image's attachment carries the copy the harness gives models; the
-    /// file itself is kept apart, to show and download. A file that is no
-    /// image, attached while a stored chat whose key is unlocked is open, is
-    /// kept by the harness as it was uploaded.
+    /// file itself is kept apart, to show and download.
     func upload(_ data: Data, fileName: String, mimeType: String) async throws -> Components.Schemas.Attachment {
-        let stored = account.cloud && account.keyReady && !open.onDevice
+        let cloudChat = account.cloud && !open.onDevice
+        if cloudChat && !account.keyReady, try await account.loadedSession().features.additionalProperties["imageOriginals"] == true {
+            throw HarnessError(code: HarnessErrorCode.keyRequired, message: "Unlock cloud sync before attaching a file so its original can be kept.", action: .unlock)
+        }
+        let stored = cloudChat && account.keyReady
         let attachment = try await HarnessUploads.upload(account, data: data, fileName: fileName, mimeType: mimeType, forStoredChat: stored)
         if attachment.kind.value1 == .image {
             attachments.keepOriginal(attachment.id, AttachmentOriginal(base64: data.base64EncodedString(), mimeType: mimeType.isEmpty ? attachment.mimeType : mimeType))
