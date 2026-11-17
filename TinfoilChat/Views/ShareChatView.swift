@@ -286,7 +286,7 @@ struct ShareChatView: View {
     // MARK: - Footer
 
     private var footer: some View {
-        Text("Anyone with the link can read these messages and download their original attachments, including metadata in photos or documents. Disabling sharing deactivates the link. Copies already saved by recipients cannot be removed.")
+        Text("Only messages up to this point are shared. Anyone with the link can download any originals kept with those messages, including photo or document metadata. Disabling sharing deactivates the link. Copies already saved by recipients cannot be removed.")
             .font(.system(size: 13))
             .foregroundStyle(.tertiary)
             .multilineTextAlignment(.center)
