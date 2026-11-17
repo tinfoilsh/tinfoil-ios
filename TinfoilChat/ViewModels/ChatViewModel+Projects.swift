@@ -278,6 +278,7 @@ extension ChatViewModel {
             }
         }
         projectError = ManagedFileBatchErrorMessage.projectUpload(successCount: result.successes.count, failures: pickerFailures + result.failures)
+        if !result.successes.isEmpty { await refreshProjectDocuments() }
     }
 
     /// A document of the open project as a file to share: the file it was
@@ -292,7 +293,7 @@ extension ChatViewModel {
                 data = try await HarnessProjects.downloadDocument(session.account, projectId: document.projectId, documentId: document.id)
                 name = document.filename
             } else {
-                guard let content = document.content, !content.isEmpty else {
+                guard let content = document.content else {
                     projectError = Self.documentWithoutFileMessage
                     return nil
                 }
@@ -300,13 +301,13 @@ extension ChatViewModel {
                 name = document.textFileName
             }
             let file = try await Task.detached(priority: .userInitiated) { try ExportedFile.write(data, named: name) }.value
-            guard self.session === session else {
+            guard self.session === session, activeProject?.id == document.projectId else {
                 file.remove()
                 return nil
             }
             return file
         } catch {
-            if self.session === session, !(error is CancellationError) { projectError = error.localizedDescription }
+            if self.session === session, activeProject?.id == document.projectId, !(error is CancellationError) { projectError = error.localizedDescription }
             return nil
         }
     }
@@ -314,16 +315,16 @@ extension ChatViewModel {
     private static let documentWithoutFileMessage = "This document has no file or text to download."
 
     /// Reads the open project's documents again, as when another device
-    /// added, replaced or deleted one. Documents read before this device
-    /// changed one are left out: the change is read with the next.
+    /// added, replaced or deleted one. Only the latest read can publish.
     func refreshProjectDocuments() async {
-        guard let session, canUseProjects, let projectId = activeProject?.id, !isUploadingProjectDocument else { return }
+        guard let session, canUseProjects, let projectId = activeProject?.id else { return }
         let generation = projectLoadGeneration
+        projectDocumentChanges += 1
         let changes = projectDocumentChanges
         do {
             let loaded = try await HarnessProjects.get(session.account, id: projectId)
             guard self.session === session, activeProject?.id == projectId, generation == projectLoadGeneration,
-                  changes == projectDocumentChanges, !isUploadingProjectDocument else { return }
+                  changes == projectDocumentChanges else { return }
             projectDocuments = (loaded.documents ?? []).map(ProjectDocument.init)
         } catch {
             Self.logger.error("Failed to refresh a project's documents: \(error, privacy: .public)")
@@ -338,6 +339,7 @@ extension ChatViewModel {
             guard self.session === session, activeProject?.id == project.id else { return }
             projectDocumentChanges += 1
             projectDocuments.removeAll { $0.id == documentId }
+            await refreshProjectDocuments()
         } catch {
             projectError = error.localizedDescription
         }
