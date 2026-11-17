@@ -1135,6 +1135,7 @@ class ObservableMessageWrapper: ObservableObject {
                             self.message.segments != message.segments ||
                             self.message.webSearches != message.webSearches ||
                             self.message.toolCalls != message.toolCalls ||
+                            self.message.connectorCalls != message.connectorCalls ||
                             self.message.thinkingSummary != message.thinkingSummary ||
                             self.message.webSearchSummary != message.webSearchSummary ||
                             self.message.annotations != message.annotations ||

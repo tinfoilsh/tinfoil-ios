@@ -10,6 +10,10 @@ struct InlineSegmentGroupingTests {
             WebSearchInstance(id: $0, query: "query-\($0)", status: .completed, sources: [], reason: nil)
         }
         message.urlFetches = [URLFetchState(id: "page", url: "https://example.com/page", status: .completed)]
+        message.connectorCalls = [ConnectorCallState(
+            id: "call", connectorId: "connector", connectorName: "Fake", connectorURL: "https://mcp.example.test/mcp", tool: "create_page",
+            title: nil, status: .completed, approval: nil, startedAt: nil, endedAt: nil
+        )]
         return MessageView.inlineSegmentRuns(from: segments, message: message)
     }
 
@@ -89,6 +93,28 @@ struct InlineSegmentGroupingTests {
             #expect(sizes == [1, 1])
             #expect(!result.contains { if case .work = $0.run { return true }; return false })
         }
+    }
+
+    @Test func aConnectorCallStandsOnItsOwnRowBetweenWorkRuns() {
+        let result = runs([
+            .thinking(content: "Plan", isThinking: false, duration: 1),
+            .webSearch(searchId: "first"),
+            .connectorCall(callId: "call"),
+            .webSearch(searchId: "second"),
+            .urlFetch(fetchId: "page"),
+        ])
+        #expect(result.map(\.id) == ["work:0:thinking", "connector:2:call", "work:3:searches:second"])
+        guard result.count == 3,
+              let before = workSteps(result[0]),
+              case .connectorCall(let call) = result[1].run,
+              let after = workSteps(result[2]) else {
+            Issue.record("Expected a work run on each side of the call, got \(result.map(\.id))")
+            return
+        }
+        #expect(call.id == "call")
+        // The steps after the call start a run of their own.
+        #expect(before.map(\.id) == ["thinking", "searches:first"])
+        #expect(after.map(\.id) == ["searches:second", "fetches:page"])
     }
 
     @Test func loneTraceRowsRenderAsThemselves() {

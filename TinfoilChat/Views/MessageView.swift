@@ -93,6 +93,9 @@ struct MessageRowContext: Equatable {
     var genUIRetryStates: [String: GenUIRetryState] = [:]
     /// The answers of the row's questions widgets, by widget call.
     var answers: [String: GenUIAnswersState] = [:]
+    /// The user's answers to the row's connector calls that wait for their
+    /// approval, as they are sent, by call.
+    var connectorApprovals: [String: ConnectorApprovalState] = [:]
     /// The open chat's error, which only the row that failed shows.
     var failure: HarnessErrorBody?
     var failureAt: Date?
@@ -114,6 +117,9 @@ struct MessageRowContext: Equatable {
             if toolCall.name == QuestionSet.widgetName {
                 answers[toolCall.id] = viewModel.answersState(of: toolCall, isRenderingStream: isRenderingStream)
             }
+        }
+        for call in message.connectorCalls {
+            if let state = viewModel.connectorApprovalState(callId: call.id) { connectorApprovals[call.id] = state }
         }
         if shouldShowStreamError(message: message), let shown = viewModel.shownFailure {
             failure = shown.error
@@ -326,6 +332,7 @@ struct MessageView: View, Equatable {
         case text(String, isTrailing: Bool)
         case step(WorkStep)
         case toolCall(GenUIToolCall)
+        case connectorCall(ConnectorCallState)
         case work(WorkRun)
     }
 
@@ -421,6 +428,16 @@ struct MessageView: View, Equatable {
                         run: .toolCall(toolCall)
                     ))
                 }
+            case .connectorCall(let callId):
+                // A call stands on its own row, so one that waits for the
+                // user's approval is never folded into a run of steps.
+                flushWork()
+                if let call = message.connectorCalls.first(where: { $0.id == callId }) {
+                    runs.append(IdentifiedInlineSegmentRun(
+                        id: "connector:\(index):\(call.id)",
+                        run: .connectorCall(call)
+                    ))
+                }
             }
         }
         flushWork()
@@ -444,6 +461,10 @@ struct MessageView: View, Equatable {
                 return false
             case .step(let step):
                 return !step.isInFlight
+            case .connectorCall(let call):
+                // A call still running, or waiting for the user, says so in
+                // its own row.
+                return call.status != .running
             case .text, .toolCall, nil:
                 return true
             }
@@ -485,6 +506,8 @@ struct MessageView: View, Equatable {
                     workStepBox(step, rowId: identifiedRun.id, isActive: isRenderingStream && step.isInFlight)
                 case .toolCall(let toolCall):
                     genUIToolCallView(toolCall)
+                case .connectorCall(let call):
+                    connectorCallView(call)
                 case .work(let run):
                     WorkBox(
                         run: run,
@@ -566,6 +589,18 @@ struct MessageView: View, Equatable {
                     submit: { viewModel.submitAnswers() }
                 )
             }
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func connectorCallView(_ call: ConnectorCallState) -> some View {
+        ConnectorCallView(
+            call: call,
+            isDarkMode: isDarkMode,
+            approving: ConnectorApproving(
+                state: context.connectorApprovals[call.id],
+                answer: { choice in viewModel.answerConnectorApproval(call, choice: choice) }
+            )
         )
         .frame(maxWidth: .infinity, alignment: .leading)
     }

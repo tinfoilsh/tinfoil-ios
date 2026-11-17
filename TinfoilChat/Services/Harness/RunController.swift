@@ -537,6 +537,11 @@ final class RunController: ObservableObject {
         let _: RawJSON = try await account.post(.cancel, request, keyless: true, threadId: request.threadId)
     }
 
+    /// Answers a call of a chat's run that waits for the user's approval.
+    func approve(_ answer: Components.Schemas.ApprovalInput) async throws {
+        let _: RawJSON = try await account.post(.approve, answer, keyless: true, threadId: answer.threadId)
+    }
+
     func markCanceled(_ messageIds: [String]) {
         if !messageIds.isEmpty { canceled.formUnion(messageIds) }
     }

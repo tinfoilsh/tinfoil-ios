@@ -13,6 +13,18 @@ struct ChatViewMappingTests {
         try message(["id": "m", "role": "assistant", "createdAt": "2026-01-01T00:00:00Z", "timeline": timeline])
     }
 
+    /// A call to a connector's tool as a reply's timeline holds it, with the
+    /// user's approval when the call needs one.
+    private static func connectorCall(status: String, approval: [String: Any]? = nil) -> [String: Any] {
+        var connector: [String: Any] = [
+            "id": "conn-1", "name": "Fake", "url": "https://mcp.example.test/mcp", "tool": "create_page", "title": "Create a page",
+        ]
+        if let approval { connector["approval"] = approval }
+        let display: [String: Any] = ["status": status, "sources": [], "connector": connector]
+        return ["id": "app-call", "type": "tool_call", "toolCallId": "app-call", "name": "fake__create_page", "arguments": #"{"title":"Plans"}"#,
+                "complete": true, "startedAt": 1000, "endedAt": 2000, "display": display]
+    }
+
     @Test func aReplyStoppedEarlySaysSoUntilAContinuationFinishesIt() throws {
         let stopped = try Self.message(["id": "m", "role": "assistant", "createdAt": "2026-01-01T00:00:00Z", "content": "Half", "isInterrupted": true])
         #expect(ChatViewMapping.message(stopped).replyStop == .stopped)
@@ -154,6 +166,70 @@ struct ChatViewMappingTests {
         let shown = ChatViewMapping.message(wire)
         #expect(shown.toolCalls == [GenUIToolCall(id: "w", name: "render_clock", arguments: #"{"tz":"UTC"}"#)])
         #expect(shown.segments == [.toolCall(toolCallId: "w")])
+    }
+
+    @Test func aCallToAConnectorsToolShowsAsTheCallAndNotAsAWidget() throws {
+        let wire = try Self.reply([
+            Self.connectorCall(status: "completed", approval: ["status": "approved"]),
+            ["id": "c", "type": "content", "content": "done"],
+        ])
+        let shown = ChatViewMapping.message(wire)
+        #expect(shown.segments == [.connectorCall(callId: "app-call"), .text("done")])
+        #expect(shown.connectorCalls == [ConnectorCallState(
+            id: "app-call", connectorId: "conn-1", connectorName: "Fake", connectorURL: "https://mcp.example.test/mcp", tool: "create_page",
+            title: "Create a page", status: .completed, approval: .approved, startedAt: 1000, endedAt: 2000
+        )])
+        // Its server names the tool, which is no widget's name.
+        #expect(shown.toolCalls.isEmpty)
+    }
+
+    @Test func aConnectorCallCarriesTheUsersAnswerToItsApproval() throws {
+        func shownApproval(_ approval: [String: Any]) throws -> ConnectorCallState.Approval {
+            let wire = try Self.reply([Self.connectorCall(status: "running", approval: approval)])
+            return try #require(ChatViewMapping.message(wire, streaming: true).connectorCalls.first?.approval)
+        }
+        let deadline = try #require(ChatAccessCache.date(of: "2026-01-01T00:05:00Z"))
+        let dated = ConnectorCallState.Approval.pending(id: "ap-1", expiresAt: deadline)
+        let undated = ConnectorCallState.Approval.pending(id: "ap-1", expiresAt: nil)
+        #expect(try shownApproval(["id": "ap-1", "status": "pending", "expiresAt": "2026-01-01T00:05:00Z"]) == dated)
+        #expect(try shownApproval(["id": "ap-1", "status": "pending"]) == undated)
+        // A pending approval that names no id cannot be answered.
+        #expect(try shownApproval(["status": "pending", "expiresAt": "2026-01-01T00:05:00Z"]) == .expired)
+        #expect(try shownApproval(["status": "approved"]) == .approved)
+        #expect(try shownApproval(["status": "declined"]) == .declined)
+        #expect(try shownApproval(["status": "expired"]) == .expired)
+        // A status this client does not know shows as declined.
+        #expect(try shownApproval(["status": "postponed"]) == .declined)
+
+        // A call its connector lets run without asking has none.
+        let wire = try Self.reply([Self.connectorCall(status: "running")])
+        let allowed = try #require(ChatViewMapping.message(wire, streaming: true).connectorCalls.first)
+        #expect(allowed.approval == nil)
+    }
+
+    @Test func aConnectorCallWaitsForItsApprovalWhileItRunsAndUntilItsDeadline() throws {
+        let wire = try Self.reply([
+            Self.connectorCall(status: "running", approval: ["id": "ap-1", "status": "pending", "expiresAt": "2026-01-01T00:05:00Z"]),
+        ])
+        let deadline = try #require(ChatAccessCache.date(of: "2026-01-01T00:05:00Z"))
+        let waiting = try #require(ChatViewMapping.message(wire, streaming: true).connectorCalls.first)
+        #expect(waiting.status == .running)
+        #expect(waiting.pendingApprovalId(now: deadline.addingTimeInterval(-1)) == "ap-1")
+        #expect(waiting.pendingApprovalId(now: deadline) == nil)
+
+        // A reply that stopped cut the call off, which no answer can run.
+        let cutOff = try #require(ChatViewMapping.message(wire, streaming: false).connectorCalls.first)
+        #expect(cutOff.status == .failed)
+        #expect(cutOff.pendingApprovalId(now: deadline.addingTimeInterval(-1)) == nil)
+
+        // An approval that names no deadline waits for as long as its call
+        // runs, and one the user answered waits no more.
+        var undated = waiting
+        undated.approval = .pending(id: "ap-1", expiresAt: nil)
+        #expect(undated.pendingApprovalId(now: .distantFuture) == "ap-1")
+        var answered = waiting
+        answered.approval = .approved
+        #expect(answered.pendingApprovalId(now: deadline.addingTimeInterval(-1)) == nil)
     }
 
     @Test func aQuestionsWidgetCarriesTheAnswersTheChatSaved() throws {

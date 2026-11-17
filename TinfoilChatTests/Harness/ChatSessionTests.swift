@@ -1600,4 +1600,131 @@ struct ChatSessionTests {
         let left = try #require(try await session.device.get(threadId))
         #expect(Self.ids(left) == ["u1", "a1", "c", "u2"])
     }
+
+    /// A stored chat, open for an account on a chat service that offers the
+    /// features named.
+    private static func storedChat(features: [String: Bool]) async throws -> Fixture {
+        let opened: [String: Any] = signedInSession.merging(["features": features]) { $1 }
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(opened), Answers.json(firstQuestionWindow)])
+        _ = try await fixture.account.loadedSession()
+        #expect(try await fixture.session.openChat(threadId, local: false) == .opened)
+        return fixture
+    }
+
+    /// A turn of the open chat as the chat service was sent it, which it
+    /// refuses.
+    private static func refusedTurn(_ fixture: Fixture, _ fields: TurnFields) async throws -> [String: Any] {
+        await fixture.transport.push(Answers.refusal(429, code: HarnessErrorCode.quotaExhausted, action: "wait"))
+        #expect(!(await fixture.session.send(fields)))
+        let turn = try #require(await fixture.transport.requests.last)
+        #expect(turn.route == .turn)
+        return turn.json
+    }
+
+    /// What a turn says of the account's connectors, if it says anything.
+    private static func askedConnectors(_ turn: [String: Any]) -> Any? {
+        (turn["options"] as? [String: Any])?["connectors"]
+    }
+
+    @Test func onlyATurnOfAStoredChatAsksForTheConnectorsTheChatServiceOffers() async throws {
+        let question = TurnFields(kind: .send, content: "again")
+        let offered = try await Self.storedChat(features: ["connectors": true])
+        #expect(offered.session.offersConnectors)
+        let stored = try await Self.refusedTurn(offered, question)
+        #expect(stored["local"] == nil)
+        #expect(Self.askedConnectors(stored) as? Bool == true)
+
+        // The same account's chat on this device is sent with its turn, and
+        // its replies call no connector.
+        offered.session.newChat(local: true)
+        #expect(!offered.session.offersConnectors)
+        let onDevice = try await Self.refusedTurn(offered, question)
+        #expect(onDevice["local"] as? Bool == true)
+        #expect(Self.askedConnectors(onDevice) == nil)
+
+        let notOffered = try await Self.storedChat(features: [:])
+        #expect(!notOffered.session.offersConnectors)
+        let plain = try await Self.refusedTurn(notOffered, question)
+        #expect(plain["local"] == nil)
+        #expect(Self.askedConnectors(plain) == nil)
+    }
+
+    @Test func aQuestionResearchedInDepthAsksForNoConnectors() async throws {
+        let fixture = try await Self.storedChat(features: ["connectors": true, "research": true])
+        let session = fixture.session
+        #expect(session.offersConnectors)
+        session.setResearch(true)
+        try #require(session.researching)
+
+        let turn = try await Self.refusedTurn(fixture, TurnFields(kind: .send, content: "Compare lighthouses"))
+
+        #expect((turn["options"] as? [String: Any])?["research"] as? Bool == true)
+        #expect(Self.askedConnectors(turn) == nil)
+    }
+
+    /// What a reply's call to a connector's tool shows, with the user's
+    /// approval as it stands.
+    private static func connectorDisplay(_ status: String, approval: [String: Any]) -> [String: Any] {
+        let connector: [String: Any] = [
+            "id": "conn-1", "name": "Fake", "url": "https://mcp.example.test/mcp", "tool": "create_page", "title": "Create a page",
+            "approval": approval,
+        ]
+        return ["status": status, "sources": [], "connector": connector]
+    }
+
+    @Test func anApprovalAnswersTheCallOfTheRunThatWaitsForIt() async throws {
+        let fixture = try await Self.storedChat(features: ["connectors": true])
+        let session = fixture.session
+        // No run of the chat waits for an answer yet.
+        await #expect(throws: HarnessError.self) { try await session.approve("ap-1", approved: true) }
+        #expect(await fixture.transport.requests.map(\.route) == [.session, .get])
+
+        let pending: [String: Any] = ["id": "ap-1", "status": "pending", "expiresAt": "2999-01-01T00:00:00Z"]
+        let asking: [[String: Any]] = [
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_3", "instance": "i"],
+            ["type": "TOOL_CALL_START", "toolCallId": "app-call", "toolCallName": "fake__create_page", "parentMessageId": "msg_6"],
+            ["type": "TOOL_CALL_ARGS", "toolCallId": "app-call", "delta": #"{"title":"Plans"}"#],
+            ["type": "TOOL_CALL_END", "toolCallId": "app-call"],
+            ["type": "ACTIVITY_SNAPSHOT", "messageId": "act_app-call", "activityType": "TOOL",
+             "content": ["toolCallId": "app-call", "tool": "fake__create_page", "progress": 0, "output": []],
+             "display": Self.connectorDisplay("running", approval: pending)],
+        ]
+        let approved: [String: Any] = ["status": "approved"]
+        let running: [[String: Any]] = [
+            ["type": "ACTIVITY_DELTA", "messageId": "act_app-call", "activityType": "TOOL", "patch": [],
+             "display": Self.connectorDisplay("running", approval: approved)],
+            ["type": "TOOL_CALL_RESULT", "messageId": "msg_7", "toolCallId": "app-call", "role": "tool", "content": ["output": "created Plans"],
+             "display": Self.connectorDisplay("completed", approval: approved)],
+            ["type": "TEXT_MESSAGE_CHUNK", "messageId": "msg_6", "role": "assistant", "delta": "done"],
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_3", "metadata": [:]],
+        ]
+        let (release, answered) = AsyncStream<Void>.makeStream()
+        await fixture.transport.push(heldRun(asking, then: running, until: release))
+        await fixture.transport.push(Answers.json(["accepted": true]))
+        let replying = Task { await session.send(TurnFields(kind: .send, content: "again")) }
+        for await state in session.controller.$view.values where state.messages.last?.timeline?.last?.display?.connector?.approval?.id == "ap-1" { break }
+        let asked = try #require(session.state.messages.last)
+        let waiting = try #require(ChatViewMapping.message(asked, streaming: true).connectorCalls.first)
+        #expect(waiting.pendingApprovalId() == "ap-1")
+
+        try await session.approve("ap-1", approved: true)
+
+        // The answer names the run, and goes to the instance that holds it.
+        let approval = try #require(await fixture.transport.requests.last)
+        #expect(approval.route == .approve)
+        #expect(approval.headers[HarnessHeader.instance] == "i")
+        #expect(approval.json["key"] as? String == Data(repeating: 7, count: 32).base64EncodedString())
+        #expect(approval.json["threadId"] as? String == threadId)
+        #expect(approval.json["runId"] as? String == "run_3")
+        #expect(approval.json["approvalId"] as? String == "ap-1")
+        #expect(approval.json["approved"] as? Bool == true)
+        // The reply's stream then shows how the call went.
+        answered.yield(())
+        #expect(await replying.value)
+        let reply = try #require(session.state.messages.last)
+        let called = try #require(ChatViewMapping.message(reply).connectorCalls.first)
+        #expect(called.status == .completed)
+        #expect(called.approval == .approved)
+        #expect(await fixture.transport.requests.map(\.route) == [.session, .get, .turn, .approve])
+    }
 }

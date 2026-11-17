@@ -833,6 +833,20 @@ struct SettingsView: View {
                     }
                     .listRowBackground(Color.cardSurface(for: colorScheme))
                 }
+                if authManager.isAuthenticated && chatViewModel.connectorsOffered {
+                    Section {
+                        NavigationLink {
+                            ConnectorsSettingsView(
+                                store: chatViewModel.connectors,
+                                viewModel: chatViewModel
+                            )
+                        } label: {
+                            Label(Constants.Connectors.label, tinfoil: Constants.Connectors.icon)
+                                .foregroundColor(.primary)
+                        }
+                    }
+                    .listRowBackground(Color.cardSurface(for: colorScheme))
+                }
                 preferencesSection
                 contactSection
                 legalSection

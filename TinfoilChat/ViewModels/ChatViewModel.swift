@@ -264,6 +264,11 @@ class ChatViewModel: ObservableObject {
     @Published var shouldShowKeyImport: Bool = false
     @Published private(set) var isPasskeyRecoverySkipped: Bool = false
 
+    // MARK: - Connectors
+
+    /// The account's connectors, which Settings and the composer show.
+    let connectors = ConnectorStore()
+
     // MARK: - Audio
 
     let speechPlayer = SpeechPlayer()
@@ -473,6 +478,8 @@ class ChatViewModel: ObservableObject {
         isSavingTemporaryChat = false
         rows = ChatRows()
         session = nil
+        connectors.bind(nil)
+        connectorApprovals = [:]
         dictation.reset()
         showsKeptModels = true
         verification = VerificationInfo(isVerifying: true)
@@ -497,6 +504,7 @@ class ChatViewModel: ObservableObject {
             return try await HarnessSpeech.transcribe(account, recording: recording, fileName: fileName, mimeType: Constants.Audio.recordingMimeType)
         }
         ProfileManager.shared.bind(account)
+        connectors.bind(account)
         KeyRegistry.shared.bind(account)
         await LinkMetadataService.shared.bind(account)
         session.objectWillChange.sink { [weak self] _ in self?.sessionChanged() }.store(in: &sessionCancellables)
@@ -2023,6 +2031,58 @@ class ChatViewModel: ObservableObject {
 
     func genUIRetryState(toolCallId: String) -> GenUIRetryState? {
         genUIRetryStates[toolCallId]
+    }
+
+    // MARK: - Connector calls
+
+    /// Whether the chat service offers connectors to the account: it is
+    /// signed in, and its session has the feature.
+    var connectorsOffered: Bool {
+        account?.userId != nil && account?.session?.features.additionalProperties[Constants.Connectors.feature] == true
+    }
+
+    /// Whether the open chat's replies may call the account's connectors.
+    var chatUsesConnectors: Bool { session?.offersConnectors == true }
+
+    /// The user's answers to the calls that wait for their approval, as they
+    /// are sent, by call.
+    @Published private var connectorApprovals: [String: ConnectorApprovalState] = [:]
+
+    func connectorApprovalState(callId: String) -> ConnectorApprovalState? {
+        connectorApprovals[callId]
+    }
+
+    /// Answers a call of the open chat's reply that waits for the user's
+    /// approval. Allowing its tool always also lets the tool run without
+    /// asking from then on.
+    func answerConnectorApproval(_ call: ConnectorCallState, choice: ConnectorApprovalChoice) {
+        guard let session, let approvalId = call.pendingApprovalId(), connectorApprovals[call.id]?.sending == nil else { return }
+        connectorApprovals[call.id] = ConnectorApprovalState(sending: choice)
+        Task {
+            var refusal: Error?
+            do {
+                try await session.approve(approvalId, approved: choice != .decline)
+            } catch {
+                refusal = error
+            }
+            // An answer given to another account's chat changes nothing of
+            // the one open since.
+            guard self.session === session else { return }
+            // A call answered already, as on another device, or no longer
+            // waiting says how it went in the reply's stream.
+            if let refusal, (refusal as? HarnessError)?.code != HarnessErrorCode.revisionConflict {
+                connectorApprovals[call.id] = ConnectorApprovalState(error: ConnectorStore.describe(refusal))
+                return
+            }
+            connectorApprovals[call.id] = ConnectorApprovalState(answered: true)
+            guard choice == .always else { return }
+            do {
+                try await connectors.update(call.connectorId, tools: [call.tool: .allow])
+            } catch {
+                guard self.session === session else { return }
+                reportActionFailure("\(call.toolName) Will Still Ask First", error)
+            }
+        }
     }
 
     // MARK: - Questions widgets

@@ -227,13 +227,15 @@ enum HarnessEventStream {
         }
         guard let type = HarnessEventType(rawValue: named.type) else { return nil }
         do {
-            return Frame(event: try event(of: type, from: bytes, decoder), id: id)
+            return try event(of: type, from: bytes, decoder).map { Frame(event: $0, id: id) }
         } catch {
             throw HarnessError.invalidStream("The chat stream contained an invalid \(named.type) event.")
         }
     }
 
-    private static func event(of type: HarnessEventType, from bytes: Data, _ decoder: JSONDecoder) throws -> RunEvent {
+    /// The event of a type this client knows, or nil for one it has no use
+    /// for.
+    private static func event(of type: HarnessEventType, from bytes: Data, _ decoder: JSONDecoder) throws -> RunEvent? {
         switch type {
         case .runStarted: return .runStarted(try decoder.decode(Components.Schemas.RunStartedEvent.self, from: bytes))
         case .messagesSnapshot: return .messagesSnapshot(try decoder.decode(Components.Schemas.MessagesSnapshotEvent.self, from: bytes))
@@ -250,6 +252,7 @@ enum HarnessEventStream {
         case .activityDelta: return .activityDelta(try decoder.decode(Components.Schemas.ActivityDeltaEvent.self, from: bytes))
         case .compactionStart: return .compactionStart(try decoder.decode(Components.Schemas.CompactionStartEvent.self, from: bytes))
         case .compactionEnd: return .compactionEnd(try decoder.decode(Components.Schemas.CompactionEndEvent.self, from: bytes))
+        case .browserToolRequest: return nil
         case .runFinished:
             return .runFinished(RunFinished(event: try decoder.decode(Components.Schemas.RunFinishedEvent.self, from: bytes), thread: returnedThread(bytes)))
         case .runError:

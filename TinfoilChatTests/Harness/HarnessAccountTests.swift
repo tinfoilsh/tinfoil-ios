@@ -231,6 +231,41 @@ struct HarnessAccountTests {
         #expect(account.syncStatus.lastSyncedAt == nil)
     }
 
+    @Test func aChangeOfTheAccountsConnectorsShowsAsTheirRevision() async throws {
+        let (account, transport) = makeAccount(userId: "user-1", answers: [
+            Answers.json(sessionAnswer), Answers.json([:]),
+            Answers.json(["chats": "c1", "profile": "p1", "projects": "j1", "connectors": "n1"]), Answers.json([:]),
+            Answers.json(["chats": "c1", "profile": "p1", "projects": "j1", "connectors": "n2"]),
+        ])
+        try await account.refresh()
+        #expect(account.connectorRevision == nil)
+
+        await account.checkChanges()
+        #expect(account.connectorRevision == "n1")
+
+        // Only the connectors changed, so nothing else is read again.
+        await account.checkChanges()
+        #expect(account.connectorRevision == "n2")
+        #expect(account.chatRevision == "c1")
+        #expect(await transport.requests.map(\.route) == [.session, .profileGet, .changes, .profileGet, .changes])
+    }
+
+    @Test func aChatServiceThatKeepsNoConnectorsNamesNoRevisionOfThem() async throws {
+        let (account, _) = makeAccount(userId: "user-1", answers: [
+            Answers.json(sessionAnswer), Answers.json([:]),
+            Answers.json(["chats": "c1", "profile": "p1", "projects": "j1"]), Answers.json([:]),
+        ])
+        try await account.refresh()
+
+        await account.checkChanges()
+
+        #expect(account.syncStatus.lastSyncedAt != nil)
+        #expect(!account.syncStatus.failing)
+        #expect(account.chatRevision == "c1")
+        #expect(account.projectRevision == "j1")
+        #expect(account.connectorRevision == nil)
+    }
+
     @Test func settingsTheHarnessRefusesAnAccountWhoseSessionEndedAskForASignIn() async throws {
         let prompts = SignInPrompts()
         let observer = NotificationCenter.default.addObserver(forName: .chatAuthenticationRequired, object: nil, queue: nil) { _ in prompts.count += 1 }

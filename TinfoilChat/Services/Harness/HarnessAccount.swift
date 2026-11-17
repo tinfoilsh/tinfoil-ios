@@ -39,10 +39,12 @@ final class HarnessAccount: ObservableObject {
     @Published private(set) var error: String?
     /// The account's quota as the session and its runs last reported it.
     @Published private(set) var rateLimit: HarnessRateLimit?
-    /// What the harness holds of the account's chats and projects, as a
-    /// revision that changes when another device changes them.
+    /// What the harness holds of the account's chats, projects and
+    /// connectors, as a revision that changes when another device changes
+    /// them. A harness that keeps no connectors names no revision of them.
     @Published private(set) var chatRevision: String?
     @Published private(set) var projectRevision: String?
+    @Published private(set) var connectorRevision: String?
     let syncStatus = CloudSyncStatus()
 
     private(set) var disposed = false
@@ -71,6 +73,7 @@ final class HarnessAccount: ObservableObject {
         var chats: String
         var profile: String
         var projects: String
+        var connectors: String?
     }
 
     init(
@@ -566,6 +569,7 @@ final class HarnessAccount: ObservableObject {
             changeTokens = tokens
             if tokens.chats != chatRevision { chatRevision = tokens.chats }
             if tokens.projects != projectRevision { projectRevision = tokens.projects }
+            if tokens.connectors != connectorRevision { connectorRevision = tokens.connectors }
             syncStatus.reportSynced()
         } catch {
             if !disposed { Self.logger.error("Failed to refresh remote changes: \(error, privacy: .public)") }

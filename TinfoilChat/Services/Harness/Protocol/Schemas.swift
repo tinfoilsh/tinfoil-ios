@@ -337,8 +337,15 @@ extension Components {
                 case attachmentUnsupported = "ATTACHMENT_UNSUPPORTED"
                 case attachmentsUnavailable = "ATTACHMENTS_UNAVAILABLE"
                 case badRequest = "BAD_REQUEST"
+                case browserTimeout = "BROWSER_TIMEOUT"
                 case chatFlagged = "CHAT_FLAGGED"
                 case compactionFailed = "COMPACTION_FAILED"
+                case connectorLimit = "CONNECTOR_LIMIT"
+                case connectorNotFound = "CONNECTOR_NOT_FOUND"
+                case connectorSignInFailed = "CONNECTOR_SIGN_IN_FAILED"
+                case connectorSignedOut = "CONNECTOR_SIGNED_OUT"
+                case connectorUnreachable = "CONNECTOR_UNREACHABLE"
+                case connectorUnsupported = "CONNECTOR_UNSUPPORTED"
                 case contextTooLarge = "CONTEXT_TOO_LARGE"
                 case credentialRequired = "CREDENTIAL_REQUIRED"
                 case importInvalid = "IMPORT_INVALID"
@@ -556,7 +563,7 @@ extension Components {
             internal var composer: Components.Schemas.Composer
             /// - Remark: Generated from `#/components/schemas/Session/presets`.
             internal var presets: [Components.Schemas.Preset]
-            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes.
+            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes. connectors is true while this caller may connect servers, whose tools a stored chat's replies call.
             ///
             /// - Remark: Generated from `#/components/schemas/Session/features`.
             internal struct FeaturesPayload: Codable, Hashable, Sendable {
@@ -576,7 +583,7 @@ extension Components {
                     try encoder.encodeAdditionalProperties(additionalProperties)
                 }
             }
-            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes.
+            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes. connectors is true while this caller may connect servers, whose tools a stored chat's replies call.
             ///
             /// - Remark: Generated from `#/components/schemas/Session/features`.
             internal var features: Components.Schemas.Session.FeaturesPayload
@@ -593,7 +600,7 @@ extension Components {
             ///   - profileDefaults:
             ///   - composer:
             ///   - presets:
-            ///   - features: Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes.
+            ///   - features: Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes. connectors is true while this caller may connect servers, whose tools a stored chat's replies call.
             internal init(
                 _protocol: Components.Schemas.Session._ProtocolPayload,
                 user: Components.Schemas.Session.UserPayload,
@@ -1165,6 +1172,8 @@ extension Components {
             ///
             /// - Remark: Generated from `#/components/schemas/Turn/widgets`.
             internal var widgets: [Swift.String]?
+            /// - Remark: Generated from `#/components/schemas/Turn/browser`.
+            internal var browser: Components.Schemas.BrowserAccess?
             /// A compact turn, or a retry that compacts again, summarizes the chat's latest exchange too, as COMPACTION_START describes. It is refused on any other kind. A client sends it only while the session's features.compactLatest is true, and when it shows a compaction marker at the end of a chat.
             ///
             /// - Remark: Generated from `#/components/schemas/Turn/compactLatest`.
@@ -1190,6 +1199,7 @@ extension Components {
             ///   - toolCallId: The widget call a retryToolCall regenerates.
             ///   - attachments:
             ///   - widgets: The widgets this client renders.
+            ///   - browser:
             ///   - compactLatest: A compact turn, or a retry that compacts again, summarizes the chat's latest exchange too, as COMPACTION_START describes. It is refused on any other kind. A client sends it only while the session's features.compactLatest is true, and when it shows a compaction marker at the end of a chat.
             ///   - options:
             internal init(
@@ -1209,6 +1219,7 @@ extension Components {
                 toolCallId: Swift.String? = nil,
                 attachments: [Components.Schemas.SentAttachment]? = nil,
                 widgets: [Swift.String]? = nil,
+                browser: Components.Schemas.BrowserAccess? = nil,
                 compactLatest: Swift.Bool? = nil,
                 options: Components.Schemas.TurnOptions? = nil
             ) {
@@ -1228,6 +1239,7 @@ extension Components {
                 self.toolCallId = toolCallId
                 self.attachments = attachments
                 self.widgets = widgets
+                self.browser = browser
                 self.compactLatest = compactLatest
                 self.options = options
             }
@@ -1248,8 +1260,287 @@ extension Components {
                 case toolCallId
                 case attachments
                 case widgets
+                case browser
                 case compactLatest
                 case options
+            }
+        }
+        /// Available only when features.browserTools is true, on local send turns
+        /// without research. The client controls selected tabs and supplies a new
+        /// executor identity and secret for each turn. The token is sent only in
+        /// sealed bodies, never in prompts, events or persistent chat records.
+        /// Browser actions run sequentially, at most 40 per turn. Each waits at
+        /// most five minutes for its executor; a timeout ends the run with
+        /// BROWSER_TIMEOUT and leaves later actions unexecuted. Clients cancel a run when they
+        /// relinquish browser control, and stop local dispatch immediately.
+        ///
+        ///
+        /// - Remark: Generated from `#/components/schemas/BrowserAccess`.
+        internal struct BrowserAccess: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/BrowserAccess/executorId`.
+            internal var executorId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BrowserAccess/token`.
+            internal var token: Swift.String
+            /// Creates a new `BrowserAccess`.
+            ///
+            /// - Parameters:
+            ///   - executorId:
+            ///   - token:
+            internal init(
+                executorId: Swift.String,
+                token: Swift.String
+            ) {
+                self.executorId = executorId
+                self.token = token
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case executorId
+                case token
+            }
+        }
+        /// Arguments validated against the model-facing browser tool schema. The executor additionally validates selected tabs, URL schemes, current references, and action permissions before dispatch.
+        ///
+        /// - Remark: Generated from `#/components/schemas/BrowserAction`.
+        internal struct BrowserAction: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/action`.
+            internal enum ActionPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case tabs = "tabs"
+                case read = "read"
+                case screenshot = "screenshot"
+                case click = "click"
+                case hover = "hover"
+                case fill = "fill"
+                case select = "select"
+                case press = "press"
+                case scroll = "scroll"
+                case navigate = "navigate"
+                case back = "back"
+                case forward = "forward"
+                case open = "open"
+                case _switch = "switch"
+                case close = "close"
+                case wait = "wait"
+            }
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/action`.
+            internal var action: Components.Schemas.BrowserAction.ActionPayload
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/tabId`.
+            internal var tabId: Swift.Int?
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/ref`.
+            internal var ref: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/text`.
+            internal var text: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/url`.
+            internal var url: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/key`.
+            internal enum KeyPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case enter = "Enter"
+                case tab = "Tab"
+                case escape = "Escape"
+                case arrowDown = "ArrowDown"
+                case arrowUp = "ArrowUp"
+                case arrowLeft = "ArrowLeft"
+                case arrowRight = "ArrowRight"
+                case backspace = "Backspace"
+            }
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/key`.
+            internal var key: Components.Schemas.BrowserAction.KeyPayload?
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/direction`.
+            internal enum DirectionPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case up = "up"
+                case down = "down"
+            }
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/direction`.
+            internal var direction: Components.Schemas.BrowserAction.DirectionPayload?
+            /// The fresh screenshot whose pixels a coordinate action uses.
+            ///
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/screenshotId`.
+            internal var screenshotId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/x`.
+            internal var x: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/y`.
+            internal var y: Swift.Double?
+            /// Creates a new `BrowserAction`.
+            ///
+            /// - Parameters:
+            ///   - action:
+            ///   - tabId:
+            ///   - ref:
+            ///   - text:
+            ///   - url:
+            ///   - key:
+            ///   - direction:
+            ///   - screenshotId: The fresh screenshot whose pixels a coordinate action uses.
+            ///   - x:
+            ///   - y:
+            internal init(
+                action: Components.Schemas.BrowserAction.ActionPayload,
+                tabId: Swift.Int? = nil,
+                ref: Swift.String? = nil,
+                text: Swift.String? = nil,
+                url: Swift.String? = nil,
+                key: Components.Schemas.BrowserAction.KeyPayload? = nil,
+                direction: Components.Schemas.BrowserAction.DirectionPayload? = nil,
+                screenshotId: Swift.String? = nil,
+                x: Swift.Double? = nil,
+                y: Swift.Double? = nil
+            ) {
+                self.action = action
+                self.tabId = tabId
+                self.ref = ref
+                self.text = text
+                self.url = url
+                self.key = key
+                self.direction = direction
+                self.screenshotId = screenshotId
+                self.x = x
+                self.y = y
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case action
+                case tabId
+                case ref
+                case text
+                case url
+                case key
+                case direction
+                case screenshotId
+                case x
+                case y
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/BrowserResult`.
+        internal struct BrowserResult: Codable, Hashable, Sendable {
+            /// Page data or a structured action error. Limited to 64 KiB UTF-8.
+            ///
+            /// - Remark: Generated from `#/components/schemas/BrowserResult/text`.
+            internal var text: Swift.String
+            /// Optional base64 JPEG viewport, at most 4 million pixels. Read only by vision models.
+            ///
+            /// - Remark: Generated from `#/components/schemas/BrowserResult/image`.
+            internal var image: Swift.String?
+            /// Creates a new `BrowserResult`.
+            ///
+            /// - Parameters:
+            ///   - text: Page data or a structured action error. Limited to 64 KiB UTF-8.
+            ///   - image: Optional base64 JPEG viewport, at most 4 million pixels. Read only by vision models.
+            internal init(
+                text: Swift.String,
+                image: Swift.String? = nil
+            ) {
+                self.text = text
+                self.image = image
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case text
+                case image
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/BrowserResultInput`.
+        internal struct BrowserResultInput: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/BrowserResultInput/threadId`.
+            internal var threadId: Components.Schemas.Identifier
+            /// - Remark: Generated from `#/components/schemas/BrowserResultInput/runId`.
+            internal var runId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BrowserResultInput/executorId`.
+            internal var executorId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BrowserResultInput/token`.
+            internal var token: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BrowserResultInput/executionId`.
+            internal var executionId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BrowserResultInput/result`.
+            internal var result: Components.Schemas.BrowserResult
+            /// Creates a new `BrowserResultInput`.
+            ///
+            /// - Parameters:
+            ///   - threadId:
+            ///   - runId:
+            ///   - executorId:
+            ///   - token:
+            ///   - executionId:
+            ///   - result:
+            internal init(
+                threadId: Components.Schemas.Identifier,
+                runId: Swift.String,
+                executorId: Swift.String,
+                token: Swift.String,
+                executionId: Swift.String,
+                result: Components.Schemas.BrowserResult
+            ) {
+                self.threadId = threadId
+                self.runId = runId
+                self.executorId = executorId
+                self.token = token
+                self.executionId = executionId
+                self.result = result
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case threadId
+                case runId
+                case executorId
+                case token
+                case executionId
+                case result
+            }
+        }
+        /// A complete, validated browser operation ready for the selected executor.
+        /// Only this event authorizes dispatch, never partial TOOL_CALL_ARGS.
+        /// executionId identifies the operation across stream reconnections.
+        /// Every replay is reconciled against the executor's local journal.
+        ///
+        ///
+        /// - Remark: Generated from `#/components/schemas/BrowserToolRequestEvent`.
+        internal struct BrowserToolRequestEvent: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/BrowserToolRequestEvent/type`.
+            internal var _type: OpenAPIRuntime.OpenAPIValueContainer
+            /// - Remark: Generated from `#/components/schemas/BrowserToolRequestEvent/timestamp`.
+            internal var timestamp: Components.Schemas.Timestamp?
+            /// The executor refuses dispatch after this deadline, including after a delayed review or stream replay.
+            ///
+            /// - Remark: Generated from `#/components/schemas/BrowserToolRequestEvent/expiresAt`.
+            internal var expiresAt: Foundation.Date
+            /// - Remark: Generated from `#/components/schemas/BrowserToolRequestEvent/executionId`.
+            internal var executionId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BrowserToolRequestEvent/toolCallId`.
+            internal var toolCallId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BrowserToolRequestEvent/executorId`.
+            internal var executorId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BrowserToolRequestEvent/operation`.
+            internal var operation: Components.Schemas.BrowserAction
+            /// Creates a new `BrowserToolRequestEvent`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - timestamp:
+            ///   - expiresAt: The executor refuses dispatch after this deadline, including after a delayed review or stream replay.
+            ///   - executionId:
+            ///   - toolCallId:
+            ///   - executorId:
+            ///   - operation:
+            internal init(
+                _type: OpenAPIRuntime.OpenAPIValueContainer,
+                timestamp: Components.Schemas.Timestamp? = nil,
+                expiresAt: Foundation.Date,
+                executionId: Swift.String,
+                toolCallId: Swift.String,
+                executorId: Swift.String,
+                operation: Components.Schemas.BrowserAction
+            ) {
+                self._type = _type
+                self.timestamp = timestamp
+                self.expiresAt = expiresAt
+                self.executionId = executionId
+                self.toolCallId = toolCallId
+                self.executorId = executorId
+                self.operation = operation
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case timestamp
+                case expiresAt
+                case executionId
+                case toolCallId
+                case executorId
+                case operation
             }
         }
         /// - Remark: Generated from `#/components/schemas/TurnOptions`.
@@ -1304,6 +1595,17 @@ extension Components {
             ///
             /// - Remark: Generated from `#/components/schemas/TurnOptions/research`.
             internal var research: Swift.Bool?
+            /// The turn offers the model the tools of the account's enabled,
+            /// signed-in connectors. A client sends it only while the session's
+            /// features.connectors is true, and only if it shows connector calls
+            /// and answers their approvals with threads/approve: without it, no
+            /// connector is called, so no call waits on an approval the client
+            /// cannot show. It applies to a stored chat's send, edit, regenerate,
+            /// continue or retry, and not to a research or browser turn.
+            ///
+            ///
+            /// - Remark: Generated from `#/components/schemas/TurnOptions/connectors`.
+            internal var connectors: Swift.Bool?
             /// 256 random bits the client keeps, hex encoded, which scope the model enclaves' prompt cache to the client. Turns without one share a cache only within their chat.
             ///
             /// - Remark: Generated from `#/components/schemas/TurnOptions/cacheSecret`.
@@ -1321,6 +1623,7 @@ extension Components {
             ///   - piiCheck:
             ///   - genUI:
             ///   - research: The turn researches its question on the web at length, for up to
+            ///   - connectors: The turn offers the model the tools of the account's enabled,
             ///   - cacheSecret: 256 random bits the client keeps, hex encoded, which scope the model enclaves' prompt cache to the client. Turns without one share a cache only within their chat.
             internal init(
                 model: Swift.String? = nil,
@@ -1333,6 +1636,7 @@ extension Components {
                 piiCheck: Swift.Bool? = nil,
                 genUI: Swift.Bool? = nil,
                 research: Swift.Bool? = nil,
+                connectors: Swift.Bool? = nil,
                 cacheSecret: Swift.String? = nil
             ) {
                 self.model = model
@@ -1345,6 +1649,7 @@ extension Components {
                 self.piiCheck = piiCheck
                 self.genUI = genUI
                 self.research = research
+                self.connectors = connectors
                 self.cacheSecret = cacheSecret
             }
             internal enum CodingKeys: String, CodingKey {
@@ -1358,6 +1663,7 @@ extension Components {
                 case piiCheck
                 case genUI
                 case research
+                case connectors
                 case cacheSecret
             }
         }
@@ -1512,6 +1818,8 @@ extension Components {
             case activityDelta(Components.Schemas.ActivityDeltaEvent)
             /// - Remark: Generated from `#/components/schemas/HarnessEvent/ActivitySnapshotEvent`.
             case activitySnapshot(Components.Schemas.ActivitySnapshotEvent)
+            /// - Remark: Generated from `#/components/schemas/HarnessEvent/BrowserToolRequestEvent`.
+            case browserToolRequest(Components.Schemas.BrowserToolRequestEvent)
             /// - Remark: Generated from `#/components/schemas/HarnessEvent/CompactionEndEvent`.
             case compactionEnd(Components.Schemas.CompactionEndEvent)
             /// - Remark: Generated from `#/components/schemas/HarnessEvent/CompactionStartEvent`.
@@ -1556,6 +1864,8 @@ extension Components {
                     self = .activityDelta(try .init(from: decoder))
                 case "ACTIVITY_SNAPSHOT":
                     self = .activitySnapshot(try .init(from: decoder))
+                case "BROWSER_TOOL_REQUEST":
+                    self = .browserToolRequest(try .init(from: decoder))
                 case "COMPACTION_END":
                     self = .compactionEnd(try .init(from: decoder))
                 case "COMPACTION_START":
@@ -1599,6 +1909,8 @@ extension Components {
                 case let .activityDelta(value):
                     try value.encode(to: encoder)
                 case let .activitySnapshot(value):
+                    try value.encode(to: encoder)
+                case let .browserToolRequest(value):
                     try value.encode(to: encoder)
                 case let .compactionEnd(value):
                     try value.encode(to: encoder)
@@ -4073,7 +4385,7 @@ extension Components {
                 case invalidArguments
             }
         }
-        /// What a web search or page fetch shows, kept current while it runs.
+        /// What a web search, page fetch or call to a connector's tool shows, kept current while it runs. An ACTIVITY_DELTA's display replaces the call's.
         ///
         /// - Remark: Generated from `#/components/schemas/ToolDisplay`.
         internal struct ToolDisplay: Codable, Hashable, Sendable {
@@ -4173,6 +4485,8 @@ extension Components {
             internal typealias SourcesPayload = [Components.Schemas.ToolDisplay.SourcesPayloadPayload]
             /// - Remark: Generated from `#/components/schemas/ToolDisplay/sources`.
             internal var sources: Components.Schemas.ToolDisplay.SourcesPayload
+            /// - Remark: Generated from `#/components/schemas/ToolDisplay/connector`.
+            internal var connector: Components.Schemas.ConnectorCall?
             /// Creates a new `ToolDisplay`.
             ///
             /// - Parameters:
@@ -4180,22 +4494,434 @@ extension Components {
             ///   - url:
             ///   - status: A client shows a status it does not know as completed.
             ///   - sources:
+            ///   - connector:
             internal init(
                 query: Swift.String? = nil,
                 url: Swift.String? = nil,
                 status: Components.Schemas.ToolDisplay.StatusPayload,
-                sources: Components.Schemas.ToolDisplay.SourcesPayload
+                sources: Components.Schemas.ToolDisplay.SourcesPayload,
+                connector: Components.Schemas.ConnectorCall? = nil
             ) {
                 self.query = query
                 self.url = url
                 self.status = status
                 self.sources = sources
+                self.connector = connector
             }
             internal enum CodingKeys: String, CodingKey {
                 case query
                 case url
                 case status
                 case sources
+                case connector
+            }
+        }
+        /// The connector a call reached, the tool's name on its server, and the user's approval when the call needs one.
+        ///
+        /// - Remark: Generated from `#/components/schemas/ConnectorCall`.
+        internal struct ConnectorCall: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ConnectorCall/id`.
+            internal var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/ConnectorCall/name`.
+            internal var name: Swift.String
+            /// - Remark: Generated from `#/components/schemas/ConnectorCall/url`.
+            internal var url: Swift.String
+            /// - Remark: Generated from `#/components/schemas/ConnectorCall/tool`.
+            internal var tool: Swift.String
+            /// - Remark: Generated from `#/components/schemas/ConnectorCall/title`.
+            internal var title: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ConnectorCall/approval`.
+            internal var approval: Components.Schemas.ToolApproval?
+            /// Creates a new `ConnectorCall`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - name:
+            ///   - url:
+            ///   - tool:
+            ///   - title:
+            ///   - approval:
+            internal init(
+                id: Swift.String,
+                name: Swift.String,
+                url: Swift.String,
+                tool: Swift.String,
+                title: Swift.String? = nil,
+                approval: Components.Schemas.ToolApproval? = nil
+            ) {
+                self.id = id
+                self.name = name
+                self.url = url
+                self.tool = tool
+                self.title = title
+                self.approval = approval
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case id
+                case name
+                case url
+                case tool
+                case title
+                case approval
+            }
+        }
+        /// The user's answer to a call that needs it. A pending approval names the id threads/approve answers it under and when it expires; the call waits until then.
+        ///
+        /// - Remark: Generated from `#/components/schemas/ToolApproval`.
+        internal struct ToolApproval: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ToolApproval/id`.
+            internal var id: Swift.String?
+            /// A client shows a status it does not know as declined.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ToolApproval/status`.
+            internal struct StatusPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/ToolApproval/status/value1`.
+                internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case pending = "pending"
+                    case approved = "approved"
+                    case declined = "declined"
+                    case expired = "expired"
+                }
+                /// - Remark: Generated from `#/components/schemas/ToolApproval/status/value1`.
+                internal var value1: Components.Schemas.ToolApproval.StatusPayload.Value1Payload?
+                /// - Remark: Generated from `#/components/schemas/ToolApproval/status/value2`.
+                internal var value2: Swift.String?
+                /// Creates a new `StatusPayload`.
+                ///
+                /// - Parameters:
+                ///   - value1:
+                ///   - value2:
+                internal init(
+                    value1: Components.Schemas.ToolApproval.StatusPayload.Value1Payload? = nil,
+                    value2: Swift.String? = nil
+                ) {
+                    self.value1 = value1
+                    self.value2 = value2
+                }
+                internal init(from decoder: any Swift.Decoder) throws {
+                    var errors: [any Swift.Error] = []
+                    do {
+                        self.value1 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    do {
+                        self.value2 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                        [
+                            self.value1,
+                            self.value2
+                        ],
+                        type: Self.self,
+                        codingPath: decoder.codingPath,
+                        errors: errors
+                    )
+                }
+                internal func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                        self.value1,
+                        self.value2
+                    ])
+                }
+            }
+            /// A client shows a status it does not know as declined.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ToolApproval/status`.
+            internal var status: Components.Schemas.ToolApproval.StatusPayload
+            /// - Remark: Generated from `#/components/schemas/ToolApproval/expiresAt`.
+            internal var expiresAt: Components.Schemas.Timestamp?
+            /// Creates a new `ToolApproval`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - status: A client shows a status it does not know as declined.
+            ///   - expiresAt:
+            internal init(
+                id: Swift.String? = nil,
+                status: Components.Schemas.ToolApproval.StatusPayload,
+                expiresAt: Components.Schemas.Timestamp? = nil
+            ) {
+                self.id = id
+                self.status = status
+                self.expiresAt = expiresAt
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case id
+                case status
+                case expiresAt
+            }
+        }
+        /// What a connector's tool may do in a chat. A reply reads it as each call is made. When a server offers a reply a tool its connector does not list, the reply lists the tool as ask. A tool allowed while its server said it only reads becomes ask once the server no longer says so. A client shows a permission it does not know as ask.
+        ///
+        /// - Remark: Generated from `#/components/schemas/ToolPermission`.
+        internal struct ToolPermission: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ToolPermission/value1`.
+            internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                case allow = "allow"
+                case ask = "ask"
+                case off = "off"
+            }
+            /// - Remark: Generated from `#/components/schemas/ToolPermission/value1`.
+            internal var value1: Components.Schemas.ToolPermission.Value1Payload?
+            /// - Remark: Generated from `#/components/schemas/ToolPermission/value2`.
+            internal var value2: Swift.String?
+            /// Creates a new `ToolPermission`.
+            ///
+            /// - Parameters:
+            ///   - value1:
+            ///   - value2:
+            internal init(
+                value1: Components.Schemas.ToolPermission.Value1Payload? = nil,
+                value2: Swift.String? = nil
+            ) {
+                self.value1 = value1
+                self.value2 = value2
+            }
+            internal init(from decoder: any Swift.Decoder) throws {
+                var errors: [any Swift.Error] = []
+                do {
+                    self.value1 = try decoder.decodeFromSingleValueContainer()
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self.value2 = try decoder.decodeFromSingleValueContainer()
+                } catch {
+                    errors.append(error)
+                }
+                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                    [
+                        self.value1,
+                        self.value2
+                    ],
+                    type: Self.self,
+                    codingPath: decoder.codingPath,
+                    errors: errors
+                )
+            }
+            internal func encode(to encoder: any Swift.Encoder) throws {
+                try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                    self.value1,
+                    self.value2
+                ])
+            }
+        }
+        /// A server the account connected, without anything it signs in with, which never leaves the enclave.
+        ///
+        /// - Remark: Generated from `#/components/schemas/Connector`.
+        internal struct Connector: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/Connector/id`.
+            internal var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/Connector/name`.
+            internal var name: Swift.String
+            /// - Remark: Generated from `#/components/schemas/Connector/url`.
+            internal var url: Swift.String
+            /// Whether chats call its tools.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Connector/enabled`.
+            internal var enabled: Swift.Bool
+            /// Whether its tools can be called, or the user must sign in first. A client shows a status it does not know as signedOut.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Connector/status`.
+            internal struct StatusPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/Connector/status/value1`.
+                internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case connected = "connected"
+                    case signedOut = "signedOut"
+                }
+                /// - Remark: Generated from `#/components/schemas/Connector/status/value1`.
+                internal var value1: Components.Schemas.Connector.StatusPayload.Value1Payload?
+                /// - Remark: Generated from `#/components/schemas/Connector/status/value2`.
+                internal var value2: Swift.String?
+                /// Creates a new `StatusPayload`.
+                ///
+                /// - Parameters:
+                ///   - value1:
+                ///   - value2:
+                internal init(
+                    value1: Components.Schemas.Connector.StatusPayload.Value1Payload? = nil,
+                    value2: Swift.String? = nil
+                ) {
+                    self.value1 = value1
+                    self.value2 = value2
+                }
+                internal init(from decoder: any Swift.Decoder) throws {
+                    var errors: [any Swift.Error] = []
+                    do {
+                        self.value1 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    do {
+                        self.value2 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                        [
+                            self.value1,
+                            self.value2
+                        ],
+                        type: Self.self,
+                        codingPath: decoder.codingPath,
+                        errors: errors
+                    )
+                }
+                internal func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                        self.value1,
+                        self.value2
+                    ])
+                }
+            }
+            /// Whether its tools can be called, or the user must sign in first. A client shows a status it does not know as signedOut.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Connector/status`.
+            internal var status: Components.Schemas.Connector.StatusPayload
+            /// Whether the server asks the user to sign in.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Connector/signIn`.
+            internal var signIn: Swift.Bool
+            /// - Remark: Generated from `#/components/schemas/Connector/createdAt`.
+            internal var createdAt: Swift.String
+            /// - Remark: Generated from `#/components/schemas/Connector/updatedAt`.
+            internal var updatedAt: Swift.String
+            /// - Remark: Generated from `#/components/schemas/Connector/ToolsPayload`.
+            internal struct ToolsPayloadPayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/Connector/ToolsPayload/name`.
+                internal var name: Swift.String
+                /// - Remark: Generated from `#/components/schemas/Connector/ToolsPayload/title`.
+                internal var title: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/Connector/ToolsPayload/description`.
+                internal var description: Swift.String?
+                /// The server says the tool changes nothing.
+                ///
+                /// - Remark: Generated from `#/components/schemas/Connector/ToolsPayload/readOnly`.
+                internal var readOnly: Swift.Bool?
+                /// - Remark: Generated from `#/components/schemas/Connector/ToolsPayload/permission`.
+                internal var permission: Components.Schemas.ToolPermission
+                /// Creates a new `ToolsPayloadPayload`.
+                ///
+                /// - Parameters:
+                ///   - name:
+                ///   - title:
+                ///   - description:
+                ///   - readOnly: The server says the tool changes nothing.
+                ///   - permission:
+                internal init(
+                    name: Swift.String,
+                    title: Swift.String? = nil,
+                    description: Swift.String? = nil,
+                    readOnly: Swift.Bool? = nil,
+                    permission: Components.Schemas.ToolPermission
+                ) {
+                    self.name = name
+                    self.title = title
+                    self.description = description
+                    self.readOnly = readOnly
+                    self.permission = permission
+                }
+                internal enum CodingKeys: String, CodingKey {
+                    case name
+                    case title
+                    case description
+                    case readOnly
+                    case permission
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/Connector/tools`.
+            internal typealias ToolsPayload = [Components.Schemas.Connector.ToolsPayloadPayload]
+            /// - Remark: Generated from `#/components/schemas/Connector/tools`.
+            internal var tools: Components.Schemas.Connector.ToolsPayload
+            /// Creates a new `Connector`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - name:
+            ///   - url:
+            ///   - enabled: Whether chats call its tools.
+            ///   - status: Whether its tools can be called, or the user must sign in first. A client shows a status it does not know as signedOut.
+            ///   - signIn: Whether the server asks the user to sign in.
+            ///   - createdAt:
+            ///   - updatedAt:
+            ///   - tools:
+            internal init(
+                id: Swift.String,
+                name: Swift.String,
+                url: Swift.String,
+                enabled: Swift.Bool,
+                status: Components.Schemas.Connector.StatusPayload,
+                signIn: Swift.Bool,
+                createdAt: Swift.String,
+                updatedAt: Swift.String,
+                tools: Components.Schemas.Connector.ToolsPayload
+            ) {
+                self.id = id
+                self.name = name
+                self.url = url
+                self.enabled = enabled
+                self.status = status
+                self.signIn = signIn
+                self.createdAt = createdAt
+                self.updatedAt = updatedAt
+                self.tools = tools
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case id
+                case name
+                case url
+                case enabled
+                case status
+                case signIn
+                case createdAt
+                case updatedAt
+                case tools
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ApprovalInput`.
+        internal struct ApprovalInput: Codable, Hashable, Sendable {
+            /// The account's content key, base64.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ApprovalInput/key`.
+            internal var key: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ApprovalInput/threadId`.
+            internal var threadId: Components.Schemas.Identifier
+            /// - Remark: Generated from `#/components/schemas/ApprovalInput/runId`.
+            internal var runId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/ApprovalInput/approvalId`.
+            internal var approvalId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/ApprovalInput/approved`.
+            internal var approved: Swift.Bool
+            /// Creates a new `ApprovalInput`.
+            ///
+            /// - Parameters:
+            ///   - key: The account's content key, base64.
+            ///   - threadId:
+            ///   - runId:
+            ///   - approvalId:
+            ///   - approved:
+            internal init(
+                key: Swift.String? = nil,
+                threadId: Components.Schemas.Identifier,
+                runId: Swift.String,
+                approvalId: Swift.String,
+                approved: Swift.Bool
+            ) {
+                self.key = key
+                self.threadId = threadId
+                self.runId = runId
+                self.approvalId = approvalId
+                self.approved = approved
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case key
+                case threadId
+                case runId
+                case approvalId
+                case approved
             }
         }
         /// A reply's citation of a page.

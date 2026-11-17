@@ -506,6 +506,24 @@ enum Constants {
         static let heightWithContext: CGFloat = 368
         /// The sheet grows by the deep research toggle's row where it shows.
         static let researchRowHeight: CGFloat = 51
+        /// The sheet grows by the connectors row where it shows.
+        static let connectorsRowHeight: CGFloat = 51
+    }
+
+    /// Connectors: the servers an account connects, whose tools its chats'
+    /// replies can call.
+    enum Connectors {
+        static let label = "Connectors"
+        static let icon: TinfoilIcon = .link
+        /// The session feature the chat service offers them under.
+        static let feature = "connectors"
+        /// The bundled list of servers to connect, without its extension.
+        static let catalogResource = "connector-catalog"
+        /// How many listed servers show before a search narrows them.
+        static let catalogPreview = 24
+        /// The longest name a connector takes.
+        static let maxNameLength = 64
+        static let unavailableOnDevice = "Connectors work only in chats saved to the cloud."
     }
 
     /// Deep research: a turn that researches its question on the web at
