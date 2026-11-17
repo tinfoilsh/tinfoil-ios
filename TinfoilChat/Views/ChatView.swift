@@ -41,7 +41,7 @@ struct ChatContainer: View {
     @State private var verticalFold: CGRect?
 
     private var isAnySheetPresented: Bool {
-        viewModel.showVerifierSheet || viewModel.showAddSheet || viewModel.showModelSelectorSheet || viewModel.showRateLimitPaywall || viewModel.showDocumentPicker || viewModel.showPhotoPicker || viewModel.showCamera || viewModel.showDocumentScanner || viewModel.showMessageSheet || viewModel.showImageViewer || viewModel.showSidebarSettings || showAuthView || showPremiumModal
+        viewModel.sharedAttachmentFile != nil || viewModel.showVerifierSheet || viewModel.showAddSheet || viewModel.showModelSelectorSheet || viewModel.showRateLimitPaywall || viewModel.showDocumentPicker || viewModel.showPhotoPicker || viewModel.showCamera || viewModel.showDocumentScanner || viewModel.showMessageSheet || viewModel.showImageViewer || viewModel.showSidebarSettings || showAuthView || showPremiumModal
     }
     
     // Sidebar constants
