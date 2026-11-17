@@ -557,7 +557,7 @@ extension Components {
             internal var composer: Components.Schemas.Composer
             /// - Remark: Generated from `#/components/schemas/Session/presets`.
             internal var presets: [Components.Schemas.Preset]
-            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes. documentVersions is true while a project document upload that names a documentId replaces that document. artifacts is true while /v1/artifacts/list and /v1/artifacts/get list and open the artifacts of the account's chats.
+            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes. imageOriginals is true while an image upload may send a separate original file alongside its model copy. documentVersions is true while a project document upload that names a documentId replaces that document. artifacts is true while /v1/artifacts/list and /v1/artifacts/get list and open the artifacts of the account's chats.
             ///
             /// - Remark: Generated from `#/components/schemas/Session/features`.
             internal struct FeaturesPayload: Codable, Hashable, Sendable {
@@ -577,7 +577,7 @@ extension Components {
                     try encoder.encodeAdditionalProperties(additionalProperties)
                 }
             }
-            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes. documentVersions is true while a project document upload that names a documentId replaces that document. artifacts is true while /v1/artifacts/list and /v1/artifacts/get list and open the artifacts of the account's chats.
+            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes. imageOriginals is true while an image upload may send a separate original file alongside its model copy. documentVersions is true while a project document upload that names a documentId replaces that document. artifacts is true while /v1/artifacts/list and /v1/artifacts/get list and open the artifacts of the account's chats.
             ///
             /// - Remark: Generated from `#/components/schemas/Session/features`.
             internal var features: Components.Schemas.Session.FeaturesPayload
@@ -594,7 +594,7 @@ extension Components {
             ///   - profileDefaults:
             ///   - composer:
             ///   - presets:
-            ///   - features: Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes. documentVersions is true while a project document upload that names a documentId replaces that document. artifacts is true while /v1/artifacts/list and /v1/artifacts/get list and open the artifacts of the account's chats.
+            ///   - features: Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes. imageOriginals is true while an image upload may send a separate original file alongside its model copy. documentVersions is true while a project document upload that names a documentId replaces that document. artifacts is true while /v1/artifacts/list and /v1/artifacts/get list and open the artifacts of the account's chats.
             internal init(
                 _protocol: Components.Schemas.Session._ProtocolPayload,
                 user: Components.Schemas.Session.UserPayload,
@@ -4634,6 +4634,14 @@ extension Components {
             ///
             /// - Remark: Generated from `#/components/schemas/AttachmentView/hasOriginal`.
             internal var hasOriginal: Swift.Bool?
+            /// Download name when the original differs from the preview.
+            ///
+            /// - Remark: Generated from `#/components/schemas/AttachmentView/originalFileName`.
+            internal var originalFileName: Swift.String?
+            /// Download type when the original differs from the preview.
+            ///
+            /// - Remark: Generated from `#/components/schemas/AttachmentView/originalMimeType`.
+            internal var originalMimeType: Swift.String?
             /// Creates a new `AttachmentView`.
             ///
             /// - Parameters:
@@ -4646,6 +4654,8 @@ extension Components {
             ///   - textContent:
             ///   - description:
             ///   - hasOriginal: Whether the file is kept as it was uploaded, which /v1/attachments/get returns with original. Absent for an attachment stored before files were kept.
+            ///   - originalFileName: Download name when the original differs from the preview.
+            ///   - originalMimeType: Download type when the original differs from the preview.
             internal init(
                 id: Swift.String,
                 kind: Components.Schemas.AttachmentKind,
@@ -4655,7 +4665,9 @@ extension Components {
                 thumbnail: Swift.String? = nil,
                 textContent: Swift.String? = nil,
                 description: Swift.String? = nil,
-                hasOriginal: Swift.Bool? = nil
+                hasOriginal: Swift.Bool? = nil,
+                originalFileName: Swift.String? = nil,
+                originalMimeType: Swift.String? = nil
             ) {
                 self.id = id
                 self.kind = kind
@@ -4666,6 +4678,8 @@ extension Components {
                 self.textContent = textContent
                 self.description = description
                 self.hasOriginal = hasOriginal
+                self.originalFileName = originalFileName
+                self.originalMimeType = originalMimeType
             }
             internal enum CodingKeys: String, CodingKey {
                 case id
@@ -4677,6 +4691,8 @@ extension Components {
                 case textContent
                 case description
                 case hasOriginal
+                case originalFileName
+                case originalMimeType
             }
         }
         /// An attachment as an upload returns it and a device chat keeps it.
@@ -4778,25 +4794,37 @@ extension Components {
             internal var encryptionKey: Swift.String
             /// - Remark: Generated from `#/components/schemas/OriginalFile/storageThreadId`.
             internal var storageThreadId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OriginalFile/fileName`.
+            internal var fileName: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/OriginalFile/mimeType`.
+            internal var mimeType: Swift.String?
             /// Creates a new `OriginalFile`.
             ///
             /// - Parameters:
             ///   - id:
             ///   - encryptionKey:
             ///   - storageThreadId:
+            ///   - fileName:
+            ///   - mimeType:
             internal init(
                 id: Swift.String,
                 encryptionKey: Swift.String,
-                storageThreadId: Swift.String
+                storageThreadId: Swift.String,
+                fileName: Swift.String? = nil,
+                mimeType: Swift.String? = nil
             ) {
                 self.id = id
                 self.encryptionKey = encryptionKey
                 self.storageThreadId = storageThreadId
+                self.fileName = fileName
+                self.mimeType = mimeType
             }
             internal enum CodingKeys: String, CodingKey {
                 case id
                 case encryptionKey
                 case storageThreadId
+                case fileName
+                case mimeType
             }
         }
         /// - Remark: Generated from `#/components/schemas/DocumentPage`.
@@ -5526,6 +5554,10 @@ extension Components {
                     internal var attKey: Swift.String?
                     /// - Remark: Generated from `#/components/schemas/SharedThread/MessagesPayload/AttachmentsPayload/hasOriginal`.
                     internal var hasOriginal: Swift.Bool?
+                    /// - Remark: Generated from `#/components/schemas/SharedThread/MessagesPayload/AttachmentsPayload/originalFileName`.
+                    internal var originalFileName: Swift.String?
+                    /// - Remark: Generated from `#/components/schemas/SharedThread/MessagesPayload/AttachmentsPayload/originalMimeType`.
+                    internal var originalMimeType: Swift.String?
                     /// The file as it was uploaded, which /v1/attachments/get-public returns with original.
                     ///
                     /// - Remark: Generated from `#/components/schemas/SharedThread/MessagesPayload/AttachmentsPayload/original`.
@@ -5568,6 +5600,8 @@ extension Components {
                     ///   - description:
                     ///   - attKey:
                     ///   - hasOriginal:
+                    ///   - originalFileName:
+                    ///   - originalMimeType:
                     ///   - original: The file as it was uploaded, which /v1/attachments/get-public returns with original.
                     internal init(
                         id: Swift.String,
@@ -5580,6 +5614,8 @@ extension Components {
                         description: Swift.String? = nil,
                         attKey: Swift.String? = nil,
                         hasOriginal: Swift.Bool? = nil,
+                        originalFileName: Swift.String? = nil,
+                        originalMimeType: Swift.String? = nil,
                         original: Components.Schemas.SharedThread.MessagesPayloadPayload.AttachmentsPayloadPayload.OriginalPayload? = nil
                     ) {
                         self.id = id
@@ -5592,6 +5628,8 @@ extension Components {
                         self.description = description
                         self.attKey = attKey
                         self.hasOriginal = hasOriginal
+                        self.originalFileName = originalFileName
+                        self.originalMimeType = originalMimeType
                         self.original = original
                     }
                     internal enum CodingKeys: String, CodingKey {
@@ -5605,6 +5643,8 @@ extension Components {
                         case description
                         case attKey
                         case hasOriginal
+                        case originalFileName
+                        case originalMimeType
                         case original
                     }
                 }
