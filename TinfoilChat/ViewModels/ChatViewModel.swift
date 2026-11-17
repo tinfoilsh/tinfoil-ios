@@ -479,6 +479,7 @@ class ChatViewModel: ObservableObject {
         rows = ChatRows()
         session = nil
         connectors.bind(nil)
+        connectorApprovals = [:]
         dictation.reset()
         showsKeptModels = true
         verification = VerificationInfo(isVerifying: true)
@@ -2030,6 +2031,46 @@ class ChatViewModel: ObservableObject {
 
     func genUIRetryState(toolCallId: String) -> GenUIRetryState? {
         genUIRetryStates[toolCallId]
+    }
+
+    // MARK: - Connector calls
+
+    /// Whether the open chat's replies may call the account's connectors.
+    var chatUsesConnectors: Bool { session?.offersConnectors == true }
+
+    /// The user's answers to the calls that wait for their approval, as they
+    /// are sent, by call.
+    @Published private var connectorApprovals: [String: ConnectorApprovalState] = [:]
+
+    func connectorApprovalState(callId: String) -> ConnectorApprovalState? {
+        connectorApprovals[callId]
+    }
+
+    /// Answers a call of the open chat's reply that waits for the user's
+    /// approval. Allowing its tool always also lets the tool run without
+    /// asking from then on.
+    func answerConnectorApproval(_ call: ConnectorCallState, choice: ConnectorApprovalChoice) {
+        guard let session, let approvalId = call.pendingApprovalId(), connectorApprovals[call.id]?.sending == nil else { return }
+        connectorApprovals[call.id] = ConnectorApprovalState(sending: choice)
+        Task {
+            do {
+                try await session.approve(approvalId, approved: choice != .decline)
+            } catch {
+                // A call answered already, as on another device, or no longer
+                // waiting says how it went in the reply's stream.
+                guard (error as? HarnessError)?.code == HarnessErrorCode.revisionConflict else {
+                    connectorApprovals[call.id] = ConnectorApprovalState(error: ConnectorStore.describe(error))
+                    return
+                }
+            }
+            connectorApprovals[call.id] = ConnectorApprovalState(answered: true)
+            guard choice == .always else { return }
+            do {
+                try await connectors.update(call.connectorId, tools: [call.tool: .allow])
+            } catch {
+                reportActionFailure("\(call.toolName) Will Still Ask First", error)
+            }
+        }
     }
 
     // MARK: - Questions widgets

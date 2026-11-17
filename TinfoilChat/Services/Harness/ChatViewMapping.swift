@@ -35,6 +35,7 @@ enum ChatViewMapping {
         var searches: [WebSearchInstance] = []
         var fetches: [URLFetchState] = []
         var toolCalls: [GenUIToolCall] = []
+        var connectorCalls: [ConnectorCallState] = []
         // The sources of every search and page read, in the order found.
         var found: [WebSearchSource] = []
         var thoughts = ""
@@ -59,6 +60,14 @@ enum ChatViewMapping {
                 text += content
                 segments.append(.text(content))
             case .toolCall:
+                // A call to a connector's tool is told by what the harness
+                // shows of it, whatever its server names the tool.
+                if let call = block.display?.connector {
+                    let callId = block.toolCallId ?? block.id
+                    connectorCalls.append(connectorCall(call, id: callId, block: block, streaming: streaming))
+                    segments.append(.connectorCall(callId: callId))
+                    continue
+                }
                 guard isShownTool(block.name) else { continue }
                 if block.name == searchTool || block.name == fetchTool { found += block.display?.sources.map(source) ?? [] }
                 let toolCallId = block.toolCallId ?? block.id
@@ -97,6 +106,7 @@ enum ChatViewMapping {
         message.webSearchState = searches.last.map { WebSearchState(query: $0.query, status: $0.status, sources: $0.sources ?? [], reason: nil) }
         message.urlFetches = fetches
         message.toolCalls = toolCalls
+        message.connectorCalls = connectorCalls
         if wire.research != nil {
             // A research lists every source it searched and read, and those
             // its report cites, once each.
@@ -155,6 +165,33 @@ enum ChatViewMapping {
         case .completed, nil: return .completed
         case .failed: return .failed
         case .running: return streaming ? .running : .failed
+        }
+    }
+
+    private static func connectorCall(_ call: Components.Schemas.ConnectorCall, id: String, block: TimelineBlock, streaming: Bool) -> ConnectorCallState {
+        let status: ConnectorCallState.Status
+        switch toolStatus(block, streaming: streaming) {
+        case .running: status = .running
+        case .completed: status = .completed
+        case .failed: status = .failed
+        }
+        return ConnectorCallState(
+            id: id, connectorId: call.id, connectorName: call.name, connectorURL: call.url, tool: call.tool, title: call.title,
+            status: status, approval: call.approval.map(approval), startedAt: block.startedAt, endedAt: block.endedAt
+        )
+    }
+
+    /// The user's answer to a call that needs it. A status this client does
+    /// not know shows as declined, and a pending approval that names no id
+    /// to answer it under as expired.
+    private static func approval(_ approval: Components.Schemas.ToolApproval) -> ConnectorCallState.Approval {
+        switch approval.status.value1 {
+        case .pending:
+            guard let id = approval.id else { return .expired }
+            return .pending(id: id, expiresAt: approval.expiresAt.flatMap(ChatAccessCache.date(of:)))
+        case .approved: return .approved
+        case .expired: return .expired
+        case .declined, nil: return .declined
         }
     }
 

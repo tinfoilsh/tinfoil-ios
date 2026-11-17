@@ -77,6 +77,9 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// The turns that ask a question, which research it while deep research
     /// is on.
     private static let researchKinds: Set<Turn.Kind> = [.send, .edit, .regenerate, .retry]
+    /// The turns that answer the user, whose replies may call the tools of
+    /// the account's connectors.
+    private static let connectorKinds: Set<Turn.Kind> = [.send, .edit, .regenerate, .continue, .retry]
 
     let account: HarnessAccount
     let controller: RunController
@@ -640,6 +643,15 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             fields.options = options
             setResearch(false)
         }
+        // This client shows the calls a reply makes to the account's
+        // connectors and answers their approvals, which the harness offers
+        // only to a client that asks. A question researched in depth calls
+        // none.
+        if offersConnectors, Self.connectorKinds.contains(fields.kind ?? defaults.kind), fields.options?.research != true {
+            var options = fields.options ?? defaults.options ?? TurnOptions()
+            options.connectors = true
+            fields.options = options
+        }
         let shown = controller.track()
         let before = state.messages
         let markers = state.markers
@@ -744,6 +756,17 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
             if shown(), (error as? HarnessError)?.action != .reload { controller.updateView { $0.stopping = false } }
             throw error
         }
+    }
+
+    /// Answers a call of the open chat's reply that waits for the user's
+    /// approval. The reply's stream then shows how the call went.
+    func approve(_ approvalId: String, approved: Bool) async throws {
+        guard let threadId = open.id, let runId = state.snapshot.thread?.activeRun?.runId ?? state.runId else {
+            throw HarnessError(code: HarnessErrorCode.revisionConflict, message: "This action is not waiting for approval.", action: .reload)
+        }
+        try await controller.approve(Components.Schemas.ApprovalInput(
+            key: try openStore().runKey(), threadId: threadId, runId: runId, approvalId: approvalId, approved: approved
+        ))
     }
 
     /// The harness regenerates the reply it is named. A message is named by
@@ -894,6 +917,14 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// The open chat's next question is researched on the web at length
     /// before it is answered.
     var researching: Bool { open.research && researchAvailable }
+
+    /// Whether the open chat's replies may call the tools of the account's
+    /// connectors: the harness offers them to the caller, and stores the
+    /// chat.
+    var offersConnectors: Bool {
+        account.session?.features.additionalProperties[Constants.Connectors.feature] == true
+            && account.cloud && !open.onDevice
+    }
 
     func setResearch(_ enabled: Bool) {
         patch { $0.research = enabled }

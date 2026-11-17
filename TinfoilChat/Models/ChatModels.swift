@@ -182,7 +182,8 @@ struct WebSearchInstance: Equatable, Identifiable {
 }
 
 /// An ordered segment of assistant content. Preserves the exact order in which
-/// text and inline events (thinking, web search, URL fetch, tool call) streamed.
+/// text and inline events (thinking, web search, URL fetch, tool call,
+/// connector call) streamed.
 enum MessageSegment: Equatable {
     case text(String)
     /// `startedAt` is when the thought started, in epoch ms, from which its
@@ -191,6 +192,7 @@ enum MessageSegment: Equatable {
     case webSearch(searchId: String)
     case urlFetch(fetchId: String)
     case toolCall(toolCallId: String)
+    case connectorCall(callId: String)
 }
 
 private struct DynamicCodingKey: CodingKey {
@@ -373,6 +375,8 @@ struct Message: Identifiable, Equatable {
     var segments: [MessageSegment]? = nil
     var webSearches: [WebSearchInstance]? = nil
     var toolCalls: [GenUIToolCall] = []
+    /// The calls the reply made to the tools of the account's connectors.
+    var connectorCalls: [ConnectorCallState] = []
     /// The chat service's live summaries of the step the reply streams: the
     /// reasoning it is thinking through, and the search or page read under
     /// way.
@@ -432,7 +436,7 @@ struct Message: Identifiable, Equatable {
     /// True when a continuation request would show the model something to
     /// resume: text or tool calls. Thoughts alone are not always sent back.
     var hasContinuableResponse: Bool {
-        role == .assistant && (!content.isEmpty || !toolCalls.isEmpty)
+        role == .assistant && (!content.isEmpty || !toolCalls.isEmpty || !connectorCalls.isEmpty)
     }
 }
 
