@@ -455,7 +455,8 @@ enum HarnessUploads {
         guard let group = groups.first(where: { $0.imageMaxSide != nil }), data.count <= group.maxBytes else {
             throw HarnessError(code: "ATTACHMENT_TOO_LARGE", message: "The original photo exceeds the upload limit.", action: .revise, status: 413)
         }
-        return MultipartForm.Original(data: data, fileName: name)
+        let mimeType = imageType(of: data)?.preferredMIMEType ?? "application/octet-stream"
+        return MultipartForm.Original(data: data, fileName: name, mimeType: mimeType)
     }
 
     @MainActor

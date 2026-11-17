@@ -260,6 +260,7 @@ struct MultipartForm {
     struct Original: Sendable {
         let data: Data
         let fileName: String
+        let mimeType: String
     }
 
     let body: Data
@@ -275,7 +276,7 @@ struct MultipartForm {
         line("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(Self.quoted(fileField))\"; filename=\"\(Self.quoted(fileName))\"\r\nContent-Type: \(mimeType)\r\n\r\n")
         body.append(file)
         if let original {
-            line("\r\n--\(boundary)\r\nContent-Disposition: form-data; name=\"original\"; filename=\"\(Self.quoted(original.fileName))\"\r\nContent-Type: application/octet-stream\r\n\r\n")
+            line("\r\n--\(boundary)\r\nContent-Disposition: form-data; name=\"original\"; filename=\"\(Self.quoted(original.fileName))\"\r\nContent-Type: \(original.mimeType)\r\n\r\n")
             body.append(original.data)
         }
         line("\r\n--\(boundary)--\r\n")
