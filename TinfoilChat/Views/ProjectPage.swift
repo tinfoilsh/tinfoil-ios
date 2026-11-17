@@ -76,6 +76,7 @@ struct ProjectPage: View {
                     if viewModel.listsArtifacts, let project {
                         NavigationLink {
                             ArtifactsListView(viewModel: viewModel, projectId: project.id)
+                                .id(viewModel.account.map(ObjectIdentifier.init))
                         } label: {
                             Label("Artifacts", tinfoil: .applicationWindow)
                         }

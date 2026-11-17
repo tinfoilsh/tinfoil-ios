@@ -214,6 +214,10 @@ struct ChatSidebar: View, Equatable {
         .onChange(of: searchUserId) { _, _ in
             chatSearchTerm = ""
             chatSearch.reset()
+            showArtifacts = false
+        }
+        .onChange(of: viewModel.listsArtifacts) { _, available in
+            if !available { showArtifacts = false }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CheckAuthState"))) { _ in
             Task {
@@ -247,6 +251,7 @@ struct ChatSidebar: View, Equatable {
         .sheet(isPresented: $showArtifacts) {
             NavigationStack {
                 ArtifactsListView(viewModel: viewModel, projectId: nil)
+                    .id(viewModel.account.map(ObjectIdentifier.init))
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Done") { showArtifacts = false }

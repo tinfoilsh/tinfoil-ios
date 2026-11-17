@@ -167,4 +167,30 @@ struct ArtifactListControllerTests {
         #expect(list.artifacts == [second])
         #expect(!list.hasMore)
     }
+
+    @Test func leavingTheAccountDropsItsListAndAReplyAlreadyInFlight() async {
+        let previous = Self.artifact("prior-account", "m")
+        let list = ArtifactListController()
+        let (pages, sender) = AsyncStream.makeStream(of: ArtifactPage.self)
+        let (requests, started) = AsyncStream.makeStream(of: Bool.self)
+        let request = list.load { cursor in
+            if cursor == nil { return ArtifactPage(artifacts: [previous], nextCursor: "more") }
+            started.yield(true)
+            var iterator = pages.makeAsyncIterator()
+            guard let page = await iterator.next() else { throw CancellationError() }
+            return page
+        }
+        await request.value
+        let continuation = list.loadMore()
+        var iterator = requests.makeAsyncIterator()
+        _ = await iterator.next()
+        list.reset()
+        sender.yield(ArtifactPage(artifacts: [previous], nextCursor: "more"))
+        sender.finish()
+        started.finish()
+        await continuation?.value
+        #expect(list.artifacts.isEmpty)
+        #expect(!list.hasMore)
+        #expect(list.retry() == nil)
+    }
 }

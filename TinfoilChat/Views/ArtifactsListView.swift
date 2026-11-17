@@ -86,8 +86,11 @@ struct ArtifactsListView: View {
         .background(Color.settingsBackground(for: colorScheme))
         .navigationTitle("Artifacts")
         .navigationBarTitleDisplayMode(.inline)
-        .task {
+        .task(id: viewModel.account.map(ObjectIdentifier.init)) {
             await list.load(account: viewModel.account, projectId: projectId).value
+        }
+        .onDisappear {
+            list.reset()
         }
         .refreshable {
             await list.load(account: viewModel.account, projectId: projectId).value
@@ -203,18 +206,20 @@ struct ArtifactsListView: View {
     /// does.
     private func open(_ artifact: ListedArtifact) {
         guard openingArtifact == nil, let account = viewModel.account else { return }
+        guard artifact.kind != nil else { openChat(of: artifact); return }
         openingArtifact = artifact.key
         Task {
             defer { openingArtifact = nil }
             do {
                 let opened = try await HarnessArtifacts.get(account, artifact)
+                guard viewModel.account === account, !account.disposed else { return }
                 let args = try JSONDecoder().decode(ArtifactPreviewWidget.Args.self, from: Data(opened.arguments.utf8))
                 shownArtifact = ShownArtifact(id: artifact.key, args: args)
             } catch is CancellationError {
             } catch is DecodingError {
-                openFailure = Self.unreadableMessage
+                if viewModel.account === account { openFailure = Self.unreadableMessage }
             } catch {
-                openFailure = error.localizedDescription
+                if viewModel.account === account { openFailure = error.localizedDescription }
             }
         }
     }

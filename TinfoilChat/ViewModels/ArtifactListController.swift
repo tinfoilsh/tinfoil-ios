@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import Combine
 
 /// What names an artifact among the account's. A model may name calls in
 /// different replies alike, so the reply names it with its chat and call.
@@ -61,16 +62,23 @@ final class ArtifactListController: ObservableObject {
     /// listed.
     @discardableResult
     func load(_ loader: @escaping PageLoader) -> Task<Void, Never> {
-        loadTask?.cancel()
+        reset()
         self.loader = loader
+        isLoading = true
+        return read(from: nil, loader)
+    }
+
+    func reset() {
+        loadTask?.cancel()
+        loadTask = nil
+        loader = nil
         artifacts = []
         listed = []
         nextCursor = nil
         hasMore = false
         error = nil
         isLoadingMore = false
-        isLoading = true
-        return read(from: nil, loader)
+        isLoading = false
     }
 
     /// Lists the page after the last one listed, when there is one and
