@@ -2035,6 +2035,12 @@ class ChatViewModel: ObservableObject {
 
     // MARK: - Connector calls
 
+    /// Whether the chat service offers connectors to the account: it is
+    /// signed in, and its session has the feature.
+    var connectorsOffered: Bool {
+        account?.userId != nil && account?.session?.features.additionalProperties[Constants.Connectors.feature] == true
+    }
+
     /// Whether the open chat's replies may call the account's connectors.
     var chatUsesConnectors: Bool { session?.offersConnectors == true }
 
