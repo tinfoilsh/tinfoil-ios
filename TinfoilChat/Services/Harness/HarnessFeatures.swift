@@ -439,11 +439,25 @@ enum HarnessUploads {
         let attachment: Components.Schemas.Attachment
     }
 
-    /// Converts a file into an attachment the next turn sends.
+    /// Whether a file uploads as an image: its bytes hold one, or its name
+    /// is one the harness reads an image from.
+    static func isImage(_ data: Data, fileName: String, groups: [Components.Schemas.FileGroup]) -> Bool {
+        if imageType(of: data) != nil { return true }
+        let ext = fileExtension(of: fileName)
+        return !ext.isEmpty && groups.contains { $0.imageMaxSide != nil && $0.accept.contains(ext) }
+    }
+
+    /// Converts a file into an attachment the next turn sends. For a stored
+    /// chat, the upload carries the content key, and the harness keeps a
+    /// file that is no image as it was uploaded: the attachment names where,
+    /// which the turn that attaches it sends back. An image uploads as the
+    /// copy models read, so no other copy of it is kept.
     @MainActor
-    static func upload(_ account: HarnessAccount, data: Data, fileName: String, mimeType: String) async throws -> Components.Schemas.Attachment {
-        let prepared = try await prepare(data, fileName: fileName, mimeType: mimeType, groups: try await account.loadedSession().composer.attachments)
-        let uploaded: Uploaded = try await account.upload(.attachmentUpload, file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, keyless: true)
+    static func upload(_ account: HarnessAccount, data: Data, fileName: String, mimeType: String, forStoredChat: Bool = false) async throws -> Components.Schemas.Attachment {
+        let groups = try await account.loadedSession().composer.attachments
+        let prepared = try await prepare(data, fileName: fileName, mimeType: mimeType, groups: groups)
+        let keepsFile = forStoredChat && !isImage(prepared.data, fileName: prepared.fileName, groups: groups)
+        let uploaded: Uploaded = try await account.upload(.attachmentUpload, file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, keyless: !keepsFile)
         return uploaded.attachment
     }
 }

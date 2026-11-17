@@ -79,6 +79,14 @@ struct HarnessUploadsTests {
         #expect(unnamed.fileName == "image.png")
     }
 
+    @Test func aFileUploadsAsAnImageByItsBytesOrByANameTheHarnessReadsOneFrom() {
+        let notes = Data("# Notes".utf8)
+        #expect(HarnessUploads.isImage(Self.png(side: 10), fileName: "scan", groups: Self.harnessGroups))
+        #expect(HarnessUploads.isImage(notes, fileName: "Photo.PNG", groups: Self.harnessGroups))
+        #expect(!HarnessUploads.isImage(notes, fileName: "notes.md", groups: Self.harnessGroups))
+        #expect(!HarnessUploads.isImage(notes, fileName: "report.pdf", groups: Self.harnessGroups))
+    }
+
     @Test func aFileThatIsNoImageUploadsAsItIs() async throws {
         let notes = Data("# Notes".utf8)
         let prepared = try await HarnessUploads.prepare(notes, fileName: "notes.md", mimeType: "text/markdown", groups: Self.harnessGroups)
