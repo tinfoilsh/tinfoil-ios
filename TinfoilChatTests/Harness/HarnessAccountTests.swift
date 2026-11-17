@@ -85,6 +85,72 @@ struct HarnessAccountTests {
         account.dispose()
     }
 
+    @Test func aDocumentThatReplacesAnotherNamesItBeforeItsFile() async throws {
+        var session = sessionAnswer
+        var composer = try #require(session["composer"] as? [String: Any])
+        composer["projectDocuments"] = [["accept": [".txt"], "maxBytes": 1000]]
+        session["composer"] = composer
+        let stored: [String: Any] = [
+            "id": "doc-1", "projectId": "project-1", "filename": "notes.txt", "contentType": "text/plain", "sizeBytes": 5, "hasFile": true,
+        ]
+        let (account, transport) = makeAccount(userId: "user-1", answers: [Answers.json(session), Answers.json(stored)])
+
+        let document = try await HarnessProjects.uploadDocument(
+            account, projectId: "project-1", replacing: "doc-1", file: Data("Notes".utf8), fileName: "notes.txt", mimeType: "text/plain"
+        )
+
+        #expect(document.id == "doc-1")
+        #expect(ProjectDocument(document).hasFile)
+        let upload = try #require(await transport.requests.last)
+        #expect(upload.route == .projectDocumentUpload)
+        let form = String(decoding: upload.body, as: UTF8.self)
+        let file = try #require(form.range(of: "name=\"file\""))
+        for field in ["documentId", "key", "projectId"] {
+            let named = try #require(form.range(of: "name=\"\(field)\""))
+            #expect(named.upperBound < file.lowerBound)
+        }
+        #expect(form.contains("name=\"documentId\"\r\n\r\ndoc-1\r\n"))
+        #expect(form.contains("name=\"projectId\"\r\n\r\nproject-1\r\n"))
+        account.dispose()
+    }
+
+    @Test func aNewDocumentNamesNoDocumentToReplace() async throws {
+        var session = sessionAnswer
+        var composer = try #require(session["composer"] as? [String: Any])
+        composer["projectDocuments"] = [["accept": [".txt"], "maxBytes": 1000]]
+        session["composer"] = composer
+        let stored: [String: Any] = [
+            "id": "doc-2", "projectId": "project-1", "filename": "notes.txt", "contentType": "text/plain", "sizeBytes": 5,
+        ]
+        let (account, transport) = makeAccount(userId: "user-1", answers: [Answers.json(session), Answers.json(stored)])
+
+        let document = try await HarnessProjects.uploadDocument(
+            account, projectId: "project-1", file: Data("Notes".utf8), fileName: "notes.txt", mimeType: "text/plain"
+        )
+
+        #expect(!ProjectDocument(document).hasFile)
+        let upload = try #require(await transport.requests.last)
+        #expect(!String(decoding: upload.body, as: UTF8.self).contains("documentId"))
+        account.dispose()
+    }
+
+    @Test func aDocumentsFileIsDownloadedWithTheContentKey() async throws {
+        let file = Data([1, 2, 3])
+        let (account, transport) = makeAccount(userId: "user-1", answers: [{ _ in
+            HarnessResponse.collected(status: 200, headers: ["content-type": "application/octet-stream"], sealed: true, body: file)
+        }])
+
+        let downloaded = try await HarnessProjects.downloadDocument(account, projectId: "project-1", documentId: "doc-1")
+
+        #expect(downloaded == file)
+        let request = try #require(await transport.requests.first)
+        #expect(request.route == .projectDocumentDownload)
+        #expect(request.json["projectId"] as? String == "project-1")
+        #expect(request.json["documentId"] as? String == "doc-1")
+        #expect(request.json["key"] as? String == Data(repeating: 7, count: 32).base64EncodedString())
+        account.dispose()
+    }
+
     @Test func malformedRemoteImagesAreRefused() async throws {
         let (account, transport) = makeAccount(userId: nil, answers: [Answers.json([
             "image_bytes": "not-base64", "image_content_type": "image/png",

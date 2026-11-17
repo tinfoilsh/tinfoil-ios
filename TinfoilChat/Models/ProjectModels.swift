@@ -48,6 +48,14 @@ struct ProjectDocument: Identifiable, Equatable {
     var updatedAt: String?
     var content: String?
     var thumbnailBase64: String?
+    /// Whether the chat service keeps the file the document was read from.
+    /// One stored before files were kept has only its text.
+    var hasFile: Bool
+
+    /// The extensions of the names a document's text is saved under as it
+    /// is.
+    private static let textFileExtensions = [".md", ".txt"]
+    private static let markdownExtension = ".md"
 
     init(_ document: Components.Schemas.ProjectDocument) {
         id = document.id
@@ -59,5 +67,16 @@ struct ProjectDocument: Identifiable, Equatable {
         updatedAt = document.updatedAt
         content = document.content
         thumbnailBase64 = document.thumbnailBase64
+        hasFile = document.hasFile == true
+    }
+
+    /// The name a document's text is saved under when no file of it is
+    /// kept: its own when that names a text file already, and its own as
+    /// Markdown otherwise.
+    var textFileName: String {
+        let name = ExportedFile.fileName(filename)
+        let lowercased = name.lowercased()
+        if Self.textFileExtensions.contains(where: { lowercased.hasSuffix($0) }) { return name }
+        return name + Self.markdownExtension
     }
 }

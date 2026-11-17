@@ -41,7 +41,8 @@ private struct ProjectUpdateRequest: Encodable {
     var color: Nullable<String>?
 }
 
-private struct ProjectDocumentDeleteRequest: Encodable {
+/// A document of a project, to download or delete.
+private struct ProjectDocumentRequest: Encodable {
     var projectId: String
     var documentId: String
 }
@@ -86,13 +87,23 @@ enum HarnessProjects {
         return deleted.deleted
     }
 
-    static func uploadDocument(_ account: HarnessAccount, projectId: String, file: Data, fileName: String, mimeType: String) async throws -> Components.Schemas.ProjectDocument {
+    /// Stores a file as a document of a project, or, when it replaces one,
+    /// as a new version of that document under the same id.
+    static func uploadDocument(_ account: HarnessAccount, projectId: String, replacing documentId: String? = nil, file: Data, fileName: String, mimeType: String) async throws -> Components.Schemas.ProjectDocument {
         let prepared = try await HarnessUploads.prepare(file, fileName: fileName, mimeType: mimeType, groups: try await account.loadedSession().composer.projectDocuments)
-        return try await account.upload(.projectDocumentUpload, file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, fields: ["projectId": projectId])
+        var fields = ["projectId": projectId]
+        if let documentId { fields["documentId"] = documentId }
+        return try await account.upload(.projectDocumentUpload, file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, fields: fields)
+    }
+
+    /// The file a document was read from, as it was uploaded. The harness
+    /// refuses a document it keeps no file of.
+    static func downloadDocument(_ account: HarnessAccount, projectId: String, documentId: String) async throws -> Data {
+        try await account.download(.projectDocumentDownload, ProjectDocumentRequest(projectId: projectId, documentId: documentId))
     }
 
     static func deleteDocument(_ account: HarnessAccount, projectId: String, documentId: String) async throws {
-        let _: RawJSON = try await account.post(.projectDocumentDelete, ProjectDocumentDeleteRequest(projectId: projectId, documentId: documentId))
+        let _: RawJSON = try await account.post(.projectDocumentDelete, ProjectDocumentRequest(projectId: projectId, documentId: documentId))
     }
 }
 
