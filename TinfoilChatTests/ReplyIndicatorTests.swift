@@ -3,10 +3,14 @@ import Testing
 
 @MainActor
 struct ReplyIndicatorTests {
-    private func reply(_ segments: [MessageSegment], searching: Bool = false) -> Message {
+    private func reply(_ segments: [MessageSegment], searching: Bool = false, calling: Bool = false) -> Message {
         var message = Message(role: .assistant, content: "")
         message.webSearches = [WebSearchInstance(id: "search", query: "tides", status: searching ? .searching : .completed, sources: [], reason: nil)]
         message.toolCalls = [GenUIToolCall(id: "widget", name: "render_chart", arguments: "{}")]
+        message.connectorCalls = [ConnectorCallState(
+            id: "call", connectorId: "connector", connectorName: "Fake", connectorURL: "https://mcp.example.test/mcp", tool: "create_page",
+            title: nil, status: calling ? .running : .completed, approval: nil, startedAt: nil, endedAt: nil
+        )]
         message.segments = segments
         for case .text(let text) in segments { message.content += text }
         return message
@@ -36,6 +40,12 @@ struct ReplyIndicatorTests {
 
     @Test func showsUnderAWidget() {
         #expect(showsIndicator(reply([.thinking(content: "Plan", isThinking: false, duration: 2), .toolCall(toolCallId: "widget")])))
+    }
+
+    @Test func hidesWhileAConnectorCallRunsAndShowsOnceItEnded() {
+        // A call that runs, or waits for the user, says so in its own row.
+        #expect(!showsIndicator(reply([.text("Intro"), .connectorCall(callId: "call")], calling: true)))
+        #expect(showsIndicator(reply([.text("Intro"), .connectorCall(callId: "call")])))
     }
 
     @Test func leavesAReplyNothingArrivedOfToItsWaitingDots() {
