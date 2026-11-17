@@ -25,40 +25,20 @@ enum EncryptionKeyFile {
     }
 
     static func write(key: String, date: Date = Date(), exportsDirectory: URL = exportsDirectory) throws -> URL {
-        let directory = exportsDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        var didFinish = false
-        defer {
-            if !didFinish {
-                try? FileManager.default.removeItem(at: directory)
-            }
-        }
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true,
-            attributes: [.protectionKey: FileProtectionType.complete]
-        )
         let formatter = DateFormatter()
         formatter.dateFormat = dateFormat
         formatter.locale = Locale(identifier: dateLocale)
-        let url = directory
-            .appendingPathComponent(fileNamePrefix + formatter.string(from: date))
-            .appendingPathExtension(fileExtension)
-        try Data(contents(for: key).utf8).write(to: url, options: [.withoutOverwriting, .completeFileProtection])
-        didFinish = true
-        return url
+        let fileName = fileNamePrefix + formatter.string(from: date) + "." + fileExtension
+        return try ExportedFile.write(Data(contents(for: key).utf8), named: fileName, in: exportsDirectory).url
     }
 
     /// Removes a file `write` made, with its directory.
     static func remove(_ url: URL) {
-        try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+        ExportedFile(url: url).remove()
     }
 
     /// Removes every key file a share left behind.
     static func removeExports(in exportsDirectory: URL = exportsDirectory) throws {
-        do {
-            try FileManager.default.removeItem(at: exportsDirectory)
-        } catch CocoaError.fileNoSuchFile {
-        } catch let error as NSError where error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT) {
-        }
+        try ExportedFile.removeAll(in: exportsDirectory)
     }
 }
