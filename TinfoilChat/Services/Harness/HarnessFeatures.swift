@@ -107,6 +107,49 @@ enum HarnessProjects {
     }
 }
 
+// MARK: - Artifacts
+
+/// A page of artifacts, and the cursor of the page after it, empty on the
+/// last.
+struct ArtifactPage: Decodable, Equatable, Sendable {
+    var artifacts: [ListedArtifact]
+    var nextCursor: String
+}
+
+/// An artifact with the arguments its reply drew it with, as JSON, which
+/// its widget reads as it reads the call's in the chat.
+struct OpenedArtifact: Decodable, Equatable, Sendable {
+    var artifact: ListedArtifact
+    var arguments: String
+}
+
+private struct ArtifactListRequest: Encodable {
+    var projectId: String?
+    var cursor: String?
+}
+
+private struct ArtifactRequest: Encodable {
+    var threadId: String
+    var messageId: String
+    var toolCallId: String
+}
+
+/// The artifacts the replies in the account's stored chats drew. The harness
+/// reads them from the chats, and lists none of a chat on this device.
+@MainActor
+enum HarnessArtifacts {
+    /// A page of the artifacts of every stored chat, or of a project's
+    /// chats: the chats in the order their list shows them, and each chat's
+    /// artifacts newest first.
+    static func list(_ account: HarnessAccount, projectId: String? = nil, cursor: String? = nil) async throws -> ArtifactPage {
+        try await account.post(.artifactsList, ArtifactListRequest(projectId: projectId, cursor: cursor))
+    }
+
+    static func get(_ account: HarnessAccount, _ artifact: ListedArtifact) async throws -> OpenedArtifact {
+        try await account.post(.artifactGet, ArtifactRequest(threadId: artifact.threadId, messageId: artifact.messageId, toolCallId: artifact.toolCallId))
+    }
+}
+
 // MARK: - Search
 
 /// A page of stored chats found: the chats, how many more match that cannot

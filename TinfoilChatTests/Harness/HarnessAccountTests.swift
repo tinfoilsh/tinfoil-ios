@@ -151,6 +151,67 @@ struct HarnessAccountTests {
         account.dispose()
     }
 
+    @Test func artifactsAreListedByProjectAndCursorWithTheContentKey() async throws {
+        let listed: [String: Any] = [
+            "artifacts": [[
+                "threadId": "thread-1", "threadTitle": "Plans", "projectId": NSNull(), "messageId": "msg-1", "toolCallId": "call-1",
+                "title": "", "sourceType": "slides", "createdAt": "2026-01-01T00:00:00Z",
+            ]],
+            "nextCursor": "c2",
+        ]
+        let (account, transport) = makeAccount(userId: "user-1", answers: [
+            Answers.json(listed), Answers.json(["artifacts": [], "nextCursor": ""]),
+        ])
+
+        let page = try await HarnessArtifacts.list(account, projectId: "project-1", cursor: "c1")
+
+        #expect(page.nextCursor == "c2")
+        let artifact = try #require(page.artifacts.first)
+        #expect(artifact.projectId == nil)
+        // A kind a later harness adds shows as a generic artifact.
+        #expect(artifact.kind == nil)
+        #expect(artifact.sourceType.value2 == "slides")
+        let request = try #require(await transport.requests.first)
+        #expect(request.route == .artifactsList)
+        #expect(request.json["projectId"] as? String == "project-1")
+        #expect(request.json["cursor"] as? String == "c1")
+        #expect(request.json["key"] as? String == Data(repeating: 7, count: 32).base64EncodedString())
+
+        // The first page of every chat's artifacts names neither.
+        let all = try await HarnessArtifacts.list(account)
+        #expect(all.artifacts.isEmpty)
+        let first = try #require(await transport.requests.last)
+        #expect(first.json["projectId"] == nil)
+        #expect(first.json["cursor"] == nil)
+        account.dispose()
+    }
+
+    @Test func anArtifactOpensByItsChatReplyAndCallWithTheArgumentsItsWidgetReads() async throws {
+        let stored: [String: Any] = [
+            "threadId": "thread-1", "threadTitle": "Plans", "projectId": "project-1", "messageId": "msg-1", "toolCallId": "call-1",
+            "title": "Plan", "sourceType": "markdown", "createdAt": "2026-01-01T00:00:00Z",
+        ]
+        let arguments = #"{"title":"Plan","source":{"type":"markdown","markdown":"# Plan"}}"#
+        let (account, transport) = makeAccount(userId: "user-1", answers: [Answers.json(["artifact": stored, "arguments": arguments])])
+        let listed = try JSONDecoder().decode(ListedArtifact.self, from: JSONSerialization.data(withJSONObject: stored))
+        #expect(listed.kind == .markdown)
+
+        let opened = try await HarnessArtifacts.get(account, listed)
+
+        #expect(opened.artifact == listed)
+        let args = try JSONDecoder().decode(ArtifactPreviewWidget.Args.self, from: Data(opened.arguments.utf8))
+        #expect(args.title == "Plan")
+        #expect(args.source.type == .markdown)
+        #expect(args.source.markdown == "# Plan")
+        let request = try #require(await transport.requests.first)
+        #expect(request.route == .artifactGet)
+        #expect(request.json["threadId"] as? String == "thread-1")
+        #expect(request.json["messageId"] as? String == "msg-1")
+        #expect(request.json["toolCallId"] as? String == "call-1")
+        #expect(request.json["key"] as? String == Data(repeating: 7, count: 32).base64EncodedString())
+        account.dispose()
+    }
+
     @Test func malformedRemoteImagesAreRefused() async throws {
         let (account, transport) = makeAccount(userId: nil, answers: [Answers.json([
             "image_bytes": "not-base64", "image_content_type": "image/png",

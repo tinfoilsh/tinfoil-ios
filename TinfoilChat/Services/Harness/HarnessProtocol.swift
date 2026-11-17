@@ -22,6 +22,9 @@ typealias RemoteImageReply = Components.Schemas.RemoteImage
 typealias ThreadWindow = Components.Schemas.ThreadWindow
 /// What a message sent of one questions widget's answers.
 typealias WidgetAnswers = Components.Schemas.WidgetAnswers
+/// An artifact a reply in a stored chat drew, as a list holds it: where it
+/// is and what its card shows, without its source.
+typealias ListedArtifact = Components.Schemas.Artifact
 
 /// The harness's routes. Every one is a POST.
 enum HarnessRoute: String, CaseIterable, Sendable {
@@ -240,6 +243,7 @@ extension Components.Schemas.Block._TypePayload: OpenValue {}
 extension Components.Schemas.TitleState: OpenValue {}
 extension Components.Schemas.AttachmentKind: OpenValue {}
 extension Components.Schemas.RateLimit.KindPayload: OpenValue {}
+extension Components.Schemas.Artifact.SourceTypePayload: OpenValue {}
 
 extension Array where Element == HarnessMessage {
     /// The messages a chat shows: a message whose role this client does not
