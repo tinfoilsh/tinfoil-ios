@@ -506,6 +506,8 @@ enum Constants {
         static let heightWithContext: CGFloat = 368
         /// The sheet grows by the deep research toggle's row where it shows.
         static let researchRowHeight: CGFloat = 51
+        /// The sheet grows by the connectors row where it shows.
+        static let connectorsRowHeight: CGFloat = 51
     }
 
     /// Connectors: the servers an account connects, whose tools its chats'

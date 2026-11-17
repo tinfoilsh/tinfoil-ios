@@ -488,6 +488,7 @@ struct MessageInputView: View {
                             ? Constants.AddToChatSheet.heightWithContext
                             : Constants.AddToChatSheet.height)
                             + (viewModel.canResearch ? Constants.AddToChatSheet.researchRowHeight : 0)
+                            + (viewModel.connectorsOffered ? Constants.AddToChatSheet.connectorsRowHeight : 0)
                     )
                 ])
                 .presentationBackground(Color.sheetBackground(isDarkMode: isDarkMode))
@@ -1706,6 +1707,28 @@ struct AddToSheetView: View {
                         Label(Constants.Research.label, tinfoil: Constants.Research.icon)
                     }
                     .tint(.green)
+                    .padding(.horizontal, 20)
+                }
+
+                if viewModel.connectorsOffered {
+                    NavigationLink {
+                        ConnectorTogglesView(
+                            store: viewModel.connectors,
+                            available: viewModel.chatUsesConnectors,
+                            isDarkMode: isDarkMode
+                        )
+                    } label: {
+                        HStack {
+                            Label(Constants.Connectors.label, tinfoil: Constants.Connectors.icon)
+                            Spacer()
+                            ConnectorsRowValue(store: viewModel.connectors, available: viewModel.chatUsesConnectors)
+                            Image(tinfoil: .chevronRight)
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.secondary)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .foregroundColor(.primary)
                     .padding(.horizontal, 20)
                 }
 
