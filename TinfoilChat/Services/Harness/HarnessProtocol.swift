@@ -37,6 +37,7 @@ enum HarnessRoute: String, CaseIterable, Sendable {
     case keysRemoveBundle = "/v1/keys/remove-bundle"
     case keysMigrateAll = "/v1/keys/migrate-all"
     case turn = "/v1/threads/turn"
+    case browserResult = "/v1/threads/browser/result"
     case follow = "/v1/threads/follow"
     case cancel = "/v1/threads/cancel"
     case queueSend = "/v1/threads/queue/send"
@@ -68,7 +69,10 @@ enum HarnessRoute: String, CaseIterable, Sendable {
     case projectsDelete = "/v1/projects/delete"
     case projectsDeleteAll = "/v1/projects/delete-all"
     case projectDocumentUpload = "/v1/projects/documents/upload"
+    case projectDocumentDownload = "/v1/projects/documents/download"
     case projectDocumentDelete = "/v1/projects/documents/delete"
+    case artifactsList = "/v1/artifacts/list"
+    case artifactGet = "/v1/artifacts/get"
     case favicon = "/v1/metadata/favicon"
     case remoteImage = "/v1/metadata/image"
     case linkMetadata = "/v1/metadata/link"
@@ -84,7 +88,7 @@ enum HarnessRoute: String, CaseIterable, Sendable {
     /// The routes about a chat's run, which go to the instance holding it.
     var aboutRun: Bool {
         switch self {
-        case .follow, .cancel, .queueSend, .queueRemove: return true
+        case .browserResult, .follow, .cancel, .queueSend, .queueRemove: return true
         default: return false
         }
     }
@@ -95,8 +99,9 @@ enum HarnessRoute: String, CaseIterable, Sendable {
     var onlyReads: Bool {
         switch self {
         case .session, .changes, .profileGet, .keysCurrent, .list, .search, .get, .shareStatus, .shareOpen,
-             .transcript, .attachmentGet, .attachmentGetPublic, .projectsList, .projectsGet, .favicon,
-             .linkMetadata, .remoteImage, .importStatus:
+             .transcript, .attachmentGet, .attachmentGetPublic, .projectsList, .projectsGet,
+             .projectDocumentDownload, .artifactsList, .artifactGet, .favicon, .linkMetadata, .remoteImage,
+             .importStatus:
             return true
         default:
             return false

@@ -337,6 +337,7 @@ extension Components {
                 case attachmentUnsupported = "ATTACHMENT_UNSUPPORTED"
                 case attachmentsUnavailable = "ATTACHMENTS_UNAVAILABLE"
                 case badRequest = "BAD_REQUEST"
+                case browserTimeout = "BROWSER_TIMEOUT"
                 case chatFlagged = "CHAT_FLAGGED"
                 case compactionFailed = "COMPACTION_FAILED"
                 case contextTooLarge = "CONTEXT_TOO_LARGE"
@@ -556,7 +557,7 @@ extension Components {
             internal var composer: Components.Schemas.Composer
             /// - Remark: Generated from `#/components/schemas/Session/presets`.
             internal var presets: [Components.Schemas.Preset]
-            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes.
+            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes. documentVersions is true while a project document upload that names a documentId replaces that document. artifacts is true while /v1/artifacts/list and /v1/artifacts/get list and open the artifacts of the account's chats.
             ///
             /// - Remark: Generated from `#/components/schemas/Session/features`.
             internal struct FeaturesPayload: Codable, Hashable, Sendable {
@@ -576,7 +577,7 @@ extension Components {
                     try encoder.encodeAdditionalProperties(additionalProperties)
                 }
             }
-            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes.
+            /// Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes. documentVersions is true while a project document upload that names a documentId replaces that document. artifacts is true while /v1/artifacts/list and /v1/artifacts/get list and open the artifacts of the account's chats.
             ///
             /// - Remark: Generated from `#/components/schemas/Session/features`.
             internal var features: Components.Schemas.Session.FeaturesPayload
@@ -593,7 +594,7 @@ extension Components {
             ///   - profileDefaults:
             ///   - composer:
             ///   - presets:
-            ///   - features: Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes.
+            ///   - features: Optional behaviors this harness offers. A client acts on a feature only when it is true here. compaction is true while a chat whose prompt would outgrow its model's window is compacted rather than refused. manualCompaction is true while a turn of kind compact compacts a chat on request. compactLatest is true while such a turn summarizes the chat's latest exchange too when it sends compactLatest. research is true while this caller may send a turn with options.research, which only a subscriber may. partialThread is true while a client may send a device chat from its latest compaction marker on, as ThreadInput describes. documentVersions is true while a project document upload that names a documentId replaces that document. artifacts is true while /v1/artifacts/list and /v1/artifacts/get list and open the artifacts of the account's chats.
             internal init(
                 _protocol: Components.Schemas.Session._ProtocolPayload,
                 user: Components.Schemas.Session.UserPayload,
@@ -1165,6 +1166,8 @@ extension Components {
             ///
             /// - Remark: Generated from `#/components/schemas/Turn/widgets`.
             internal var widgets: [Swift.String]?
+            /// - Remark: Generated from `#/components/schemas/Turn/browser`.
+            internal var browser: Components.Schemas.BrowserAccess?
             /// A compact turn, or a retry that compacts again, summarizes the chat's latest exchange too, as COMPACTION_START describes. It is refused on any other kind. A client sends it only while the session's features.compactLatest is true, and when it shows a compaction marker at the end of a chat.
             ///
             /// - Remark: Generated from `#/components/schemas/Turn/compactLatest`.
@@ -1190,6 +1193,7 @@ extension Components {
             ///   - toolCallId: The widget call a retryToolCall regenerates.
             ///   - attachments:
             ///   - widgets: The widgets this client renders.
+            ///   - browser:
             ///   - compactLatest: A compact turn, or a retry that compacts again, summarizes the chat's latest exchange too, as COMPACTION_START describes. It is refused on any other kind. A client sends it only while the session's features.compactLatest is true, and when it shows a compaction marker at the end of a chat.
             ///   - options:
             internal init(
@@ -1209,6 +1213,7 @@ extension Components {
                 toolCallId: Swift.String? = nil,
                 attachments: [Components.Schemas.SentAttachment]? = nil,
                 widgets: [Swift.String]? = nil,
+                browser: Components.Schemas.BrowserAccess? = nil,
                 compactLatest: Swift.Bool? = nil,
                 options: Components.Schemas.TurnOptions? = nil
             ) {
@@ -1228,6 +1233,7 @@ extension Components {
                 self.toolCallId = toolCallId
                 self.attachments = attachments
                 self.widgets = widgets
+                self.browser = browser
                 self.compactLatest = compactLatest
                 self.options = options
             }
@@ -1248,8 +1254,287 @@ extension Components {
                 case toolCallId
                 case attachments
                 case widgets
+                case browser
                 case compactLatest
                 case options
+            }
+        }
+        /// Available only when features.browserTools is true, on local send turns
+        /// without research. The client controls selected tabs and supplies a new
+        /// executor identity and secret for each turn. The token is sent only in
+        /// sealed bodies, never in prompts, events or persistent chat records.
+        /// Browser actions run sequentially, at most 40 per turn. Each waits at
+        /// most five minutes for its executor; a timeout ends the run with
+        /// BROWSER_TIMEOUT and leaves later actions unexecuted. Clients cancel a run when they
+        /// relinquish browser control, and stop local dispatch immediately.
+        ///
+        ///
+        /// - Remark: Generated from `#/components/schemas/BrowserAccess`.
+        internal struct BrowserAccess: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/BrowserAccess/executorId`.
+            internal var executorId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BrowserAccess/token`.
+            internal var token: Swift.String
+            /// Creates a new `BrowserAccess`.
+            ///
+            /// - Parameters:
+            ///   - executorId:
+            ///   - token:
+            internal init(
+                executorId: Swift.String,
+                token: Swift.String
+            ) {
+                self.executorId = executorId
+                self.token = token
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case executorId
+                case token
+            }
+        }
+        /// Arguments validated against the model-facing browser tool schema. The executor additionally validates selected tabs, URL schemes, current references, and action permissions before dispatch.
+        ///
+        /// - Remark: Generated from `#/components/schemas/BrowserAction`.
+        internal struct BrowserAction: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/action`.
+            internal enum ActionPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case tabs = "tabs"
+                case read = "read"
+                case screenshot = "screenshot"
+                case click = "click"
+                case hover = "hover"
+                case fill = "fill"
+                case select = "select"
+                case press = "press"
+                case scroll = "scroll"
+                case navigate = "navigate"
+                case back = "back"
+                case forward = "forward"
+                case open = "open"
+                case _switch = "switch"
+                case close = "close"
+                case wait = "wait"
+            }
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/action`.
+            internal var action: Components.Schemas.BrowserAction.ActionPayload
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/tabId`.
+            internal var tabId: Swift.Int?
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/ref`.
+            internal var ref: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/text`.
+            internal var text: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/url`.
+            internal var url: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/key`.
+            internal enum KeyPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case enter = "Enter"
+                case tab = "Tab"
+                case escape = "Escape"
+                case arrowDown = "ArrowDown"
+                case arrowUp = "ArrowUp"
+                case arrowLeft = "ArrowLeft"
+                case arrowRight = "ArrowRight"
+                case backspace = "Backspace"
+            }
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/key`.
+            internal var key: Components.Schemas.BrowserAction.KeyPayload?
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/direction`.
+            internal enum DirectionPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case up = "up"
+                case down = "down"
+            }
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/direction`.
+            internal var direction: Components.Schemas.BrowserAction.DirectionPayload?
+            /// The fresh screenshot whose pixels a coordinate action uses.
+            ///
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/screenshotId`.
+            internal var screenshotId: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/x`.
+            internal var x: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/BrowserAction/y`.
+            internal var y: Swift.Double?
+            /// Creates a new `BrowserAction`.
+            ///
+            /// - Parameters:
+            ///   - action:
+            ///   - tabId:
+            ///   - ref:
+            ///   - text:
+            ///   - url:
+            ///   - key:
+            ///   - direction:
+            ///   - screenshotId: The fresh screenshot whose pixels a coordinate action uses.
+            ///   - x:
+            ///   - y:
+            internal init(
+                action: Components.Schemas.BrowserAction.ActionPayload,
+                tabId: Swift.Int? = nil,
+                ref: Swift.String? = nil,
+                text: Swift.String? = nil,
+                url: Swift.String? = nil,
+                key: Components.Schemas.BrowserAction.KeyPayload? = nil,
+                direction: Components.Schemas.BrowserAction.DirectionPayload? = nil,
+                screenshotId: Swift.String? = nil,
+                x: Swift.Double? = nil,
+                y: Swift.Double? = nil
+            ) {
+                self.action = action
+                self.tabId = tabId
+                self.ref = ref
+                self.text = text
+                self.url = url
+                self.key = key
+                self.direction = direction
+                self.screenshotId = screenshotId
+                self.x = x
+                self.y = y
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case action
+                case tabId
+                case ref
+                case text
+                case url
+                case key
+                case direction
+                case screenshotId
+                case x
+                case y
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/BrowserResult`.
+        internal struct BrowserResult: Codable, Hashable, Sendable {
+            /// Page data or a structured action error. Limited to 64 KiB UTF-8.
+            ///
+            /// - Remark: Generated from `#/components/schemas/BrowserResult/text`.
+            internal var text: Swift.String
+            /// Optional base64 JPEG viewport, at most 4 million pixels. Read only by vision models.
+            ///
+            /// - Remark: Generated from `#/components/schemas/BrowserResult/image`.
+            internal var image: Swift.String?
+            /// Creates a new `BrowserResult`.
+            ///
+            /// - Parameters:
+            ///   - text: Page data or a structured action error. Limited to 64 KiB UTF-8.
+            ///   - image: Optional base64 JPEG viewport, at most 4 million pixels. Read only by vision models.
+            internal init(
+                text: Swift.String,
+                image: Swift.String? = nil
+            ) {
+                self.text = text
+                self.image = image
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case text
+                case image
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/BrowserResultInput`.
+        internal struct BrowserResultInput: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/BrowserResultInput/threadId`.
+            internal var threadId: Components.Schemas.Identifier
+            /// - Remark: Generated from `#/components/schemas/BrowserResultInput/runId`.
+            internal var runId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BrowserResultInput/executorId`.
+            internal var executorId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BrowserResultInput/token`.
+            internal var token: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BrowserResultInput/executionId`.
+            internal var executionId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BrowserResultInput/result`.
+            internal var result: Components.Schemas.BrowserResult
+            /// Creates a new `BrowserResultInput`.
+            ///
+            /// - Parameters:
+            ///   - threadId:
+            ///   - runId:
+            ///   - executorId:
+            ///   - token:
+            ///   - executionId:
+            ///   - result:
+            internal init(
+                threadId: Components.Schemas.Identifier,
+                runId: Swift.String,
+                executorId: Swift.String,
+                token: Swift.String,
+                executionId: Swift.String,
+                result: Components.Schemas.BrowserResult
+            ) {
+                self.threadId = threadId
+                self.runId = runId
+                self.executorId = executorId
+                self.token = token
+                self.executionId = executionId
+                self.result = result
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case threadId
+                case runId
+                case executorId
+                case token
+                case executionId
+                case result
+            }
+        }
+        /// A complete, validated browser operation ready for the selected executor.
+        /// Only this event authorizes dispatch, never partial TOOL_CALL_ARGS.
+        /// executionId identifies the operation across stream reconnections.
+        /// Every replay is reconciled against the executor's local journal.
+        ///
+        ///
+        /// - Remark: Generated from `#/components/schemas/BrowserToolRequestEvent`.
+        internal struct BrowserToolRequestEvent: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/BrowserToolRequestEvent/type`.
+            internal var _type: OpenAPIRuntime.OpenAPIValueContainer
+            /// - Remark: Generated from `#/components/schemas/BrowserToolRequestEvent/timestamp`.
+            internal var timestamp: Components.Schemas.Timestamp?
+            /// The executor refuses dispatch after this deadline, including after a delayed review or stream replay.
+            ///
+            /// - Remark: Generated from `#/components/schemas/BrowserToolRequestEvent/expiresAt`.
+            internal var expiresAt: Foundation.Date
+            /// - Remark: Generated from `#/components/schemas/BrowserToolRequestEvent/executionId`.
+            internal var executionId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BrowserToolRequestEvent/toolCallId`.
+            internal var toolCallId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BrowserToolRequestEvent/executorId`.
+            internal var executorId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/BrowserToolRequestEvent/operation`.
+            internal var operation: Components.Schemas.BrowserAction
+            /// Creates a new `BrowserToolRequestEvent`.
+            ///
+            /// - Parameters:
+            ///   - _type:
+            ///   - timestamp:
+            ///   - expiresAt: The executor refuses dispatch after this deadline, including after a delayed review or stream replay.
+            ///   - executionId:
+            ///   - toolCallId:
+            ///   - executorId:
+            ///   - operation:
+            internal init(
+                _type: OpenAPIRuntime.OpenAPIValueContainer,
+                timestamp: Components.Schemas.Timestamp? = nil,
+                expiresAt: Foundation.Date,
+                executionId: Swift.String,
+                toolCallId: Swift.String,
+                executorId: Swift.String,
+                operation: Components.Schemas.BrowserAction
+            ) {
+                self._type = _type
+                self.timestamp = timestamp
+                self.expiresAt = expiresAt
+                self.executionId = executionId
+                self.toolCallId = toolCallId
+                self.executorId = executorId
+                self.operation = operation
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case _type = "type"
+                case timestamp
+                case expiresAt
+                case executionId
+                case toolCallId
+                case executorId
+                case operation
             }
         }
         /// - Remark: Generated from `#/components/schemas/TurnOptions`.
@@ -1385,6 +1670,8 @@ extension Components {
             internal var pages: [Components.Schemas.DocumentPage]?
             /// - Remark: Generated from `#/components/schemas/SentAttachment/base64`.
             internal var base64: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/SentAttachment/original`.
+            internal var original: Components.Schemas.OriginalFile?
             /// Creates a new `SentAttachment`.
             ///
             /// - Parameters:
@@ -1398,6 +1685,7 @@ extension Components {
             ///   - description:
             ///   - pages:
             ///   - base64:
+            ///   - original:
             internal init(
                 id: Components.Schemas.Identifier,
                 kind: Components.Schemas.AttachmentKind? = nil,
@@ -1408,7 +1696,8 @@ extension Components {
                 textContent: Swift.String? = nil,
                 description: Swift.String? = nil,
                 pages: [Components.Schemas.DocumentPage]? = nil,
-                base64: Swift.String? = nil
+                base64: Swift.String? = nil,
+                original: Components.Schemas.OriginalFile? = nil
             ) {
                 self.id = id
                 self.kind = kind
@@ -1420,6 +1709,7 @@ extension Components {
                 self.description = description
                 self.pages = pages
                 self.base64 = base64
+                self.original = original
             }
             internal enum CodingKeys: String, CodingKey {
                 case id
@@ -1432,6 +1722,7 @@ extension Components {
                 case description
                 case pages
                 case base64
+                case original
             }
         }
         /// - Remark: Generated from `#/components/schemas/FollowInput`.
@@ -1512,6 +1803,8 @@ extension Components {
             case activityDelta(Components.Schemas.ActivityDeltaEvent)
             /// - Remark: Generated from `#/components/schemas/HarnessEvent/ActivitySnapshotEvent`.
             case activitySnapshot(Components.Schemas.ActivitySnapshotEvent)
+            /// - Remark: Generated from `#/components/schemas/HarnessEvent/BrowserToolRequestEvent`.
+            case browserToolRequest(Components.Schemas.BrowserToolRequestEvent)
             /// - Remark: Generated from `#/components/schemas/HarnessEvent/CompactionEndEvent`.
             case compactionEnd(Components.Schemas.CompactionEndEvent)
             /// - Remark: Generated from `#/components/schemas/HarnessEvent/CompactionStartEvent`.
@@ -1556,6 +1849,8 @@ extension Components {
                     self = .activityDelta(try .init(from: decoder))
                 case "ACTIVITY_SNAPSHOT":
                     self = .activitySnapshot(try .init(from: decoder))
+                case "BROWSER_TOOL_REQUEST":
+                    self = .browserToolRequest(try .init(from: decoder))
                 case "COMPACTION_END":
                     self = .compactionEnd(try .init(from: decoder))
                 case "COMPACTION_START":
@@ -1599,6 +1894,8 @@ extension Components {
                 case let .activityDelta(value):
                     try value.encode(to: encoder)
                 case let .activitySnapshot(value):
+                    try value.encode(to: encoder)
+                case let .browserToolRequest(value):
                     try value.encode(to: encoder)
                 case let .compactionEnd(value):
                     try value.encode(to: encoder)
@@ -4333,6 +4630,10 @@ extension Components {
             internal var textContent: Swift.String?
             /// - Remark: Generated from `#/components/schemas/AttachmentView/description`.
             internal var description: Swift.String?
+            /// Whether the file is kept as it was uploaded, which /v1/attachments/get returns with original. Absent for an attachment stored before files were kept.
+            ///
+            /// - Remark: Generated from `#/components/schemas/AttachmentView/hasOriginal`.
+            internal var hasOriginal: Swift.Bool?
             /// Creates a new `AttachmentView`.
             ///
             /// - Parameters:
@@ -4344,6 +4645,7 @@ extension Components {
             ///   - thumbnail:
             ///   - textContent:
             ///   - description:
+            ///   - hasOriginal: Whether the file is kept as it was uploaded, which /v1/attachments/get returns with original. Absent for an attachment stored before files were kept.
             internal init(
                 id: Swift.String,
                 kind: Components.Schemas.AttachmentKind,
@@ -4352,7 +4654,8 @@ extension Components {
                 size: Swift.Int? = nil,
                 thumbnail: Swift.String? = nil,
                 textContent: Swift.String? = nil,
-                description: Swift.String? = nil
+                description: Swift.String? = nil,
+                hasOriginal: Swift.Bool? = nil
             ) {
                 self.id = id
                 self.kind = kind
@@ -4362,6 +4665,7 @@ extension Components {
                 self.thumbnail = thumbnail
                 self.textContent = textContent
                 self.description = description
+                self.hasOriginal = hasOriginal
             }
             internal enum CodingKeys: String, CodingKey {
                 case id
@@ -4372,6 +4676,7 @@ extension Components {
                 case thumbnail
                 case textContent
                 case description
+                case hasOriginal
             }
         }
         /// An attachment as an upload returns it and a device chat keeps it.
@@ -4404,6 +4709,8 @@ extension Components {
             ///
             /// - Remark: Generated from `#/components/schemas/Attachment/originalBase64`.
             internal var originalBase64: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/Attachment/original`.
+            internal var original: Components.Schemas.OriginalFile?
             /// Creates a new `Attachment`.
             ///
             /// - Parameters:
@@ -4418,6 +4725,7 @@ extension Components {
             ///   - pages:
             ///   - base64: The copy of an image models read.
             ///   - originalBase64: An imported image's original, only in an import's lines. A client keeps it apart from the chat.
+            ///   - original:
             internal init(
                 id: Swift.String,
                 kind: Components.Schemas.AttachmentKind,
@@ -4429,7 +4737,8 @@ extension Components {
                 description: Swift.String? = nil,
                 pages: [Components.Schemas.DocumentPage]? = nil,
                 base64: Swift.String? = nil,
-                originalBase64: Swift.String? = nil
+                originalBase64: Swift.String? = nil,
+                original: Components.Schemas.OriginalFile? = nil
             ) {
                 self.id = id
                 self.kind = kind
@@ -4442,6 +4751,7 @@ extension Components {
                 self.pages = pages
                 self.base64 = base64
                 self.originalBase64 = originalBase64
+                self.original = original
             }
             internal enum CodingKeys: String, CodingKey {
                 case id
@@ -4455,6 +4765,38 @@ extension Components {
                 case pages
                 case base64
                 case originalBase64
+                case original
+            }
+        }
+        /// Where an upload kept the file as it was uploaded. A turn sends it back as the upload returned it.
+        ///
+        /// - Remark: Generated from `#/components/schemas/OriginalFile`.
+        internal struct OriginalFile: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OriginalFile/id`.
+            internal var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OriginalFile/encryptionKey`.
+            internal var encryptionKey: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OriginalFile/storageThreadId`.
+            internal var storageThreadId: Swift.String
+            /// Creates a new `OriginalFile`.
+            ///
+            /// - Parameters:
+            ///   - id:
+            ///   - encryptionKey:
+            ///   - storageThreadId:
+            internal init(
+                id: Swift.String,
+                encryptionKey: Swift.String,
+                storageThreadId: Swift.String
+            ) {
+                self.id = id
+                self.encryptionKey = encryptionKey
+                self.storageThreadId = storageThreadId
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case id
+                case encryptionKey
+                case storageThreadId
             }
         }
         /// - Remark: Generated from `#/components/schemas/DocumentPage`.
@@ -5182,6 +5524,37 @@ extension Components {
                     internal var description: Swift.String?
                     /// - Remark: Generated from `#/components/schemas/SharedThread/MessagesPayload/AttachmentsPayload/attKey`.
                     internal var attKey: Swift.String?
+                    /// - Remark: Generated from `#/components/schemas/SharedThread/MessagesPayload/AttachmentsPayload/hasOriginal`.
+                    internal var hasOriginal: Swift.Bool?
+                    /// The file as it was uploaded, which /v1/attachments/get-public returns with original.
+                    ///
+                    /// - Remark: Generated from `#/components/schemas/SharedThread/MessagesPayload/AttachmentsPayload/original`.
+                    internal struct OriginalPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/components/schemas/SharedThread/MessagesPayload/AttachmentsPayload/original/id`.
+                        internal var id: Swift.String
+                        /// - Remark: Generated from `#/components/schemas/SharedThread/MessagesPayload/AttachmentsPayload/original/attKey`.
+                        internal var attKey: Swift.String
+                        /// Creates a new `OriginalPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - id:
+                        ///   - attKey:
+                        internal init(
+                            id: Swift.String,
+                            attKey: Swift.String
+                        ) {
+                            self.id = id
+                            self.attKey = attKey
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case id
+                            case attKey
+                        }
+                    }
+                    /// The file as it was uploaded, which /v1/attachments/get-public returns with original.
+                    ///
+                    /// - Remark: Generated from `#/components/schemas/SharedThread/MessagesPayload/AttachmentsPayload/original`.
+                    internal var original: Components.Schemas.SharedThread.MessagesPayloadPayload.AttachmentsPayloadPayload.OriginalPayload?
                     /// Creates a new `AttachmentsPayloadPayload`.
                     ///
                     /// - Parameters:
@@ -5194,6 +5567,8 @@ extension Components {
                     ///   - textContent:
                     ///   - description:
                     ///   - attKey:
+                    ///   - hasOriginal:
+                    ///   - original: The file as it was uploaded, which /v1/attachments/get-public returns with original.
                     internal init(
                         id: Swift.String,
                         kind: Components.Schemas.AttachmentKind,
@@ -5203,7 +5578,9 @@ extension Components {
                         thumbnail: Swift.String? = nil,
                         textContent: Swift.String? = nil,
                         description: Swift.String? = nil,
-                        attKey: Swift.String? = nil
+                        attKey: Swift.String? = nil,
+                        hasOriginal: Swift.Bool? = nil,
+                        original: Components.Schemas.SharedThread.MessagesPayloadPayload.AttachmentsPayloadPayload.OriginalPayload? = nil
                     ) {
                         self.id = id
                         self.kind = kind
@@ -5214,6 +5591,8 @@ extension Components {
                         self.textContent = textContent
                         self.description = description
                         self.attKey = attKey
+                        self.hasOriginal = hasOriginal
+                        self.original = original
                     }
                     internal enum CodingKeys: String, CodingKey {
                         case id
@@ -5225,6 +5604,8 @@ extension Components {
                         case textContent
                         case description
                         case attKey
+                        case hasOriginal
+                        case original
                     }
                 }
                 /// - Remark: Generated from `#/components/schemas/SharedThread/MessagesPayload/attachments`.
@@ -5347,6 +5728,10 @@ extension Components {
             internal var textContent: Swift.String?
             /// - Remark: Generated from `#/components/schemas/AttachmentRequest/pages`.
             internal var pages: [Components.Schemas.DocumentPage]?
+            /// Asks for the file as it was uploaded: of the attachment a stored chat names by id, or, for a share, the original that id and attKey name.
+            ///
+            /// - Remark: Generated from `#/components/schemas/AttachmentRequest/original`.
+            internal var original: Swift.Bool?
             /// Creates a new `AttachmentRequest`.
             ///
             /// - Parameters:
@@ -5360,6 +5745,7 @@ extension Components {
             ///   - mimeType:
             ///   - textContent:
             ///   - pages:
+            ///   - original: Asks for the file as it was uploaded: of the attachment a stored chat names by id, or, for a share, the original that id and attKey name.
             internal init(
                 _type: Swift.String? = nil,
                 key: Swift.String? = nil,
@@ -5370,7 +5756,8 @@ extension Components {
                 fileName: Swift.String? = nil,
                 mimeType: Swift.String? = nil,
                 textContent: Swift.String? = nil,
-                pages: [Components.Schemas.DocumentPage]? = nil
+                pages: [Components.Schemas.DocumentPage]? = nil,
+                original: Swift.Bool? = nil
             ) {
                 self._type = _type
                 self.key = key
@@ -5382,6 +5769,7 @@ extension Components {
                 self.mimeType = mimeType
                 self.textContent = textContent
                 self.pages = pages
+                self.original = original
             }
             internal enum CodingKeys: String, CodingKey {
                 case _type = "type"
@@ -5394,6 +5782,7 @@ extension Components {
                 case mimeType
                 case textContent
                 case pages
+                case original
             }
         }
         /// The account's settings. A field a profile leaves out takes its value from the session's profileDefaults.
@@ -6239,6 +6628,10 @@ extension Components {
             internal var content: Swift.String?
             /// - Remark: Generated from `#/components/schemas/ProjectDocument/thumbnailBase64`.
             internal var thumbnailBase64: Swift.String?
+            /// Whether the uploaded file is kept, which /v1/projects/documents/download returns. A document stored before files were kept, or restored from a backup, has only its text.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ProjectDocument/hasFile`.
+            internal var hasFile: Swift.Bool?
             /// - Remark: Generated from `#/components/schemas/ProjectDocument/createdAt`.
             internal var createdAt: Components.Schemas.Timestamp?
             /// - Remark: Generated from `#/components/schemas/ProjectDocument/updatedAt`.
@@ -6253,6 +6646,7 @@ extension Components {
             ///   - sizeBytes:
             ///   - content:
             ///   - thumbnailBase64:
+            ///   - hasFile: Whether the uploaded file is kept, which /v1/projects/documents/download returns. A document stored before files were kept, or restored from a backup, has only its text.
             ///   - createdAt:
             ///   - updatedAt:
             internal init(
@@ -6263,6 +6657,7 @@ extension Components {
                 sizeBytes: Swift.Int,
                 content: Swift.String? = nil,
                 thumbnailBase64: Swift.String? = nil,
+                hasFile: Swift.Bool? = nil,
                 createdAt: Components.Schemas.Timestamp? = nil,
                 updatedAt: Components.Schemas.Timestamp? = nil
             ) {
@@ -6273,6 +6668,7 @@ extension Components {
                 self.sizeBytes = sizeBytes
                 self.content = content
                 self.thumbnailBase64 = thumbnailBase64
+                self.hasFile = hasFile
                 self.createdAt = createdAt
                 self.updatedAt = updatedAt
             }
@@ -6284,8 +6680,137 @@ extension Components {
                 case sizeBytes
                 case content
                 case thumbnailBase64
+                case hasFile
                 case createdAt
                 case updatedAt
+            }
+        }
+        /// An artifact a reply in a stored chat drew, without its source.
+        ///
+        /// - Remark: Generated from `#/components/schemas/Artifact`.
+        internal struct Artifact: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/Artifact/threadId`.
+            internal var threadId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/Artifact/threadTitle`.
+            internal var threadTitle: Swift.String
+            /// The project the chat is in.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Artifact/projectId`.
+            internal var projectId: Swift.String?
+            /// The reply that drew it.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Artifact/messageId`.
+            internal var messageId: Swift.String
+            /// The call that drew it, as the reply's timeline names it.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Artifact/toolCallId`.
+            internal var toolCallId: Swift.String
+            /// Empty when the call gave none.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Artifact/title`.
+            internal var title: Swift.String
+            /// The kind of source the artifact shows. A client shows one of a kind it does not know as a generic artifact.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Artifact/sourceType`.
+            internal struct SourceTypePayload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/Artifact/sourceType/value1`.
+                internal enum Value1Payload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case url = "url"
+                    case html = "html"
+                    case markdown = "markdown"
+                }
+                /// - Remark: Generated from `#/components/schemas/Artifact/sourceType/value1`.
+                internal var value1: Components.Schemas.Artifact.SourceTypePayload.Value1Payload?
+                /// - Remark: Generated from `#/components/schemas/Artifact/sourceType/value2`.
+                internal var value2: Swift.String?
+                /// Creates a new `SourceTypePayload`.
+                ///
+                /// - Parameters:
+                ///   - value1:
+                ///   - value2:
+                internal init(
+                    value1: Components.Schemas.Artifact.SourceTypePayload.Value1Payload? = nil,
+                    value2: Swift.String? = nil
+                ) {
+                    self.value1 = value1
+                    self.value2 = value2
+                }
+                internal init(from decoder: any Swift.Decoder) throws {
+                    var errors: [any Swift.Error] = []
+                    do {
+                        self.value1 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    do {
+                        self.value2 = try decoder.decodeFromSingleValueContainer()
+                    } catch {
+                        errors.append(error)
+                    }
+                    try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                        [
+                            self.value1,
+                            self.value2
+                        ],
+                        type: Self.self,
+                        codingPath: decoder.codingPath,
+                        errors: errors
+                    )
+                }
+                internal func encode(to encoder: any Swift.Encoder) throws {
+                    try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                        self.value1,
+                        self.value2
+                    ])
+                }
+            }
+            /// The kind of source the artifact shows. A client shows one of a kind it does not know as a generic artifact.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Artifact/sourceType`.
+            internal var sourceType: Components.Schemas.Artifact.SourceTypePayload
+            /// When the reply was written, as the message records it.
+            ///
+            /// - Remark: Generated from `#/components/schemas/Artifact/createdAt`.
+            internal var createdAt: Swift.String
+            /// Creates a new `Artifact`.
+            ///
+            /// - Parameters:
+            ///   - threadId:
+            ///   - threadTitle:
+            ///   - projectId: The project the chat is in.
+            ///   - messageId: The reply that drew it.
+            ///   - toolCallId: The call that drew it, as the reply's timeline names it.
+            ///   - title: Empty when the call gave none.
+            ///   - sourceType: The kind of source the artifact shows. A client shows one of a kind it does not know as a generic artifact.
+            ///   - createdAt: When the reply was written, as the message records it.
+            internal init(
+                threadId: Swift.String,
+                threadTitle: Swift.String,
+                projectId: Swift.String? = nil,
+                messageId: Swift.String,
+                toolCallId: Swift.String,
+                title: Swift.String,
+                sourceType: Components.Schemas.Artifact.SourceTypePayload,
+                createdAt: Swift.String
+            ) {
+                self.threadId = threadId
+                self.threadTitle = threadTitle
+                self.projectId = projectId
+                self.messageId = messageId
+                self.toolCallId = toolCallId
+                self.title = title
+                self.sourceType = sourceType
+                self.createdAt = createdAt
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case threadId
+                case threadTitle
+                case projectId
+                case messageId
+                case toolCallId
+                case title
+                case sourceType
+                case createdAt
             }
         }
         /// How the account's key was set up. A client treats an origin it does not know as unknown.
