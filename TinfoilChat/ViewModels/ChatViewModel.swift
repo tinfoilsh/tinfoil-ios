@@ -264,6 +264,11 @@ class ChatViewModel: ObservableObject {
     @Published var shouldShowKeyImport: Bool = false
     @Published private(set) var isPasskeyRecoverySkipped: Bool = false
 
+    // MARK: - Connectors
+
+    /// The account's connectors, which Settings and the composer show.
+    let connectors = ConnectorStore()
+
     // MARK: - Audio
 
     let speechPlayer = SpeechPlayer()
@@ -473,6 +478,7 @@ class ChatViewModel: ObservableObject {
         isSavingTemporaryChat = false
         rows = ChatRows()
         session = nil
+        connectors.bind(nil)
         dictation.reset()
         showsKeptModels = true
         verification = VerificationInfo(isVerifying: true)
@@ -497,6 +503,7 @@ class ChatViewModel: ObservableObject {
             return try await HarnessSpeech.transcribe(account, recording: recording, fileName: fileName, mimeType: Constants.Audio.recordingMimeType)
         }
         ProfileManager.shared.bind(account)
+        connectors.bind(account)
         KeyRegistry.shared.bind(account)
         await LinkMetadataService.shared.bind(account)
         session.objectWillChange.sink { [weak self] _ in self?.sessionChanged() }.store(in: &sessionCancellables)

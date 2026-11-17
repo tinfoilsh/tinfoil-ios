@@ -202,6 +202,18 @@ enum HarnessErrorCode {
     /// The request needs the chat access the client mints, which it lacked
     /// or which expired.
     static let credentialRequired = "CREDENTIAL_REQUIRED"
+    /// The account holds as many connectors as it may.
+    static let connectorLimit = "CONNECTOR_LIMIT"
+    static let connectorNotFound = "CONNECTOR_NOT_FOUND"
+    /// A sign-in to a connector's server did not finish.
+    static let connectorSignInFailed = "CONNECTOR_SIGN_IN_FAILED"
+    /// A connector's authorization server no longer accepts what the harness
+    /// signs in with.
+    static let connectorSignedOut = "CONNECTOR_SIGNED_OUT"
+    /// The address did not answer as an MCP server.
+    static let connectorUnreachable = "CONNECTOR_UNREACHABLE"
+    /// The server signs in only clients registered with it in advance.
+    static let connectorUnsupported = "CONNECTOR_UNSUPPORTED"
 
     // The codes of errors this client meets on its own, which the harness
     // never sends.
