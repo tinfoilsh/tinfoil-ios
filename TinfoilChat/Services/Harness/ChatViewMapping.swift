@@ -186,6 +186,7 @@ enum ChatViewMapping {
             thumbnail: view.thumbnail, textContent: view.textContent, description: view.description
         )
         mapped.hasOriginalFile = view.hasOriginal == true
+        mapped.originalFileName = view.originalFileName
         return mapped
     }
 

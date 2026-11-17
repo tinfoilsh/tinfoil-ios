@@ -1220,7 +1220,8 @@ struct MessageInputView: View {
         for (index, item) in items.enumerated() {
             Task {
                 if let data = try? await item.loadTransferable(type: Data.self) {
-                    let fileName = items.count > 1 ? "Photo \(index + 1).jpg" : "Photo.jpg"
+                    let ext = HarnessUploads.imageType(of: data)?.preferredFilenameExtension ?? "jpg"
+                    let fileName = items.count > 1 ? "Photo \(index + 1).\(ext)" : "Photo.\(ext)"
                     viewModel.addImageAttachment(data: data, fileName: fileName)
                 }
             }

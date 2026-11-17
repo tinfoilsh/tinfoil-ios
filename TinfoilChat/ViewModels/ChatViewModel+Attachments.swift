@@ -281,7 +281,7 @@ extension ChatViewModel {
                 try Task.checkCancellation()
                 let data = try await session.originalFile(attachment)
                 try Task.checkCancellation()
-                let fileName = attachment.fileName
+                let fileName = attachment.originalFileName ?? attachment.fileName
                 let file = try await Task.detached(priority: .userInitiated) { try ExportedFile.write(data, named: fileName) }.value
                 // A file that arrives after its chat was left is not shown.
                 guard !Task.isCancelled, self.session === session, session.open.id == chatId else {

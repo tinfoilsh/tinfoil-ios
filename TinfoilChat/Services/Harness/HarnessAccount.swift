@@ -186,11 +186,11 @@ final class HarnessAccount: ObservableObject {
         return result
     }
 
-    func upload<T: Decodable>(_ route: HarnessRoute, file: Data, fileName: String, mimeType: String, fields: [String: String] = [:], keyless: Bool = false) async throws -> T {
+    func upload<T: Decodable>(_ route: HarnessRoute, file: Data, fileName: String, mimeType: String, fields: [String: String] = [:], keyless: Bool = false, original: MultipartForm.Original? = nil) async throws -> T {
         let generation = keyGeneration
         var fields = fields
         if !keyless, let key = try key() { fields["key"] = key }
-        let result: T = try await client.upload(route, file: file, fileName: fileName, mimeType: mimeType, fields: fields)
+        let result: T = try await client.upload(route, file: file, fileName: fileName, mimeType: mimeType, fields: fields, original: original)
         try guardKey(generation, keyless: keyless)
         return result
     }

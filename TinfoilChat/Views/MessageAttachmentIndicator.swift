@@ -158,6 +158,13 @@ struct MessageAttachmentIndicator: View {
                     ForEach(row) { attachment in
                         ImageThumbnail(attachment: attachment, size: size)
                             .onTapGesture { openImageViewer(for: attachment) }
+                            .contextMenu {
+                                if attachment.hasOriginalFile {
+                                    Button { viewModel.downloadOriginalFile(of: attachment) } label: {
+                                        Label("Download original", tinfoil: .download)
+                                    }
+                                }
+                            }
                             .accessibilityElement()
                             .accessibilityLabel("Image attachment")
                             .accessibilityAddTraits(.isButton)

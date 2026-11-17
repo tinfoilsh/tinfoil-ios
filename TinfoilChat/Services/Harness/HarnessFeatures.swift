@@ -90,10 +90,13 @@ enum HarnessProjects {
     /// Stores a file as a document of a project, or, when it replaces one,
     /// as a new version of that document under the same id.
     static func uploadDocument(_ account: HarnessAccount, projectId: String, replacing documentId: String? = nil, file: Data, fileName: String, mimeType: String) async throws -> Components.Schemas.ProjectDocument {
-        let prepared = try await HarnessUploads.prepare(file, fileName: fileName, mimeType: mimeType, groups: try await account.loadedSession().composer.projectDocuments)
+        let session = try await account.loadedSession()
+        let groups = session.composer.projectDocuments
+        let prepared = try await HarnessUploads.prepare(file, fileName: fileName, mimeType: mimeType, groups: groups)
+        let original = try HarnessUploads.originalPhoto(file, named: fileName, prepared: prepared, groups: groups, enabled: session.features.additionalProperties["imageOriginals"] == true)
         var fields = ["projectId": projectId]
         if let documentId { fields["documentId"] = documentId }
-        return try await account.upload(.projectDocumentUpload, file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, fields: fields)
+        return try await account.upload(.projectDocumentUpload, file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, fields: fields, original: original)
     }
 
     /// The file a document was read from, as it was uploaded. The harness
@@ -442,22 +445,28 @@ enum HarnessUploads {
     /// Whether a file uploads as an image: its bytes hold one, or its name
     /// is one the harness reads an image from.
     static func isImage(_ data: Data, fileName: String, groups: [Components.Schemas.FileGroup]) -> Bool {
-        if imageType(of: data) != nil { return true }
         let ext = fileExtension(of: fileName)
-        return !ext.isEmpty && groups.contains { $0.imageMaxSide != nil && $0.accept.contains(ext) }
+        return groups.contains { $0.imageMaxSide != nil && ($0.accept.contains(ext) || imageType(of: data) != nil) }
     }
 
-    /// Converts a file into an attachment the next turn sends. For a stored
-    /// chat, the upload carries the content key, and the harness keeps a
-    /// file that is no image as it was uploaded: the attachment names where,
-    /// which the turn that attaches it sends back. An image uploads as the
-    /// copy models read, so no other copy of it is kept.
+    /// The source photo travels separately only when the model copy differs.
+    static func originalPhoto(_ data: Data, named name: String, prepared: Prepared, groups: [Components.Schemas.FileGroup], enabled: Bool) throws -> MultipartForm.Original? {
+        guard enabled, prepared.fileName != name || prepared.data != data else { return nil }
+        guard let group = groups.first(where: { $0.imageMaxSide != nil }), data.count <= group.maxBytes else {
+            throw HarnessError(code: "ATTACHMENT_TOO_LARGE", message: "The original photo exceeds the upload limit.", action: .revise, status: 413)
+        }
+        return MultipartForm.Original(data: data, fileName: name)
+    }
+
     @MainActor
     static func upload(_ account: HarnessAccount, data: Data, fileName: String, mimeType: String, forStoredChat: Bool = false) async throws -> Components.Schemas.Attachment {
-        let groups = try await account.loadedSession().composer.attachments
+        let session = try await account.loadedSession()
+        let groups = session.composer.attachments
         let prepared = try await prepare(data, fileName: fileName, mimeType: mimeType, groups: groups)
-        let keepsFile = forStoredChat && !isImage(prepared.data, fileName: prepared.fileName, groups: groups)
-        let uploaded: Uploaded = try await account.upload(.attachmentUpload, file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, keyless: !keepsFile)
+        let keepsPhotos = forStoredChat && session.features.additionalProperties["imageOriginals"] == true
+        let keepsFile = forStoredChat && (keepsPhotos || !isImage(prepared.data, fileName: prepared.fileName, groups: groups))
+        let original = try originalPhoto(data, named: fileName, prepared: prepared, groups: groups, enabled: keepsPhotos)
+        let uploaded: Uploaded = try await account.upload(.attachmentUpload, file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, keyless: !keepsFile, original: original)
         return uploaded.attachment
     }
 }

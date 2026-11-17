@@ -40,6 +40,7 @@ struct Attachment: Identifiable, Equatable {
     /// Whether the chat service keeps the file as it was uploaded, beside
     /// what the chat reads of it.
     var hasOriginalFile = false
+    var originalFileName: String?
 
     init(
         id: String = UUID().uuidString.lowercased(),
