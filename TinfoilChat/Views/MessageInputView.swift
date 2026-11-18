@@ -420,7 +420,7 @@ struct MessageInputView: View {
             }
             .sheet(isPresented: $viewModel.showPhotoPicker, onDismiss: processSelectedPhotos) {
                 NavigationStack {
-                    PhotosPicker(selection: $selectedPhotoItems, matching: .images) {
+                    PhotosPicker(selection: $selectedPhotoItems, matching: .images, preferredItemEncoding: .current) {
                         Text("Select Photos")
                     }
                     .photosPickerStyle(.inline)
