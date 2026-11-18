@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/encrypted-http-body-protocol.git",
       "state" : {
-        "revision" : "4a42bea81a80fae21afb9d80fdf0614e82d40f4f",
-        "version" : "0.4.2"
+        "revision" : "a681fafe19ddf5ce67048f936e4e65293f72168e",
+        "version" : "0.6.0"
       }
     },
     {
@@ -159,8 +159,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tinfoilsh/tinfoil-swift",
       "state" : {
-        "revision" : "e49a0a4b22e3b500759e4997381ca031c894aeae",
-        "version" : "0.9.0-rc.4"
+        "revision" : "c2fd6f109b58c2f013498540d98806f400740dc8",
+        "version" : "0.9.0-rc.6"
       }
     }
   ],

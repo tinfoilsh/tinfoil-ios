@@ -75,12 +75,17 @@ extension Verification {
         codeTag: "v1.0.0",
         codeMeasurement: nil,
         enclaveMeasurement: nil,
+        config: nil,
+        runtime: nil,
+        platform: nil,
         tlsPublicKeyFingerprint: "fingerprint",
-        hpkePublicKey: nil,
+        hpkePublicKey: "",
         cryptoMaterial: [],
         freshnessExpiresAt: .distantFuture,
-        verifiedAt: Date(),
-        verifier: SoftwareIdentity(name: "tinfoil-swift", version: "test")
+        metadata: VerificationMetadata(
+            verifier: SoftwareIdentity(name: "tinfoil-swift", version: "test"),
+            verifiedAt: Date()
+        )
     )
 }
 
