@@ -438,7 +438,7 @@ private struct EncryptionSectionCards: View {
             FingerprintCard(
                 icon: .key,
                 label: "Your unique encryption key",
-                value: verification.hpkePublicKey ?? "",
+                value: verification.hpkePublicKey,
                 successBadgeText: "Attested",
                 status: status,
                 isDarkMode: isDarkMode
@@ -462,7 +462,7 @@ private struct EncryptionSectionCards: View {
                     Text("Full HPKE Public Key")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(Color.verificationAccent(isDarkMode: isDarkMode))
-                    Text(verification.hpkePublicKey ?? "Not available")
+                    Text(verification.hpkePublicKey.isEmpty ? "Not available" : verification.hpkePublicKey)
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(.primary)
                         .fixedSize(horizontal: false, vertical: true)

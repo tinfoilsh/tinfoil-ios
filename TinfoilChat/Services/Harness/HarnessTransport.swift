@@ -165,7 +165,7 @@ actor SealedTransport: HarnessTransport {
                 group.addTask {
                     try await EnclaveHTTPClient(
                         enclave: enclave,
-                        repo: repo,
+                        pin: Pin(repo: repo),
                         transportMode: .ehbp,
                         onVerificationResult: { verified.yield($0) }
                     )
