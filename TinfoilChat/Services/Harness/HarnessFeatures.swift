@@ -41,7 +41,8 @@ private struct ProjectUpdateRequest: Encodable {
     var color: Nullable<String>?
 }
 
-private struct ProjectDocumentDeleteRequest: Encodable {
+/// A document of a project, to download or delete.
+private struct ProjectDocumentRequest: Encodable {
     var projectId: String
     var documentId: String
 }
@@ -86,13 +87,69 @@ enum HarnessProjects {
         return deleted.deleted
     }
 
-    static func uploadDocument(_ account: HarnessAccount, projectId: String, file: Data, fileName: String, mimeType: String) async throws -> Components.Schemas.ProjectDocument {
-        let prepared = try await HarnessUploads.prepare(file, fileName: fileName, mimeType: mimeType, groups: try await account.loadedSession().composer.projectDocuments)
-        return try await account.upload(.projectDocumentUpload, file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, fields: ["projectId": projectId])
+    /// Stores a file as a document of a project, or, when it replaces one,
+    /// as a new version of that document under the same id.
+    static func uploadDocument(_ account: HarnessAccount, projectId: String, replacing documentId: String? = nil, file: Data, fileName: String, mimeType: String) async throws -> Components.Schemas.ProjectDocument {
+        let session = try await account.loadedSession()
+        let groups = session.composer.projectDocuments
+        let prepared = try await HarnessUploads.prepare(file, fileName: fileName, mimeType: mimeType, groups: groups)
+        let original = try HarnessUploads.originalPhoto(file, named: fileName, prepared: prepared, groups: groups, enabled: session.features.additionalProperties["imageOriginals"] == true)
+        var fields = ["projectId": projectId]
+        if let documentId { fields["documentId"] = documentId }
+        return try await account.upload(.projectDocumentUpload, file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, fields: fields, original: original)
+    }
+
+    /// The file a document was read from, as it was uploaded. The harness
+    /// refuses a document it keeps no file of.
+    static func downloadDocument(_ account: HarnessAccount, projectId: String, documentId: String) async throws -> Data {
+        try await account.download(.projectDocumentDownload, ProjectDocumentRequest(projectId: projectId, documentId: documentId))
     }
 
     static func deleteDocument(_ account: HarnessAccount, projectId: String, documentId: String) async throws {
-        let _: RawJSON = try await account.post(.projectDocumentDelete, ProjectDocumentDeleteRequest(projectId: projectId, documentId: documentId))
+        let _: RawJSON = try await account.post(.projectDocumentDelete, ProjectDocumentRequest(projectId: projectId, documentId: documentId))
+    }
+}
+
+// MARK: - Artifacts
+
+/// A page of artifacts, and the cursor of the page after it, empty on the
+/// last.
+struct ArtifactPage: Decodable, Equatable, Sendable {
+    var artifacts: [ListedArtifact]
+    var nextCursor: String
+}
+
+/// An artifact with the arguments its reply drew it with, as JSON, which
+/// its widget reads as it reads the call's in the chat.
+struct OpenedArtifact: Decodable, Equatable, Sendable {
+    var artifact: ListedArtifact
+    var arguments: String
+}
+
+private struct ArtifactListRequest: Encodable {
+    var projectId: String?
+    var cursor: String?
+}
+
+private struct ArtifactRequest: Encodable {
+    var threadId: String
+    var messageId: String
+    var toolCallId: String
+}
+
+/// The artifacts the replies in the account's stored chats drew. The harness
+/// reads them from the chats, and lists none of a chat on this device.
+@MainActor
+enum HarnessArtifacts {
+    /// A page of the artifacts of every stored chat, or of a project's
+    /// chats: the chats in the order their list shows them, and each chat's
+    /// artifacts newest first.
+    static func list(_ account: HarnessAccount, projectId: String? = nil, cursor: String? = nil) async throws -> ArtifactPage {
+        try await account.post(.artifactsList, ArtifactListRequest(projectId: projectId, cursor: cursor))
+    }
+
+    static func get(_ account: HarnessAccount, _ artifact: ListedArtifact) async throws -> OpenedArtifact {
+        try await account.post(.artifactGet, ArtifactRequest(threadId: artifact.threadId, messageId: artifact.messageId, toolCallId: artifact.toolCallId))
     }
 }
 
@@ -385,11 +442,32 @@ enum HarnessUploads {
         let attachment: Components.Schemas.Attachment
     }
 
-    /// Converts a file into an attachment the next turn sends.
+    /// Whether a file uploads as an image: its bytes hold one, or its name
+    /// is one the harness reads an image from.
+    static func isImage(_ data: Data, fileName: String, groups: [Components.Schemas.FileGroup]) -> Bool {
+        let ext = fileExtension(of: fileName)
+        return groups.contains { $0.imageMaxSide != nil && ($0.accept.contains(ext) || imageType(of: data) != nil) }
+    }
+
+    /// The source photo travels separately only when the model copy differs.
+    static func originalPhoto(_ data: Data, named name: String, prepared: Prepared, groups: [Components.Schemas.FileGroup], enabled: Bool) throws -> MultipartForm.Original? {
+        guard enabled, prepared.fileName != name || prepared.data != data else { return nil }
+        guard let group = groups.first(where: { $0.imageMaxSide != nil }), data.count <= group.maxBytes else {
+            throw HarnessError(code: "ATTACHMENT_TOO_LARGE", message: "The original photo exceeds the upload limit.", action: .revise, status: 413)
+        }
+        let mimeType = imageType(of: data)?.preferredMIMEType ?? "application/octet-stream"
+        return MultipartForm.Original(data: data, fileName: name, mimeType: mimeType)
+    }
+
     @MainActor
-    static func upload(_ account: HarnessAccount, data: Data, fileName: String, mimeType: String) async throws -> Components.Schemas.Attachment {
-        let prepared = try await prepare(data, fileName: fileName, mimeType: mimeType, groups: try await account.loadedSession().composer.attachments)
-        let uploaded: Uploaded = try await account.upload(.attachmentUpload, file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, keyless: true)
+    static func upload(_ account: HarnessAccount, data: Data, fileName: String, mimeType: String, forStoredChat: Bool = false) async throws -> Components.Schemas.Attachment {
+        let session = try await account.loadedSession()
+        let groups = session.composer.attachments
+        let prepared = try await prepare(data, fileName: fileName, mimeType: mimeType, groups: groups)
+        let keepsPhotos = forStoredChat && session.features.additionalProperties["imageOriginals"] == true
+        let keepsFile = forStoredChat && (keepsPhotos || !isImage(prepared.data, fileName: prepared.fileName, groups: groups))
+        let original = try originalPhoto(data, named: fileName, prepared: prepared, groups: groups, enabled: keepsPhotos)
+        let uploaded: Uploaded = try await account.upload(.attachmentUpload, file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, keyless: !keepsFile, original: original)
         return uploaded.attachment
     }
 }

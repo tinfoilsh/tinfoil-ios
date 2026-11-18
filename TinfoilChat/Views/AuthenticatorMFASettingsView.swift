@@ -457,16 +457,6 @@ private struct SharedBackupCodesFile: Identifiable {
     var id: URL { url }
 }
 
-private struct ActivityView: UIViewControllerRepresentable {
-    let activityItems: [Any]
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
-    }
-
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-}
-
 private struct MFAReverificationView: View {
     @Environment(Clerk.self) private var clerk
     @Environment(\.dismiss) private var dismiss

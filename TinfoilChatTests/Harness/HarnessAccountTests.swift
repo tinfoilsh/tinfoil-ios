@@ -85,6 +85,133 @@ struct HarnessAccountTests {
         account.dispose()
     }
 
+    @Test func aDocumentThatReplacesAnotherNamesItBeforeItsFile() async throws {
+        var session = sessionAnswer
+        var composer = try #require(session["composer"] as? [String: Any])
+        composer["projectDocuments"] = [["accept": [".txt"], "maxBytes": 1000]]
+        session["composer"] = composer
+        let stored: [String: Any] = [
+            "id": "doc-1", "projectId": "project-1", "filename": "notes.txt", "contentType": "text/plain", "sizeBytes": 5, "hasFile": true,
+        ]
+        let (account, transport) = makeAccount(userId: "user-1", answers: [Answers.json(session), Answers.json(stored)])
+
+        let document = try await HarnessProjects.uploadDocument(
+            account, projectId: "project-1", replacing: "doc-1", file: Data("Notes".utf8), fileName: "notes.txt", mimeType: "text/plain"
+        )
+
+        #expect(document.id == "doc-1")
+        #expect(ProjectDocument(document).hasFile)
+        let upload = try #require(await transport.requests.last)
+        #expect(upload.route == .projectDocumentUpload)
+        let form = String(decoding: upload.body, as: UTF8.self)
+        let file = try #require(form.range(of: "name=\"file\""))
+        for field in ["documentId", "key", "projectId"] {
+            let named = try #require(form.range(of: "name=\"\(field)\""))
+            #expect(named.upperBound < file.lowerBound)
+        }
+        #expect(form.contains("name=\"documentId\"\r\n\r\ndoc-1\r\n"))
+        #expect(form.contains("name=\"projectId\"\r\n\r\nproject-1\r\n"))
+        account.dispose()
+    }
+
+    @Test func aNewDocumentNamesNoDocumentToReplace() async throws {
+        var session = sessionAnswer
+        var composer = try #require(session["composer"] as? [String: Any])
+        composer["projectDocuments"] = [["accept": [".txt"], "maxBytes": 1000]]
+        session["composer"] = composer
+        let stored: [String: Any] = [
+            "id": "doc-2", "projectId": "project-1", "filename": "notes.txt", "contentType": "text/plain", "sizeBytes": 5,
+        ]
+        let (account, transport) = makeAccount(userId: "user-1", answers: [Answers.json(session), Answers.json(stored)])
+
+        let document = try await HarnessProjects.uploadDocument(
+            account, projectId: "project-1", file: Data("Notes".utf8), fileName: "notes.txt", mimeType: "text/plain"
+        )
+
+        #expect(!ProjectDocument(document).hasFile)
+        let upload = try #require(await transport.requests.last)
+        #expect(!String(decoding: upload.body, as: UTF8.self).contains("documentId"))
+        account.dispose()
+    }
+
+    @Test func aDocumentsFileIsDownloadedWithTheContentKey() async throws {
+        let file = Data([1, 2, 3])
+        let (account, transport) = makeAccount(userId: "user-1", answers: [{ _ in
+            HarnessResponse.collected(status: 200, headers: ["content-type": "application/octet-stream"], sealed: true, body: file)
+        }])
+
+        let downloaded = try await HarnessProjects.downloadDocument(account, projectId: "project-1", documentId: "doc-1")
+
+        #expect(downloaded == file)
+        let request = try #require(await transport.requests.first)
+        #expect(request.route == .projectDocumentDownload)
+        #expect(request.json["projectId"] as? String == "project-1")
+        #expect(request.json["documentId"] as? String == "doc-1")
+        #expect(request.json["key"] as? String == Data(repeating: 7, count: 32).base64EncodedString())
+        account.dispose()
+    }
+
+    @Test func artifactsAreListedByProjectAndCursorWithTheContentKey() async throws {
+        let listed: [String: Any] = [
+            "artifacts": [[
+                "threadId": "thread-1", "threadTitle": "Plans", "projectId": NSNull(), "messageId": "msg-1", "toolCallId": "call-1",
+                "title": "", "sourceType": "slides", "createdAt": "2026-01-01T00:00:00Z",
+            ]],
+            "nextCursor": "c2",
+        ]
+        let (account, transport) = makeAccount(userId: "user-1", answers: [
+            Answers.json(listed), Answers.json(["artifacts": [], "nextCursor": ""]),
+        ])
+
+        let page = try await HarnessArtifacts.list(account, projectId: "project-1", cursor: "c1")
+
+        #expect(page.nextCursor == "c2")
+        let artifact = try #require(page.artifacts.first)
+        #expect(artifact.projectId == nil)
+        // A kind a later harness adds shows as a generic artifact.
+        #expect(artifact.kind == nil)
+        #expect(artifact.sourceType.value2 == "slides")
+        let request = try #require(await transport.requests.first)
+        #expect(request.route == .artifactsList)
+        #expect(request.json["projectId"] as? String == "project-1")
+        #expect(request.json["cursor"] as? String == "c1")
+        #expect(request.json["key"] as? String == Data(repeating: 7, count: 32).base64EncodedString())
+
+        // The first page of every chat's artifacts names neither.
+        let all = try await HarnessArtifacts.list(account)
+        #expect(all.artifacts.isEmpty)
+        let first = try #require(await transport.requests.last)
+        #expect(first.json["projectId"] == nil)
+        #expect(first.json["cursor"] == nil)
+        account.dispose()
+    }
+
+    @Test func anArtifactOpensByItsChatReplyAndCallWithTheArgumentsItsWidgetReads() async throws {
+        let stored: [String: Any] = [
+            "threadId": "thread-1", "threadTitle": "Plans", "projectId": "project-1", "messageId": "msg-1", "toolCallId": "call-1",
+            "title": "Plan", "sourceType": "markdown", "createdAt": "2026-01-01T00:00:00Z",
+        ]
+        let arguments = #"{"title":"Plan","source":{"type":"markdown","markdown":"# Plan"}}"#
+        let (account, transport) = makeAccount(userId: "user-1", answers: [Answers.json(["artifact": stored, "arguments": arguments])])
+        let listed = try JSONDecoder().decode(ListedArtifact.self, from: JSONSerialization.data(withJSONObject: stored))
+        #expect(listed.kind == .markdown)
+
+        let opened = try await HarnessArtifacts.get(account, listed)
+
+        #expect(opened.artifact == listed)
+        let args = try JSONDecoder().decode(ArtifactPreviewWidget.Args.self, from: Data(opened.arguments.utf8))
+        #expect(args.title == "Plan")
+        #expect(args.source.type == .markdown)
+        #expect(args.source.markdown == "# Plan")
+        let request = try #require(await transport.requests.first)
+        #expect(request.route == .artifactGet)
+        #expect(request.json["threadId"] as? String == "thread-1")
+        #expect(request.json["messageId"] as? String == "msg-1")
+        #expect(request.json["toolCallId"] as? String == "call-1")
+        #expect(request.json["key"] as? String == Data(repeating: 7, count: 32).base64EncodedString())
+        account.dispose()
+    }
+
     @Test func malformedRemoteImagesAreRefused() async throws {
         let (account, transport) = makeAccount(userId: nil, answers: [Answers.json([
             "image_bytes": "not-base64", "image_content_type": "image/png",

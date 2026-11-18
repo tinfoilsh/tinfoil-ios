@@ -12,7 +12,18 @@ import SwiftUI
 import TinfoilIcons
 
 struct ArtifactPreviewWidget: GenUIWidget {
-    enum SourceKind: String, Decodable { case url, html, markdown }
+    enum SourceKind: String, Decodable {
+        case url, html, markdown
+
+        /// What an artifact of the kind is called when it has no title.
+        var label: String {
+            switch self {
+            case .url: return "Hosted preview"
+            case .html: return "HTML artifact"
+            case .markdown: return "Markdown artifact"
+            }
+        }
+    }
 
     struct Source: Decodable {
         let type: SourceKind
@@ -68,13 +79,7 @@ private struct ArtifactPreviewView: View {
 
     @State private var showSheet: Bool = false
 
-    private var sourceLabel: String {
-        switch args.source.type {
-        case .url: return "Hosted preview"
-        case .html: return "HTML artifact"
-        case .markdown: return "Markdown artifact"
-        }
-    }
+    private var sourceLabel: String { args.source.type.label }
 
     var body: some View {
         Button(action: openArtifact) {
@@ -120,7 +125,7 @@ private struct ArtifactPreviewView: View {
     }
 }
 
-private struct ArtifactDetailSheet: View {
+struct ArtifactDetailSheet: View {
     let args: ArtifactPreviewWidget.Args
     let isDarkMode: Bool
 

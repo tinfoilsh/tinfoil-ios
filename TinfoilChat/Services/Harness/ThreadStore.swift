@@ -95,6 +95,9 @@ protocol ThreadStore: AnyObject {
     /// An image's bytes: the file the user picked while this app holds it,
     /// or the copy the chat keeps, named by the type the attachment holds.
     func image(_ threadId: String?, attachmentId: String, mimeType: String?) async throws -> (data: Data, mimeType: String)
+    /// The file an attachment was uploaded as, which the harness keeps for
+    /// the attachments of a stored chat that say so.
+    func originalFile(_ threadId: String?, attachmentId: String) async throws -> Data
 }
 
 /// The members of a turn an action sets beyond the defaults.
@@ -313,8 +316,8 @@ final class CloudThreads: ThreadStore {
         AskContext(key: try account.key(), threadId: threadId)
     }
 
-    private func download(_ threadId: String?, _ attachmentId: String) async throws -> Data {
-        try await account.download(.attachmentGet, AttachmentRequest(id: attachmentId, threadId: threadId))
+    private func download(_ threadId: String?, _ attachmentId: String, original: Bool? = nil) async throws -> Data {
+        try await account.download(.attachmentGet, AttachmentRequest(id: attachmentId, threadId: threadId, original: original))
     }
 
     func documentText(_ threadId: String?, attachmentId: String) async throws -> String {
@@ -328,6 +331,10 @@ final class CloudThreads: ThreadStore {
             return (data, original.mimeType)
         }
         return (try await download(threadId, attachmentId), mimeType ?? Constants.Attachments.defaultImageMimeType)
+    }
+
+    func originalFile(_ threadId: String?, attachmentId: String) async throws -> Data {
+        try await download(threadId, attachmentId, original: true)
     }
 }
 
@@ -628,6 +635,11 @@ final class DeviceThreads: ThreadStore {
         if image == nil { image = attachments.images[attachmentId] }
         guard let image, let data = Data(base64Encoded: image.base64) else { throw Self.notOnDevice("image") }
         return (data, image.mimeType)
+    }
+
+    /// A chat on this device keeps no file as it was uploaded.
+    func originalFile(_ threadId: String?, attachmentId: String) async throws -> Data {
+        throw Self.notOnDevice("file")
     }
 }
 

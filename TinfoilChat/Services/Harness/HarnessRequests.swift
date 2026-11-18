@@ -56,6 +56,15 @@ enum SentAttachment: Encodable, Equatable, Sendable {
         return nil
     }
 
+    /// The attachment without where its upload kept the file, as a chat on
+    /// this device sends and keeps it: the harness keeps no file of such a
+    /// chat.
+    var withoutOriginal: SentAttachment {
+        guard case .uploaded(var attachment) = self else { return self }
+        attachment.original = nil
+        return .uploaded(attachment)
+    }
+
     func encode(to encoder: any Encoder) throws {
         switch self {
         case .uploaded(let attachment): try attachment.encode(to: encoder)
@@ -389,6 +398,9 @@ struct AttachmentRequest: Encodable, Equatable, Sendable {
     var key: String?
     var id: String
     var threadId: String?
+    /// Asks for the file as it was uploaded, in place of the copy models
+    /// read.
+    var original: Bool?
 }
 
 /// A stored chat to move to this device, or one on this device to store.

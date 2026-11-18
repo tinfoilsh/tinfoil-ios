@@ -177,6 +177,17 @@ struct ChatViewMappingTests {
         #expect(shown.attachments.first?.processingState == .completed)
     }
 
+    @Test func anAttachmentSaysWhetherItsFileIsKeptAsUploaded() throws {
+        let wire = try Self.message([
+            "id": "m", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "Read these",
+            "attachments": [
+                ["id": "a", "kind": "document", "fileName": "notes.pdf", "mimeType": "application/pdf", "hasOriginal": true],
+                ["id": "b", "kind": "document", "fileName": "older.pdf", "mimeType": "application/pdf"],
+            ],
+        ])
+        #expect(ChatViewMapping.message(wire).attachments.map(\.hasOriginalFile) == [true, false])
+    }
+
     @Test func aUserMessageKeepsTheAnswersItSent() throws {
         let wire = try Self.message([
             "id": "u", "role": "user", "createdAt": "2026-01-01T00:00:00Z", "content": "",

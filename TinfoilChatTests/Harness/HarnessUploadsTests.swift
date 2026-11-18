@@ -62,6 +62,12 @@ struct HarnessUploadsTests {
             let prepared = try await HarnessUploads.prepare(heic, fileName: name, mimeType: "image/heic", groups: Self.harnessGroups)
             #expect(prepared.fileName == uploaded)
             #expect(prepared.mimeType == "image/jpeg")
+            let original = try #require(HarnessUploads.originalPhoto(heic, named: name, prepared: prepared, groups: Self.harnessGroups, enabled: true))
+            #expect(original.data == heic && original.fileName == name)
+            let form = MultipartForm(fields: [:], file: prepared.data, fileName: prepared.fileName, mimeType: prepared.mimeType, original: original)
+            let preview = try #require(form.body.range(of: prepared.data))
+            let source = try #require(form.body.range(of: heic))
+            #expect(preview.upperBound < source.lowerBound)
             #expect(HarnessUploads.imageType(of: prepared.data) == .jpeg)
             let image = try #require(UIImage(data: prepared.data))
             #expect(image.size == CGSize(width: 50, height: 50))
@@ -77,6 +83,14 @@ struct HarnessUploadsTests {
         let unnamed = try await HarnessUploads.prepare(png, fileName: "image", mimeType: "application/octet-stream", groups: Self.harnessGroups)
         #expect(unnamed.data == png)
         #expect(unnamed.fileName == "image.png")
+    }
+
+    @Test func aFileUploadsAsAnImageByItsBytesOrByANameTheHarnessReadsOneFrom() {
+        let notes = Data("# Notes".utf8)
+        #expect(HarnessUploads.isImage(Self.png(side: 10), fileName: "scan", groups: Self.harnessGroups))
+        #expect(HarnessUploads.isImage(notes, fileName: "Photo.PNG", groups: Self.harnessGroups))
+        #expect(!HarnessUploads.isImage(notes, fileName: "notes.md", groups: Self.harnessGroups))
+        #expect(!HarnessUploads.isImage(notes, fileName: "report.pdf", groups: Self.harnessGroups))
     }
 
     @Test func aFileThatIsNoImageUploadsAsItIs() async throws {

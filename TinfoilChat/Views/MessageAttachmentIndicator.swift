@@ -111,7 +111,25 @@ struct MessageAttachmentIndicator: View {
             }
 
             ForEach(documentAttachments) { attachment in
-                AttachmentChip(attachment: attachment, isDarkMode: isDarkMode)
+                if attachment.hasOriginalFile {
+                    Menu {
+                        Button {
+                            viewModel.downloadOriginalFile(of: attachment)
+                        } label: {
+                            Label("Download original", tinfoil: .download)
+                        }
+                        .disabled(viewModel.downloadingAttachmentId != nil)
+                    } label: {
+                        AttachmentChip(
+                            attachment: attachment,
+                            isDarkMode: isDarkMode,
+                            download: viewModel.downloadingAttachmentId == attachment.id ? .running : .offered
+                        )
+                    }
+                    .accessibilityHint("Shows download options")
+                } else {
+                    AttachmentChip(attachment: attachment, isDarkMode: isDarkMode)
+                }
             }
         }
         .padding(.bottom, 4)
@@ -140,6 +158,13 @@ struct MessageAttachmentIndicator: View {
                     ForEach(row) { attachment in
                         ImageThumbnail(attachment: attachment, size: size)
                             .onTapGesture { openImageViewer(for: attachment) }
+                            .contextMenu {
+                                if attachment.hasOriginalFile {
+                                    Button { viewModel.downloadOriginalFile(of: attachment) } label: {
+                                        Label("Download original", tinfoil: .download)
+                                    }
+                                }
+                            }
                             .accessibilityElement()
                             .accessibilityLabel("Image attachment")
                             .accessibilityAddTraits(.isButton)
@@ -153,8 +178,16 @@ struct MessageAttachmentIndicator: View {
 }
 
 private struct AttachmentChip: View {
+    /// What a chip shows of downloading the file its attachment was
+    /// uploaded as.
+    enum Download {
+        case offered
+        case running
+    }
+
     let attachment: Attachment
     let isDarkMode: Bool
+    var download: Download?
 
     var body: some View {
         HStack(spacing: 6) {
@@ -166,6 +199,19 @@ private struct AttachmentChip: View {
                 .font(.system(size: 12))
                 .lineLimit(1)
                 .foregroundColor(isDarkMode ? .white.opacity(0.8) : .black.opacity(0.7))
+
+            switch download {
+            case .offered:
+                Image(tinfoil: .download)
+                    .font(.system(size: 12))
+                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
+                    .accessibilityHidden(true)
+            case .running:
+                ProgressView()
+                    .scaleEffect(0.6)
+            case nil:
+                EmptyView()
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)

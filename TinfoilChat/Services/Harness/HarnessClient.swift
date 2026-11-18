@@ -74,9 +74,10 @@ actor HarnessClient {
         file: Data,
         fileName: String,
         mimeType: String,
-        fields: [String: String] = [:]
+        fields: [String: String] = [:],
+        original: MultipartForm.Original? = nil
     ) async throws -> T {
-        let form = MultipartForm(fields: fields, file: file, fileName: fileName, mimeType: mimeType)
+        let form = MultipartForm(fields: fields, file: file, fileName: fileName, mimeType: mimeType, original: original)
         let response = try await request(route, body: form.body, contentType: form.contentType)
         return try await decode(response)
     }
@@ -256,10 +257,16 @@ struct EmptyBody: Encodable, Sendable {}
 
 /// A multipart form with one file, as an upload sends it.
 struct MultipartForm {
+    struct Original: Sendable {
+        let data: Data
+        let fileName: String
+        let mimeType: String
+    }
+
     let body: Data
     let contentType: String
 
-    init(fields: [String: String], file: Data, fileName: String, mimeType: String, fileField: String = "file") {
+    init(fields: [String: String], file: Data, fileName: String, mimeType: String, fileField: String = "file", original: Original? = nil) {
         let boundary = "tinfoil-" + UUID().uuidString
         var body = Data()
         func line(_ text: String) { body.append(Data(text.utf8)) }
@@ -268,6 +275,10 @@ struct MultipartForm {
         }
         line("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(Self.quoted(fileField))\"; filename=\"\(Self.quoted(fileName))\"\r\nContent-Type: \(mimeType)\r\n\r\n")
         body.append(file)
+        if let original {
+            line("\r\n--\(boundary)\r\nContent-Disposition: form-data; name=\"original\"; filename=\"\(Self.quoted(original.fileName))\"\r\nContent-Type: \(original.mimeType)\r\n\r\n")
+            body.append(original.data)
+        }
         line("\r\n--\(boundary)--\r\n")
         self.body = body
         contentType = "multipart/form-data; boundary=\(boundary)"

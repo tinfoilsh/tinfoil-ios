@@ -181,10 +181,13 @@ enum ChatViewMapping {
     }
 
     static func attachment(_ view: Components.Schemas.AttachmentView) -> Attachment {
-        attachment(
+        var mapped = attachment(
             id: view.id, kind: view.kind, fileName: view.fileName, mimeType: view.mimeType, size: view.size,
             thumbnail: view.thumbnail, textContent: view.textContent, description: view.description
         )
+        mapped.hasOriginalFile = view.hasOriginal == true
+        mapped.originalFileName = view.originalFileName
+        return mapped
     }
 
     /// An upload also carries the copy of an image the chat sends models.

@@ -615,6 +615,10 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         let threads = openStore()
         guard acceptsTurn else { return false }
         patch { $0.failure = nil }
+        var fields = fields
+        // An upload made for a stored chat names where the harness kept its
+        // file. A chat on this device neither sends nor keeps that.
+        if threads.local { fields.attachments = fields.attachments?.map(\.withoutOriginal) }
         attachments.rememberSent(fields.attachments)
         // A turn the key could not be read for is not shown as sent.
         do { _ = try threads.runKey() } catch { report(error); return false }
@@ -624,7 +628,6 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
         let threadId = startChat(choice)
         var defaults = turnDefaults(threadId)
         defaults.options = leaveToPreset(defaults.options, choice)
-        var fields = fields
         fields.options = fields.options.flatMap { leaveToPreset($0, choice) }
         // Where the harness offers it, a compaction on request summarizes the
         // latest exchange too, as the chat shows a marker at its end.
@@ -1388,7 +1391,12 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
     /// image's attachment carries the copy the harness gives models; the
     /// file itself is kept apart, to show and download.
     func upload(_ data: Data, fileName: String, mimeType: String) async throws -> Components.Schemas.Attachment {
-        let attachment = try await HarnessUploads.upload(account, data: data, fileName: fileName, mimeType: mimeType)
+        let cloudChat = account.cloud && !open.onDevice
+        if cloudChat && !account.keyReady, try await account.loadedSession().features.additionalProperties["imageOriginals"] == true {
+            throw HarnessError(code: HarnessErrorCode.keyRequired, message: "Unlock cloud sync before attaching a file so its original can be kept.", action: .unlock)
+        }
+        let stored = cloudChat && account.keyReady
+        let attachment = try await HarnessUploads.upload(account, data: data, fileName: fileName, mimeType: mimeType, forStoredChat: stored)
         if attachment.kind.value1 == .image {
             attachments.keepOriginal(attachment.id, AttachmentOriginal(base64: data.base64EncodedString(), mimeType: mimeType.isEmpty ? attachment.mimeType : mimeType))
         }
@@ -1412,6 +1420,11 @@ final class ChatSession: ObservableObject, RunControllerDelegate {
 
     func image(_ attachment: Attachment) async throws -> (data: Data, mimeType: String) {
         try await openStore().image(open.id, attachmentId: attachment.id, mimeType: attachment.mimeType)
+    }
+
+    /// The file an attachment of the open chat was uploaded as.
+    func originalFile(_ attachment: Attachment) async throws -> Data {
+        try await openStore().originalFile(open.id, attachmentId: attachment.id)
     }
 }
 

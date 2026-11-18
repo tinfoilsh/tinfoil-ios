@@ -231,8 +231,30 @@ extension ChatViewModel {
 
     /// Converts and stores each picked file as a document of the active
     /// project. The chat service reads documents' text and describes
-    /// images; the files themselves are not stored.
+    /// images; a document says whether the file itself is kept.
     func uploadProjectDocuments(handles: [ManagedStagedFile], pickerFailures: [ManagedFileError] = []) async {
+        await storeProjectDocuments(handles: handles, pickerFailures: pickerFailures)
+    }
+
+    /// Whether a document of the open project can be replaced by a new
+    /// version of it: the chat service takes one, and projects need a
+    /// subscription.
+    var canReplaceProjectDocuments: Bool {
+        hasPremiumAccess && account?.session?.features.additionalProperties["documentVersions"] == true
+    }
+
+    /// Stores the picked file as a new version of a document of the active
+    /// project, which keeps its id and its place in the list.
+    func replaceProjectDocument(_ documentId: String, handles: [ManagedStagedFile], pickerFailures: [ManagedFileError] = []) async {
+        guard canReplaceProjectDocuments else {
+            handles.forEach { $0.discard() }
+            return
+        }
+        handles.dropFirst().forEach { $0.discard() }
+        await storeProjectDocuments(handles: Array(handles.prefix(1)), pickerFailures: pickerFailures, replacing: documentId)
+    }
+
+    private func storeProjectDocuments(handles: [ManagedStagedFile], pickerFailures: [ManagedFileError], replacing documentId: String? = nil) async {
         guard let session, canUseProjects, let project = activeProject else {
             handles.forEach { $0.discard() }
             return
@@ -243,14 +265,70 @@ extension ChatViewModel {
         let result = await ManagedFileBatchProcessor.process(files: handles) { handle in
             let data = try Data(contentsOf: handle.url)
             let mimeType = handle.contentTypeIdentifier.flatMap { UTType($0)?.preferredMIMEType } ?? HarnessUploads.mimeType(for: handle.fileName)
-            let document = try await HarnessProjects.uploadDocument(session.account, projectId: project.id, file: data, fileName: handle.fileName, mimeType: mimeType)
+            let document = try await HarnessProjects.uploadDocument(session.account, projectId: project.id, replacing: documentId, file: data, fileName: handle.fileName, mimeType: mimeType)
             return ProjectDocument(document)
         }
         guard self.session === session, activeProject?.id == project.id else { return }
-        for document in result.successes where !projectDocuments.contains(where: { $0.id == document.id }) {
-            projectDocuments.append(document)
+        if !result.successes.isEmpty { projectDocumentChanges += 1 }
+        for document in result.successes {
+            if let index = projectDocuments.firstIndex(where: { $0.id == document.id }) {
+                projectDocuments[index] = document
+            } else {
+                projectDocuments.append(document)
+            }
         }
         projectError = ManagedFileBatchErrorMessage.projectUpload(successCount: result.successes.count, failures: pickerFailures + result.failures)
+        if !result.successes.isEmpty { await refreshProjectDocuments() }
+    }
+
+    /// A document of the open project as a file to share: the file it was
+    /// uploaded as when the chat service keeps it, and its text otherwise.
+    func exportProjectDocument(_ document: ProjectDocument) async -> ExportedFile? {
+        guard let session else { return nil }
+        projectError = nil
+        do {
+            let data: Data
+            let name: String
+            if document.hasFile {
+                data = try await HarnessProjects.downloadDocument(session.account, projectId: document.projectId, documentId: document.id)
+                name = document.filename
+            } else {
+                guard let content = document.content else {
+                    projectError = Self.documentWithoutFileMessage
+                    return nil
+                }
+                data = Data(content.utf8)
+                name = document.textFileName
+            }
+            let file = try await Task.detached(priority: .userInitiated) { try ExportedFile.write(data, named: name) }.value
+            guard self.session === session, activeProject?.id == document.projectId else {
+                file.remove()
+                return nil
+            }
+            return file
+        } catch {
+            if self.session === session, activeProject?.id == document.projectId, !(error is CancellationError) { projectError = error.localizedDescription }
+            return nil
+        }
+    }
+
+    private static let documentWithoutFileMessage = "This document has no file or text to download."
+
+    /// Reads the open project's documents again, as when another device
+    /// added, replaced or deleted one. Only the latest read can publish.
+    func refreshProjectDocuments() async {
+        guard let session, canUseProjects, let projectId = activeProject?.id else { return }
+        let generation = projectLoadGeneration
+        projectDocumentChanges += 1
+        let changes = projectDocumentChanges
+        do {
+            let loaded = try await HarnessProjects.get(session.account, id: projectId)
+            guard self.session === session, activeProject?.id == projectId, generation == projectLoadGeneration,
+                  changes == projectDocumentChanges else { return }
+            projectDocuments = (loaded.documents ?? []).map(ProjectDocument.init)
+        } catch {
+            Self.logger.error("Failed to refresh a project's documents: \(error, privacy: .public)")
+        }
     }
 
     func deleteProjectDocument(_ documentId: String) async {
@@ -259,7 +337,9 @@ extension ChatViewModel {
         do {
             try await HarnessProjects.deleteDocument(session.account, projectId: project.id, documentId: documentId)
             guard self.session === session, activeProject?.id == project.id else { return }
+            projectDocumentChanges += 1
             projectDocuments.removeAll { $0.id == documentId }
+            await refreshProjectDocuments()
         } catch {
             projectError = error.localizedDescription
         }

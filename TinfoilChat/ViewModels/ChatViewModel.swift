@@ -292,6 +292,11 @@ class ChatViewModel: ObservableObject {
     /// The attachments the chat service converted, by the pending
     /// attachment they stand for, which the next turn sends.
     var uploadedAttachments: [String: Components.Schemas.Attachment] = [:]
+    /// The attachment of the open chat whose file, as it was uploaded, is
+    /// downloading, and the file once saved for the share sheet.
+    @Published var downloadingAttachmentId: String?
+    var attachmentDownloadTask: Task<Void, Never>?
+    @Published var sharedAttachmentFile: ExportedFile?
 
     // MARK: - Safeguards
 
@@ -316,6 +321,8 @@ class ChatViewModel: ObservableObject {
     var projectListLoadGeneration = 0
     /// A newer project load supersedes one in flight.
     var projectLoadGeneration = 0
+    /// A new document read or write supersedes an older read.
+    var projectDocumentChanges = 0
 
     // MARK: - Account
 
@@ -453,6 +460,7 @@ class ChatViewModel: ObservableObject {
             keptOpenChatId = previous.open.id.flatMap { id in memoryChats.contains { $0.thread.id == id } ? id : nil }
         }
         session?.account.dispose()
+        cancelFileDownload()
         sessionCancellables = []
         verificationWatch?.cancel()
         verificationWatch = nil
@@ -500,6 +508,9 @@ class ChatViewModel: ObservableObject {
         KeyRegistry.shared.bind(account)
         await LinkMetadataService.shared.bind(account)
         session.objectWillChange.sink { [weak self] _ in self?.sessionChanged() }.store(in: &sessionCancellables)
+        session.$open.map(\.id).removeDuplicates().dropFirst().sink { [weak self] _ in
+            self?.cancelFileDownload()
+        }.store(in: &sessionCancellables)
         session.controller.$view.dropFirst().sink { [weak self] _ in self?.unpublishedStateChanges += 1 }.store(in: &sessionCancellables)
         account.$rateLimit.receive(on: RunLoop.main).sink { [weak self] limit in self?.rateLimit = limit.flatMap(RateLimitInfo.init) }.store(in: &sessionCancellables)
         account.$profile.receive(on: RunLoop.main).sink { [weak self] _ in self?.applyProfileSettings() }.store(in: &sessionCancellables)
@@ -516,7 +527,12 @@ class ChatViewModel: ObservableObject {
             }
         }
         account.$chatRevision.receive(on: RunLoop.main).sink { [weak self] _ in Task { await self?.refreshOpenChat() } }.store(in: &sessionCancellables)
-        account.$projectRevision.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in Task { await self?.loadProjects() } }.store(in: &sessionCancellables)
+        account.$projectRevision.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in
+            Task {
+                await self?.loadProjects()
+                await self?.refreshProjectDocuments()
+            }
+        }.store(in: &sessionCancellables)
         account.$keyReady.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] ready in
             guard ready else { return }
             self?.session?.list.reload()
@@ -768,6 +784,13 @@ class ChatViewModel: ObservableObject {
     /// A compaction the user asks for summarizes the latest exchange too.
     var compactsLatestExchange: Bool {
         session?.compactsLatestExchange == true
+    }
+
+    /// The chat service lists and opens the artifacts of the account's
+    /// stored chats.
+    var listsArtifacts: Bool {
+        guard let account, account.cloud, account.keyReady else { return false }
+        return account.session?.features.additionalProperties["artifacts"] == true
     }
 
     /// Deep research can be turned on: the chat service offers it to the

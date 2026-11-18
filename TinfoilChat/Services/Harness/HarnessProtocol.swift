@@ -22,6 +22,9 @@ typealias RemoteImageReply = Components.Schemas.RemoteImage
 typealias ThreadWindow = Components.Schemas.ThreadWindow
 /// What a message sent of one questions widget's answers.
 typealias WidgetAnswers = Components.Schemas.WidgetAnswers
+/// An artifact a reply in a stored chat drew, as a list holds it: where it
+/// is and what its card shows, without its source.
+typealias ListedArtifact = Components.Schemas.Artifact
 
 /// The harness's routes. Every one is a POST.
 enum HarnessRoute: String, CaseIterable, Sendable {
@@ -37,6 +40,7 @@ enum HarnessRoute: String, CaseIterable, Sendable {
     case keysRemoveBundle = "/v1/keys/remove-bundle"
     case keysMigrateAll = "/v1/keys/migrate-all"
     case turn = "/v1/threads/turn"
+    case browserResult = "/v1/threads/browser/result"
     case follow = "/v1/threads/follow"
     case cancel = "/v1/threads/cancel"
     case queueSend = "/v1/threads/queue/send"
@@ -68,7 +72,10 @@ enum HarnessRoute: String, CaseIterable, Sendable {
     case projectsDelete = "/v1/projects/delete"
     case projectsDeleteAll = "/v1/projects/delete-all"
     case projectDocumentUpload = "/v1/projects/documents/upload"
+    case projectDocumentDownload = "/v1/projects/documents/download"
     case projectDocumentDelete = "/v1/projects/documents/delete"
+    case artifactsList = "/v1/artifacts/list"
+    case artifactGet = "/v1/artifacts/get"
     case favicon = "/v1/metadata/favicon"
     case remoteImage = "/v1/metadata/image"
     case linkMetadata = "/v1/metadata/link"
@@ -84,7 +91,7 @@ enum HarnessRoute: String, CaseIterable, Sendable {
     /// The routes about a chat's run, which go to the instance holding it.
     var aboutRun: Bool {
         switch self {
-        case .follow, .cancel, .queueSend, .queueRemove: return true
+        case .browserResult, .follow, .cancel, .queueSend, .queueRemove: return true
         default: return false
         }
     }
@@ -95,8 +102,9 @@ enum HarnessRoute: String, CaseIterable, Sendable {
     var onlyReads: Bool {
         switch self {
         case .session, .changes, .profileGet, .keysCurrent, .list, .search, .get, .shareStatus, .shareOpen,
-             .transcript, .attachmentGet, .attachmentGetPublic, .projectsList, .projectsGet, .favicon,
-             .linkMetadata, .remoteImage, .importStatus:
+             .transcript, .attachmentGet, .attachmentGetPublic, .projectsList, .projectsGet,
+             .projectDocumentDownload, .artifactsList, .artifactGet, .favicon, .linkMetadata, .remoteImage,
+             .importStatus:
             return true
         default:
             return false
@@ -124,6 +132,9 @@ enum HarnessEventType: String, CaseIterable, Sendable {
     case compactionEnd = "COMPACTION_END"
     case runFinished = "RUN_FINISHED"
     case runError = "RUN_ERROR"
+    /// Asks the device a turn gave browser access to act in its browser.
+    /// This client gives no turn that access, and reads past the event.
+    case browserToolRequest = "BROWSER_TOOL_REQUEST"
 }
 
 /// The headers a request says more in than who is asking.
@@ -235,6 +246,7 @@ extension Components.Schemas.Block._TypePayload: OpenValue {}
 extension Components.Schemas.TitleState: OpenValue {}
 extension Components.Schemas.AttachmentKind: OpenValue {}
 extension Components.Schemas.RateLimit.KindPayload: OpenValue {}
+extension Components.Schemas.Artifact.SourceTypePayload: OpenValue {}
 
 extension Array where Element == HarnessMessage {
     /// The messages a chat shows: a message whose role this client does not

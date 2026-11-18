@@ -217,8 +217,9 @@ enum HarnessEventStream {
     }
 
     /// The frame an event's data holds. One of a type this client does not
-    /// know is ignored, as a later harness may send; one of a known type
-    /// that does not read as the protocol describes it fails the stream.
+    /// know, or does not act on, is ignored, as a later harness may send; one
+    /// of a type it acts on that does not read as the protocol describes it
+    /// fails the stream.
     static func decode(_ data: [UInt8], id: Int?) throws -> Frame? {
         let bytes = Data(data)
         let decoder = JSONDecoder()
@@ -227,14 +228,18 @@ enum HarnessEventStream {
         }
         guard let type = HarnessEventType(rawValue: named.type) else { return nil }
         do {
-            return Frame(event: try event(of: type, from: bytes, decoder), id: id)
+            guard let read = try event(of: type, from: bytes, decoder) else { return nil }
+            return Frame(event: read, id: id)
         } catch {
             throw HarnessError.invalidStream("The chat stream contained an invalid \(named.type) event.")
         }
     }
 
-    private static func event(of type: HarnessEventType, from bytes: Data, _ decoder: JSONDecoder) throws -> RunEvent {
+    /// The event of a type this client acts on, or nil for one it reads
+    /// past.
+    private static func event(of type: HarnessEventType, from bytes: Data, _ decoder: JSONDecoder) throws -> RunEvent? {
         switch type {
+        case .browserToolRequest: return nil
         case .runStarted: return .runStarted(try decoder.decode(Components.Schemas.RunStartedEvent.self, from: bytes))
         case .messagesSnapshot: return .messagesSnapshot(try decoder.decode(Components.Schemas.MessagesSnapshotEvent.self, from: bytes))
         case .stateSnapshot: return .stateSnapshot(try decoder.decode(Components.Schemas.StateSnapshotEvent.self, from: bytes))

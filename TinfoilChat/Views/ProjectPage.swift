@@ -73,6 +73,15 @@ struct ProjectPage: View {
                         }
                     }
 
+                    if viewModel.listsArtifacts, let project {
+                        NavigationLink {
+                            ArtifactsListView(viewModel: viewModel, projectId: project.id)
+                                .id(viewModel.account.map(ObjectIdentifier.init))
+                        } label: {
+                            Label("Artifacts", tinfoil: .applicationWindow)
+                        }
+                    }
+
                     NavigationLink {
                         ProjectSettingsView(viewModel: viewModel)
                     } label: {
@@ -362,6 +371,9 @@ struct ProjectDocumentsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var viewModel: TinfoilChat.ChatViewModel
     @State private var showDocumentPicker = false
+    @State private var replacingDocument: ProjectDocument?
+    @State private var downloadingDocumentId: String?
+    @State private var sharedFile: ExportedFile?
 
     var body: some View {
         Form {
@@ -423,6 +435,22 @@ struct ProjectDocumentsView: View {
                 }
             )
         }
+        .sheet(item: $replacingDocument) { document in
+            DocumentPickerView(
+                allowedKinds: [.documents, .images],
+                allowsMultipleSelection: false,
+                onDocumentsPicked: { batch in
+                    Task {
+                        await viewModel.replaceProjectDocument(
+                            document.id,
+                            handles: batch.files,
+                            pickerFailures: batch.failures
+                        )
+                    }
+                }
+            )
+        }
+        .shareSheet(for: $sharedFile)
         .alert("Document Error", isPresented: Binding(
             get: { viewModel.projectError != nil },
             set: { if !$0 { viewModel.projectError = nil } }
@@ -449,6 +477,11 @@ struct ProjectDocumentsView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+            if downloadingDocumentId == document.id {
+                Spacer()
+                ProgressView()
+                    .scaleEffect(0.8)
+            }
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             if viewModel.hasPremiumAccess {
@@ -461,6 +494,32 @@ struct ProjectDocumentsView: View {
                 }
                 .tint(.red)
             }
+        }
+        .contextMenu {
+            Button {
+                download(document)
+            } label: {
+                Label("Download", tinfoil: .download)
+            }
+            .disabled(downloadingDocumentId != nil)
+
+            if viewModel.canReplaceProjectDocuments {
+                Button {
+                    replacingDocument = document
+                } label: {
+                    Label("Replace…", tinfoil: .refreshTwoArrows)
+                }
+                .disabled(viewModel.isUploadingProjectDocument)
+            }
+        }
+    }
+
+    private func download(_ document: ProjectDocument) {
+        guard downloadingDocumentId == nil else { return }
+        downloadingDocumentId = document.id
+        Task {
+            sharedFile = await viewModel.exportProjectDocument(document)
+            downloadingDocumentId = nil
         }
     }
 

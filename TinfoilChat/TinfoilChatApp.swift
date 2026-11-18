@@ -162,6 +162,11 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         } catch {
             SentrySDK.capture(error: error)
         }
+        do {
+            try ExportedFile.removeAll()
+        } catch {
+            SentrySDK.capture(error: error)
+        }
 
         Task.detached(priority: .utility) {
             for error in ManagedFileStore.shared.sweepOnStartup() {

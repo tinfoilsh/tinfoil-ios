@@ -1316,6 +1316,164 @@ struct ChatSessionTests {
         #expect(fixture.account.session != nil)
     }
 
+    /// The session of an account whose composer takes text files and images.
+    private static let composerSession: [String: Any] = signedInSession.merging([
+        "composer": [
+            "attachments": [["accept": [".txt"], "maxBytes": 1000], ["accept": [".png"], "maxBytes": 10_000, "imageMaxSide": 100]],
+            "projectDocuments": [], "pasteAsFileChars": 1000, "dictationMaxSeconds": 60, "dictationSegmentSeconds": 30,
+        ],
+    ]) { $1 }
+
+    /// Where an upload kept its file as it was uploaded.
+    private static let keptFile: [String: Any] = ["id": "att_file", "encryptionKey": "file-key", "storageThreadId": "0000000000002_staged"]
+
+    /// A text file as the harness converts it, with or without where it
+    /// kept the file.
+    private static func convertedFile(keepingFile: Bool) -> [String: Any] {
+        var converted: [String: Any] = ["id": "att_1", "kind": "document", "fileName": "notes.txt", "mimeType": "text/plain", "textContent": "Notes"]
+        if keepingFile { converted["original"] = keptFile }
+        return converted
+    }
+
+    /// Whether the last request, an upload, carried the content key.
+    private static func lastUploadCarriedTheKey(_ fixture: Fixture) async throws -> Bool {
+        let upload = try #require(await fixture.transport.requests.last)
+        #expect(upload.route == .attachmentUpload)
+        return String(decoding: upload.body, as: UTF8.self).contains("name=\"key\"")
+    }
+
+    @Test func aFileAttachedToAStoredChatUploadsWithTheKeySoItsFileIsKept() async throws {
+        let fixture = Fixture(userId: "user-1", answers: [
+            Answers.json(Self.composerSession), Answers.json([:]),
+            Answers.json(["attachment": Self.convertedFile(keepingFile: true)]),
+        ])
+        try await fixture.account.refresh()
+        #expect(fixture.account.keyReady)
+        fixture.session.newChat(local: false)
+
+        let attachment = try await fixture.session.upload(Data("Notes".utf8), fileName: "notes.txt", mimeType: "text/plain")
+
+        let upload = try #require(await fixture.transport.requests.last)
+        #expect(upload.route == .attachmentUpload)
+        let key = Data(repeating: 7, count: 32).base64EncodedString()
+        #expect(String(decoding: upload.body, as: UTF8.self).contains("name=\"key\"\r\n\r\n\(key)\r\n"))
+        #expect(attachment.original == Components.Schemas.OriginalFile(id: "att_file", encryptionKey: "file-key", storageThreadId: "0000000000002_staged"))
+    }
+
+    @Test func aFileAChatOnThisDeviceMayTakeAndAnyImageUploadWithoutTheKey() async throws {
+        let converted = Answers.json(["attachment": Self.convertedFile(keepingFile: false)])
+        let image: [String: Any] = ["id": "att_2", "kind": "image", "fileName": "photo.png", "mimeType": "image/png", "base64": "QUJD"]
+        let fixture = Fixture(userId: "user-1", answers: [
+            Answers.json(Self.composerSession), Answers.json([:]), converted, converted, Answers.json(["attachment": image]),
+        ])
+        try await fixture.account.refresh()
+        let session = fixture.session
+        let notes = Data("Notes".utf8)
+
+        session.newChat(local: true)
+        _ = try await session.upload(notes, fileName: "notes.txt", mimeType: "text/plain")
+        #expect(!(try await Self.lastUploadCarriedTheKey(fixture)))
+
+        session.newChat(local: false)
+        session.setTemporary(true)
+        _ = try await session.upload(notes, fileName: "notes.txt", mimeType: "text/plain")
+        #expect(!(try await Self.lastUploadCarriedTheKey(fixture)))
+
+        // An image uploads as the copy models read, so no other is kept.
+        session.newChat(local: false)
+        _ = try await session.upload(Data("pixels".utf8), fileName: "photo.png", mimeType: "image/png")
+        #expect(!(try await Self.lastUploadCarriedTheKey(fixture)))
+
+        // A signed-out caller has no key to send.
+        let signedOut = Fixture(answers: [Answers.json(Self.composerSession.merging(["user": ["id": "", "anonymous": true]]) { $1 }), converted])
+        signedOut.session.newChat()
+        _ = try await signedOut.session.upload(notes, fileName: "notes.txt", mimeType: "text/plain")
+        #expect(!(try await Self.lastUploadCarriedTheKey(signedOut)))
+    }
+
+    @Test func aFileAttachedBeforeTheAccountsKeyIsUnlockedUploadsWithoutIt() async throws {
+        let fixture = Fixture(userId: "user-1", answers: [
+            Answers.json(Self.composerSession), Answers.json(["attachment": Self.convertedFile(keepingFile: false)]),
+        ])
+        #expect(!fixture.account.keyReady)
+        fixture.session.newChat(local: false)
+
+        _ = try await fixture.session.upload(Data("Notes".utf8), fileName: "notes.txt", mimeType: "text/plain")
+
+        #expect(!(try await Self.lastUploadCarriedTheKey(fixture)))
+    }
+
+    @Test func aTurnOfAStoredChatSendsBackWhereItsUploadKeptTheFile() async throws {
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(firstQuestionWindow)])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        let attachment = try Components.Schemas.Attachment(jsonObject: Self.convertedFile(keepingFile: true))
+        await fixture.transport.push(Answers.events([
+            ["type": "RUN_STARTED", "threadId": threadId, "runId": "run_3", "instance": "i"],
+            ["type": "RUN_FINISHED", "threadId": threadId, "runId": "run_3", "metadata": [:]],
+        ]))
+
+        #expect(await session.send(TurnFields(kind: .send, content: "Read this", attachments: [.uploaded(attachment)])))
+
+        let turn = try #require(await fixture.transport.requests.last)
+        #expect(turn.route == .turn)
+        let sent = try #require((turn.json["attachments"] as? [[String: Any]])?.first)
+        #expect(NSDictionary(dictionary: sent) == NSDictionary(dictionary: Self.convertedFile(keepingFile: true)))
+    }
+
+    @Test func aChatOnThisDeviceNeitherSendsNorKeepsWhereAnUploadKeptItsFile() async throws {
+        let fixture = Fixture(answers: [])
+        let session = fixture.session
+        session.newChat()
+        // The file was attached while a stored chat was open.
+        let attachment = try Components.Schemas.Attachment(jsonObject: Self.convertedFile(keepingFile: true))
+        await fixture.transport.push { request in
+            let turn = request.json
+            return try Answers.events(deviceRun(id: turn["threadId"] as! String, question: "Read this", questionId: turn["clientRequestId"] as! String))(request)
+        }
+        await fixture.transport.hold()
+        let sending = Task { await session.send(TurnFields(kind: .send, content: "Read this", attachments: [.uploaded(attachment)])) }
+        await fixture.transport.arrived()
+
+        let turn = try #require(await fixture.transport.requests.last)
+        #expect(turn.route == .turn)
+        let sent = try #require((turn.json["attachments"] as? [[String: Any]])?.first)
+        #expect(NSDictionary(dictionary: sent) == NSDictionary(dictionary: Self.convertedFile(keepingFile: false)))
+        // Nor does the message this device keeps until the run returns the
+        // chat, or what the open chat remembers of the upload.
+        let opened = try #require(session.open.id)
+        let kept = try #require(try await session.device.get(opened))
+        #expect(kept.attachments.map(\.id) == ["att_1"])
+        #expect(kept.attachments.first?.original == nil)
+        #expect(session.attachments.uploads["att_1"]?.original == nil)
+        await fixture.transport.release()
+        #expect(await sending.value)
+    }
+
+    @Test func theFileAnAttachmentWasUploadedAsIsReadFromAStoredChatAlone() async throws {
+        let file = Data([1, 2, 3])
+        let fixture = Fixture(userId: "user-1", answers: [Answers.json(firstQuestionWindow), { _ in
+            HarnessResponse.collected(status: 200, headers: ["content-type": "application/octet-stream"], sealed: true, body: file)
+        }])
+        let session = fixture.session
+        #expect(try await session.openChat(threadId, local: false) == .opened)
+        let attachment = Attachment(id: "att_1", type: .document, fileName: "notes.pdf")
+
+        #expect(try await session.originalFile(attachment) == file)
+
+        let request = try #require(await fixture.transport.requests.last)
+        #expect(request.route == .attachmentGet)
+        #expect(request.json["id"] as? String == "att_1")
+        #expect(request.json["threadId"] as? String == threadId)
+        #expect(request.json["original"] as? Bool == true)
+        #expect(request.json["key"] as? String == Data(repeating: 7, count: 32).base64EncodedString())
+
+        // A chat on this device keeps no such file, and asks for none.
+        session.newChat(local: true)
+        await #expect(throws: HarnessError.self) { _ = try await session.originalFile(attachment) }
+        #expect(await fixture.transport.requests.count == 2)
+    }
+
     @Test func deepResearchAsksForTheNextQuestionAlone() async throws {
         let fixture = Fixture(answers: [Answers.json(researchSession)])
         try await fixture.account.refresh()

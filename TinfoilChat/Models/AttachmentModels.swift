@@ -37,6 +37,10 @@ struct Attachment: Identifiable, Equatable {
     var fileSize: Int64
     var sharedImportRequestID: UUID?
     var processingState: AttachmentProcessingState
+    /// Whether the chat service keeps the file as it was uploaded, beside
+    /// what the chat reads of it.
+    var hasOriginalFile = false
+    var originalFileName: String?
 
     init(
         id: String = UUID().uuidString.lowercased(),
